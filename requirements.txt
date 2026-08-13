@@ -1,4 +1,5 @@
 xlwings
 pandas
 numpy
+comtypes
 PyLaTeX
