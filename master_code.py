@@ -1,12 +1,19 @@
+"""
+Main orchestration module for the STRUCTURAL ANALYSIS TOOL.
+Handles Excel interfacing via xlwings, data processing with pandas,
+and PDF report generation via PyLaTeX.
+"""
+import re
+import subprocess
+import tkinter as tk
+from tkinter import filedialog
 import xlwings as xw
 import pandas as pd
 import numpy as np
-import re
 from pylatex import (
     Command,
     Document,
     Itemize,
-    Math,
     Section,
     Subsection,
     Table,
@@ -16,11 +23,10 @@ from pylatex import (
     UnsafeCommand,
 )
 from pylatex.utils import NoEscape
-import tkinter as tk
-from tkinter import filedialog
 
 
-class Wind_Load_Calculator_ASCE_7:
+class WindLoadCalculatorDirectionalASCE7:
+    """Calculates wind loads on structures per ASCE 7 provisions."""
     def __init__(
         self,
         target_sheet,
@@ -40,9 +46,9 @@ class Wind_Load_Calculator_ASCE_7:
         velocity_pressure,
         internal_pressure_coefficient_pos,
         internal_pressure_coefficient_neg,
-        L_input,
-        B_input,
-        Rid_Dir_input,
+        l_input,
+        b_input,
+        ridge_direction_input,
         raw_heights,
         eave_height,
         apex_height,
@@ -52,48 +58,48 @@ class Wind_Load_Calculator_ASCE_7:
         """
         self.sheet = target_sheet
         self.table_vel_pres_coef = self.excel_to_dataframe(
-            "Velocity Pressure Coefficients", table_vel_pres_coef
+            self.sheet, table_vel_pres_coef
         )
         self.wall_press_coeff_data = self.excel_to_dataframe(
-            "Wall Pressure Coefficients", wall_press_coeff_data
+            self.sheet, wall_press_coeff_data
         )
         self.table_int_pres_coef = self.excel_to_dataframe(
-            "Internal Pressure Coefficients", table_int_pres_coef
+            self.sheet, table_int_pres_coef
         )
         self.table_roof_over_10 = self.excel_to_dataframe(
-            "Roof Pressure Coefficients (Over 10 ft)", table_roof_over_10
+            self.sheet, table_roof_over_10
         )
         self.table_roof_under_10 = self.excel_to_dataframe(
-            "Roof Pressure Coefficients (Under 10 ft)", table_roof_under_10
+            self.sheet, table_roof_under_10
         )
 
-        self.building_class = target_sheet.range(building_class).value
-        self.basic_wind_speed = target_sheet.range(basic_wind_speed).value
-        self.enclosure_class = target_sheet.range(enclosure_class).value
-        self.exposure_category = target_sheet.range(exposure_category).value
-        self.wind_dir_factor = target_sheet.range(wind_dir_factor).value
-        self.topographic_factor = target_sheet.range(topographic_factor).value
-        self.ground_elevation_factor = target_sheet.range(ground_elevation_factor).value
-        self.gust_effect_factor = target_sheet.range(gust_effect_factor).value
-        self.velocity_pressure = target_sheet.range(velocity_pressure).value
-        self.internal_pressure_coefficient_pos = target_sheet.range(
+        self.building_class = self.sheet.range(building_class).value
+        self.basic_wind_speed = self.sheet.range(basic_wind_speed).value
+        self.enclosure_class = self.sheet.range(enclosure_class).value
+        self.exposure_category = self.sheet.range(exposure_category).value
+        self.wind_dir_factor = self.sheet.range(wind_dir_factor).value
+        self.topographic_factor = self.sheet.range(topographic_factor).value
+        self.ground_elevation_factor = self.sheet.range(ground_elevation_factor).value
+        self.gust_effect_factor = self.sheet.range(gust_effect_factor).value
+        self.velocity_pressure = self.sheet.range(velocity_pressure).value
+        self.internal_pressure_coefficient_pos = self.sheet.range(
             internal_pressure_coefficient_pos
         ).value
-        self.internal_pressure_coefficient_neg = target_sheet.range(
+        self.internal_pressure_coefficient_neg = self.sheet.range(
             internal_pressure_coefficient_neg
         ).value
 
-        self.L_input = target_sheet.range(L_input).value
-        self.B_input = target_sheet.range(B_input).value
-        self.Rid_Dir_input = target_sheet.range(Rid_Dir_input).value
+        self.l_input = self.sheet.range(l_input).value
+        self.b_input = self.sheet.range(b_input).value
+        self.ridge_direction_input = self.sheet.range(ridge_direction_input).value
 
-        self.raw_heights = target_sheet.range(raw_heights).value
-        self.eave_height = target_sheet.range(eave_height).value
-        self.apex_height = target_sheet.range(apex_height).value
+        self.raw_heights = self.sheet.range(raw_heights).value
+        self.eave_height = self.sheet.range(eave_height).value
+        self.apex_height = self.sheet.range(apex_height).value
         self.mean_roof_height = (self.eave_height + self.apex_height) / 2
 
         self.heights_list = []
-        self.Exp_input = None
+        self.exposure_input = None
         self.vel_pres = None
 
         self.gcpi_pos: float
@@ -236,8 +242,8 @@ class Wind_Load_Calculator_ASCE_7:
         heights_list,
         eave_height,
         mean_roof_height,
-        apex_height,  # <-- 1. ADDED TO PARAMETERS
-        Exp_input,
+        apex_height,  
+        exposure_input,
         vel_pres,
     ):
         """
@@ -247,10 +253,10 @@ class Wind_Load_Calculator_ASCE_7:
         """
         try:
             # 1. EXTRACT VELOCITY PRESSURE COEFFICIENTS FOR THE SELECTED EXPOSURE CATEGORY
-            target_column = str(Exp_input).strip().upper()
+            target_column = str(exposure_input).strip().upper()
             if target_column not in table_vel_pres_coef.columns:
                 raise ValueError(
-                    f"Exposure Category '{Exp_input}' column not found in table."
+                    f"Exposure Category '{exposure_input}' column not found in table."
                 )
 
             # 2. Gather all distinct heights to consider and sort them ascending
@@ -309,24 +315,24 @@ class Wind_Load_Calculator_ASCE_7:
             print(f"Error compiling velocity pressure profile: {str(e)}")
             return pd.DataFrame()
 
-    def generate_wall_cp_table(self, table_wall_cp, L_val, B_val, ridge_direction):
+    def generate_wall_cp_table(self, table_wall_cp, l_value, b_value, ridge_direction):
         """
         Generates a structured wall Cp table by pulling raw numeric sequences out
         by physical row position, completely bypassing string matching bugs.
         """
         try:
             # 1. Clean dimension inputs
-            L_val = float(L_val)
-            B_val = float(B_val)
+            l_value = float(l_value)
+            b_value = float(b_value)
             ridge_dir = str(ridge_direction).strip().upper()
 
             # 2. Calculate structural L/B aspect ratios
             if ridge_dir == "L":
-                lb_normal = B_val / L_val
-                lb_parallel = L_val / B_val
+                lb_normal = b_value / l_value
+                lb_parallel = l_value / b_value
             else:
-                lb_normal = L_val / B_val
-                lb_parallel = B_val / L_val
+                lb_normal = l_value / b_value
+                lb_parallel = b_value / l_value
 
             lb_thresholds = []
             cp_coefficients = []
@@ -396,7 +402,7 @@ class Wind_Load_Calculator_ASCE_7:
 
             return pd.DataFrame(wall_data)
 
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             print(f"Error compiling Wall Cp Matrix: {str(e)}")
             return pd.DataFrame()
 
@@ -406,8 +412,8 @@ class Wind_Load_Calculator_ASCE_7:
         table_roof_over_10,
         eave_height,
         apex_height,
-        B_val,
-        L_val,
+        b_value,
+        l_value,
         ridge_direction,
         wind_direction,
     ):
@@ -420,13 +426,13 @@ class Wind_Load_Calculator_ASCE_7:
         # =========================================================================
         # REUSABLE INTERNAL HELPER: STEPPED DISTANCE ZONES
         # =========================================================================
-        def _process_stepped_zones(h_over_L, current_wind):
+        def _process_stepped_zones(h_over_l, current_wind):
             """Helper function to calculate and structure low-slope or parallel stepped zones."""
             x_hl = [0.5, 1.0]
-            col_hl_label = f"h/L = {h_over_L:.2f}"
+            col_hl_label = f"h/L = {h_over_l:.2f}"
 
             # --- Condition 1: Purely Low Aspect Ratio (<= 0.5) ---
-            if h_over_L <= 0.5:
+            if h_over_l <= 0.5:
                 cp_z1_c1, cp_z1_c2 = (
                     float(table_roof_under_10.iloc[0, 0]),
                     float(table_roof_under_10.iloc[0, 1]),
@@ -492,7 +498,7 @@ class Wind_Load_Calculator_ASCE_7:
                 )
 
             # --- Condition 2: Purely High Aspect Ratio (>= 1.0) ---
-            elif h_over_L >= 1.0:
+            elif h_over_l >= 1.0:
                 cp_z1_c1, cp_z1_c2 = (
                     float(table_roof_under_10.iloc[4, 0]),
                     float(table_roof_under_10.iloc[4, 1]),
@@ -604,14 +610,14 @@ class Wind_Load_Calculator_ASCE_7:
                     index=x_hl,
                 )
 
-                cp_z1_c1 = self.interpolate_table_value(df_z1_c1, "Val", h_over_L)
-                cp_z1_c2 = self.interpolate_table_value(df_z1_c2, "Val", h_over_L)
-                cp_z2_c1 = self.interpolate_table_value(df_z2_c1, "Val", h_over_L)
-                cp_z2_c2 = self.interpolate_table_value(df_z2_c2, "Val", h_over_L)
-                cp_z3_c1 = self.interpolate_table_value(df_z3_c1, "Val", h_over_L)
-                cp_z3_c2 = self.interpolate_table_value(df_z3_c2, "Val", h_over_L)
-                cp_z4_c1 = self.interpolate_table_value(df_z4_c1, "Val", h_over_L)
-                cp_z4_c2 = self.interpolate_table_value(df_z4_c2, "Val", h_over_L)
+                cp_z1_c1 = self.interpolate_table_value(df_z1_c1, "Val", h_over_l)
+                cp_z1_c2 = self.interpolate_table_value(df_z1_c2, "Val", h_over_l)
+                cp_z2_c1 = self.interpolate_table_value(df_z2_c1, "Val", h_over_l)
+                cp_z2_c2 = self.interpolate_table_value(df_z2_c2, "Val", h_over_l)
+                cp_z3_c1 = self.interpolate_table_value(df_z3_c1, "Val", h_over_l)
+                cp_z3_c2 = self.interpolate_table_value(df_z3_c2, "Val", h_over_l)
+                cp_z4_c1 = self.interpolate_table_value(df_z4_c1, "Val", h_over_l)
+                cp_z4_c2 = self.interpolate_table_value(df_z4_c2, "Val", h_over_l)
 
                 display_rows = [
                     {
@@ -661,17 +667,17 @@ class Wind_Load_Calculator_ASCE_7:
                     ]
                 )
 
-            return pd.DataFrame(display_rows), df_profile_payload, theta, h_over_L
+            return pd.DataFrame(display_rows), df_profile_payload, theta, h_over_l
 
         # =========================================================================
         # PRIMARY EXECUTION ENTRY
         # =========================================================================
         try:
-            eave, apex, B, L = (
+            eave, apex, b, l = (
                 float(eave_height),
                 float(apex_height),
-                float(B_val),
-                float(L_val),
+                float(b_value),
+                float(l_value),
             )
             h = (eave + apex) / 2.0
             current_wind = str(wind_direction).strip().capitalize()
@@ -681,24 +687,24 @@ class Wind_Load_Calculator_ASCE_7:
             # ---------------------------------------------------------------------
             if current_wind == "Normal":
                 run_dist = (
-                    (B / 2.0)
+                    (b / 2.0)
                     if str(ridge_direction).strip().upper() == "L"
-                    else (L / 2.0)
+                    else (l / 2.0)
                 )
-                L_wind = B if str(ridge_direction).strip().upper() == "L" else L
+                l_wind = b if str(ridge_direction).strip().upper() == "L" else l
                 theta = np.degrees(np.arctan((apex - eave) / run_dist))
-                h_over_L = h / L_wind
+                h_over_l = h / l_wind
 
                 print("\n--- Wind Normal to Ridge Engine ---")
                 print(f"h: {round(h, 2)}")
-                print(f"L_wind: {round(L_wind, 2)}")
-                print(f"Computed h/L ratio: {round(h_over_L, 2)}")
+                print(f"L_wind: {round(l_wind, 2)}")
+                print(f"Computed h/L ratio: {round(h_over_l, 2)}")
                 print(f"Computed roof slope angle (theta): {round(theta, 2)}°")
 
                 # Sub-Branch A: Flat Roofs (< 10 degrees) -> Diverts to Helper Function
                 if theta < 10.0:
                     print("Slope < 10°: Invoking Stepped Zone Helper...")
-                    return _process_stepped_zones(h_over_L, current_wind)
+                    return _process_stepped_zones(h_over_l, current_wind)
 
                 # Sub-Branch B: Pitched Roofs (>= 10 degrees) -> Performs Bilinear 2D Interpolation
                 else:
@@ -808,31 +814,31 @@ class Wind_Load_Calculator_ASCE_7:
                     )
 
                     cp_w1_low = self.interpolate_table_value(
-                        df_final_w1_low, "Val", h_over_L
+                        df_final_w1_low, "Val", h_over_l
                     )
                     cp_w1_act = self.interpolate_table_value(
-                        df_final_w1_act, "Val", h_over_L
+                        df_final_w1_act, "Val", h_over_l
                     )
                     cp_w1_high = self.interpolate_table_value(
-                        df_final_w1_high, "Val", h_over_L
+                        df_final_w1_high, "Val", h_over_l
                     )
                     cp_w2_low = self.interpolate_table_value(
-                        df_final_w2_low, "Val", h_over_L
+                        df_final_w2_low, "Val", h_over_l
                     )
                     cp_w2_act = self.interpolate_table_value(
-                        df_final_w2_act, "Val", h_over_L
+                        df_final_w2_act, "Val", h_over_l
                     )
                     cp_w2_high = self.interpolate_table_value(
-                        df_final_w2_high, "Val", h_over_L
+                        df_final_w2_high, "Val", h_over_l
                     )
                     cp_l1_low = self.interpolate_table_value(
-                        df_final_l1_low, "Val", h_over_L
+                        df_final_l1_low, "Val", h_over_l
                     )
                     cp_l1_act = self.interpolate_table_value(
-                        df_final_l1_act, "Val", h_over_L
+                        df_final_l1_act, "Val", h_over_l
                     )
                     cp_l1_high = self.interpolate_table_value(
-                        df_final_l1_high, "Val", h_over_L
+                        df_final_l1_high, "Val", h_over_l
                     )
 
                     col_low = f"{lower_angle:g}°"
@@ -877,7 +883,7 @@ class Wind_Load_Calculator_ASCE_7:
                         pd.DataFrame(display_rows),
                         df_profile_payload,
                         theta,
-                        h_over_L,
+                        h_over_l,
                     )
 
             # ---------------------------------------------------------------------
@@ -885,25 +891,25 @@ class Wind_Load_Calculator_ASCE_7:
             # ---------------------------------------------------------------------
             else:
                 run_dist = (
-                    (L / 2.0)
+                    (l / 2.0)
                     if str(ridge_direction).strip().upper() == "L"
-                    else (B / 2.0)
+                    else (b / 2.0)
                 )
-                L_wind = L if str(ridge_direction).strip().upper() == "L" else B
+                l_wind = l if str(ridge_direction).strip().upper() == "L" else b
                 theta = np.degrees(np.arctan((apex - eave) / run_dist))
-                h_over_L = h / L_wind
+                h_over_l = h / l_wind
 
                 print("\n--- Wind Parallel to Ridge Engine ---")
                 print(
                     "Invoking Stepped Zone Helper (Governs for all values of theta)..."
                 )
                 print(f"h: {round(h, 2)}")
-                print(f"L_wind: {round(L_wind, 2)}")
-                print(f"Computed h/L ratio: {round(h_over_L, 2)}")
+                print(f"l_wind: {round(l_wind, 2)}")
+                print(f"Computed h/L ratio: {round(h_over_l, 2)}")
                 print(f"Computed roof slope angle (theta): {round(theta, 2)}°")
-                return _process_stepped_zones(h_over_L, current_wind)
+                return _process_stepped_zones(h_over_l, current_wind)
 
-        except Exception as e:
+        except Exception as e: # pylint: disable=broad-exception-caught
             print(f"Structural Pipeline Error: {str(e)}")
             return pd.DataFrame(), pd.DataFrame(), 0.0
 
@@ -912,9 +918,9 @@ class Wind_Load_Calculator_ASCE_7:
         df_wall_cp,
         df_roof_payload,
         df_velocity_profile,
-        G_val=0.85,
-        GCpi_pos=0.55,
-        GCpi_neg=-0.55,
+        gust_effect_factor=0.85,
+        gcpi_pos=0.55,
+        gcpi_neg=-0.55,
     ):
         """
         Generates a dedicated MWFRS pressure summary table exclusively for the
@@ -925,8 +931,8 @@ class Wind_Load_Calculator_ASCE_7:
         2. Flat roofs (< 10 deg) with stepped distance zones (0 to h/2, etc.).
         """
         # Cast variables to floats to prevent string math errors
-        g_pos = float(GCpi_pos)
-        g_neg = float(GCpi_neg)
+        g_pos = float(gcpi_pos)
+        g_neg = float(gcpi_neg)
 
         # 1. Isolate the reference q_h value at Mean Roof Height ('Mean' entry in profile)
         try:
@@ -936,7 +942,8 @@ class Wind_Load_Calculator_ASCE_7:
                     "qz (Pa)",
                 ].values[0]
             )
-        except:
+        except (IndexError, KeyError, ValueError):
+            # Fallback to the top of the building if 'Mean' isn't explicitly defined
             q_h = float(df_velocity_profile["qz (Pa)"].iloc[-1])
 
         summary_rows = []
@@ -958,15 +965,15 @@ class Wind_Load_Calculator_ASCE_7:
             q_z = float(row["qz (Pa)"])
 
             # Net Pressure: p = q*G*Cp - qi*GCpi
-            p_pos = (q_z * G_val * cp_ww) - (q_h * g_pos)
-            p_neg = (q_z * G_val * cp_ww) - (q_h * g_neg)
+            p_pos = (q_z * gust_effect_factor * cp_ww) - (q_h * g_pos)
+            p_neg = (q_z * gust_effect_factor * cp_ww) - (q_h * g_neg)
 
             summary_rows.append(
                 {
                     "Surface": "Windward wall" if idx == 0 else "",
                     "z (m)": f"{z_val:g}",
                     "q (Pa)": round(q_z, 2),
-                    "G": G_val,
+                    "G": gust_effect_factor,
                     "C_p": cp_ww,
                     "Net (+GCpi)": round(p_pos, 2),
                     "Net (-GCpi)": round(p_neg, 2),
@@ -984,15 +991,15 @@ class Wind_Load_Calculator_ASCE_7:
         )
 
         for label, cp_val in [("Leeward wall", cp_lw), ("Side walls", cp_sw)]:
-            p_pos = (q_h * G_val * cp_val) - (q_h * g_pos)
-            p_neg = (q_h * G_val * cp_val) - (q_h * g_neg)
+            p_pos = (q_h * gust_effect_factor * cp_val) - (q_h * g_pos)
+            p_neg = (q_h * gust_effect_factor * cp_val) - (q_h * g_neg)
 
             summary_rows.append(
                 {
                     "Surface": label,
                     "z (m)": "All",
                     "q (Pa)": round(q_h, 2),
-                    "G": G_val,
+                    "G": gust_effect_factor,
                     "C_p": cp_val,
                     "Net (+GCpi)": round(p_pos, 2),
                     "Net (-GCpi)": round(p_neg, 2),
@@ -1008,15 +1015,15 @@ class Wind_Load_Calculator_ASCE_7:
             # --- SCENARIO A: PITCHED ROOF (>= 10 degrees) ---
             if "windward" in zone_label.lower():
                 cp_1 = float(row["C_p_1"])
-                p_pos_1 = (q_h * G_val * cp_1) - (q_h * g_pos)
-                p_neg_1 = (q_h * G_val * cp_1) - (q_h * g_neg)
+                p_pos_1 = (q_h * gust_effect_factor * cp_1) - (q_h * g_pos)
+                p_neg_1 = (q_h * gust_effect_factor * cp_1) - (q_h * g_neg)
 
                 summary_rows.append(
                     {
                         "Surface": "Windward roof*",
                         "z (m)": "—",
                         "q (Pa)": round(q_h, 2),
-                        "G": G_val,
+                        "G": gust_effect_factor,
                         "C_p": cp_1,
                         "Net (+GCpi)": round(p_pos_1, 2),
                         "Net (-GCpi)": round(p_neg_1, 2),
@@ -1030,15 +1037,15 @@ class Wind_Load_Calculator_ASCE_7:
                     and row["C_p_2"] != cp_1
                 ):
                     cp_2 = float(row["C_p_2"])
-                    p_pos_2 = (q_h * G_val * cp_2) - (q_h * g_pos)
-                    p_neg_2 = (q_h * G_val * cp_2) - (q_h * g_neg)
+                    p_pos_2 = (q_h * gust_effect_factor * cp_2) - (q_h * g_pos)
+                    p_neg_2 = (q_h * gust_effect_factor * cp_2) - (q_h * g_neg)
 
                     summary_rows.append(
                         {
                             "Surface": "",
                             "z (m)": "—",
                             "q (Pa)": round(q_h, 2),
-                            "G": G_val,
+                            "G": gust_effect_factor,
                             "C_p": cp_2,
                             "Net (+GCpi)": round(p_pos_2, 2),
                             "Net (-GCpi)": round(p_neg_2, 2),
@@ -1047,15 +1054,15 @@ class Wind_Load_Calculator_ASCE_7:
 
             elif "leeward" in zone_label.lower():
                 cp_l = float(row["C_p_1"])
-                p_pos_l = (q_h * G_val * cp_l) - (q_h * g_pos)
-                p_neg_l = (q_h * G_val * cp_l) - (q_h * g_neg)
+                p_pos_l = (q_h * gust_effect_factor * cp_l) - (q_h * g_pos)
+                p_neg_l = (q_h * gust_effect_factor * cp_l) - (q_h * g_neg)
 
                 summary_rows.append(
                     {
                         "Surface": "Leeward roof",
                         "z (m)": "—",
                         "q (Pa)": round(q_h, 2),
-                        "G": G_val,
+                        "G": gust_effect_factor,
                         "C_p": cp_l,
                         "Net (+GCpi)": round(p_pos_l, 2),
                         "Net (-GCpi)": round(p_neg_l, 2),
@@ -1069,15 +1076,15 @@ class Wind_Load_Calculator_ASCE_7:
                 raw_cp1 = str(row["C_p_1"]).replace("*", "").strip()
                 cp_1 = float(raw_cp1)
 
-                p_pos_1 = (q_h * G_val * cp_1) - (q_h * g_pos)
-                p_neg_1 = (q_h * G_val * cp_1) - (q_h * g_neg)
+                p_pos_1 = (q_h * gust_effect_factor * cp_1) - (q_h * g_pos)
+                p_neg_1 = (q_h * gust_effect_factor * cp_1) - (q_h * g_neg)
 
                 summary_rows.append(
                     {
                         "Surface": zone_label,
                         "z (m)": "—",
                         "q (Pa)": round(q_h, 2),
-                        "G": G_val,
+                        "G": gust_effect_factor,
                         "C_p": cp_1,  # Uses the clean float for math
                         "Net (+GCpi)": round(p_pos_1, 2),
                         "Net (-GCpi)": round(p_neg_1, 2),
@@ -1094,15 +1101,15 @@ class Wind_Load_Calculator_ASCE_7:
                     cp_2 = float(raw_cp2)
 
                     if cp_2 != cp_1:
-                        p_pos_2 = (q_h * G_val * cp_2) - (q_h * g_pos)
-                        p_neg_2 = (q_h * G_val * cp_2) - (q_h * g_neg)
+                        p_pos_2 = (q_h * gust_effect_factor * cp_2) - (q_h * g_pos)
+                        p_neg_2 = (q_h * gust_effect_factor * cp_2) - (q_h * g_neg)
 
                         summary_rows.append(
                             {
                                 "Surface": "",
                                 "z (m)": "—",
                                 "q (Pa)": round(q_h, 2),
-                                "G": G_val,
+                                "G": gust_effect_factor,
                                 "C_p": cp_2,  # Uses the clean float
                                 "Net (+GCpi)": round(p_pos_2, 2),
                                 "Net (-GCpi)": round(p_neg_2, 2),
@@ -1116,9 +1123,9 @@ class Wind_Load_Calculator_ASCE_7:
         df_wall_cp,
         df_roof_payload,
         df_velocity_profile,
-        G_val=0.85,
-        GCpi_pos=0.55,
-        GCpi_neg=-0.55,
+        gust_effect_factor=0.85,
+        gcpi_pos=0.55,
+        gcpi_neg=-0.55,
     ):
         """
         Generates a dedicated MWFRS pressure summary table exclusively for the
@@ -1128,8 +1135,8 @@ class Wind_Load_Calculator_ASCE_7:
         Windward wall extends to the Apex (Gable end).
         Rounded to 2 decimal places.
         """
-        g_pos = float(GCpi_pos)
-        g_neg = float(GCpi_neg)
+        g_pos = float(gcpi_pos)
+        g_neg = float(gcpi_neg)
 
         # 1. Isolate the reference q_h value at Mean Roof Height
         try:
@@ -1139,7 +1146,7 @@ class Wind_Load_Calculator_ASCE_7:
                     "qz (Pa)",
                 ].values[0]
             )
-        except:
+        except (IndexError, KeyError, ValueError):
             q_h = float(df_velocity_profile["qz (Pa)"].iloc[-1])
 
         summary_rows = []
@@ -1157,15 +1164,15 @@ class Wind_Load_Calculator_ASCE_7:
             z_val = float(row["Height (m)"])
             q_z = float(row["qz (Pa)"])
 
-            p_pos = (q_z * G_val * cp_ww) - (q_h * g_pos)
-            p_neg = (q_z * G_val * cp_ww) - (q_h * g_neg)
+            p_pos = (q_z * gust_effect_factor * cp_ww) - (q_h * g_pos)
+            p_neg = (q_z * gust_effect_factor * cp_ww) - (q_h * g_neg)
 
             summary_rows.append(
                 {
                     "Surface": "Windward wall" if idx == 0 else "",
                     "z (m)": f"{z_val:g}",
                     "q (Pa)": round(q_z, 2),
-                    "G": round(G_val, 2),
+                    "G": round(gust_effect_factor, 2),
                     "C_p": round(cp_ww, 2),
                     "Net (+GCpi)": round(p_pos, 2),
                     "Net (-GCpi)": round(p_neg, 2),
@@ -1197,24 +1204,24 @@ class Wind_Load_Calculator_ASCE_7:
                 )
             )
             cp_lw = float(df_wall_cp.loc[parallel_leeward_mask, "Cp"].values[0])
-        except:
+        except (IndexError, KeyError, ValueError):
             cp_lw = float(
                 df_wall_cp.loc[
                     df_wall_cp["Surface"].str.contains("Leeward", case=False), "Cp"
                 ].iloc[-1]
             )
-
+            
         # 4. Run the uniform load calculations using q_h
         for label, cp_val in [("Leeward wall", cp_lw), ("Side walls", cp_sw)]:
-            p_pos = (q_h * G_val * cp_val) - (q_h * g_pos)
-            p_neg = (q_h * G_val * cp_val) - (q_h * g_neg)
+            p_pos = (q_h * gust_effect_factor * cp_val) - (q_h * g_pos)
+            p_neg = (q_h * gust_effect_factor * cp_val) - (q_h * g_neg)
 
             summary_rows.append(
                 {
                     "Surface": label,
                     "z (m)": "All",
                     "q (Pa)": round(q_h, 2),
-                    "G": round(G_val, 2),
+                    "G": round(gust_effect_factor, 2),
                     "C_p": round(cp_val, 2),
                     "Net (+GCpi)": round(p_pos, 2),
                     "Net (-GCpi)": round(p_neg, 2),
@@ -1230,8 +1237,8 @@ class Wind_Load_Calculator_ASCE_7:
             # 1. Primary Coefficient (Asterisk Stripping)
             raw_cp1 = str(row["C_p_1"]).replace("*", "").strip()
             cp_1 = float(raw_cp1)
-            p_pos_1 = (q_h * G_val * cp_1) - (q_h * g_pos)
-            p_neg_1 = (q_h * G_val * cp_1) - (q_h * g_neg)
+            p_pos_1 = (q_h * gust_effect_factor * cp_1) - (q_h * g_pos)
+            p_neg_1 = (q_h * gust_effect_factor * cp_1) - (q_h * g_neg)
 
             display_surface = f"Roof ({zone_label})" if idx == 0 else zone_label
 
@@ -1240,7 +1247,7 @@ class Wind_Load_Calculator_ASCE_7:
                     "Surface": display_surface,
                     "z (m)": "—",
                     "q (Pa)": round(q_h, 2),
-                    "G": round(G_val, 2),
+                    "G": round(gust_effect_factor, 2),
                     "C_p": round(cp_1, 2),
                     "Net (+GCpi)": round(p_pos_1, 2),
                     "Net (-GCpi)": round(p_neg_1, 2),
@@ -1257,15 +1264,15 @@ class Wind_Load_Calculator_ASCE_7:
                 cp_2 = float(raw_cp2)
 
                 if cp_2 != cp_1:
-                    p_pos_2 = (q_h * G_val * cp_2) - (q_h * g_pos)
-                    p_neg_2 = (q_h * G_val * cp_2) - (q_h * g_neg)
+                    p_pos_2 = (q_h * gust_effect_factor * cp_2) - (q_h * g_pos)
+                    p_neg_2 = (q_h * gust_effect_factor * cp_2) - (q_h * g_neg)
 
                     summary_rows.append(
                         {
                             "Surface": "",
                             "z (m)": "—",
                             "q (Pa)": round(q_h, 2),
-                            "G": round(G_val, 2),
+                            "G": round(gust_effect_factor, 2),
                             "C_p": round(cp_2, 2),
                             "Net (+GCpi)": round(p_pos_2, 2),
                             "Net (-GCpi)": round(p_neg_2, 2),
@@ -1287,9 +1294,9 @@ class Wind_Load_Calculator_ASCE_7:
             table_int_pres_coef = self.table_int_pres_coef
             table_roof_over_10 = self.table_roof_over_10
             table_roof_under_10 = self.table_roof_under_10
-            L_input = self.L_input
-            B_input = self.B_input
-            Rid_Dir_input = self.Rid_Dir_input
+            l_input = self.l_input
+            b_input = self.b_input
+            ridge_direction_input = self.ridge_direction_input
 
             raw_heights = self.raw_heights
             eave_height = self.eave_height
@@ -1306,18 +1313,18 @@ class Wind_Load_Calculator_ASCE_7:
                 heights_list = []
 
                 # 1. Grab base variables from Excel (Example layout)
-            Enc_input = self.enclosure_class
-            Exp_input = self.exposure_category
+            enclosure_input = self.enclosure_class
+            exposure_input = self.exposure_category
 
-            self.Exp_input = Exp_input  # Store for later use in other methods
+            self.exposure_input = exposure_input  # Store for later use in other methods
 
-            V_input = self.basic_wind_speed
-            Kd_input = self.wind_dir_factor
-            Kzt_input = self.topographic_factor
-            Ke_input = self.ground_elevation_factor
-            G_input = self.gust_effect_factor
+            v_input = self.basic_wind_speed
+            kd_input = self.wind_dir_factor
+            kzt_input = self.topographic_factor
+            ke_input = self.ground_elevation_factor
+            g_input = self.gust_effect_factor
 
-            vel_pres = 0.613 * (V_input**2) * Kd_input * Kzt_input * Ke_input
+            vel_pres = 0.613 * (v_input**2) * kd_input * kzt_input * ke_input
 
             self.vel_pres = vel_pres  # Store for later use in other methods
 
@@ -1333,7 +1340,7 @@ class Wind_Load_Calculator_ASCE_7:
             print(f"Eave height: {eave_height}")
             print(f"Mean roof height: {mean_roof_height}")
 
-            target = str(Enc_input).strip()
+            target = str(enclosure_input).strip()
 
             matched_row = None
             for idx_val in table_int_pres_coef.index:
@@ -1343,7 +1350,7 @@ class Wind_Load_Calculator_ASCE_7:
 
             if matched_row is None:
                 raise ValueError(
-                    f"Enclosure Classification '{Enc_input}' was not found."
+                    f"Enclosure Classification '{enclosure_input}' was not found."
                 )
 
             # Extracted clean float variables by position index
@@ -1354,7 +1361,7 @@ class Wind_Load_Calculator_ASCE_7:
             self.gcpi_neg = gcpi_neg  # Store for later use in other methods
 
             print(
-                f"Matched row for Enclosure Classification '{Enc_input}': {matched_row}"
+                f"Matched row for Enclosure Classification '{enclosure_input}': {matched_row}"
             )
             print(
                 f"Extracted GCpi values: Positive = {gcpi_pos}, Negative = {gcpi_neg}"
@@ -1380,7 +1387,7 @@ class Wind_Load_Calculator_ASCE_7:
                 eave_height=eave_height,
                 mean_roof_height=mean_roof_height,
                 apex_height=apex_height,  # <-- Remember to hook this up here!
-                Exp_input=Exp_input,
+                exposure_input=exposure_input,
                 vel_pres=vel_pres,
             )
 
@@ -1395,7 +1402,7 @@ class Wind_Load_Calculator_ASCE_7:
             )
 
             table_wall_cp = self.generate_wall_cp_table(
-                table_wall_pres_coef, L_input, B_input, Rid_Dir_input
+                table_wall_pres_coef, l_input, b_input, ridge_direction_input
             )
             print(table_wall_cp)
 
@@ -1416,9 +1423,9 @@ class Wind_Load_Calculator_ASCE_7:
                 table_roof_over_10=table_roof_over_10,  # Your parsed steep-slope DataFrame
                 eave_height=eave_height,
                 apex_height=apex_height,
-                B_val=B_input,
-                L_val=L_input,
-                ridge_direction=Rid_Dir_input,
+                b_value=b_input,
+                l_value=l_input,
+                ridge_direction=ridge_direction_input,
                 wind_direction="Normal",  # "Normal" or "Parallel"
             )
 
@@ -1441,9 +1448,9 @@ class Wind_Load_Calculator_ASCE_7:
                 table_roof_over_10=table_roof_over_10,  # Your parsed steep-slope DataFrame
                 eave_height=eave_height,
                 apex_height=apex_height,
-                B_val=B_input,
-                L_val=L_input,
-                ridge_direction=Rid_Dir_input,
+                b_value=b_input,
+                l_value=l_input,
+                ridge_direction=ridge_direction_input,
                 wind_direction="Parallel",  # "Normal" or "Parallel"
             )
 
@@ -1461,9 +1468,9 @@ class Wind_Load_Calculator_ASCE_7:
                 df_wall_cp=table_wall_cp,
                 df_roof_payload=df_roof_payload_normal,
                 df_velocity_profile=table_vel_pressure,
-                G_val=G_input,
-                GCpi_pos=gcpi_pos,
-                GCpi_neg=gcpi_neg,
+                gust_effect_factor=g_input,
+                gcpi_pos=gcpi_pos,
+                gcpi_neg=gcpi_neg,
             )
 
             current_anchor_cell = self.paste_dataframe_with_border(
@@ -1479,9 +1486,9 @@ class Wind_Load_Calculator_ASCE_7:
                 df_wall_cp=table_wall_cp,  # Your imported wall coefficients
                 df_roof_payload=df_roof_payload_parallel,  # Your calculated stepped roof zones
                 df_velocity_profile=table_vel_pressure,  # Your height tracking profile
-                G_val=G_input,
-                GCpi_pos=gcpi_pos,
-                GCpi_neg=gcpi_neg,
+                gust_effect_factor=g_input,
+                gcpi_pos=gcpi_pos,
+                gcpi_neg=gcpi_neg,
             )
 
             current_anchor_cell = self.paste_dataframe_with_border(
@@ -1493,7 +1500,7 @@ class Wind_Load_Calculator_ASCE_7:
 
             print(df_parallel_summary)
 
-        except Exception as e:
+        except (ValueError, KeyError, TypeError) as e:
             main_sheet.range("A23").value = f"Error: {str(e)}"
 
         finally:
@@ -1628,9 +1635,9 @@ class Wind_Load_Calculator_ASCE_7:
                     tabular.add_hline()  # Optional separator between params and geometry
 
                     # Geometry Parameters
-                    tabular.add_row(("L (m)", f"{self.L_input:.2f}"))
-                    tabular.add_row(("B (m)", f"{self.B_input:.2f}"))
-                    tabular.add_row(("Direction of Ridge", self.Rid_Dir_input))
+                    tabular.add_row(("L (m)", f"{self.l_input:.2f}"))
+                    tabular.add_row(("B (m)", f"{self.b_input:.2f}"))
+                    tabular.add_row(("Direction of Ridge", self.ridge_direction_input))
 
                     # Convert the heights list to a clean comma-separated string
                     # e.g. [8, 10, 15] -> "8, 10, 15"
@@ -1651,12 +1658,12 @@ class Wind_Load_Calculator_ASCE_7:
             eave_height=self.eave_height,
             mean_roof_height=self.mean_roof_height,
             apex_height=self.apex_height,  # <-- Remember to hook this up here!
-            Exp_input=self.Exp_input,
+            exposure_input=self.exposure_input,
             vel_pres=self.vel_pres,
         )
 
         wall_press_coeff_data = self.generate_wall_cp_table(
-            self.wall_press_coeff_data, self.L_input, self.B_input, self.Rid_Dir_input
+            self.wall_press_coeff_data, self.l_input, self.b_input, self.ridge_direction_input
         )
 
         roof_press_coeff_normal, roof_payload_normal, place_holder_1, place_holder_2 = (
@@ -1665,9 +1672,9 @@ class Wind_Load_Calculator_ASCE_7:
                 table_roof_over_10=self.table_roof_over_10,  # Your parsed steep-slope DataFrame
                 eave_height=self.eave_height,
                 apex_height=self.apex_height,
-                B_val=self.B_input,
-                L_val=self.L_input,
-                ridge_direction=self.Rid_Dir_input,
+                b_value=self.b_input,
+                l_value=self.l_input,
+                ridge_direction=self.ridge_direction_input,
                 wind_direction="Normal",  # "Normal" or "Parallel"
             )
         )
@@ -1682,9 +1689,9 @@ class Wind_Load_Calculator_ASCE_7:
             table_roof_over_10=self.table_roof_over_10,  # Your parsed steep-slope DataFrame
             eave_height=self.eave_height,
             apex_height=self.apex_height,
-            B_val=self.B_input,
-            L_val=self.L_input,
-            ridge_direction=self.Rid_Dir_input,
+            b_value=self.b_input,
+            l_value=self.l_input,
+            ridge_direction=self.ridge_direction_input,
             wind_direction="Parallel",  # "Normal" or "Parallel"
         )
 
@@ -1692,18 +1699,18 @@ class Wind_Load_Calculator_ASCE_7:
             df_wall_cp=wall_press_coeff_data,
             df_roof_payload=roof_payload_normal,
             df_velocity_profile=velocity_pressure,
-            G_val=self.gust_effect_factor,
-            GCpi_pos=self.gcpi_pos,
-            GCpi_neg=self.gcpi_neg,
+            gust_effect_factor=self.gust_effect_factor,
+            gcpi_pos=self.gcpi_pos,
+            gcpi_neg=self.gcpi_neg,
         )
 
         mwfrs_parallel_summary = self.generate_mwfrs_parallel_to_ridge_table(
             df_wall_cp=wall_press_coeff_data,  # Your imported wall coefficients
             df_roof_payload=roof_payload_parallel,  # Your calculated stepped roof zones
             df_velocity_profile=velocity_pressure,  # Your height tracking profile
-            G_val=self.gust_effect_factor,
-            GCpi_pos=self.gcpi_pos,
-            GCpi_neg=self.gcpi_neg,
+            gust_effect_factor=self.gust_effect_factor,
+            gcpi_pos=self.gcpi_pos,
+            gcpi_neg=self.gcpi_neg,
         )
 
         print(velocity_pressure)
@@ -1944,10 +1951,16 @@ class Wind_Load_Calculator_ASCE_7:
         try:
             doc.generate_pdf(save_path, clean_tex=True, compiler="pdflatex")
             self.sheet.range("D23").value = "PDF Exported Successfully!"
-        except Exception as e:
-            self.sheet.range("D23").value = f"PDF EXPORT FAILED: {str(e)}"
+            
+        except subprocess.CalledProcessError as e:
+            # This catches the specific error where LaTeX runs but the math/syntax is bad
+            self.sheet.range("D23").value = "PDF EXPORT FAILED: LaTeX Syntax Error"
             print(f"LaTeX Compilation Failed: {e}")
 
+        except FileNotFoundError as e:
+            # This catches the error if MiKTeX isn't installed or added to PATH
+            self.sheet.range("D23").value = "PDF EXPORT FAILED: Compiler Not Found"
+            print(f"LaTeX Compiler missing: {e}")
 
 # ARBITRARY/DUMMY FUNCTION TO TEST MAIN SCRIPT FROM EXCEL BUTTON
 def calculate_wind_loads():
@@ -1959,7 +1972,7 @@ def calculate_wind_loads():
     main_sheet = wb.sheets.active  # Ensure this matches your tab name
 
     # Initialize class and run
-    wind_calculator = Wind_Load_Calculator_ASCE_7(
+    wind_calculation_instance_for_excel_display = WindLoadCalculatorDirectionalASCE7(
         target_sheet=main_sheet,
         table_vel_pres_coef="L5",
         wall_press_coeff_data="Q4",
@@ -1977,14 +1990,14 @@ def calculate_wind_loads():
         velocity_pressure="C10",
         internal_pressure_coefficient_pos="C11",
         internal_pressure_coefficient_neg="C12",
-        L_input="C13",
-        B_input="C14",
-        Rid_Dir_input="C15",
+        l_input="C13",
+        b_input="C14",
+        ridge_direction_input="C15",
         raw_heights="C16",
         eave_height="C18",
         apex_height="C19",
     )
-    wind_calculator.calculate_wind_load()
+    wind_calculation_instance_for_excel_display.calculate_wind_load()
 
 
 # ARBITRARY/DUMMY FUNCTION TO TEST PDF EXPORT FROM EXCEL BUTTON
@@ -1994,7 +2007,7 @@ def export_pdf_wind_loads():
     main_sheet = wb.sheets.active
 
     # Initialize the class and run calculations
-    wind_calculator = Wind_Load_Calculator_ASCE_7(
+    wind_calculation_instance_for_pdf_export = WindLoadCalculatorDirectionalASCE7(
         target_sheet=main_sheet,
         table_vel_pres_coef="L5",
         wall_press_coeff_data="Q4",
@@ -2012,26 +2025,26 @@ def export_pdf_wind_loads():
         velocity_pressure="C10",
         internal_pressure_coefficient_pos="C11",
         internal_pressure_coefficient_neg="C12",
-        L_input="C13",
-        B_input="C14",
-        Rid_Dir_input="C15",
+        l_input="C13",
+        b_input="C14",
+        ridge_direction_input="C15",
         raw_heights="C16",
         eave_height="C18",
         apex_height="C19",
     )
-    wind_calculator.calculate_wind_load()
+    wind_calculation_instance_for_pdf_export.calculate_wind_load()
 
     # Call the class method directly
-    wind_calculator.generate_pdf_report()
+    wind_calculation_instance_for_pdf_export.generate_pdf_report()
 
 
 # RUN CONDITIONS WHEN SCRIPT IS EXECUTED DIRECTLY (FOR TESTING PURPOSES)
 if __name__ == "__main__":
     # Safety catch for IDE testing
-    xw.Book("wind_load_calculator_asce7_02.xlsm").set_mock_caller()
+    xw.Book("wind_load_calculator_asce7.xlsm").set_mock_caller()
 
     # 2. Instantiate your calculator
-    wind_calculator = Wind_Load_Calculator_ASCE_7(
+    wind_calculation_instance_for_debugging = WindLoadCalculatorDirectionalASCE7(
         xw.Book.caller().sheets.active,
         table_vel_pres_coef="L5",
         wall_press_coeff_data="Q4",
@@ -2049,15 +2062,15 @@ if __name__ == "__main__":
         velocity_pressure="C10",
         internal_pressure_coefficient_pos="C11",
         internal_pressure_coefficient_neg="C12",
-        L_input="C13",
-        B_input="C14",
-        Rid_Dir_input="C15",
+        l_input="C13",
+        b_input="C14",
+        ridge_direction_input="C15",
         raw_heights="C16",
         eave_height="C18",
         apex_height="C19",
     )
 
-    wind_calculator.calculate_wind_load()
+    wind_calculation_instance_for_debugging.calculate_wind_load()
 
     # 3. Call the method you want to test
-    wind_calculator.generate_pdf_report()
+    wind_calculation_instance_for_debugging.generate_pdf_report()
