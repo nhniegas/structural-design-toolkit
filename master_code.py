@@ -21,36 +21,75 @@ from tkinter import filedialog
 
 
 class Wind_Load_Calculator_ASCE_7:
-    def __init__(self, target_sheet):
+    def __init__(
+        self,
+        target_sheet,
+        table_vel_pres_coef,
+        wall_press_coeff_data,
+        table_int_pres_coef,
+        table_roof_over_10,
+        table_roof_under_10,
+        building_class,
+        basic_wind_speed,
+        enclosure_class,
+        exposure_category,
+        wind_dir_factor,
+        topographic_factor,
+        ground_elevation_factor,
+        gust_effect_factor,
+        velocity_pressure,
+        internal_pressure_coefficient_pos,
+        internal_pressure_coefficient_neg,
+        L_input,
+        B_input,
+        Rid_Dir_input,
+        raw_heights,
+        eave_height,
+        apex_height,
+    ):
         """
         Initializes the calculator and binds it to the active Excel sheet.
         """
         self.sheet = target_sheet
-        self.table_vel_pres_coef = self.excel_to_dataframe(target_sheet, "L5")
-        self.wall_press_coeff_data = self.excel_to_dataframe(target_sheet, "Q4")
-        self.table_int_pres_coef = self.excel_to_dataframe(target_sheet, "L31")
-        self.table_roof_over_10 = self.excel_to_dataframe(target_sheet, "R14")
-        self.table_roof_under_10 = self.excel_to_dataframe(target_sheet, "S23")
+        self.table_vel_pres_coef = self.excel_to_dataframe(
+            "Velocity Pressure Coefficients", table_vel_pres_coef
+        )
+        self.wall_press_coeff_data = self.excel_to_dataframe(
+            "Wall Pressure Coefficients", wall_press_coeff_data
+        )
+        self.table_int_pres_coef = self.excel_to_dataframe(
+            "Internal Pressure Coefficients", table_int_pres_coef
+        )
+        self.table_roof_over_10 = self.excel_to_dataframe(
+            "Roof Pressure Coefficients (Over 10 ft)", table_roof_over_10
+        )
+        self.table_roof_under_10 = self.excel_to_dataframe(
+            "Roof Pressure Coefficients (Under 10 ft)", table_roof_under_10
+        )
 
-        self.building_class = target_sheet.range("C2").value
-        self.basic_wind_speed = target_sheet.range("C3").value
-        self.enclosure_class = target_sheet.range("C4").value
-        self.exposure_category = target_sheet.range("C5").value
-        self.wind_dir_factor = target_sheet.range("C6").value
-        self.topographic_factor = target_sheet.range("C7").value
-        self.ground_elevation_factor = target_sheet.range("C8").value
-        self.gust_effect_factor = target_sheet.range("C9").value
-        self.velocity_pressure = target_sheet.range("C10").value
-        self.internal_pressure_coefficient_pos = target_sheet.range("C11").value
-        self.internal_pressure_coefficient_neg = target_sheet.range("C12").value
+        self.building_class = target_sheet.range(building_class).value
+        self.basic_wind_speed = target_sheet.range(basic_wind_speed).value
+        self.enclosure_class = target_sheet.range(enclosure_class).value
+        self.exposure_category = target_sheet.range(exposure_category).value
+        self.wind_dir_factor = target_sheet.range(wind_dir_factor).value
+        self.topographic_factor = target_sheet.range(topographic_factor).value
+        self.ground_elevation_factor = target_sheet.range(ground_elevation_factor).value
+        self.gust_effect_factor = target_sheet.range(gust_effect_factor).value
+        self.velocity_pressure = target_sheet.range(velocity_pressure).value
+        self.internal_pressure_coefficient_pos = target_sheet.range(
+            internal_pressure_coefficient_pos
+        ).value
+        self.internal_pressure_coefficient_neg = target_sheet.range(
+            internal_pressure_coefficient_neg
+        ).value
 
-        self.L_input = target_sheet.range("C13").value
-        self.B_input = target_sheet.range("C14").value
-        self.Rid_Dir_input = target_sheet.range("C15").value
+        self.L_input = target_sheet.range(L_input).value
+        self.B_input = target_sheet.range(B_input).value
+        self.Rid_Dir_input = target_sheet.range(Rid_Dir_input).value
 
-        self.raw_heights = target_sheet.range("C16").value
-        self.eave_height = target_sheet.range("C18").value
-        self.apex_height = target_sheet.range("C19").value
+        self.raw_heights = target_sheet.range(raw_heights).value
+        self.eave_height = target_sheet.range(eave_height).value
+        self.apex_height = target_sheet.range(apex_height).value
         self.mean_roof_height = (self.eave_height + self.apex_height) / 2
 
         self.heights_list = []
@@ -361,7 +400,7 @@ class Wind_Load_Calculator_ASCE_7:
             print(f"Error compiling Wall Cp Matrix: {str(e)}")
             return pd.DataFrame()
 
-    def generate_and_display_roof_cp(
+    def generate_roof_cp(
         self,
         table_roof_under_10,
         table_roof_over_10,
@@ -1372,7 +1411,7 @@ class Wind_Load_Calculator_ASCE_7:
                 df_roof_payload_normal,
                 computed_pitch,
                 final_hl_ratio,
-            ) = self.generate_and_display_roof_cp(
+            ) = self.generate_roof_cp(
                 table_roof_under_10=table_roof_under_10,  # Your parsed low-slope DataFrame
                 table_roof_over_10=table_roof_over_10,  # Your parsed steep-slope DataFrame
                 eave_height=eave_height,
@@ -1397,7 +1436,7 @@ class Wind_Load_Calculator_ASCE_7:
                 df_roof_payload_parallel,
                 computed_pitch,
                 final_hl_ratio,
-            ) = self.generate_and_display_roof_cp(
+            ) = self.generate_roof_cp(
                 table_roof_under_10=table_roof_under_10,  # Your parsed low-slope DataFrame
                 table_roof_over_10=table_roof_over_10,  # Your parsed steep-slope DataFrame
                 eave_height=eave_height,
@@ -1621,7 +1660,7 @@ class Wind_Load_Calculator_ASCE_7:
         )
 
         roof_press_coeff_normal, roof_payload_normal, place_holder_1, place_holder_2 = (
-            self.generate_and_display_roof_cp(
+            self.generate_roof_cp(
                 table_roof_under_10=self.table_roof_under_10,  # Your parsed low-slope DataFrame
                 table_roof_over_10=self.table_roof_over_10,  # Your parsed steep-slope DataFrame
                 eave_height=self.eave_height,
@@ -1638,7 +1677,7 @@ class Wind_Load_Calculator_ASCE_7:
             roof_payload_parallel,
             place_holder_1,
             place_holder_2,
-        ) = self.generate_and_display_roof_cp(
+        ) = self.generate_roof_cp(
             table_roof_under_10=self.table_roof_under_10,  # Your parsed low-slope DataFrame
             table_roof_over_10=self.table_roof_over_10,  # Your parsed steep-slope DataFrame
             eave_height=self.eave_height,
@@ -1911,7 +1950,7 @@ class Wind_Load_Calculator_ASCE_7:
 
 
 # ARBITRARY/DUMMY FUNCTION TO TEST MAIN SCRIPT FROM EXCEL BUTTON
-def main():
+def calculate_wind_loads():
     """
     Hook for the Excel VBA Macro.
     Builds the class and runs the orchestrator.
@@ -1920,22 +1959,70 @@ def main():
     main_sheet = wb.sheets.active  # Ensure this matches your tab name
 
     # Initialize class and run
-    calculator = Wind_Load_Calculator_ASCE_7(target_sheet=main_sheet)
-    calculator.calculate_wind_load()
+    wind_calculator = Wind_Load_Calculator_ASCE_7(
+        target_sheet=main_sheet,
+        table_vel_pres_coef="L5",
+        wall_press_coeff_data="Q4",
+        table_int_pres_coef="L31",
+        table_roof_over_10="R14",
+        table_roof_under_10="S23",
+        building_class="C2",
+        basic_wind_speed="C3",
+        enclosure_class="C4",
+        exposure_category="C5",
+        wind_dir_factor="C6",
+        topographic_factor="C7",
+        ground_elevation_factor="C8",
+        gust_effect_factor="C9",
+        velocity_pressure="C10",
+        internal_pressure_coefficient_pos="C11",
+        internal_pressure_coefficient_neg="C12",
+        L_input="C13",
+        B_input="C14",
+        Rid_Dir_input="C15",
+        raw_heights="C16",
+        eave_height="C18",
+        apex_height="C19",
+    )
+    wind_calculator.calculate_wind_load()
 
 
 # ARBITRARY/DUMMY FUNCTION TO TEST PDF EXPORT FROM EXCEL BUTTON
-def export_calcs_main():
+def export_pdf_wind_loads():
     """Hook for the Excel 'Export Calcs' VBA Macro."""
     wb = xw.Book.caller()
     main_sheet = wb.sheets.active
 
     # Initialize the class and run calculations
-    calculator = Wind_Load_Calculator_ASCE_7(target_sheet=main_sheet)
-    calculator.calculate_wind_load()
+    wind_calculator = Wind_Load_Calculator_ASCE_7(
+        target_sheet=main_sheet,
+        table_vel_pres_coef="L5",
+        wall_press_coeff_data="Q4",
+        table_int_pres_coef="L31",
+        table_roof_over_10="R14",
+        table_roof_under_10="S23",
+        building_class="C2",
+        basic_wind_speed="C3",
+        enclosure_class="C4",
+        exposure_category="C5",
+        wind_dir_factor="C6",
+        topographic_factor="C7",
+        ground_elevation_factor="C8",
+        gust_effect_factor="C9",
+        velocity_pressure="C10",
+        internal_pressure_coefficient_pos="C11",
+        internal_pressure_coefficient_neg="C12",
+        L_input="C13",
+        B_input="C14",
+        Rid_Dir_input="C15",
+        raw_heights="C16",
+        eave_height="C18",
+        apex_height="C19",
+    )
+    wind_calculator.calculate_wind_load()
 
     # Call the class method directly
-    calculator.generate_pdf_report()
+    wind_calculator.generate_pdf_report()
 
 
 # RUN CONDITIONS WHEN SCRIPT IS EXECUTED DIRECTLY (FOR TESTING PURPOSES)
@@ -1944,8 +2031,33 @@ if __name__ == "__main__":
     xw.Book("wind_load_calculator_asce7_02.xlsm").set_mock_caller()
 
     # 2. Instantiate your calculator
-    calc = Wind_Load_Calculator_ASCE_7(xw.Book.caller().sheets.active)
-    calc.calculate_wind_load()
+    wind_calculator = Wind_Load_Calculator_ASCE_7(
+        xw.Book.caller().sheets.active,
+        table_vel_pres_coef="L5",
+        wall_press_coeff_data="Q4",
+        table_int_pres_coef="L31",
+        table_roof_over_10="R14",
+        table_roof_under_10="S23",
+        building_class="C2",
+        basic_wind_speed="C3",
+        enclosure_class="C4",
+        exposure_category="C5",
+        wind_dir_factor="C6",
+        topographic_factor="C7",
+        ground_elevation_factor="C8",
+        gust_effect_factor="C9",
+        velocity_pressure="C10",
+        internal_pressure_coefficient_pos="C11",
+        internal_pressure_coefficient_neg="C12",
+        L_input="C13",
+        B_input="C14",
+        Rid_Dir_input="C15",
+        raw_heights="C16",
+        eave_height="C18",
+        apex_height="C19",
+    )
+
+    wind_calculator.calculate_wind_load()
 
     # 3. Call the method you want to test
-    calc.generate_pdf_report()
+    wind_calculator.generate_pdf_report()
