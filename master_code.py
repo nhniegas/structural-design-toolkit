@@ -8,7 +8,7 @@ import xlwings as xw
 from utilities.etabs_api import ETABSConnector
 from utilities.wind_calculator_directional_asce7 import WindLoadCalculatorDirectionalASCE7
 
-# ARBITRARY/DUMMY FUNCTION TO TEST MAIN SCRIPT FROM EXCEL BUTTON
+# FUNCTION TO TRIGGER WIND LOAD CALCULATION FROM EXCEL BUTTON
 def calculate_wind_loads():
     """
     Hook for the Excel VBA Macro.
@@ -45,7 +45,7 @@ def calculate_wind_loads():
     )
     wind_calculation_instance_for_excel_display.calculate_wind_load()
 
-# ARBITRARY/DUMMY FUNCTION TO TEST PDF EXPORT FROM EXCEL BUTTON
+# FUNCTION TO TRIGGER PDF EXPORT FROM EXCEL BUTTON
 def export_pdf_wind_loads():
     """Hook for the Excel 'Export Calcs' VBA Macro."""
     wb = xw.Book.caller()
