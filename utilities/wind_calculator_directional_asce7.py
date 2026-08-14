@@ -1281,7 +1281,7 @@ class WindLoadCalculatorDirectionalASCE7:
 
         return pd.DataFrame(summary_rows)
 
-    # --- WIND LOAD CALCULATION TRIGGER FUNCTION ---
+    # --- WIND LOAD CALCULATION TRIGGER FUNCTION --- EDIT THIS CODE: ADD ANOTHER FUNCTION FOR PASTING DATA BACK TO EXCEL
     def calculate_wind_load(self):
         """This is the function the Excel button will actually trigger."""
         wb = xw.Book.caller()
@@ -1328,6 +1328,7 @@ class WindLoadCalculatorDirectionalASCE7:
 
             self.vel_pres = vel_pres  # Store for later use in other methods
 
+            #EDIT THIS PART
             main_sheet.range("C10").value = round(vel_pres, 3)
 
             print(table_vel_pres_coef)
@@ -1367,6 +1368,7 @@ class WindLoadCalculatorDirectionalASCE7:
                 f"Extracted GCpi values: Positive = {gcpi_pos}, Negative = {gcpi_neg}"
             )
 
+            # EDIT THIS PART
             main_sheet.range("C11").value = gcpi_pos
             main_sheet.range("C12").value = gcpi_neg
 
