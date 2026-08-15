@@ -19,7 +19,7 @@ def calculate_wind_loads():
 
     # Initialize class and run
     wind_calculation_instance_for_excel_display = WindLoadCalculatorDirectionalASCE7(
-        target_sheet=main_sheet,
+        active_sheet=main_sheet,
         table_vel_pres_coef="L5",
         wall_press_coeff_data="Q4",
         table_int_pres_coef="L31",
@@ -34,6 +34,7 @@ def calculate_wind_loads():
         ground_elevation_factor="C8",
         gust_effect_factor="C9",
         velocity_pressure="C10",
+        velocity_pressure_output="C10",
         internal_pressure_coefficient_pos="C11",
         internal_pressure_coefficient_neg="C12",
         l_input="C13",
@@ -42,6 +43,8 @@ def calculate_wind_loads():
         raw_heights="C16",
         eave_height="C18",
         apex_height="C19",
+        gcpi_pos_output="C11",
+        gci_neg_output="C12"
     )
     wind_calculation_instance_for_excel_display.calculate_wind_load()
 
@@ -53,7 +56,7 @@ def export_pdf_wind_loads():
 
     # Initialize the class and run calculations
     wind_calculation_instance_for_pdf_export = WindLoadCalculatorDirectionalASCE7(
-        target_sheet=main_sheet,
+        active_sheet=main_sheet,
         table_vel_pres_coef="L5",
         wall_press_coeff_data="Q4",
         table_int_pres_coef="L31",
@@ -68,6 +71,7 @@ def export_pdf_wind_loads():
         ground_elevation_factor="C8",
         gust_effect_factor="C9",
         velocity_pressure="C10",
+        velocity_pressure_output="C10",
         internal_pressure_coefficient_pos="C11",
         internal_pressure_coefficient_neg="C12",
         l_input="C13",
@@ -76,6 +80,8 @@ def export_pdf_wind_loads():
         raw_heights="C16",
         eave_height="C18",
         apex_height="C19",
+        gcpi_pos_output="C11",
+        gci_neg_output="C12"
     )
     wind_calculation_instance_for_pdf_export.calculate_wind_load()
 
@@ -104,6 +110,7 @@ if __name__ == "__main__":
         ground_elevation_factor="C8",
         gust_effect_factor="C9",
         velocity_pressure="C10",
+        velocity_pressure_output="C10",
         internal_pressure_coefficient_pos="C11",
         internal_pressure_coefficient_neg="C12",
         l_input="C13",
@@ -112,6 +119,8 @@ if __name__ == "__main__":
         raw_heights="C16",
         eave_height="C18",
         apex_height="C19",
+        gcpi_pos_output="C11",
+        gci_neg_output="C12"
     )
 
     wind_calculation_instance_for_debugging.calculate_wind_load()

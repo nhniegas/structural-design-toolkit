@@ -29,7 +29,7 @@ class WindLoadCalculatorDirectionalASCE7:
     """Calculates wind loads on structures per ASCE 7 provisions."""
     def __init__(
         self,
-        target_sheet,
+        active_sheet,
         table_vel_pres_coef,
         wall_press_coeff_data,
         table_int_pres_coef,
@@ -44,6 +44,7 @@ class WindLoadCalculatorDirectionalASCE7:
         ground_elevation_factor,
         gust_effect_factor,
         velocity_pressure,
+        velocity_pressure_output,
         internal_pressure_coefficient_pos,
         internal_pressure_coefficient_neg,
         l_input,
@@ -52,11 +53,13 @@ class WindLoadCalculatorDirectionalASCE7:
         raw_heights,
         eave_height,
         apex_height,
+        gcpi_pos_output,
+        gci_neg_output
     ):
         """
         Initializes the calculator and binds it to the active Excel sheet.
         """
-        self.sheet = target_sheet
+        self.sheet = active_sheet
         self.table_vel_pres_coef = self.excel_to_dataframe(
             self.sheet, table_vel_pres_coef
         )
@@ -82,6 +85,7 @@ class WindLoadCalculatorDirectionalASCE7:
         self.ground_elevation_factor = self.sheet.range(ground_elevation_factor).value
         self.gust_effect_factor = self.sheet.range(gust_effect_factor).value
         self.velocity_pressure = self.sheet.range(velocity_pressure).value
+        self.velocity_pressure_output = velocity_pressure_output
         self.internal_pressure_coefficient_pos = self.sheet.range(
             internal_pressure_coefficient_pos
         ).value
@@ -97,6 +101,9 @@ class WindLoadCalculatorDirectionalASCE7:
         self.eave_height = self.sheet.range(eave_height).value
         self.apex_height = self.sheet.range(apex_height).value
         self.mean_roof_height = (self.eave_height + self.apex_height) / 2
+        
+        self.gcpi_pos_output = gcpi_pos_output
+        self.gcpi_neg_output = gci_neg_output
 
         self.heights_list = []
         self.exposure_input = None
@@ -1329,7 +1336,7 @@ class WindLoadCalculatorDirectionalASCE7:
             self.vel_pres = vel_pres  # Store for later use in other methods
 
             #EDIT THIS PART
-            main_sheet.range("C10").value = round(vel_pres, 3)
+            self.sheet.range(self.velocity_pressure_output).value = round(vel_pres, 3)
 
             print(table_vel_pres_coef)
             print(table_wall_pres_coef)
@@ -1369,8 +1376,8 @@ class WindLoadCalculatorDirectionalASCE7:
             )
 
             # EDIT THIS PART
-            main_sheet.range("C11").value = gcpi_pos
-            main_sheet.range("C12").value = gcpi_neg
+            self.sheet.range(self.gcpi_pos_output).value = gcpi_pos
+            self.sheet.range(self.gcpi_neg_output).value = gcpi_neg
 
             initial_anchor_cell = "B24"
 
