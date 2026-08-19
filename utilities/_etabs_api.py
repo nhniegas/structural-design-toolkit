@@ -8,6 +8,9 @@ import sys
 import comtypes
 import comtypes.client
 import pandas as pd
+from utilities._gui_helpers import LoadingWindow
+
+from utilities._gui_helpers import select_etabs_file
 
 
 class ETABSConnector:
@@ -34,23 +37,35 @@ class ETABSConnector:
 
         # Create the ETABS API Helper Object
         try:
-            helper = comtypes.client.CreateObject("ETABSv1.Helper")
-            helper = helper.QueryInterface(comtypes.gen.ETABSv1.cHelper)
+            with LoadingWindow("Connecting to Model.."):
+                helper = comtypes.client.CreateObject("ETABSv1.Helper")
+                helper = helper.QueryInterface(comtypes.gen.ETABSv1.cHelper)
+                self.etabs_object = helper.GetObject("CSI.ETABS.API.ETABSObject")
+                self.sap_model = self.etabs_object.SapModel
+                self.is_connected = True
+                return True
 
-            # Create a new instance of ETABS
-            self.etabs_object = helper.CreateObject(self.program_path)
+        except Exception: # pylint: disable=broad-exception-caught      
+            model_path = select_etabs_file()
+            if not model_path:
+                return
+            
+            with LoadingWindow("Opening Etabs Model..."):
+                helper = comtypes.client.CreateObject("ETABSv1.Helper")
+                helper = helper.QueryInterface(comtypes.gen.ETABSv1.cHelper)
 
-            # Create SapModel Object
-            self.sap_model = self.etabs_object.SapModel
-            self.sap_model.InitializeNewModel
+                # Create a new instance of ETABS
+                self.etabs_object = helper.CreateObject(self.program_path)
 
-            # Set connection to true
-            self.is_connected = True
+                # Create SapModel Object
+                self.sap_model = self.etabs_object.SapModel
 
-        except Exception as e: # pylint: disable=broad-exception-caught
-            print(f"Error connecting to ETABS: {e}")
-            self.is_connected = False
-            return False
+                # Set connection to true
+                self.is_connected = True 
+                
+                self.open_model(model_path)
+                self.run_analysis()
+            return True
 
     def open_model(self, model_path: str):
         """Opens an ETABS model file at the specified path and sets units to kN-m."""
@@ -64,7 +79,6 @@ class ETABSConnector:
 
         try:
             # Open the model
-            self.sap_model.SetPresentUnits(6)  # Set units to kN, m, C
             self.sap_model.File.OpenFile(self.model_path)
             func_name = sys._getframe().f_code.co_name
             print(f"[{func_name}] Model opened successfully: {self.model_path}")
@@ -78,16 +92,18 @@ class ETABSConnector:
     def run_analysis(self):
         """Executes structural analysis in the active ETABS model."""
         try:
-            # Run the analysis
-            run_info = self.sap_model.Analyze.RunAnalysis()
-            if run_info == 0:
-                func_name = sys._getframe().f_code.co_name
-                print(f"[{func_name}] Analysis completed successfully")
-                return True
-            else:
-                func_name = sys._getframe().f_code.co_name
-                print(f"[{func_name}] Analysis failed with code: {run_info}")
-                return False
+            with LoadingWindow("Running Analysis Model..."):
+                # Run the analysis
+                self.sap_model.Analyze.SetSolverOption_3(2, 0, 0, 0, 0)
+                run_info = self.sap_model.Analyze.RunAnalysis()
+                if run_info == 0:
+                    func_name = sys._getframe().f_code.co_name
+                    print(f"[{func_name}] Analysis completed successfully")
+                    return True
+                else:
+                    func_name = sys._getframe().f_code.co_name
+                    print(f"[{func_name}] Analysis failed with code: {run_info}")
+                    return False
 
         except Exception as e: # pylint: disable=broad-exception-caught
             func_name = sys._getframe().f_code.co_name
