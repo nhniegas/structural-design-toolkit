@@ -13,8 +13,11 @@ from utilities._gui_helpers import (
     LoadingWindow,
     show_warning,
 )
-from utilities._wind_calculator_directional_asce7 import WindLoadCalculatorDirectionalASCE7
-from utilities._beam_designer_aci318 import attach_provision_notes, identify_cantilever_beams
+from utilities._wind_calculator_directional_asce7 import (
+    WindLoadCalculatorDirectionalASCE7,
+)
+from utilities._beam_designer_aci318 import identify_cantilever_beams
+
 
 # FUNCTION TO TRIGGER WIND LOAD CALCULATION FROM EXCEL BUTTON
 def calculate_wind_loads():
@@ -27,35 +30,38 @@ def calculate_wind_loads():
         main_sheet = wb.sheets.active  # Ensure this matches your tab name
 
         # Initialize class and run
-        wind_calculation_instance_for_excel_display = WindLoadCalculatorDirectionalASCE7(
-            active_sheet=main_sheet,
-            table_vel_pres_coef="L5",
-            wall_press_coeff_data="Q4",
-            table_int_pres_coef="L31",
-            table_roof_over_10="R14",
-            table_roof_under_10="S23",
-            building_class="C2",
-            basic_wind_speed="C3",
-            enclosure_class="C4",
-            exposure_category="C5",
-            wind_dir_factor="C6",
-            topographic_factor="C7",
-            ground_elevation_factor="C8",
-            gust_effect_factor="C9",
-            velocity_pressure="C10",
-            velocity_pressure_output="C10",
-            internal_pressure_coefficient_pos="C11",
-            internal_pressure_coefficient_neg="C12",
-            l_input="C13",
-            b_input="C14",
-            ridge_direction_input="C15",
-            raw_heights="C16",
-            eave_height="C18",
-            apex_height="C19",
-            gcpi_pos_output="C11",
-            gci_neg_output="C12"
+        wind_calculation_instance_for_excel_display = (
+            WindLoadCalculatorDirectionalASCE7(
+                active_sheet=main_sheet,
+                table_vel_pres_coef="L5",
+                wall_press_coeff_data="Q4",
+                table_int_pres_coef="L31",
+                table_roof_over_10="R14",
+                table_roof_under_10="S23",
+                building_class="C2",
+                basic_wind_speed="C3",
+                enclosure_class="C4",
+                exposure_category="C5",
+                wind_dir_factor="C6",
+                topographic_factor="C7",
+                ground_elevation_factor="C8",
+                gust_effect_factor="C9",
+                velocity_pressure="C10",
+                velocity_pressure_output="C10",
+                internal_pressure_coefficient_pos="C11",
+                internal_pressure_coefficient_neg="C12",
+                l_input="C13",
+                b_input="C14",
+                ridge_direction_input="C15",
+                raw_heights="C16",
+                eave_height="C18",
+                apex_height="C19",
+                gcpi_pos_output="C11",
+                gci_neg_output="C12",
+            )
         )
         wind_calculation_instance_for_excel_display.calculate_wind_load()
+
 
 # FUNCTION TO TRIGGER PDF EXPORT FROM EXCEL BUTTON
 def export_pdf_wind_loads():
@@ -90,7 +96,7 @@ def export_pdf_wind_loads():
         eave_height="C18",
         apex_height="C19",
         gcpi_pos_output="C11",
-        gci_neg_output="C12"
+        gci_neg_output="C12",
     )
     with LoadingWindow("Exporting PDF Report..."):
         wind_calculation_instance_for_pdf_export.calculate_wind_load()
@@ -98,16 +104,17 @@ def export_pdf_wind_loads():
     # Call the class method directly
     wind_calculation_instance_for_pdf_export.generate_pdf_report()
 
-#FUNCTION TO TRIGGER EXTRACT ETABS BEAM DATA TO EXCEL
+
+# FUNCTION TO TRIGGER EXTRACT ETABS BEAM DATA TO EXCEL
 def extract_forces_properties_from_etabs():
-    """Triggers the full workflow to extract design forces and section properties 
+    """Triggers the full workflow to extract design forces and section properties
     from ETABS, process materials/dimensions, and export results to Excel.
     """
     etabs_instance = ETABSConnector()
-    
+
     etabs_instance.connect()
-    #tabs_instance.open_model(file_path)
-    #etabs_instance.run_analysis()
+    # tabs_instance.open_model(file_path)
+    # etabs_instance.run_analysis()
 
     # Instantiate exporter passing the connected etabs_instance
     exporter = ETABSDataExporter(etabs_instance)
@@ -119,9 +126,8 @@ def extract_forces_properties_from_etabs():
             "Select Load Combinations", load_combos_filtered
         ).show()
     except Exception:
-        show_warning(title="Warning",message = "File Not Found")
+        show_warning(title="Warning", message="File Not Found")
         return
-        
 
     etabs_instance.clear_load_combinations(load_combos_filtered)
     etabs_instance.set_load_combinations(load_combos_selected)
@@ -132,9 +138,7 @@ def extract_forces_properties_from_etabs():
     # 2. Member Selection
     with LoadingWindow("Extracting Members..."):
         members = exporter.get_available_members()
-    members_selected = DualListboxSelector(
-        "Select Members to Design", members
-    ).show()
+    members_selected = DualListboxSelector("Select Members to Design", members).show()
 
     with LoadingWindow("Extracting Data..."):
         # 3. Export Operations
@@ -145,12 +149,12 @@ def extract_forces_properties_from_etabs():
             combo_cell="B6",
             member_cell="C6",
         )
-        
+
         # Populate Factored Gravity Load dropdown menu
         exporter.display_factored_gravity_loads_menu(
-        load_combos=load_combos_selected,
-        sheet_name="OVERWRITES",    
-        dropdown_cell="F22",  # Cell coordinate containing '*default'
+            load_combos=load_combos_selected,
+            sheet_name="OVERWRITES",
+            dropdown_cell="F35",  # Cell coordinate containing '*default'
         )
 
         design_forces = exporter.display_factored_loads(
@@ -165,17 +169,13 @@ def extract_forces_properties_from_etabs():
             sheet_name="FRAME DATA",
             start_cell="B2",
         )
-        
+
         connectivity_data = exporter.display_connectivity_data(
-        sheet_name="CONNECTIVITY",
-        start_cell="B2",
+            sheet_name="CONNECTIVITY",
+            start_cell="B2",
         )
-        
-        attach_provision_notes(
-        sheet_name="OVERWRITES",  # Replace with your actual beam sheet name
-        target_range="G2:G50",  # Replace with the exact column range containing section codes
-        )
-    
+
+
 def extract_beam_design_data(
     frame_sheet_name: str = "FRAME DATA",
     frame_cell_ref: str = "B2",
@@ -265,6 +265,7 @@ def extract_beam_design_data(
             f"Beam design data successfully exported to {output_sheet_name}!{output_cell_ref}"
         )
         return beam_df
+
 
 # RUN CONDITIONS WHEN SCRIPT IS EXECUTED DIRECTLY (FOR TESTING PURPOSES)
 if __name__ == "__main__":

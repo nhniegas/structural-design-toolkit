@@ -3,6 +3,7 @@ ETABS API Integration Module.
 Provides wrapper classes to manage COM client connections, program execution,
 and structural model data exchange for CSI ETABS.
 """
+
 import os
 import sys
 import comtypes
@@ -15,7 +16,7 @@ from utilities._gui_helpers import select_etabs_file
 
 class ETABSConnector:
     """Manages API connections and interface methods for CSI ETABS."""
-    
+
     def __init__(self):
         # Initialize ETABS API connection variables
         self.etabs_object = None
@@ -30,7 +31,7 @@ class ETABSConnector:
 
     def connect(self):
         """Attaches to or launches a new ETABS application instance via COM API."""
-        
+
         self.program_path = (
             r"C:\Program Files\Computers and Structures\ETABS 22\ETABS.exe"
         )
@@ -45,11 +46,11 @@ class ETABSConnector:
                 self.is_connected = True
                 return True
 
-        except Exception: # pylint: disable=broad-exception-caught      
+        except Exception:  # pylint: disable=broad-exception-caught
             model_path = select_etabs_file()
             if not model_path:
                 return
-            
+
             with LoadingWindow("Opening Etabs Model..."):
                 helper = comtypes.client.CreateObject("ETABSv1.Helper")
                 helper = helper.QueryInterface(comtypes.gen.ETABSv1.cHelper)
@@ -61,8 +62,8 @@ class ETABSConnector:
                 self.sap_model = self.etabs_object.SapModel
 
                 # Set connection to true
-                self.is_connected = True 
-                
+                self.is_connected = True
+
                 self.open_model(model_path)
                 self.run_analysis()
             return True
@@ -84,7 +85,7 @@ class ETABSConnector:
             print(f"[{func_name}] Model opened successfully: {self.model_path}")
             return True
 
-        except Exception as e: # pylint: disable=broad-exception-caught
+        except Exception as e:  # pylint: disable=broad-exception-caught
             func_name = sys._getframe().f_code.co_name
             print(f"[{func_name}] Error opening model: {e}")
             return False
@@ -105,7 +106,7 @@ class ETABSConnector:
                     print(f"[{func_name}] Analysis failed with code: {run_info}")
                     return False
 
-        except Exception as e: # pylint: disable=broad-exception-caught
+        except Exception as e:  # pylint: disable=broad-exception-caught
             func_name = sys._getframe().f_code.co_name
             print(f"[{func_name}] Error running analysis: {e}")
             return False
@@ -126,7 +127,7 @@ class ETABSConnector:
                     print(
                         f"[{func_name}] Load combination {combo} cleared for design successfully."
                     )
-        except Exception as e: # pylint: disable=broad-exception-caught
+        except Exception as e:  # pylint: disable=broad-exception-caught
             func_name = sys._getframe().f_code.co_name
             print(f"[{func_name}] Error clearing load combinations for design: {e}")
 
@@ -147,7 +148,7 @@ class ETABSConnector:
                         print(f"Load combination {combo} set for design successfully.")
                 prev_combo = current_combo
 
-        except Exception as e: # pylint: disable=broad-exception-caught
+        except Exception as e:  # pylint: disable=broad-exception-caught
             print(f"Error setting load combinations for design: {e}")
 
     def run_concrete_design(self):
@@ -165,7 +166,7 @@ class ETABSConnector:
                 print(f"[{func_name}] Concrete design failed with code: {run_info}")
                 return False
 
-        except Exception as e: # pylint: disable=broad-exception-caught
+        except Exception as e:  # pylint: disable=broad-exception-caught
             func_name = sys._getframe().f_code.co_name
             print(f"[{func_name}] Error running concrete design: {e}")
             return False
@@ -198,7 +199,7 @@ class ETABSConnector:
                 func_name = sys._getframe().f_code.co_name
                 print(f"[{func_name}] Failed to retrieve data. Error code: {data[6]}")
 
-        except Exception as e: # pylint: disable=broad-exception-caught
+        except Exception as e:  # pylint: disable=broad-exception-caught
             return {"error": str(e)}
 
     def get_unique_name(self):
@@ -212,7 +213,7 @@ class ETABSConnector:
                 return ret[2][0]
             return None
 
-        except Exception as e: # pylint: disable=broad-exception-caught
+        except Exception as e:  # pylint: disable=broad-exception-caught
             func_name = sys._getframe().f_code.co_name
             print(f"[{func_name}] Error occurred while retrieving unique name: {e}")
             pass
@@ -239,7 +240,7 @@ class ETABSConnector:
                 )
                 return ret
 
-        except Exception as e: # pylint: disable=broad-exception-caught
+        except Exception as e:  # pylint: disable=broad-exception-caught
             func_name = sys._getframe().f_code.co_name
             print(
                 f"[{func_name}] Failed to rename {extracted_unique_name}. Error code: {e}"
@@ -252,7 +253,7 @@ class ETABSConnector:
 
         try:
             self.sap_model.SelectObj.ClearSelection()
-        except: # pylint: disable=broad-exception-caught
+        except:  # pylint: disable=broad-exception-caught
             pass
 
     def refresh_view(self):
@@ -262,7 +263,7 @@ class ETABSConnector:
 
         try:
             self.sap_model.View.RefreshView()
-        except: # pylint: disable=broad-exception-caught
+        except:  # pylint: disable=broad-exception-caught
             pass
 
     def close_model(self):
@@ -276,7 +277,7 @@ class ETABSConnector:
 
             self.sap_model = None
             self.etabs_object = None
-        except Exception as e: # pylint: disable=broad-exception-caught
+        except Exception as e:  # pylint: disable=broad-exception-caught
             func_name = sys._getframe().f_code.co_name
             print(f"[{func_name}] Error closing model: {e}")
             return False
