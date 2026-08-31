@@ -2,6 +2,8 @@
 Etabs Designer.exe
 *.exe
 
+*.pdf
+
 # --- Python ---
 __pycache__/
 *.py[cod]
