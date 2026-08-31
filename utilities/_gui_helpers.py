@@ -21,6 +21,18 @@ except Exception:
         pass
 
 
+def select_output_directory() -> str:
+    """Opens a native Windows directory dialog to select an output folder."""
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+    folder_path = filedialog.askdirectory(
+        title="Select Output Folder for DXF Schedules"
+    )
+    root.destroy()
+    return folder_path
+
+
 def select_etabs_file() -> str:
     """Opens a native Windows file dialog to select an ETABS .edb file."""
     root = tk.Tk()
@@ -65,9 +77,13 @@ class DualListboxSelector:
         # Left Listbox (Available Items)
         frame_left = tk.Frame(frame_top)
         frame_left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        tk.Label(frame_left, text="Available Items", font=("Arial", 9, "bold")).pack(pady=(0, 5))
+        tk.Label(frame_left, text="Available Items", font=("Arial", 9, "bold")).pack(
+            pady=(0, 5)
+        )
 
-        self.lb_available = tk.Listbox(frame_left, selectmode=tk.MULTIPLE, exportselection=False)
+        self.lb_available = tk.Listbox(
+            frame_left, selectmode=tk.MULTIPLE, exportselection=False
+        )
         self.lb_available.pack(fill=tk.BOTH, expand=True)
         for item in self.available_items:
             self.lb_available.insert(tk.END, item)
@@ -79,17 +95,25 @@ class DualListboxSelector:
         frame_mid_inner = tk.Frame(frame_mid)
         frame_mid_inner.pack(expand=True)  # Places inner frame in the vertical center
 
-        btn_add = tk.Button(frame_mid_inner, text=">>>", width=8, command=self._add_items)
+        btn_add = tk.Button(
+            frame_mid_inner, text=">>>", width=8, command=self._add_items
+        )
         btn_add.pack(pady=6)
-        btn_remove = tk.Button(frame_mid_inner, text="<<<", width=8, command=self._remove_items)
+        btn_remove = tk.Button(
+            frame_mid_inner, text="<<<", width=8, command=self._remove_items
+        )
         btn_remove.pack(pady=6)
 
         # Right Listbox (Selected Items)
         frame_right = tk.Frame(frame_top)
         frame_right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        tk.Label(frame_right, text="Selected Items", font=("Arial", 9, "bold")).pack(pady=(0, 5))
+        tk.Label(frame_right, text="Selected Items", font=("Arial", 9, "bold")).pack(
+            pady=(0, 5)
+        )
 
-        self.lb_selected = tk.Listbox(frame_right, selectmode=tk.MULTIPLE, exportselection=False)
+        self.lb_selected = tk.Listbox(
+            frame_right, selectmode=tk.MULTIPLE, exportselection=False
+        )
         self.lb_selected.pack(fill=tk.BOTH, expand=True)
 
         # Bottom Frame with Centered Confirm Button
@@ -198,10 +222,9 @@ root.mainloop()
         if self.proc:
             self.proc.terminate()
             self.proc = None
-            
-def show_warning(
-    message: str, title: str = "Warning", topmost: bool = True
-) -> None:
+
+
+def show_warning(message: str, title: str = "Warning", topmost: bool = True) -> None:
     """Displays a GUI warning popup box with a custom message and title."""
     root = tk.Tk()
     root.withdraw()  # Hide the main Tkinter root window

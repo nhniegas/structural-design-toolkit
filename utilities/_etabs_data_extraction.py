@@ -302,9 +302,9 @@ class ETABSDataExporter:
 
         frame_assignments.rename(
             columns={
-                "Material": "Fc",
-                "RebarMatL": "Fy_L",
-                "RebarMatC": "Fy_C",
+                "Material": "f'c",
+                "RebarMatL": "fy",
+                "RebarMatC": "fys",
             },
             inplace=True,
         )
@@ -314,13 +314,13 @@ class ETABSDataExporter:
             "Story",
             "UniqueName",
             "SectProp",
-            "Fc",
+            "f'c",
             "Width",
             "Depth",
             "Diameter",
             "DesignType",
-            "Fy_L",
-            "Fy_C",
+            "fy",
+            "fys",
         ]
         final_cols = [c for c in desired_order if c in frame_assignments.columns]
         frame_assignments = frame_assignments[final_cols]
