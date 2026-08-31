@@ -47,7 +47,7 @@ def select_etabs_file() -> str:
 
 
 class DualListboxSelector:
-    """Creates a screen-centered dual listbox popup window."""
+    """Creates a screen-centered dual listbox popup window with extended selection and select all capabilities."""
 
     def __init__(self, title: str, available_items: list[str]):
         self.selected_items: list[str] = []
@@ -56,8 +56,11 @@ class DualListboxSelector:
         self.root = tk.Tk()
         self.root.title(title)
 
+        # Handle early window close ('X' button) safely
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+
         # Screen Centering Logic
-        width, height = 540, 380
+        width, height = 620, 420
         screen_w = self.root.winfo_screenwidth()
         screen_h = self.root.winfo_screenheight()
         x = (screen_w // 2) - (width // 2)
@@ -74,26 +77,39 @@ class DualListboxSelector:
         frame_top = tk.Frame(self.root)
         frame_top.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=15, pady=10)
 
-        # Left Listbox (Available Items)
+        # ------------------- Left Listbox (Available Items) -------------------
         frame_left = tk.Frame(frame_top)
         frame_left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         tk.Label(frame_left, text="Available Items", font=("Arial", 9, "bold")).pack(
             pady=(0, 5)
         )
 
+        # tk.EXTENDED enables Shift+Click range select and Ctrl+Click toggle select
         self.lb_available = tk.Listbox(
-            frame_left, selectmode=tk.MULTIPLE, exportselection=False
+            frame_left, selectmode=tk.EXTENDED, exportselection=False
         )
         self.lb_available.pack(fill=tk.BOTH, expand=True)
         for item in self.available_items:
             self.lb_available.insert(tk.END, item)
 
-        # Center Action Buttons (Vertically Centered)
+        # Left Action Buttons (Select All / Unselect All)
+        frame_left_btns = tk.Frame(frame_left)
+        frame_left_btns.pack(fill=tk.X, pady=(5, 0))
+        btn_sel_all_avail = tk.Button(
+            frame_left_btns, text="Select All", command=self._select_all_available
+        )
+        btn_sel_all_avail.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 2))
+        btn_unsel_all_avail = tk.Button(
+            frame_left_btns, text="Unselect All", command=self._unselect_all_available
+        )
+        btn_unsel_all_avail.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(2, 0))
+
+        # ------------------- Center Action Buttons (>>> / <<<) -------------------
         frame_mid = tk.Frame(frame_top)
         frame_mid.pack(side=tk.LEFT, fill=tk.Y, padx=12)
 
         frame_mid_inner = tk.Frame(frame_mid)
-        frame_mid_inner.pack(expand=True)  # Places inner frame in the vertical center
+        frame_mid_inner.pack(expand=True)  # Vertically centers transfer buttons
 
         btn_add = tk.Button(
             frame_mid_inner, text=">>>", width=8, command=self._add_items
@@ -104,19 +120,32 @@ class DualListboxSelector:
         )
         btn_remove.pack(pady=6)
 
-        # Right Listbox (Selected Items)
+        # ------------------- Right Listbox (Selected Items) -------------------
         frame_right = tk.Frame(frame_top)
         frame_right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         tk.Label(frame_right, text="Selected Items", font=("Arial", 9, "bold")).pack(
             pady=(0, 5)
         )
 
+        # tk.EXTENDED enables Shift+Click range select and Ctrl+Click toggle select
         self.lb_selected = tk.Listbox(
-            frame_right, selectmode=tk.MULTIPLE, exportselection=False
+            frame_right, selectmode=tk.EXTENDED, exportselection=False
         )
         self.lb_selected.pack(fill=tk.BOTH, expand=True)
 
-        # Bottom Frame with Centered Confirm Button
+        # Right Action Buttons (Select All / Unselect All)
+        frame_right_btns = tk.Frame(frame_right)
+        frame_right_btns.pack(fill=tk.X, pady=(5, 0))
+        btn_sel_all_sel = tk.Button(
+            frame_right_btns, text="Select All", command=self._select_all_selected
+        )
+        btn_sel_all_sel.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 2))
+        btn_unsel_all_sel = tk.Button(
+            frame_right_btns, text="Unselect All", command=self._unselect_all_selected
+        )
+        btn_unsel_all_sel.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(2, 0))
+
+        # ------------------- Bottom Frame with Confirm Button -------------------
         frame_bottom = tk.Frame(self.root)
         frame_bottom.pack(side=tk.BOTTOM, fill=tk.X, pady=(0, 15))
 
@@ -132,6 +161,21 @@ class DualListboxSelector:
         )
         btn_confirm.pack(anchor=tk.CENTER)
 
+    # --- Available Listbox Helpers ---
+    def _select_all_available(self):
+        self.lb_available.selection_set(0, tk.END)
+
+    def _unselect_all_available(self):
+        self.lb_available.selection_clear(0, tk.END)
+
+    # --- Selected Listbox Helpers ---
+    def _select_all_selected(self):
+        self.lb_selected.selection_set(0, tk.END)
+
+    def _unselect_all_selected(self):
+        self.lb_selected.selection_clear(0, tk.END)
+
+    # --- Item Transfer Logic ---
     def _add_items(self):
         selected_indices = list(self.lb_available.curselection())
         for idx in reversed(selected_indices):
@@ -151,13 +195,26 @@ class DualListboxSelector:
         if not self.selected_items:
             messagebox.showwarning("Warning", "Please select at least one item.")
             return
-        self.root.destroy()
+        self._on_close()
+
+    def _on_close(self):
+        """Safely tears down the Tkinter loop without causing Tcl errors."""
+        try:
+            self.root.quit()
+            self.root.destroy()
+        except tk.TclError:
+            pass
 
     def show(self) -> list[str]:
-        """Displays dialog and blocks until user confirms selection."""
-        self.root.lift()
-        self.root.focus_force()
-        self.root.mainloop()
+        """Displays dialog safely and blocks until user confirms or closes."""
+        try:
+            if self.root.winfo_exists():
+                self.root.lift()
+                self.root.focus_force()
+                self.root.mainloop()
+        except tk.TclError:
+            pass
+
         return self.selected_items
 
 

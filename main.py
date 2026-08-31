@@ -159,7 +159,7 @@ def extract_forces_properties_from_etabs():
         exporter.display_factored_gravity_loads_menu(
             load_combos=load_combos_selected,
             sheet_name="OVERWRITES",
-            dropdown_cell="F35",  # Cell coordinate containing '*default'
+            dropdown_cell="F4",  # Cell coordinate containing '*default'
         )
 
         design_forces = exporter.display_factored_loads(
@@ -274,170 +274,171 @@ def extract_beam_design_data(
 
 def run_beam_design_from_excel():
     """Triggered by the DESIGN REINFORCEMENTS button in Excel or IDE."""
+    with LoadingWindow("Designing Reinforcements..."):
+        # 1. Connect to Excel (Handles both VBA button clicks and IDE testing)
+        try:
+            wb = xw.Book.caller()
+        except Exception:
+            # Fallback for IDE testing: connects to the currently active Excel window
+            wb = xw.books.active
 
-    # 1. Connect to Excel (Handles both VBA button clicks and IDE testing)
-    try:
-        wb = xw.Book.caller()
-    except Exception:
-        # Fallback for IDE testing: connects to the currently active Excel window
-        wb = xw.books.active
+            # Alternatively, you can hardcode the filename to be perfectly safe:
+            # wb = xw.Book('Your_Excel_File_Name.xlsm')
 
-        # Alternatively, you can hardcode the filename to be perfectly safe:
-        # wb = xw.Book('Your_Excel_File_Name.xlsm')
+        # 2. Assign Sheets
+        sht_ow = wb.sheets["OVERWRITES"]
+        sht_loads = wb.sheets["FACTORED LOADS"]
+        sht_design = wb.sheets["BEAM DESIGN"]
 
-    # 2. Assign Sheets
-    sht_ow = wb.sheets["OVERWRITES"]
-    sht_loads = wb.sheets["FACTORED LOADS"]
-    sht_design = wb.sheets["BEAM DESIGN"]
+        # 2. Assign Sheets
+        sht_ow = wb.sheets["OVERWRITES"]
+        sht_loads = wb.sheets["FACTORED LOADS"]
+        sht_design = wb.sheets["BEAM DESIGN"]
 
-    # 2. Assign Sheets
-    sht_ow = wb.sheets["OVERWRITES"]
-    sht_loads = wb.sheets["FACTORED LOADS"]
-    sht_design = wb.sheets["BEAM DESIGN"]
+        # 3. Read Parameters (Assuming linked checkbox is F4 and combo is F5)
+        enable_seismic_design = sht_ow.range("F3").value is True
+        gravity_combo_name = sht_ow.range("F4").value
 
-    # 3. Read Parameters (Assuming linked checkbox is F4 and combo is F5)
-    enable_seismic_design = sht_ow.range("F3").value is True
-    gravity_combo_name = sht_ow.range("F4").value
-
-    # 4. Extract DataFrames
-    # expand='table' pulls the contiguous data block starting at A1
-    df_frame_forces = (
-        sht_loads.range("B2")
-        .options(pd.DataFrame, header=1, index=False, expand="table")
-        .value
-    )
-    df_beam_props = (
-        sht_design.range("B8")
-        .options(pd.DataFrame, header=1, index=False, expand="table")
-        .value
-    )
-
-    # 5. Execute the Design Engine
-    # Pass the extracted Excel data directly into your design function
-    df_beam_design_results = execute_beam_design(
-        df_beam_props=df_beam_props,
-        df_frame_forces=df_frame_forces,
-        enable_seismic_design=enable_seismic_design,
-        gravity_combo_name=gravity_combo_name,
-    )
-
-    # 6. Paste Results Back to Excel (Starting at B8)
-    sht_design.range("B8").options(index=False).value = df_beam_design_results
-
-    # 7. Apply Advanced Visual Formatting (Shifted to B8)
-    cols = df_beam_design_results.columns.tolist()
-    num_rows = len(df_beam_design_results)
-    num_cols = len(cols)
-
-    if num_rows > 0:
-        start_row = 8
-        start_col = 2  # Column B
-
-        # Dynamically find 0-based column offsets for all categories
-        idx_main = cols.index("n_left_L1") if "n_left_L1" in cols else num_cols
-        idx_web = (
-            cols.index("n_side_per_face_gov")
-            if "n_side_per_face_gov" in cols
-            else num_cols
+        # 4. Extract DataFrames
+        # expand='table' pulls the contiguous data block starting at A1
+        df_frame_forces = (
+            sht_loads.range("B2")
+            .options(pd.DataFrame, header=1, index=False, expand="table")
+            .value
         )
-        idx_stirrups = (
-            cols.index("Stirrup_Legs") if "Stirrup_Legs" in cols else num_cols
-        )
-        idx_check = (
-            cols.index("Anchorage_Check") if "Anchorage_Check" in cols else num_cols
+        df_beam_props = (
+            sht_design.range("B8")
+            .options(pd.DataFrame, header=1, index=False, expand="table")
+            .value
         )
 
-        rng_all = sht_design.range(
-            (start_row, start_col), (start_row + num_rows, start_col + num_cols - 1)
+        # 5. Execute the Design Engine
+        # Pass the extracted Excel data directly into your design function
+        df_beam_design_results = execute_beam_design(
+            df_beam_props=df_beam_props,
+            df_frame_forces=df_frame_forces,
+            enable_seismic_design=enable_seismic_design,
+            gravity_combo_name=gravity_combo_name,
         )
 
-        # 1. CLEAR ALL BORDERS: -4142 is xlNone (Removes intermediate vertical/horizontal lines)
-        rng_all.api.Borders.LineStyle = -4142
+        # 6. Paste Results Back to Excel (Starting at B8)
+        sht_design.range("B8").options(index=False).value = df_beam_design_results
 
-        # --- A. Format Headers (Row 8) ---
-        header_rng = sht_design.range(
-            (start_row, start_col), (start_row, start_col + num_cols - 1)
-        )
-        header_rng.font.bold = True
+        # 7. Apply Advanced Visual Formatting (Shifted to B8)
+        cols = df_beam_design_results.columns.tolist()
+        num_rows = len(df_beam_design_results)
+        num_cols = len(cols)
 
-        # Bottom Border (xlEdgeBottom = 9)
-        header_rng.api.Borders(9).LineStyle = 1
-        header_rng.api.Borders(9).Weight = 3
+        if num_rows > 0:
+            start_row = 8
+            start_col = 2  # Column B
 
-        # Top Border (xlEdgeTop = 8)
-        header_rng.api.Borders(8).LineStyle = 1
-        header_rng.api.Borders(8).Weight = 3
-
-        # Group 1: Properties & Forces (Light Blue)
-        if idx_main > 0:
-            sht_design.range(
-                (start_row, start_col), (start_row, start_col + idx_main - 1)
-            ).color = (189, 215, 238)
-        # Group 2: Main Bars (Light Green)
-        if idx_web > idx_main:
-            sht_design.range(
-                (start_row, start_col + idx_main), (start_row, start_col + idx_web - 1)
-            ).color = (226, 239, 218)
-        # Group 3: Web Reinforcement (Light Yellow)
-        if idx_stirrups > idx_web:
-            sht_design.range(
-                (start_row, start_col + idx_web),
-                (start_row, start_col + idx_stirrups - 1),
-            ).color = (255, 242, 204)
-        # Group 4: Stirrups / Shear (Light Orange)
-        if idx_check > idx_stirrups:
-            sht_design.range(
-                (start_row, start_col + idx_stirrups),
-                (start_row, start_col + idx_check - 1),
-            ).color = (252, 228, 214)
-        # Group 5: Post-Checks (Light Purple/Gray)
-        if num_cols > idx_check:
-            sht_design.range(
-                (start_row, start_col + idx_check),
-                (start_row, start_col + num_cols - 1),
-            ).color = (222, 235, 247)
-
-        # --- B. Alternate Row Colors & Horizontal Beam Separators ---
-        # Step by 2 to grab both TOP and BOTTOM rows for a single beam at once
-        for i in range(0, num_rows, 2):
-            row_block = sht_design.range(
-                (start_row + i + 1, start_col),
-                (start_row + i + 2, start_col + num_cols - 1),
+            # Dynamically find 0-based column offsets for all categories
+            idx_main = cols.index("n_left_L1") if "n_left_L1" in cols else num_cols
+            idx_web = (
+                cols.index("n_side_per_face_gov")
+                if "n_side_per_face_gov" in cols
+                else num_cols
+            )
+            idx_stirrups = (
+                cols.index("Stirrup_Legs") if "Stirrup_Legs" in cols else num_cols
+            )
+            idx_check = (
+                cols.index("Anchorage_Check") if "Anchorage_Check" in cols else num_cols
             )
 
-            # Apply Alternating Fill
-            if (i // 2) % 2 == 0:
-                row_block.color = (242, 242, 242)  # Light Gray
-            else:
-                row_block.color = (255, 255, 255)  # White
+            rng_all = sht_design.range(
+                (start_row, start_col), (start_row + num_rows, start_col + num_cols - 1)
+            )
 
-            # Add border ONLY to the bottom of the 2-row block (Separates beams, ignores top/bot inside)
-            row_block.api.Borders(9).LineStyle = 1  # xlEdgeBottom
-            row_block.api.Borders(9).Weight = 2  # xlThin
+            # 1. CLEAR ALL BORDERS: -4142 is xlNone (Removes intermediate vertical/horizontal lines)
+            rng_all.api.Borders.LineStyle = -4142
 
-        # --- C. Thick Vertical Section Grouping Borders ---
-        def set_thick_right_border(col_offset):
-            if 0 < col_offset < num_cols:
-                target_col = start_col + col_offset - 1
+            # --- A. Format Headers (Row 8) ---
+            header_rng = sht_design.range(
+                (start_row, start_col), (start_row, start_col + num_cols - 1)
+            )
+            header_rng.font.bold = True
+
+            # Bottom Border (xlEdgeBottom = 9)
+            header_rng.api.Borders(9).LineStyle = 1
+            header_rng.api.Borders(9).Weight = 3
+
+            # Top Border (xlEdgeTop = 8)
+            header_rng.api.Borders(8).LineStyle = 1
+            header_rng.api.Borders(8).Weight = 3
+
+            # Group 1: Properties & Forces (Light Blue)
+            if idx_main > 0:
                 sht_design.range(
-                    (start_row, target_col), (start_row + num_rows, target_col)
-                ).api.Borders(
-                    10
-                ).LineStyle = 1  # 10 = xlEdgeRight
+                    (start_row, start_col), (start_row, start_col + idx_main - 1)
+                ).color = (189, 215, 238)
+            # Group 2: Main Bars (Light Green)
+            if idx_web > idx_main:
                 sht_design.range(
-                    (start_row, target_col), (start_row + num_rows, target_col)
-                ).api.Borders(
-                    10
-                ).Weight = 3  # Medium/Thick Line
+                    (start_row, start_col + idx_main),
+                    (start_row, start_col + idx_web - 1),
+                ).color = (226, 239, 218)
+            # Group 3: Web Reinforcement (Light Yellow)
+            if idx_stirrups > idx_web:
+                sht_design.range(
+                    (start_row, start_col + idx_web),
+                    (start_row, start_col + idx_stirrups - 1),
+                ).color = (255, 242, 204)
+            # Group 4: Stirrups / Shear (Light Orange)
+            if idx_check > idx_stirrups:
+                sht_design.range(
+                    (start_row, start_col + idx_stirrups),
+                    (start_row, start_col + idx_check - 1),
+                ).color = (252, 228, 214)
+            # Group 5: Post-Checks (Light Purple/Gray)
+            if num_cols > idx_check:
+                sht_design.range(
+                    (start_row, start_col + idx_check),
+                    (start_row, start_col + num_cols - 1),
+                ).color = (222, 235, 247)
 
-        # This keeps the thick vertical lines organizing the main categories,
-        # while standard vertical gridlines remain hidden.
-        set_thick_right_border(idx_main)
-        set_thick_right_border(idx_web)
-        set_thick_right_border(idx_stirrups)
-        set_thick_right_border(idx_check)
+            # --- B. Alternate Row Colors & Horizontal Beam Separators ---
+            # Step by 2 to grab both TOP and BOTTOM rows for a single beam at once
+            for i in range(0, num_rows, 2):
+                row_block = sht_design.range(
+                    (start_row + i + 1, start_col),
+                    (start_row + i + 2, start_col + num_cols - 1),
+                )
 
-    sht_design.autofit()
+                # Apply Alternating Fill
+                if (i // 2) % 2 == 0:
+                    row_block.color = (242, 242, 242)  # Light Gray
+                else:
+                    row_block.color = (255, 255, 255)  # White
+
+                # Add border ONLY to the bottom of the 2-row block (Separates beams, ignores top/bot inside)
+                row_block.api.Borders(9).LineStyle = 1  # xlEdgeBottom
+                row_block.api.Borders(9).Weight = 2  # xlThin
+
+            # --- C. Thick Vertical Section Grouping Borders ---
+            def set_thick_right_border(col_offset):
+                if 0 < col_offset < num_cols:
+                    target_col = start_col + col_offset - 1
+                    sht_design.range(
+                        (start_row, target_col), (start_row + num_rows, target_col)
+                    ).api.Borders(
+                        10
+                    ).LineStyle = 1  # 10 = xlEdgeRight
+                    sht_design.range(
+                        (start_row, target_col), (start_row + num_rows, target_col)
+                    ).api.Borders(
+                        10
+                    ).Weight = 3  # Medium/Thick Line
+
+            # This keeps the thick vertical lines organizing the main categories,
+            # while standard vertical gridlines remain hidden.
+            set_thick_right_border(idx_main)
+            set_thick_right_border(idx_web)
+            set_thick_right_border(idx_stirrups)
+            set_thick_right_border(idx_check)
+
+        sht_design.autofit()
 
 
 def generate_dxf_beam_schedule(
@@ -889,4 +890,4 @@ def export_cad_drawings():
 
 
 if __name__ == "__main__":
-    export_cad_drawings()
+    extract_forces_properties_from_etabs()

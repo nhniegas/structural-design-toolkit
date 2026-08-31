@@ -1,0 +1,41 @@
+# --- Project-specific ---
+Etabs Designer.exe
+*.exe
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# --- Excel / xlwings ---
+~$*.xlsx
+~$*.xlsm
+~$*.xls
+*.xlsb
+.xlwings.conf
+xlwings.log
+
+# --- IDE / editor ---
+.vscode/
+.idea/
+*.swp
+
+# --- OS clutter ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Logs / env / secrets ---
+*.log
+.env
