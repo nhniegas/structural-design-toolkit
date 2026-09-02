@@ -26,8 +26,10 @@ from pylatex import (
 from pylatex.utils import NoEscape
 from utilities._gui_helpers import LoadingWindow
 
+
 class WindLoadCalculatorDirectionalASCE7:
     """Calculates wind loads on structures per ASCE 7 provisions."""
+
     def __init__(
         self,
         active_sheet,
@@ -55,7 +57,7 @@ class WindLoadCalculatorDirectionalASCE7:
         eave_height,
         apex_height,
         gcpi_pos_output,
-        gci_neg_output
+        gci_neg_output,
     ):
         """
         Initializes the calculator and binds it to the active Excel sheet.
@@ -102,7 +104,7 @@ class WindLoadCalculatorDirectionalASCE7:
         self.eave_height = self.sheet.range(eave_height).value
         self.apex_height = self.sheet.range(apex_height).value
         self.mean_roof_height = (self.eave_height + self.apex_height) / 2
-        
+
         self.gcpi_pos_output = gcpi_pos_output
         self.gcpi_neg_output = gci_neg_output
 
@@ -148,9 +150,9 @@ class WindLoadCalculatorDirectionalASCE7:
         df_target_address = f"{col_letter}{current_row}"
 
         # 3. Paste the dataframe
-        sheet_obj.range(df_target_address).options(
-            index=False
-        ).value = dataframe_to_paste
+        sheet_obj.range(df_target_address).options(index=False).value = (
+            dataframe_to_paste
+        )
 
         # 4. Calculate table dimensions
         num_rows = len(dataframe_to_paste.index) + 1
@@ -250,7 +252,7 @@ class WindLoadCalculatorDirectionalASCE7:
         heights_list,
         eave_height,
         mean_roof_height,
-        apex_height,  
+        apex_height,
         exposure_input,
         vel_pres,
     ):
@@ -917,7 +919,7 @@ class WindLoadCalculatorDirectionalASCE7:
                 print(f"Computed roof slope angle (theta): {round(theta, 2)}°")
                 return _process_stepped_zones(h_over_l, current_wind)
 
-        except Exception as e: # pylint: disable=broad-exception-caught
+        except Exception as e:  # pylint: disable=broad-exception-caught
             print(f"Structural Pipeline Error: {str(e)}")
             return pd.DataFrame(), pd.DataFrame(), 0.0
 
@@ -1218,7 +1220,7 @@ class WindLoadCalculatorDirectionalASCE7:
                     df_wall_cp["Surface"].str.contains("Leeward", case=False), "Cp"
                 ].iloc[-1]
             )
-            
+
         # 4. Run the uniform load calculations using q_h
         for label, cp_val in [("Leeward wall", cp_lw), ("Side walls", cp_sw)]:
             p_pos = (q_h * gust_effect_factor * cp_val) - (q_h * g_pos)
@@ -1336,7 +1338,7 @@ class WindLoadCalculatorDirectionalASCE7:
 
             self.vel_pres = vel_pres  # Store for later use in other methods
 
-            #EDIT THIS PART
+            # EDIT THIS PART
             self.sheet.range(self.velocity_pressure_output).value = round(vel_pres, 3)
 
             print(table_vel_pres_coef)
@@ -1514,9 +1516,9 @@ class WindLoadCalculatorDirectionalASCE7:
             main_sheet.range("A23").value = f"Error: {str(e)}"
 
         finally:
-            main_sheet.range(
-                "B23"
-            ).value = "Table loaded successfully into Pandas memory. Check the console for details."
+            main_sheet.range("B23").value = (
+                "Table loaded successfully into Pandas memory. Check the console for details."
+            )
 
     # --- EXPORT PDF TRIGGER FUNCTION ---
     def generate_pdf_report(
@@ -1556,9 +1558,10 @@ class WindLoadCalculatorDirectionalASCE7:
             doc = Document(
                 output_filename,
                 geometry_options={
+                    "a4paper": True,  # <-- A4 paper size added
                     "top": "0.75in",
                     "bottom": "0.75in",
-                    "left": "0.75in",  # Added slight side margins so it doesn't crowd the edge
+                    "left": "0.75in",
                     "right": "0.75in",
                 },
             )
@@ -1567,7 +1570,7 @@ class WindLoadCalculatorDirectionalASCE7:
             doc.preamble.append(Command("usepackage", "amsmath"))
             doc.preamble.append(Command("usepackage", "float"))
 
-            # --- NEW: Fix the huge gap above \maketitle ---
+            # --- Fix the huge gap above \maketitle ---
             doc.preamble.append(Command("usepackage", "titling"))
             doc.preamble.append(NoEscape(r"\setlength{\droptitle}{-0.75in}"))
             doc.preamble.append(
@@ -1600,7 +1603,7 @@ class WindLoadCalculatorDirectionalASCE7:
                     "The following fundamental parameters and building dimensions were utilized for the ASCE 7 wind load calculations:"
                 )
 
-                with doc.create(Table(position="h!")) as input_table:
+                with doc.create(Table(position="H")) as input_table:
                     # 'l r' means left-aligned first column, right-aligned second column
                     with input_table.create(Tabular("l r", booktabs=True)) as tabular:
                         # Table Header
@@ -1608,11 +1611,15 @@ class WindLoadCalculatorDirectionalASCE7:
                         tabular.add_hline()
 
                         # Core Parameters
-                        tabular.add_row(("Building Classification", self.building_class))
+                        tabular.add_row(
+                            ("Building Classification", self.building_class)
+                        )
                         tabular.add_row(
                             ("Basic Wind Speed (m/s)", f"{self.basic_wind_speed:.2f}")
                         )
-                        tabular.add_row(("Enclosure Classification", self.enclosure_class))
+                        tabular.add_row(
+                            ("Enclosure Classification", self.enclosure_class)
+                        )
                         tabular.add_row(("Exposure Category", self.exposure_category))
                         tabular.add_row(
                             (
@@ -1621,7 +1628,10 @@ class WindLoadCalculatorDirectionalASCE7:
                             )
                         )
                         tabular.add_row(
-                            ("Topographic Factor (Kzt)", f"{self.topographic_factor:.2f}")
+                            (
+                                "Topographic Factor (Kzt)",
+                                f"{self.topographic_factor:.2f}",
+                            )
                         )
                         tabular.add_row(
                             (
@@ -1648,7 +1658,9 @@ class WindLoadCalculatorDirectionalASCE7:
                         # Geometry Parameters
                         tabular.add_row(("L (m)", f"{self.l_input:.2f}"))
                         tabular.add_row(("B (m)", f"{self.b_input:.2f}"))
-                        tabular.add_row(("Direction of Ridge", self.ridge_direction_input))
+                        tabular.add_row(
+                            ("Direction of Ridge", self.ridge_direction_input)
+                        )
 
                         # Convert the heights list to a clean comma-separated string
                         # e.g. [8, 10, 15] -> "8, 10, 15"
@@ -1668,26 +1680,32 @@ class WindLoadCalculatorDirectionalASCE7:
                 heights_list=self.heights_list,
                 eave_height=self.eave_height,
                 mean_roof_height=self.mean_roof_height,
-                apex_height=self.apex_height,  # <-- Remember to hook this up here!
+                apex_height=self.apex_height,
                 exposure_input=self.exposure_input,
                 vel_pres=self.vel_pres,
             )
 
             wall_press_coeff_data = self.generate_wall_cp_table(
-                self.wall_press_coeff_data, self.l_input, self.b_input, self.ridge_direction_input
+                self.wall_press_coeff_data,
+                self.l_input,
+                self.b_input,
+                self.ridge_direction_input,
             )
 
-            roof_press_coeff_normal, roof_payload_normal, place_holder_1, place_holder_2 = (
-                self.generate_roof_cp(
-                    table_roof_under_10=self.table_roof_under_10,  # Your parsed low-slope DataFrame
-                    table_roof_over_10=self.table_roof_over_10,  # Your parsed steep-slope DataFrame
-                    eave_height=self.eave_height,
-                    apex_height=self.apex_height,
-                    b_value=self.b_input,
-                    l_value=self.l_input,
-                    ridge_direction=self.ridge_direction_input,
-                    wind_direction="Normal",  # "Normal" or "Parallel"
-                )
+            (
+                roof_press_coeff_normal,
+                roof_payload_normal,
+                place_holder_1,
+                place_holder_2,
+            ) = self.generate_roof_cp(
+                table_roof_under_10=self.table_roof_under_10,
+                table_roof_over_10=self.table_roof_over_10,
+                eave_height=self.eave_height,
+                apex_height=self.apex_height,
+                b_value=self.b_input,
+                l_value=self.l_input,
+                ridge_direction=self.ridge_direction_input,
+                wind_direction="Normal",
             )
 
             (
@@ -1696,14 +1714,14 @@ class WindLoadCalculatorDirectionalASCE7:
                 place_holder_1,
                 place_holder_2,
             ) = self.generate_roof_cp(
-                table_roof_under_10=self.table_roof_under_10,  # Your parsed low-slope DataFrame
-                table_roof_over_10=self.table_roof_over_10,  # Your parsed steep-slope DataFrame
+                table_roof_under_10=self.table_roof_under_10,
+                table_roof_over_10=self.table_roof_over_10,
                 eave_height=self.eave_height,
                 apex_height=self.apex_height,
                 b_value=self.b_input,
                 l_value=self.l_input,
                 ridge_direction=self.ridge_direction_input,
-                wind_direction="Parallel",  # "Normal" or "Parallel"
+                wind_direction="Parallel",
             )
 
             mwfrs_normal_summary = self.generate_mwfrs_normal_to_ridge_table(
@@ -1716,9 +1734,9 @@ class WindLoadCalculatorDirectionalASCE7:
             )
 
             mwfrs_parallel_summary = self.generate_mwfrs_parallel_to_ridge_table(
-                df_wall_cp=wall_press_coeff_data,  # Your imported wall coefficients
-                df_roof_payload=roof_payload_parallel,  # Your calculated stepped roof zones
-                df_velocity_profile=velocity_pressure,  # Your height tracking profile
+                df_wall_cp=wall_press_coeff_data,
+                df_roof_payload=roof_payload_parallel,
+                df_velocity_profile=velocity_pressure,
                 gust_effect_factor=self.gust_effect_factor,
                 gcpi_pos=self.gcpi_pos,
                 gcpi_neg=self.gcpi_neg,
@@ -1744,45 +1762,57 @@ class WindLoadCalculatorDirectionalASCE7:
                 )
 
                 # ASCE 7 Formula (SI Units)
-            doc.append(
-                NoEscape(
-                    r"\begin{equation*} q_z = 0.613 K_z K_{zt} K_d K_e V^2 \end{equation*}"
+                doc.append(
+                    NoEscape(
+                        r"\begin{equation*} q_z = 0.613 K_z K_{zt} K_d K_e V^2 \end{equation*}"
+                    )
                 )
-            )
 
-            # Legend as a Bulleted Itemize list (matching the MWFRS layout)
-            with doc.create(Itemize()) as itemize:
-                itemize.add_item(
-                    NoEscape(r"$q_z$: Velocity pressure ($\text{N/m}^2$ or $\text{Pa}$)")
-                )
-                itemize.add_item(NoEscape(r"$V$: Basic wind speed ($\text{m/s}$)"))
-                itemize.add_item(NoEscape(r"$K_d$: Wind directionality factor"))
-                itemize.add_item(NoEscape(r"$K_e$: Ground elevation factor"))
-                itemize.add_item(NoEscape(r"$K_{zt}$: Topographic factor"))
-                itemize.add_item(NoEscape(r"$K_z$: Velocity pressure exposure coefficient"))
+                # Legend as a Bulleted Itemize list (matching the MWFRS layout)
+                with doc.create(Itemize()) as itemize:
+                    itemize.add_item(
+                        NoEscape(
+                            r"$q_z$: Velocity pressure ($\text{N/m}^2$ or $\text{Pa}$)"
+                        )
+                    )
+                    itemize.add_item(NoEscape(r"$V$: Basic wind speed ($\text{m/s}$)"))
+                    itemize.add_item(NoEscape(r"$K_d$: Wind directionality factor"))
+                    itemize.add_item(NoEscape(r"$K_e$: Ground elevation factor"))
+                    itemize.add_item(NoEscape(r"$K_{zt}$: Topographic factor"))
+                    itemize.add_item(
+                        NoEscape(r"$K_z$: Velocity pressure exposure coefficient")
+                    )
 
+                # --- FIX: dedented out of Itemize so it's a sibling, not a child ---
                 # 4. Build the booktabs formatted table
                 with doc.create(Subsection("Velocity Pressure Profile Table")):
-                    with doc.create(Tabular("r l r r", booktabs=True)) as table:
-                        # Table Header
-                        table.add_row(["Height (m)", "Type", "Kz", "qz (Pa)"])
-                        table.add_hline()  # Adds the clean midrule line
+                    with doc.create(Table(position="H")) as vp_table_env:
+                        with vp_table_env.create(
+                            Tabular("r l r r", booktabs=True)
+                        ) as table:
+                            # Table Header
+                            table.add_row(["Height (m)", "Type", "Kz", "qz (Pa)"])
+                            table.add_hline()
 
-                        vp_data_list = velocity_pressure.values.tolist()
+                            vp_data_list = velocity_pressure.values.tolist()
 
-                        # Populate Data Rows (Loop logic stays exactly the same!)
-                        for row in vp_data_list:
-                            formatted_row = [
-                                row[0],
-                                row[1],
-                                f"{row[2]:.3f}"
-                                if isinstance(row[2], (int, float))
-                                else row[2],
-                                f"{row[3]:.3f}"
-                                if isinstance(row[3], (int, float))
-                                else row[3],
-                            ]
-                            table.add_row(formatted_row)
+                            # Populate Data Rows
+                            for row in vp_data_list:
+                                formatted_row = [
+                                    row[0],
+                                    row[1],
+                                    (
+                                        f"{row[2]:.3f}"
+                                        if isinstance(row[2], (int, float))
+                                        else row[2]
+                                    ),
+                                    (
+                                        f"{row[3]:.3f}"
+                                        if isinstance(row[3], (int, float))
+                                        else row[3]
+                                    ),
+                                ]
+                                table.add_row(formatted_row)
 
             # ==========================================
             # 3.0 PRESSURE COEFFICIENTS SECTION
@@ -1801,7 +1831,7 @@ class WindLoadCalculatorDirectionalASCE7:
                     wall_cols = len(df_wall.columns)
                     wall_align = "l " + " ".join(["r"] * (wall_cols - 1))
 
-                    with doc.create(Table(position="h!")) as table_env:
+                    with doc.create(Table(position="H")) as table_env:
                         with table_env.create(
                             Tabular(wall_align, booktabs=True)
                         ) as tabular:
@@ -1829,7 +1859,7 @@ class WindLoadCalculatorDirectionalASCE7:
                     roof_norm_cols = len(df_roof_norm.columns)
                     roof_norm_align = "l " + " ".join(["r"] * (roof_norm_cols - 1))
 
-                    with doc.create(Table(position="h!")) as table_env:
+                    with doc.create(Table(position="H")) as table_env:
                         with table_env.create(
                             Tabular(roof_norm_align, booktabs=True)
                         ) as tabular:
@@ -1857,7 +1887,7 @@ class WindLoadCalculatorDirectionalASCE7:
                     roof_par_cols = len(df_roof_par.columns)
                     roof_par_align = "l " + " ".join(["r"] * (roof_par_cols - 1))
 
-                    with doc.create(Table(position="h!")) as table_env:
+                    with doc.create(Table(position="H")) as table_env:
                         with table_env.create(
                             Tabular(roof_par_align, booktabs=True)
                         ) as tabular:
@@ -1880,7 +1910,7 @@ class WindLoadCalculatorDirectionalASCE7:
                     "are determined in accordance with ASCE 7 using the following equation:"
                 )
 
-                # Corrected Equation
+                # Equation
                 doc.append(
                     NoEscape(
                         r"\begin{equation*} p = q G C_p - q_i (GC_{pi}) \end{equation*}"
@@ -1902,7 +1932,9 @@ class WindLoadCalculatorDirectionalASCE7:
                     )
                     itemize.add_item(NoEscape(r"$G$: Gust-effect factor"))
                     itemize.add_item(NoEscape(r"$C_p$: External pressure coefficient"))
-                    itemize.add_item(NoEscape(r"$GC_{pi}$: Internal pressure coefficient"))
+                    itemize.add_item(
+                        NoEscape(r"$GC_{pi}$: Internal pressure coefficient")
+                    )
 
                 doc.append(NoEscape(r"\vspace{0.5cm}"))
 
@@ -1915,60 +1947,59 @@ class WindLoadCalculatorDirectionalASCE7:
                         num_cols = len(df.columns)
                         align_str = "l " + " ".join(["r"] * (num_cols - 1))
 
-                        # Replace Center() with FlushLeft() to align flush to the left margin
-                        with doc.create(FlushLeft()) as left_env:
-                            with left_env.create(
-                                Tabular(align_str, booktabs=True)
-                            ) as tabular:
-                                # Format column headers cleanly
-                                clean_headers = []
-                                for col in df.columns:
-                                    col_str = str(col)
-                                    col_str = col_str.replace("C_p", "$C_p$")
-                                    col_str = col_str.replace("(+GCpi)", r"(+$GC_{pi}$)")
-                                    col_str = col_str.replace("(-GCpi)", r"(-$GC_{pi}$)")
+                        with doc.create(Table(position="H")) as summary_table_env:
+                            with summary_table_env.create(FlushLeft()) as left_env:
+                                with left_env.create(
+                                    Tabular(align_str, booktabs=True)
+                                ) as tabular:
+                                    # Format column headers cleanly
+                                    clean_headers = []
+                                    for col in df.columns:
+                                        col_str = str(col)
+                                        col_str = col_str.replace("C_p", "$C_p$")
+                                        col_str = col_str.replace(
+                                            "(+GCpi)", r"(+$GC_{pi}$)"
+                                        )
+                                        col_str = col_str.replace(
+                                            "(-GCpi)", r"(-$GC_{pi}$)"
+                                        )
 
-                                    if "$" not in col_str:
-                                        col_str = col_str.replace("_", r"\_")
+                                        if "$" not in col_str:
+                                            col_str = col_str.replace("_", r"\_")
 
-                                    clean_headers.append(NoEscape(col_str))
+                                        clean_headers.append(NoEscape(col_str))
 
-                                tabular.add_row(clean_headers)
-                                tabular.add_hline()
+                                    tabular.add_row(clean_headers)
+                                    tabular.add_hline()
 
-                                # Clean NaNs and populate rows
-                                clean_data = df.fillna("").values.tolist()
-                                for row in clean_data:
-                                    tabular.add_row(row)
+                                    # Clean NaNs and populate rows
+                                    clean_data = df.fillna("").values.tolist()
+                                    for row in clean_data:
+                                        tabular.add_row(row)
 
                         doc.append(NoEscape(r"\vspace{1.5em}"))
 
                 # --- 4.1 Summary Table - Normal Wind Direction ---
-                # Replace 'mwfrs_normal_df' with your actual DataFrame variable name
                 build_summary_table(
                     mwfrs_normal_summary,
                     "MWFRS Pressure Summary Table - Normal Wind Direction",
                 )
 
                 # --- 4.2 Summary Table - Parallel Wind Direction ---
-                # Replace 'mwfrs_parallel_df' with your actual DataFrame variable name
                 build_summary_table(
                     mwfrs_parallel_summary,
                     "MWFRS Pressure Summary Table - Parallel Wind Direction",
                 )
 
             # 5. Compile the PDF
-
             try:
                 doc.generate_pdf(save_path, clean_tex=True, compiler="pdflatex")
                 self.sheet.range("D23").value = "PDF Exported Successfully!"
-                
+
             except subprocess.CalledProcessError as e:
-                # This catches the specific error where LaTeX runs but the math/syntax is bad
                 self.sheet.range("D23").value = "PDF EXPORT FAILED: LaTeX Syntax Error"
                 print(f"LaTeX Compilation Failed: {e}")
 
             except FileNotFoundError as e:
-                # This catches the error if MiKTeX isn't installed or added to PATH
                 self.sheet.range("D23").value = "PDF EXPORT FAILED: Compiler Not Found"
                 print(f"LaTeX Compiler missing: {e}")
