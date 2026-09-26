@@ -33,6 +33,23 @@ def select_output_directory() -> str:
     return folder_path
 
 
+def select_save_file(default_name="Composite_Column_Report") -> str:
+    """Opens a native Windows Save As dialog to name the PDF."""
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)  # Forces dialog over Excel
+
+    file_path = filedialog.asksaveasfilename(
+        title="Save PDF Report As",
+        initialfile=default_name,
+        defaultextension=".pdf",
+        filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")],
+    )
+
+    root.destroy()
+    return file_path
+
+
 def select_etabs_file() -> str:
     """Opens a native Windows file dialog to select an ETABS .edb file."""
     root = tk.Tk()

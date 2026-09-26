@@ -50,17 +50,17 @@ class ETABSDataExporter:
             if autofit:
                 sheet.range(start_cell).expand().columns.autofit()
 
-    def get_load_combinations(self) -> list:
+    def get_load_combinations(self, place_holder=None) -> list:
         """Extracts unique load combination definitions from ETABS."""
-        raw_combos = self.etabs.get_data("Load Combination Definitions")[
+        raw_combos = self.etabs.get_data("Load Combination Definitions", place_holder)[
             "Name"
         ].tolist()
         return list(dict.fromkeys(raw_combos))
 
-    def get_available_members(self) -> list:
+    def get_available_members(self, load_combos: list) -> list:
         """Extracts unique non-numeric frame member names from ETABS."""
-        raw_beam_forces = self.etabs.get_data("Design Forces - Beams")
-        raw_col_forces = self.etabs.get_data("Design Forces - Columns")
+        raw_beam_forces = self.etabs.get_data("Design Forces - Beams", load_combos)
+        raw_col_forces = self.etabs.get_data("Design Forces - Columns", load_combos)
         combined_names = pd.concat(
             [raw_beam_forces["UniqueName"], raw_col_forces["UniqueName"]]
         )
@@ -126,8 +126,10 @@ class ETABSDataExporter:
         header_color: tuple = (189, 215, 238),
     ) -> pd.DataFrame:
         """Extracts, converts to numeric, deduplicates, and exports design forces."""
-        beam_forces = self.etabs.get_data("Design Forces - Beams")
-        col_forces = self.etabs.get_data("Design Forces - Columns")
+        beam_forces = self.etabs.get_data("Design Forces - Beams", load_combos_selected)
+        col_forces = self.etabs.get_data(
+            "Design Forces - Columns", load_combos_selected
+        )
 
         if "Beam" in beam_forces.columns:
             beam_forces.rename(columns={"Beam": "Label"}, inplace=True)
@@ -183,23 +185,27 @@ class ETABSDataExporter:
         members_selected: list = None,
         sheet_name: str = "FRAME DATA",
         start_cell: str = "B2",
+        load_combos_selected: list = None,
         header_color: tuple = (189, 215, 238),
     ) -> pd.DataFrame:
         """Extracts frame assignments, section properties, rebar, material strengths, processes them, and writes to Excel."""
         frame_assignments = self.etabs.get_data(
-            "Frame Assignments - Section Properties"
+            "Frame Assignments - Section Properties", load_combos_selected
         )
         frame_section_properties_rectangular = self.etabs.get_data(
-            "Frame Section Property Definitions - Concrete Rectangular"
+            "Frame Section Property Definitions - Concrete Rectangular",
+            load_combos_selected,
         )
         frame_section_properties_circular = self.etabs.get_data(
-            "Frame Section Property Definitions - Concrete Circle"
+            "Frame Section Property Definitions - Concrete Circle", load_combos_selected
         )
         concrete_beam_reinforcing = self.etabs.get_data(
-            "Frame Section Property Definitions - Concrete Beam Reinforcing"
+            "Frame Section Property Definitions - Concrete Beam Reinforcing",
+            load_combos_selected,
         )
         concrete_column_reinforcing = self.etabs.get_data(
-            "Frame Section Property Definitions - Concrete Column Reinforcing"
+            "Frame Section Property Definitions - Concrete Column Reinforcing",
+            load_combos_selected,
         )
 
         frame_assignments = frame_assignments[
@@ -269,8 +275,12 @@ class ETABSDataExporter:
         ).drop(columns=["Name"], errors="ignore")
 
         # 4. Material Strengths
-        concrete_data = self.etabs.get_data("Material Properties - Concrete Data")
-        rebar_data = self.etabs.get_data("Material Properties - Rebar Data")
+        concrete_data = self.etabs.get_data(
+            "Material Properties - Concrete Data", load_combos_selected
+        )
+        rebar_data = self.etabs.get_data(
+            "Material Properties - Rebar Data", load_combos_selected
+        )
 
         concrete_data["Fc"] = pd.to_numeric(concrete_data["Fc"], errors="coerce").round(
             2
@@ -340,6 +350,7 @@ class ETABSDataExporter:
         sheet_name: str = "CONNECTIVITY",
         start_cell: str = "B2",
         header_color: tuple = (189, 215, 238),
+        load_combos_selected: list = None,
     ) -> pd.DataFrame:
         """Combines Beam, Column, and Wall connectivity tables and maps DesignType using section property definitions and frame assignments."""
 
@@ -357,15 +368,21 @@ class ETABSDataExporter:
             return pd.DataFrame()
 
         # 1. Fetch Beam, Column, and Wall Connectivity tables
-        beam_conn = _to_dataframe(self.etabs.get_data("Beam Object Connectivity"))
+        beam_conn = _to_dataframe(
+            self.etabs.get_data("Beam Object Connectivity", load_combos_selected)
+        )
         if not beam_conn.empty:
             beam_conn["DesignType"] = "Beam"
 
-        col_conn = _to_dataframe(self.etabs.get_data("Column Object Connectivity"))
+        col_conn = _to_dataframe(
+            self.etabs.get_data("Column Object Connectivity", load_combos_selected)
+        )
         if not col_conn.empty:
             col_conn["DesignType"] = "Column"
 
-        wall_conn = _to_dataframe(self.etabs.get_data("Wall Object Connectivity"))
+        wall_conn = _to_dataframe(
+            self.etabs.get_data("Wall Object Connectivity", load_combos_selected)
+        )
         if not wall_conn.empty:
             wall_conn["DesignType"] = "Wall"
 
@@ -379,11 +396,15 @@ class ETABSDataExporter:
         # 2. Fetch Section Property Definitions
         rect_props = _to_dataframe(
             self.etabs.get_data(
-                "Frame Section Property Definitions - Concrete Rectangular"
+                "Frame Section Property Definitions - Concrete Rectangular",
+                load_combos_selected,
             )
         )
         circ_props = _to_dataframe(
-            self.etabs.get_data("Frame Section Property Definitions - Concrete Circle")
+            self.etabs.get_data(
+                "Frame Section Property Definitions - Concrete Circle",
+                load_combos_selected,
+            )
         )
 
         prop_design_map = {}
@@ -399,7 +420,9 @@ class ETABSDataExporter:
 
         # 3. Fetch Frame Assignments to map UniqueName -> DesignType
         frame_assigns = _to_dataframe(
-            self.etabs.get_data("Frame Assignments - Section Properties")
+            self.etabs.get_data(
+                "Frame Assignments - Section Properties", load_combos_selected
+            )
         )
 
         if not frame_assigns.empty:

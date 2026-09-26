@@ -171,35 +171,85 @@ class ETABSConnector:
             print(f"[{func_name}] Error running concrete design: {e}")
             return False
 
-    def get_data(self, table_name):
-        """Retrieves raw database display table from ETABS model."""
+    def get_data(self, table_name, load_combinations_for_display=None):
+        """Retrieves raw database display table from ETABS model in safe chunks or as a whole."""
         try:
-            # Get all raw data
-            data = self.sap_model.DatabaseTables.GetTableForDisplayArray(
-                table_name, [], "", 0
-            )
+            # 1. Clear all previously selected cases, patterns, and combinations using empty/null parameters
+            self.sap_model.DatabaseTables.SetLoadCasesSelectedForDisplay([])
+            self.sap_model.DatabaseTables.SetLoadPatternsSelectedForDisplay([])
+            self.sap_model.DatabaseTables.SetLoadCombinationsSelectedForDisplay([])
 
-            # Check if retrieval was successful
-            if data[5] == 0:
-                func_name = sys._getframe().f_code.co_name
-                print(f"[{func_name}] Data Retrieved Successfully")
+            all_chunks = []
+            func_name = sys._getframe().f_code.co_name
 
-                # Store data in a pandas dataframe
-                headers = data[2]
-                table_data = data[4]
-                num_columns = len(headers)
-                row_list = []
-                for i in range(0, len(table_data), num_columns):
-                    row = table_data[i : i + num_columns]
-                    row_list.append(row)
-                dataframe = pd.DataFrame(row_list, columns=headers)
-                return dataframe
+            # 2. Check if a list of combinations was provided
+            if load_combinations_for_display:
+                # Loop through the list of load combos to extract data safely
+                for combo in load_combinations_for_display:
 
+                    # Set ONLY the current combination for extraction
+                    self.sap_model.DatabaseTables.SetLoadCombinationsSelectedForDisplay(
+                        [combo]
+                    )
+
+                    # NOW request the data (API only pulls this specific combo)
+                    data = self.sap_model.DatabaseTables.GetTableForDisplayArray(
+                        table_name, [], "", 0
+                    )
+
+                    # Process the data chunk if successful
+                    if data[5] == 0:
+                        headers = data[2]
+                        table_data = data[4]
+                        num_columns = len(headers)
+
+                        if num_columns > 0 and table_data:
+                            # Fast list comprehension to group flat array into rows
+                            row_list = [
+                                table_data[i : i + num_columns]
+                                for i in range(0, len(table_data), num_columns)
+                            ]
+                            df_chunk = pd.DataFrame(row_list, columns=headers)
+                            all_chunks.append(df_chunk)
+                    else:
+                        print(
+                            f"[{func_name}] Failed to retrieve data for combo: {combo}. Error: {data[6]}"
+                        )
+
+                # Stitch all chunks into one massive final DataFrame
+                if all_chunks:
+                    final_dataframe = pd.concat(all_chunks, ignore_index=True)
+                    print(f"[{func_name}] All chunked data retrieved successfully")
+                    return final_dataframe
+                else:
+                    return pd.DataFrame()
+
+            # 3. If NO combinations were provided, extract the table normally in one piece
             else:
-                func_name = sys._getframe().f_code.co_name
-                print(f"[{func_name}] Failed to retrieve data. Error code: {data[6]}")
+                data = self.sap_model.DatabaseTables.GetTableForDisplayArray(
+                    table_name, [], "", 0
+                )
 
-        except Exception as e:  # pylint: disable=broad-exception-caught
+                if data[5] == 0:
+                    headers = data[2]
+                    table_data = data[4]
+                    num_columns = len(headers)
+
+                    if num_columns > 0 and table_data:
+                        row_list = [
+                            table_data[i : i + num_columns]
+                            for i in range(0, len(table_data), num_columns)
+                        ]
+                        final_dataframe = pd.DataFrame(row_list, columns=headers)
+                        print(f"[{func_name}] Data retrieved successfully")
+                        return final_dataframe
+                    else:
+                        return pd.DataFrame()
+                else:
+                    print(f"[{func_name}] Failed to retrieve data. Error: {data[6]}")
+                    return pd.DataFrame()
+
+        except Exception as e:
             return {"error": str(e)}
 
     def get_unique_name(self):

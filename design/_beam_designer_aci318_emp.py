@@ -99,6 +99,7 @@ class BeamFlexureDesign:
         cc: float = 40.0,
         Mu_neg: float = 0.0,
         Mu_pos: float = 0.0,
+        d_agg: float = 25.0,  # <-- Add this here
     ):
         self.width = width
         self.height = height
@@ -110,6 +111,7 @@ class BeamFlexureDesign:
         self.cc = cc
         self.Mu_neg = Mu_neg
         self.Mu_pos = Mu_pos
+        self.d_agg = d_agg  # <-- And here
 
         self.bheta = max(0.65, min(0.85, 0.85 - 0.05 * (self.fc - 28.0) / 7.0))
         self.max_bar_per_layer = self.calculate_max_bars_per_layer()
@@ -119,10 +121,17 @@ class BeamFlexureDesign:
         self.n_bot = n_min_150
 
     def calculate_max_bars_per_layer(self) -> int:
+        # Get aggregate size, default to 20.0 mm if not yet added to __init__
+        d_agg = getattr(self, "d_agg", 20.0)
+
+        # Minimum clear spacing is the greatest of: 25mm, bar diameter, or 4/3 * max aggregate size
+        min_spacing = max(25.0, self.dmain, (4.0 / 3.0) * d_agg)
+
         clear_width = self.width - 2 * (self.cc + self.dstirrup)
-        min_spacing = max(25.0, self.dmain)
+
         if clear_width < self.dmain:
             return 1
+
         return int((clear_width + min_spacing) // (self.dmain + min_spacing))
 
     def get_min_bars_for_150mm_spacing(self) -> int:
@@ -262,6 +271,24 @@ class BeamFlexureDesign:
             top_layers = self.calculate_layer_distribution(self.n_top)
             bot_layers = self.calculate_layer_distribution(self.n_bot)
 
+            # --- STRICT MINIMUM OF 2 BARS PER LAYER (ADD ONLY) ---
+            # If the calculation results in exactly 1 bar in the last layer (e.g., [6, 1]),
+            # instantly add another bar to the total count (becoming [6, 2]) and re-loop.
+            if self.max_bar_per_layer >= 2:
+                needs_increment = False
+
+                if top_layers and top_layers[-1] == 1 and self.n_top < max_allowed_bars:
+                    self.n_top += 1
+                    needs_increment = True
+
+                if bot_layers and bot_layers[-1] == 1 and self.n_bot < max_allowed_bars:
+                    self.n_bot += 1
+                    needs_increment = True
+
+                if needs_increment:
+                    continue
+            # -----------------------------------------------------
+
             # Cap layer depth at 3 layers and flag congestion if exceeded
             if len(top_layers) > 3 or len(bot_layers) > 3:
                 self.rebar_congestion_exceeded = True
@@ -325,6 +352,17 @@ class BeamFlexureDesign:
             "rebar_congestion_exceeded": self.rebar_congestion_exceeded,
             "status": status_msg,
         }
+
+    def clean_single_bars(self):
+        """Post-process check to ensure no manual overrides result in exactly 1 bar in the last layer."""
+        if self.max_bar_per_layer >= 2:
+            top_layers = self.calculate_layer_distribution(self.n_top)
+            if top_layers and top_layers[-1] == 1:
+                self.n_top += 1
+
+            bot_layers = self.calculate_layer_distribution(self.n_bot)
+            if bot_layers and bot_layers[-1] == 1:
+                self.n_bot += 1
 
 
 # =============================================================================
@@ -1126,6 +1164,11 @@ def execute_beam_design(
                     cant_n_bot
                 )
 
+                # --- ADD CLEANUP HERE ---
+                flex_eng_left.clean_single_bars()
+                flex_eng_mid.clean_single_bars()
+                flex_eng_right.clean_single_bars()
+
             flex_engines = {
                 "Left Support Face": flex_eng_left,
                 "Midspan Zone": flex_eng_mid,
@@ -1286,6 +1329,10 @@ def execute_beam_design(
                 if not anch_check["anchorage_passed"]:
                     eng.n_top = anch_check["final_n_top"]
                     eng.n_bot = anch_check["final_n_bot"]
+
+                    # --- ADD CLEANUP HERE ---
+                    eng.clean_single_bars()
+
                     anchorage_passed_all = False
 
             if is_cantilever:
@@ -1301,6 +1348,11 @@ def execute_beam_design(
                 flex_eng_left.n_bot = flex_eng_mid.n_bot = flex_eng_right.n_bot = (
                     cant_n_bot
                 )
+
+                # --- ADD CLEANUP HERE ---
+                flex_eng_left.clean_single_bars()
+                flex_eng_mid.clean_single_bars()
+                flex_eng_right.clean_single_bars()
 
             current_state = (
                 [(eng.n_top, eng.n_bot) for eng in flex_engines.values()],
@@ -1361,6 +1413,20 @@ def execute_beam_design(
                 "PASSED" if anchorage_passed_all else "ADJUSTED"
             )
             summary["Alternating_Tie_Check"] = "PASSED"
+
+            # --- NEW: Catch Congestion Warnings ---
+            if (
+                flex_eng_left.rebar_congestion_exceeded
+                or flex_eng_mid.rebar_congestion_exceeded
+                or flex_eng_right.rebar_congestion_exceeded
+            ):
+                summary["Design_Status"] = "FAILED: MAX BARS EXCEEDED (>3 LAYERS)"
+            elif (
+                s_2h < 75 or s_mid < 75
+            ):  # Flag if shear spacing is unrealistically tight
+                summary["Design_Status"] = "FAILED: SHEAR SPACING < 75mm"
+            else:
+                summary["Design_Status"] = "OK"
 
             results_list.append(summary)
 

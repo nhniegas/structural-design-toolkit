@@ -1,0 +1,57 @@
+---
+title: "Rectangular Filled Composite Member Capacity (AISC DG6)"
+format:
+  pdf:
+    documentclass: article
+    papersize: a4
+    fontsize: 10pt
+    geometry:
+      - margin=0.75in
+    number-sections: true
+    # one font family for text AND math (xelatex, Quarto's default engine)
+    mainfont: "TeX Gyre Termes"
+    mathfont: "TeX Gyre Termes Math"
+    include-in-header:
+      text: |
+        \usepackage{booktabs}
+        \usepackage{etoolbox}
+        \renewcommand{\arraystretch}{1.3}
+        \AtBeginEnvironment{longtable}{\small}
+        \setlength{\parindent}{0pt}
+        \setlength{\parskip}{5pt}
+        \usepackage{titlesec}
+        \titleformat{\section}{\large\bfseries}{\thesection}{0.6em}{}
+        \titleformat{\subsection}{\normalsize\bfseries}{\thesubsection}{0.6em}{}
+jupyter: python3
+execute:
+  echo: false
+  warning: false
+---
+
+```{python}
+#| label: inputs
+import sys
+sys.path.append("helpers")           # folder containing the helper scripts
+from design._composite_column_designer_aiscDG06_rev02 import RectangularFilledComposite
+
+# ------------------------- INPUTS (edit here) -------------------------
+col = RectangularFilledComposite(
+    label="Column C1",
+    # geometry & materials
+    b_mm=635.0, h_mm=635.0, t_mm=12.7,
+    fc_mpa=41.37, fy_mpa=344.74,
+    Lb_m=9.144, Lh_m=9.144,          # unbraced lengths (b-axis / h-axis)
+    # demands (LRFD)
+    Pu_kN=6672.3,
+    Mb_kNm=2440.5, Mh_kNm=0.0,
+    Vb_kN=400.3,   Vh_kN=0.0,
+    # optional
+    Asr_mm2=0.0, Fysr_mpa=414.0, ri_mm=0.0, shear_span_to_depth=None,
+)
+# ----------------------------------------------------------------------
+```
+
+```{python}
+#| label: report
+col.show()
+```
