@@ -11,8 +11,8 @@ This documents two design engines from the codebase:
 
 | Module | File | Reference |
 |---|---|---|
-| Wide-flange / I-shape capacity checks | `_general_steel_section_designer_aisc360.py` | AISC 360-22, Ch. B, D, E, F, G, H |
-| Rectangular filled composite column | `_composite_column_designer_aiscDG06.py` | AISC Design Guide 6 (2nd Ed.) §2.5, AISC 360 Ch. I |
+| Wide-flange / I-shape capacity checks | `general_steel_section_designer_aisc360.py` | AISC 360-22, Ch. B, D, E, F, G, H |
+| Rectangular filled composite column | `composite_column_designer_aiscDG06.py` | AISC Design Guide 6 (2nd Ed.) §2.5, AISC 360 Ch. I |
 
 For each module you get: purpose/scope, class & method reference, unit conventions, and a **fully worked manual computation** that reproduces the numbers the code itself would produce, so the module can be spot-checked by hand (or against a PE's calc pad) during QA.
 

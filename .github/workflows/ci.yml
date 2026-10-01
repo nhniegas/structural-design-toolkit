@@ -1,0 +1,77 @@
+name: CI
+
+# Runs on every push / pull request to main, and is reused by release.yml.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.14"
+  MPLBACKEND: Agg # matplotlib must not try to open a window on the runner
+
+jobs:
+  test:
+    name: Lint and test
+    # Windows is required: comtypes (ETABS COM API) only imports on Windows.
+    # Excel, ETABS and LaTeX are NOT installed on the runner; the tests do not need them.
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            .github/requirements-ci.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r .github/requirements-ci.txt
+
+      # Blocking: syntax errors and undefined names only.
+      - name: Lint (errors)
+        run: ruff check --select E9,F63,F7,F82 --output-format github .
+
+      # Advisory: unused imports/variables and likely bugs. Reported, never fails the build.
+      - name: Lint (advisory)
+        run: ruff check --select F,B --exit-zero .
+
+      - name: Check every module compiles
+        run: python -m compileall -q main.py design etabs_api utilities tests
+
+      - name: Check the Excel callback module imports
+        run: python -c "import main; print('main exports:', ', '.join(main.__all__))"
+
+      - name: Run tests
+        run: >
+          python -m pytest tests -v
+          --cov=design --cov=etabs_api --cov=utilities
+          --cov-report=term-missing:skip-covered
+          --cov-report=xml
+          --junitxml=test-results.xml
+
+      - name: Upload test and coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            test-results.xml
+            coverage.xml
+          if-no-files-found: ignore

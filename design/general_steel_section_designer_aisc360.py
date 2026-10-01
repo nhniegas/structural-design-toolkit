@@ -2510,9 +2510,9 @@ if __name__ == "__main__":
             Vry=1,
             Tr=0.005,
             # Advanced Parameters (Examples - adjust or remove as needed)
-            a=1000,  # 1000 mm stiffener spacing
-            stiffener=Stiffener(b=50.0, t=5.0),  # 50x5 mm stiffener plates
-            tension_field=True,  # Set True to utilize tension field action
+            #a=1000,  # 1000 mm stiffener spacing
+            #stiffener=Stiffener(b=50.0, t=5.0),  # 50x5 mm stiffener plates
+            #tension_field=True,  # Set True to utilize tension field action
             # panel="interior",  # "interior" or "end" panel
             # An=2290,  # Net area for tension checks (mm^2)
             # U=1.0,  # Shear lag factor

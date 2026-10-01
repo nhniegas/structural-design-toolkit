@@ -114,7 +114,7 @@ input — it's looked up automatically from `enclosure_class` against `GCPI_TABL
 ## 5. Reference tables (hardcoded)
 
 These replace the 5 Excel ranges the original tool read live off the worksheet.
-They were extracted directly from your workbook (`_wind_load_calculator_asce7.xlsm`),
+They were extracted directly from your workbook (`wind_load_calculator_asce7.xlsm`),
 so they carry over any project-specific values or rounding your original sheet used.
 
 | Constant | Replaces (Excel anchor) | Content |

@@ -42,8 +42,8 @@ class RectangularFilledComposite:
         t_mm,
         fc_mpa,
         fy_mpa,
-        Lx_m,
-        Ly_m,
+        Lx_m=None,
+        Ly_m=None,
         Pu_kN=0,
         Mbx_kNmm=0,
         Mhy_kNmm=0,
@@ -53,6 +53,12 @@ class RectangularFilledComposite:
         Fysr_mpa=414.0,  # NEW: rebar yield (414 MPa ~= 60 ksi), real param
         ri_mm=0.0,  # NEW: corner radius; 0 = sharp/welded box (DG6 Ex 2.5)
         shear_span_to_depth=None,  # NEW: (Mr/Vr)/d, enables Kc interpolation
+        *,
+        Lb_m=None,
+        Lh_m=None,
+        Mb_kNm=None,
+        Mh_kNm=None,
+        label="",
     ):
         # CONFIRMED (per source sheet labels "Moment - b, Mb (kN-mm)" /
         # "Moment - h, Mh (kN-mm)"): moments ARE in kN-mm. Reverted to
@@ -61,6 +67,13 @@ class RectangularFilledComposite:
         # to make that unit explicit and avoid this ambiguity recurring.
 
         # 1. Metric to US Customary Conversions
+        # Accept the standalone rev02 names while preserving the Excel API.
+        self.label = label
+        Lx_m = Lx_m if Lx_m is not None else (Lb_m or 0.0)
+        Ly_m = Ly_m if Ly_m is not None else (Lh_m or 0.0)
+        Mbx_kNmm = Mbx_kNmm if Mbx_kNmm else (Mb_kNm or 0.0) * 1000.0
+        Mhy_kNmm = Mhy_kNmm if Mhy_kNmm else (Mh_kNm or 0.0) * 1000.0
+
         self.b = b_mm / 25.4  # inches
         self.h = h_mm / 25.4  # inches
         self.t = t_mm / 25.4  # inches
@@ -430,6 +443,95 @@ class RectangularFilledComposite:
             return "Moderately Ductile"
         else:
             return "Not Seismically Compact"
+
+    def axial_classification(self):
+        """Return axial compactness using the standalone API naming."""
+        label = self.check_compactness_axial()
+        scale = math.sqrt(self.Es / self.Fy)
+        return {
+            "lam_b": self.bi / self.t,
+            "lam_h": self.hi / self.t,
+            "lam": max(self.bi / self.t, self.hi / self.t),
+            "lam_p": 2.26 * scale,
+            "lam_r": 3.00 * scale,
+            "lam_max": 5.00 * scale,
+            "cls": label,
+        }
+
+    def flexure_classification(self, axis="b"):
+        """Return flexural compactness using the standalone API naming."""
+        label = self.check_compactness_flexure(axis)
+        scale = math.sqrt(self.Es / self.Fy)
+        flange = self.bi / self.t if axis == "b" else self.hi / self.t
+        web = self.hi / self.t if axis == "b" else self.bi / self.t
+        return {
+            "lf": flange,
+            "lw": web,
+            "cls": label,
+            "lam_fp": 2.26 * scale,
+            "lam_fr": 3.00 * scale,
+            "lam_wp": 3.00 * scale,
+            "lam_wr": 5.70 * scale,
+        }
+
+    def seismic_classification(self, Ry=1.3):
+        """Return seismic compactness using the standalone API naming."""
+        return {"cls": self.check_seismic_compactness(Ry), "Ry": Ry}
+
+    def axial_compression(self):
+        """Return axial compression results using the standalone API naming."""
+        result = self.axial_compressive_strength()
+        return {"phiPn": result, "Pn": self.Pn, "Pno": self.Pno}
+
+    def axial_tension(self):
+        """Return axial tension strength using the standalone API naming."""
+        return self.axial_tensile_strength()
+
+    def flexure(self, axis="b"):
+        """Return flexural strength using the standalone API naming."""
+        return {"phiMn": self.flexural_strength(axis), "axis": axis}
+
+    def shear(self, axis="b"):
+        """Return shear strength and demand using the standalone API naming."""
+        capacity = self.shear_strength(axis)
+        demand = self.Vux if axis == "b" else self.Vuy
+        return {
+            "phiVn": capacity,
+            "Vu": demand,
+            "ratio": demand / capacity if capacity else 0.0,
+            "axis": axis,
+        }
+
+    def interaction(self, alpha=1.5):
+        """Return interaction results using the standalone API naming."""
+        result = self.interaction_check()
+        result["alpha"] = alpha
+        return result
+
+    def report(self, heading_level=1):
+        """Return a concise Markdown report for standalone callers."""
+        heading = "#" * heading_level
+        interaction = self.interaction(alpha=1.5)
+        axial = self.axial_compression()
+        return "\n".join(
+            [
+                f"{heading} Rectangular Filled Composite Column",
+                f"**Label:** {self.label or 'Unlabeled'}",
+                "",
+                "| Check | Result |",
+                "|---|---:|",
+                f"| Axial design strength, phiPn (kips) | {axial['phiPn']} |",
+                f"| Axial interaction ratio | {interaction.get('Interaction Ratio (Standard)', 'N/A')} |",
+                f"| Alpha interaction ratio | {interaction.get('Interaction Ratio (Alpha=1.5)', 'N/A')} |",
+                f"| Seismic compactness | {self.check_seismic_compactness()} |",
+            ]
+        )
+
+    def show(self, heading_level=1):
+        """Print the standalone Markdown report and return it."""
+        report = self.report(heading_level)
+        print(report)
+        return report
 
 
 # ==========================================================================

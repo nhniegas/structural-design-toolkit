@@ -1,0 +1,4 @@
+# Tools used only by the CI pipeline (not needed to run the Excel workbooks).
+pytest
+pytest-cov
+ruff

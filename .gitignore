@@ -1,7 +1,8 @@
-# --- Project-specific ---
+# --- Project-generated / exported artifacts ---
 Etabs Designer.exe
 *.exe
 
+# Ignore generated reports and exported PDFs anywhere in the repository.
 *.pdf
 
 # --- Python ---
@@ -13,6 +14,18 @@ __pycache__/
 build/
 dist/
 *.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+pip-wheel-metadata/
 
 # Virtual environments
 .venv/
@@ -20,10 +33,22 @@ venv/
 env/
 ENV/
 
+# --- Local configuration / credentials ---
+.env
+.env.*
+!.env.example
+!.env.template
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+
 # --- Excel / xlwings ---
 ~$*.xlsx
 ~$*.xlsm
 ~$*.xls
+~$*.xlsb
 *.xlsb
 .xlwings.conf
 xlwings.log
@@ -40,4 +65,16 @@ desktop.ini
 
 # --- Logs / env / secrets ---
 *.log
-.env
+
+# --- Temporary files ---
+*.tmp
+*.temp
+*.bak
+*.orig
+*.rej
+*.stackdump
+
+# --- ETABS model files (may contain client/project data) ---
+*.edb
+*.sdb
+*.ebk

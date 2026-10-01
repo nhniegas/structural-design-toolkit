@@ -1,5 +1,16 @@
+# Excel integration and data handling
 xlwings
 pandas
 numpy
 comtypes
+
+# Beam/CAD, concrete/section, and structural steel design
+ezdxf
+concreteproperties
+sectionproperties
+steelpy
+matplotlib
+
+# PDF report generation and optional rich display helpers
 PyLaTeX
+IPython
