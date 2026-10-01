@@ -58,6 +58,8 @@ What is read, and how often:
 
 Members with a purely numeric ETABS name are skipped; only named members are designed.
 
+Units: every table is read in N and mm, whatever units the model was created in and whatever the ETABS window displays. If the model's API units differ, the extraction switches them to N-mm for each read and restores them afterwards. Forces are then written to Excel in kN and kN-m, dimensions in mm, strengths in MPa.
+
 ### Load-combination permutations
 
 ETABS writes several row sets for one combination when it contains a response-spectrum or multi-direction case, naming them `ULS 107 ...-1`, `ULS 107 ...-2`, and so on. Each is a different P, M2, M3 set.

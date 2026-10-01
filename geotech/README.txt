@@ -1,5 +1,5 @@
 ==========================================================================
- LogSpiralPassive.exe  -  USER GUIDE
+ logspiral_passive.py  -  USER GUIDE
  Passive earth pressure by the logarithmic-spiral method
  (soil with friction AND cohesion, with wall friction and wall adhesion)
  CE 264 Geotechnical Engineering - Terzaghi, Peck & Mesri, Article 32
@@ -23,15 +23,23 @@ Enter c = 0 and ca = 0 for a purely frictional (sand) backfill.
 
 2. STARTING THE PROGRAM
 -----------------------
-Double-click  LogSpiralPassive.exe .  A black terminal window opens.
-No installation is needed, and Python is not required.
+The program is a single Python script.  It needs Python 3.8 or newer and
+no other packages.  From the project folder, in a terminal:
 
+   python geotech\logspiral_passive.py
+
+A standalone LogSpiralPassive.exe (no Python needed) is not kept in the
+repository.  It is built by the release workflow and attached to each
+GitHub Release.  To build one yourself:
+
+   python -m pip install pyinstaller
+   python -m PyInstaller --onefile --console --name LogSpiralPassive geotech\logspiral_passive.py
+
+If you use the .exe:
  * The first time, Windows may show "Windows protected your PC".
    Click "More info" and then "Run anyway".
  * Your antivirus may ask for confirmation.  This is a normal false alarm
    for small self-contained programs; allow it.
- * Keep the .exe in a folder you can write to (Desktop, Documents, USB
-   drive) if you want to save results to a file.
 
 
 3. ENTERING DATA
@@ -86,8 +94,8 @@ and the result is the Rankine passive value.
 5. SAVING AND RUNNING MORE CASES
 --------------------------------
  * "Save this result to a text file?"  Type y, then give a file name (or
-   press ENTER for logspiral_result.txt).  The file is saved in the same
-   folder as the .exe.
+   press ENTER for logspiral_result.txt).  The file is saved in the folder
+   the program was started from, so start it from a folder you can write to.
  * "Run another case?"  Type y to enter new data.  The previous values
    become the new defaults, so you only retype what changes.
  * Type n to finish, then press ENTER to close the window.
@@ -106,12 +114,14 @@ and the result is the Rankine passive value.
 
 7. TROUBLESHOOTING
 ------------------
- * The window closes too fast / nothing appears:
-   open Command Prompt, drag the .exe into it and press ENTER.
+ * "python" is not recognized:
+   install Python from python.org and tick "Add python.exe to PATH".
  * Message "Minimum lies at the upper edge of the search range":
    check the inputs, especially very large c or ca compared with
    gamma x H.
- * The program will not start (blocked):
+ * The .exe window closes too fast / nothing appears:
+   open Command Prompt, drag the .exe into it and press ENTER.
+ * The .exe will not start (blocked):
    right-click the .exe -> Properties -> tick "Unblock" -> OK, or allow
    it in your antivirus.
 ==========================================================================

@@ -176,6 +176,8 @@ class ETABSDataExporter:
                     "Permutation",
                     permutation,
                 )
+        # The connector reads every table in N-mm (see ETABSConnector.extraction_units),
+        # so forces arrive in N and moments in N-mm.
         numeric_cols = ["Station", "P", "V2", "V3", "T", "M2", "M3"]
         for col in numeric_cols:
             if col in design_forces.columns:
