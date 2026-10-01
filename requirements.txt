@@ -8,9 +8,14 @@ comtypes
 ezdxf
 concreteproperties
 sectionproperties
+scipy
+shapely
 steelpy
 matplotlib
 
 # PDF report generation and optional rich display helpers
 PyLaTeX
 IPython
+ipykernel  # lets Quarto run the Python cells in main.qmd
+
+# Tests and lint: pip install -r .github/requirements-ci.txt

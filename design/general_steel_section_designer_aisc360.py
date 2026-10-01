@@ -1,12 +1,12 @@
 """
-wideflange_capacity.py   -   ONE self-contained script
+general_steel_section_designer_aisc360.py   -   ONE self-contained script
 =======================================================
 AISC 360-22 capacity checks for wide-flange / I-shaped members  +  one-page PDF calculation
 report (pylatex) driven from Excel through xlwings.
 
     Section database : steelpy (AISC Shapes DB: W, M, S, HP)
     PDF report       : pylatex + a LaTeX install with pdflatex (extarticle, amsmath, booktabs, multicol)
-    Excel button     : xlwings  ->  RunPython "import wideflange_capacity; wideflange_capacity.export_calcs()"
+    Excel button     : xlwings  ->  RunPython "from design import general_steel_section_designer_aisc360 as steel; steel.export_calcs()"
 
 Install once:   pip install steelpy pylatex xlwings
 
@@ -1239,7 +1239,6 @@ class WideFlangeCapacity:
             None,
             "",
         )
-        ratios: Dict[str, float] = {}
         ls: Dict[str, dict] = {}
 
         # ---------------- available strengths
@@ -1343,7 +1342,6 @@ class WideFlangeCapacity:
 
         # ---------------- H4 flange rupture at bolt holes
         if bolt_holes:
-            Afn = bolt_holes["Afn"]
             flg = bolt_holes.get("flanges", ("top", "bottom"))
             Pc4 = self._avail(self.Fu * (An if An else s.A) * U, 0.75, 2.00) / 1e3
             rup = next((k for k in Fx.limit_states if "rupture" in k), None)
@@ -1761,7 +1759,6 @@ class ReportBuilder:
 
     # ---- 3 Governing capacities ---------------------------------------------
     def _capacities(self, d: Demands, R) -> Sec:
-        E = self.m.E
         return Sec(
             "Governing Capacities",
             [
@@ -1837,7 +1834,7 @@ class ReportBuilder:
                 )
             else:
                 lines.append(rf"F_e = {_f(Fe)}~\text{{MPa (Eq. E4-2)}}")
-            br = rf"0.658^{{F_y/F_e}}F_y" if m.Fy / Fe <= 2.25 else r"0.877F_e"
+            br = r"0.658^{F_y/F_e}F_y" if m.Fy / Fe <= 2.25 else r"0.877F_e"
             lines.append(
                 _aligned(
                     "F_n",
@@ -1886,7 +1883,7 @@ class ReportBuilder:
                 )
             ]
         elif clause in ("F2.2", "F3.1"):
-            Lp, Lr, Lb, Cb = info["Lp"], info["Lr"], info["Lb"], info["Cb"]
+            Lp, Lr, Lb = info["Lp"], info["Lr"], info["Lb"]
             pre = rf"L_p={_f(Lp, 0)},\;L_r={_f(Lr, 0)},\;L_b={_f(Lb, 0)}~\text{{mm}}"
             if Lb <= Lp:
                 lines = [_aligned("M_n", [rf"M_p={_f(Mp)}~\text{{kN-m}}~(L_b\le L_p)"])]
@@ -2432,7 +2429,7 @@ def export_from_values(vals: dict, filepath: str) -> str:
 
 
 def export_calcs():
-    """Excel button macro:  RunPython "import wideflange_capacity; wideflange_capacity.export_calcs()" """
+    """Excel button macro:  RunPython "from design import general_steel_section_designer_aisc360 as steel; steel.export_calcs()" """
     if xw is None:
         raise RuntimeError("xlwings is not installed (pip install xlwings)")
     book = xw.Book.caller()
@@ -2480,7 +2477,7 @@ if __name__ == "__main__":
     dest_file = select_save_file(default_name="W6X12_report")
 
     if dest_file:
-        print(f"Generating PDF...")
+        print("Generating PDF...")
 
         # ---------------------------------------------------------
         # 2. RUN CAPACITY CHECKS & EXPORT REPORT

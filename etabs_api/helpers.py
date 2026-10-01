@@ -6,9 +6,13 @@ from collections.abc import Iterable
 
 
 def return_code(value) -> int:
-    """Extract an ETABS return code from an integer or COM tuple."""
-    if isinstance(value, tuple):
-        return int(value[0])
+    """Extract an ETABS return code from an integer or COM tuple.
+
+    Through comtypes, ETABS returns its output arguments first and the status
+    code as the LAST item, e.g. ``(count, names, 0)``.
+    """
+    if isinstance(value, (tuple, list)):
+        return int(value[-1])
     return int(value)
 
 
@@ -32,9 +36,9 @@ def as_list(value) -> list:
     return [value]
 
 
-def result_payload(value, offset: int = 1) -> tuple[int, list]:
-    """Return an ETABS return code and tuple payload after that code."""
-    if isinstance(value, tuple):
-        return int(value[0]), list(value[offset:])
+def result_payload(value) -> tuple[int, list]:
+    """Return an ETABS return code and the output values that precede it."""
+    if isinstance(value, (tuple, list)):
+        return int(value[-1]), list(value[:-1])
     return int(value), []
 

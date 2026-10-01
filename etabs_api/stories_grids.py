@@ -11,11 +11,13 @@ class StoriesGrids:
 
     def stories(self) -> list[dict]:
         """Return story names, elevations, and heights."""
-        result = self.connector.sap_model.Story.GetStories(0, [], [], [], [])
+        # Returns (count, names, elevations, heights, master flags, similar-to,
+        # splice-above flags, splice heights, status).
+        result = self.connector.sap_model.Story.GetStories(0, [], [], [], [], [], [], [])
         ensure_success(result, "Story.GetStories")
-        names = as_list(result[2])
-        elevations = as_list(result[3])
-        heights = as_list(result[4])
+        names = as_list(result[1])
+        elevations = as_list(result[2])
+        heights = as_list(result[3])
         return [
             {
                 "name": name,
@@ -29,5 +31,5 @@ class StoriesGrids:
         """Return defined grid-system names."""
         result = self.connector.sap_model.GridSys.GetNameList(0, [])
         ensure_success(result, "GridSys.GetNameList")
-        return as_list(result[2])
+        return as_list(result[1])  # (count, names, status)
 

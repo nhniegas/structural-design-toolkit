@@ -13,19 +13,19 @@ class Geometry:
         """Return all point object names."""
         result = self.connector.sap_model.PointObj.GetNameList(0, [])
         ensure_success(result, "PointObj.GetNameList")
-        return as_list(result[2])
+        return as_list(result[1])  # (count, names, status)
 
     def all_frames(self) -> list[str]:
         """Return all frame object names."""
         result = self.connector.sap_model.FrameObj.GetNameList(0, [])
         ensure_success(result, "FrameObj.GetNameList")
-        return as_list(result[2])
+        return as_list(result[1])  # (count, names, status)
 
     def all_areas(self) -> list[str]:
         """Return all area object names."""
         result = self.connector.sap_model.AreaObj.GetNameList(0, [])
         ensure_success(result, "AreaObj.GetNameList")
-        return as_list(result[2])
+        return as_list(result[1])  # (count, names, status)
 
     def add_point(self, x: float, y: float, z: float, user_name: str = ""):
         """Add a point object and return ETABS names."""

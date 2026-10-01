@@ -13,7 +13,7 @@ class Properties:
         """Read a property-name list from an ETABS property interface."""
         result = interface.GetNameList(0, [])
         ensure_success(result, operation)
-        return as_list(result[2])
+        return as_list(result[1])  # (count, names, status)
 
     def materials(self) -> list[str]:
         """Return material property names."""

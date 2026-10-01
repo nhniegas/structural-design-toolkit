@@ -1,57 +1,68 @@
 # XLWings Structural Design Toolkit
 
-This repository is a Python-based structural engineering toolkit built around Excel workbooks and `xlwings`. It has evolved beyond a simple steel-beam helper into a multi-module design platform for spreadsheet-driven calculation workflows.
+Structural design calculations driven from Excel workbooks. Each workbook button runs a Python design module through `xlwings`; the module reads the inputs from the sheet, does the calculation, and writes the results back. Reports can be exported as PDF and reinforcement schedules as DXF.
 
-## Project scope
+## What is in it
 
-The active codebase contains separate engineering modules for:
+| Workbook (`spreadsheets/`) | Design module (`design/`) | What it does |
+|---|---|---|
+| `beam_column_designer_aci318.xlsm` | `beam_designer_aci318.py` | ACI 318M-14 beam flexure, shear, torsion and SMRF checks from ETABS forces; beam schedule DXF |
+| `beam_column_designer_aci318.xlsm` | `column_designer_aci318.py` | ACI 318M-14 column P-M, shear, confinement, strong-column and joint-shear checks; column schedule DXF |
+| `composite_column_designer_aiscDG06.xlsm` | `composite_column_designer_aiscDG06.py` | AISC Design Guide 6 rectangular filled composite column; PDF report |
+| `wind_load_calculator_asce7.xlsm` | `wind_calculator_directional_asce7.py` | ASCE 7 directional procedure (MWFRS) wind pressures; PDF report |
+| none yet | `general_steel_section_designer_aisc360.py` | AISC 360-22 wide-flange capacity checks; PDF report |
 
-- ASCE 7 directional wind-load calculations in `design/wind_calculator_directional_asce7.py`
-- AISC Design Guide 6 rectangular filled composite-column design in `design/composite_column_designer_aiscDG06.py`
-- ACI 318 reinforced-concrete beam design and ETABS extraction in `design/beam_designer_aci318.py`
-- ACI 318 reinforced-concrete column design, detailing, and SMRF checks in `design/column_designer_aci318.py`
-- AISC 360 steel-member capacity checks in `design/general_steel_section_designer_aisc360.py`
+Supporting code:
 
-The workbook-facing entry point is `main.py`, which acts as a compatibility facade. It exposes workbook callback functions that delegate to the active engineering modules rather than duplicating design logic in one script.
+- `design/aci318_config.py`: every ACI 318M-14 constant used by the beam and column designers, with its clause.
+- `etabs_api/`: ETABS connection, table extraction and Excel export.
+- `utilities/_gui_helpers.py`: file pickers, list pickers and the loading window.
+- `geotech/logspiral_passive.py`: standalone log-spiral passive earth pressure calculator (run in a terminal).
+- `main.qmd`: Quarto template for written reports.
+- `main.py`: a marker file only. No workbook calls it.
 
-## Current architecture
+## Requirements
 
-- `main.py` keeps the historical Excel callback names available and routes work into the design modules.
-- `design/` contains the actual engineering logic, input parsing, result tables, and export functions.
-- `etabs_api/` provides ETABS connection and model-access utilities used by the concrete design workflows.
-- `utilities/` contains shared GUI and workbook helper functions.
-- `spreadsheets/`, `pdf/`, and `doc/` hold workbook assets, generated reports, and project documentation.
+- Windows with Microsoft Excel desktop and the xlwings add-in
+- Python 3.10 or newer (developed on 3.14)
+- ETABS, for the beam and column workbook (developed on ETABS 22)
+- A LaTeX distribution such as MiKTeX, for PDF reports
+- Quarto, only to render `main.qmd`
 
-## Typical workflow
-
-1. The Excel workbook calls a Python callback through `xlwings`.
-2. `main.py` or a module-level callback loads the active sheet and reads design inputs.
-3. The relevant design module performs calculations and writes results back to Excel.
-4. Optional outputs include PDF reports, DXF schedules, and structured result tables.
-
-## Installation
-
-Requirements are listed in `requirements.txt` and include spreadsheet, structural-analysis, and reporting libraries such as `xlwings`, `pandas`, `numpy`, `ezdxf`, `concreteproperties`, `sectionproperties`, `steelpy`, `matplotlib`, and `PyLaTeX`.
+## Setup
 
 ```powershell
+git clone https://github.com/nhniegas/xlwings_spreadsheet_structural.git
+cd xlwings_spreadsheet_structural
+python -m venv .venv
+.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
+xlwings addin install
 ```
 
-## Recommended setup
+In Excel, open the xlwings ribbon and set **Interpreter** to `.venv\Scripts\python.exe` in this folder.
 
-- Windows with Microsoft Excel Desktop
-- Python 3.9+
-- Git for repository management
-- LaTeX distribution for PDF generation when using report exports
+Keep the folder layout as it is. The macros find the Python code relative to the workbook (`spreadsheets\..`), so the project folder can be moved or renamed, but the workbooks must stay in `spreadsheets/` next to `design/`.
 
-## Documentation
+If ETABS is not installed at `C:\Program Files\Computers and Structures\ETABS 22\ETABS.exe`, set the `ETABS_PROGRAM_PATH` environment variable to your `ETABS.exe`. It is only used when no ETABS session is already open.
 
-The documentation under `doc/` documents the current project modules and workflow, including:
+## Using the workbooks
 
-- ASCE 7 wind-load design
-- steel and composite member design
-- concrete beam and column workbook integration
+Each guide in `doc/` covers one workbook: buttons, input cells, what is written where, and the limits of the calculation.
 
-## Notes
+- [Concrete beam and column workflow](doc/concrete_beam_column_excel_guide.md)
+- [Steel and composite modules](doc/steel_design_documentation.md)
+- [Wind load calculator](doc/wind_calculator_asce7_documentation.md)
 
-This repository is intended to be a structural design workbook ecosystem, not a single-purpose beam calculator. The documentation and workbook entry points are organized around that broader current architecture.
+## Tests
+
+```powershell
+python -m pip install -r .github/requirements-ci.txt
+python -m pytest tests
+```
+
+The tests need neither Excel nor ETABS. GitHub Actions runs them on every push to `main` (`.github/workflows/ci.yml`). Pushing a tag such as `v1.0.0` builds a release package (`.github/workflows/release.yml`).
+
+## Engineering use
+
+These tools automate calculations; they do not replace engineering judgement. Check the results independently before using them for design, and read the limitations section of each guide.

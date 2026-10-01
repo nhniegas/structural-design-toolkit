@@ -1,16 +1,17 @@
 """
-ASCE 7 Directional Procedure Wind Load Calculator (MWFRS) - Standalone Edition.
+ASCE 7 Directional Procedure Wind Load Calculator (MWFRS).
 
-Self-contained port of the original xlwings/Excel-driven tool: all reference
-tables (Kz, wall Cp, roof Cp, GCpi) that used to live in the Excel workbook
-are now hardcoded as module-level constants below, and every input parameter
-is edited directly in the CONFIG block at the bottom of this file.
+All reference tables (Kz, wall Cp, roof Cp, GCpi) are module-level constants,
+so the calculator class needs no workbook: give it the inputs and call
+``calculate()``.
 
-Run the script directly to:
-  1. Print a summary of every intermediate table to the terminal.
-  2. Prompt for a location to save a formal PDF report (via PyLaTeX).
-
-No Excel / xlwings dependency remains.
+Two ways to use it:
+  * Standalone - edit the CONFIG block at the bottom of this file and run it.
+    It prints every table and asks where to save the PDF report (PyLaTeX).
+  * From Excel - the workbook buttons call ``calculate_wind_loads()`` and
+    ``export_pdf_wind_loads()`` (section 3), which read the inputs from the
+    active sheet and write the result tables back to it. xlwings is imported
+    only by those two functions.
 """
 
 from __future__ import annotations
@@ -119,7 +120,7 @@ KZ_TABLE = pd.DataFrame(
         9.1,
         12.2,
         15.2,
-        18,
+        18.3,
         21.3,
         24.4,
         27.4,
@@ -167,21 +168,25 @@ GCPI_TABLE = pd.DataFrame(
     ],
 )
 
-# --- Fig. 27.3-2: Roof Cp, normal to ridge, slope >= 10 degrees ------------
-# 8 windward angle columns (10-60 deg) + 3 leeward angle columns (10-20 deg).
+# --- Fig. 27.3-1: Roof Cp, normal to ridge, slope >= 10 degrees ------------
+# 9 windward angle columns (10-80 deg) + 3 leeward angle columns (10-20 deg).
 # 6 data rows = 3 h/L tiers (<0.25, 0.5, >1) x 2 sub-rows (windward w1, w2);
 # the leeward value is read from the same "w2" (second) sub-row of each tier.
-_ROOF_OVER_10_WINDWARD_ANGLES = [10, 15, 20, 25, 30, 35, 45, 60]
+# For slopes of 60 degrees and steeper the code gives Cp = 0.01 * theta for both
+# windward cases; the 60 and 80 degree columns (0.6, 0.8) reproduce that line
+# exactly when interpolated.
+_ROOF_OVER_10_WINDWARD_ANGLES = [10, 15, 20, 25, 30, 35, 45, 60, 80]
 _ROOF_OVER_10_LEEWARD_ANGLES = [10, 15, 20]
+_N_WINDWARD = len(_ROOF_OVER_10_WINDWARD_ANGLES)
 TABLE_ROOF_OVER_10 = pd.DataFrame(
     [
-        # windward (8 cols)                          leeward (3 cols)
-        [-0.7, -0.5, -0.3, -0.2, -0.2, -0.2, 0.0, 0.0, 0.0, 0.0, 0.0],  # h/L<0.25, w1
-        [-0.18, 0.0, 0.2, 0.3, 0.3, 0.3, 0.4, 0.01, -0.3, -0.5, -0.6],  # h/L<0.25, w2
-        [-0.9, -0.7, -0.4, -0.3, -0.2, -0.2, 0.0, 0.0, 0.0, 0.0, 0.0],  # h/L=0.5, w1
-        [-0.18, -0.18, 0.0, 0.2, 0.2, 0.2, 0.4, 0.01, -0.5, -0.5, -0.6],  # h/L=0.5, w2
-        [-1.3, -1.0, -0.7, -0.5, -0.3, -0.3, 0.0, 0.0, 0.0, 0.0, 0.0],  # h/L>1, w1
-        [-0.18, -0.18, -0.18, 0.0, 0.2, 0.2, 0.3, 0.01, -0.7, -0.6, -0.6],  # h/L>1, w2
+        # windward (9 cols)                                    leeward (3 cols)
+        [-0.7, -0.5, -0.3, -0.2, -0.2, -0.2, 0.0, 0.6, 0.8, 0.0, 0.0, 0.0],  # h/L<0.25, w1
+        [-0.18, 0.0, 0.2, 0.3, 0.3, 0.3, 0.4, 0.6, 0.8, -0.3, -0.5, -0.6],  # h/L<0.25, w2
+        [-0.9, -0.7, -0.4, -0.3, -0.2, -0.2, 0.0, 0.6, 0.8, 0.0, 0.0, 0.0],  # h/L=0.5, w1
+        [-0.18, -0.18, 0.0, 0.2, 0.2, 0.2, 0.4, 0.6, 0.8, -0.5, -0.5, -0.6],  # h/L=0.5, w2
+        [-1.3, -1.0, -0.7, -0.5, -0.3, -0.3, 0.0, 0.6, 0.8, 0.0, 0.0, 0.0],  # h/L>1, w1
+        [-0.18, -0.18, -0.18, 0.0, 0.2, 0.2, 0.3, 0.6, 0.8, -0.7, -0.6, -0.6],  # h/L>1, w2
     ],
     columns=[*_ROOF_OVER_10_WINDWARD_ANGLES, *_ROOF_OVER_10_LEEWARD_ANGLES],
 )
@@ -243,18 +248,12 @@ class WindLoadCalculatorDirectionalASCE7:
         reference_table, target_column_name, lookup_input_value
     ):
         """Linear interpolation of a column against the table's index."""
-        try:
-            col_name = str(target_column_name).strip()
-            if col_name not in reference_table.columns:
-                raise KeyError(
-                    f"Column '{col_name}' does not exist in the reference table."
-                )
-            x_pts = np.array(reference_table.index, dtype=float)
-            y_pts = np.array(reference_table[col_name], dtype=float)
-            return float(np.interp(float(lookup_input_value), x_pts, y_pts))
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            print(f"Interpolation Error: {str(e)}")
-            return None
+        col_name = str(target_column_name).strip()
+        if col_name not in reference_table.columns:
+            raise KeyError(f"Column '{col_name}' does not exist in the reference table.")
+        x_pts = np.array(reference_table.index, dtype=float)
+        y_pts = np.array(reference_table[col_name], dtype=float)
+        return float(np.interp(float(lookup_input_value), x_pts, y_pts))
 
     # -------------------------------------------------------------------
     # STEP 1: Velocity pressure profile (qz)
@@ -306,9 +305,8 @@ class WindLoadCalculatorDirectionalASCE7:
             )
             return table_vel_pressure
 
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            print(f"Error compiling velocity pressure profile: {str(e)}")
-            return pd.DataFrame()
+        except Exception as e:
+            raise ValueError(f"Velocity pressure profile failed: {e}") from e
 
     # -------------------------------------------------------------------
     # STEP 2: Wall Cp table
@@ -345,13 +343,13 @@ class WindLoadCalculatorDirectionalASCE7:
                     "Surface": "Leeward wall",
                     "Wind direction": "Normal to ridge",
                     "L/B": round(lb_normal, 2),
-                    "Cp": round(cp_normal, 2) if cp_normal is not None else -0.50,
+                    "Cp": round(cp_normal, 2),
                 },
                 {
                     "Surface": "",
                     "Wind direction": "Parallel to ridge",
                     "L/B": round(lb_parallel, 2),
-                    "Cp": round(cp_parallel, 2) if cp_parallel is not None else -0.45,
+                    "Cp": round(cp_parallel, 2),
                 },
                 {
                     "Surface": "Side wall",
@@ -362,9 +360,8 @@ class WindLoadCalculatorDirectionalASCE7:
             ]
             return pd.DataFrame(wall_data)
 
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            print(f"Error compiling Wall Cp Matrix: {str(e)}")
-            return pd.DataFrame()
+        except Exception as e:
+            raise ValueError(f"Wall Cp table failed: {e}") from e
 
     # -------------------------------------------------------------------
     # STEP 3: Roof Cp (normal or parallel to ridge)
@@ -494,13 +491,16 @@ class WindLoadCalculatorDirectionalASCE7:
                 for tier in range(3):
                     r1, r2 = tier * 2, tier * 2 + 1
                     df_w1 = pd.DataFrame(
-                        {"Val": TABLE_ROOF_OVER_10.iloc[r1, :8].values}, index=angle_w
+                        {"Val": TABLE_ROOF_OVER_10.iloc[r1, :_N_WINDWARD].values},
+                        index=angle_w,
                     )
                     df_w2 = pd.DataFrame(
-                        {"Val": TABLE_ROOF_OVER_10.iloc[r2, :8].values}, index=angle_w
+                        {"Val": TABLE_ROOF_OVER_10.iloc[r2, :_N_WINDWARD].values},
+                        index=angle_w,
                     )
                     df_l1 = pd.DataFrame(
-                        {"Val": TABLE_ROOF_OVER_10.iloc[r2, 8:].values}, index=angle_l
+                        {"Val": TABLE_ROOF_OVER_10.iloc[r2, _N_WINDWARD:].values},
+                        index=angle_l,
                     )
 
                     for target, low_l, act_l, high_l in (
@@ -591,9 +591,8 @@ class WindLoadCalculatorDirectionalASCE7:
             )
             return _process_stepped_zones(h_over_l, current_wind, theta)
 
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            print(f"Structural Pipeline Error: {str(e)}")
-            return pd.DataFrame(), pd.DataFrame(), 0.0, 0.0
+        except Exception as e:
+            raise ValueError(f"Roof Cp table ({wind_direction}) failed: {e}") from e
 
     # -------------------------------------------------------------------
     # STEP 4a: MWFRS summary - wind normal to ridge
@@ -890,11 +889,32 @@ class WindLoadCalculatorDirectionalASCE7:
 
         return pd.DataFrame(summary_rows)
 
+    def _validate_inputs(self):
+        """Reject inputs the tables cannot handle, with a message naming the input."""
+        exposure = str(self.exposure_category).strip().upper()
+        if exposure not in KZ_TABLE.columns:
+            raise ValueError(
+                f"Exposure Category must be B, C or D; received {self.exposure_category!r}."
+            )
+        ridge = str(self.ridge_direction_input).strip().upper()
+        if ridge not in ("L", "B"):
+            raise ValueError(
+                f"Direction of Ridge must be 'L' or 'B'; received "
+                f"{self.ridge_direction_input!r}."
+            )
+        if float(self.l_input) <= 0 or float(self.b_input) <= 0:
+            raise ValueError("Building dimensions L and B must be greater than zero.")
+        if float(self.eave_height) <= 0:
+            raise ValueError("Eave height must be greater than zero.")
+        if float(self.apex_height) < float(self.eave_height):
+            raise ValueError("Apex height must not be lower than the eave height.")
+
     # -------------------------------------------------------------------
     # ORCHESTRATOR: run the full calculation pipeline
     # -------------------------------------------------------------------
     def calculate(self):
         """Runs the full ASCE 7 directional-procedure pipeline and stores all results."""
+        self._validate_inputs()
         if self.raw_heights:
             self.heights_list = [
                 float(h.strip()) for h in str(self.raw_heights).split(",") if h.strip()
@@ -1269,7 +1289,153 @@ class WindLoadCalculatorDirectionalASCE7:
 
 
 # =============================================================================
-# 3. CONFIG  ->  edit these values, then run this file directly
+# 3. EXCEL ENTRY POINTS  (called by the workbook buttons through xlwings)
+# =============================================================================
+# Input cells on the active sheet.
+WIND_INPUT_CELLS = {
+    "building_class": "C2",
+    "basic_wind_speed": "C3",
+    "enclosure_class": "C4",
+    "exposure_category": "C5",
+    "wind_dir_factor": "C6",
+    "topographic_factor": "C7",
+    "ground_elevation_factor": "C8",
+    "gust_effect_factor": "C9",
+    "l_input": "C13",
+    "b_input": "C14",
+    "ridge_direction_input": "C15",
+    "raw_heights": "C16",
+    "eave_height": "C18",
+    "apex_height": "C19",
+}
+_NUMERIC_WIND_INPUTS = {
+    "basic_wind_speed",
+    "wind_dir_factor",
+    "topographic_factor",
+    "ground_elevation_factor",
+    "gust_effect_factor",
+    "l_input",
+    "b_input",
+    "eave_height",
+    "apex_height",
+}
+# Output cells on the active sheet.
+WIND_VELOCITY_PRESSURE_CELL = "C10"
+WIND_GCPI_POS_CELL = "C11"
+WIND_GCPI_NEG_CELL = "C12"
+WIND_STATUS_CELL = "B23"
+WIND_PDF_STATUS_CELL = "D23"
+WIND_TABLES_START_CELL = "B24"
+WIND_TABLES_CLEAR_RANGE = "B24:K1000"
+
+
+def _calculator_from_sheet(sheet) -> WindLoadCalculatorDirectionalASCE7:
+    """Build the calculator from the input cells of a workbook sheet."""
+    values = {}
+    for name, address in WIND_INPUT_CELLS.items():
+        value = sheet.range(address).value
+        if name in _NUMERIC_WIND_INPUTS:
+            try:
+                value = float(value)
+            except (TypeError, ValueError) as error:
+                raise ValueError(
+                    f"Wind input {address} ({name}) must be numeric; received {value!r}."
+                ) from error
+        values[name] = value
+    return WindLoadCalculatorDirectionalASCE7(**values)
+
+
+def _write_table(sheet, table: pd.DataFrame, top_left: tuple[int, int], title: str):
+    """Write a titled, bordered table and return the cell for the next table."""
+    row, column = top_left
+    title_cell = sheet.range((row, column))
+    title_cell.value = title
+    title_cell.api.Font.Bold = True
+    header_row = row + 1
+    sheet.range((header_row, column)).options(index=False).value = table
+    n_rows, n_cols = len(table.index) + 1, len(table.columns)
+    body = sheet.range((header_row, column), (header_row + n_rows - 1, column + n_cols - 1))
+    body.api.Borders.LineStyle = -4142  # xlNone: start from a clean block
+    for border in (7, 8, 9, 10, 11):  # outside edges and inside vertical lines
+        body.api.Borders(border).Weight = 2
+    header = sheet.range((header_row, column), (header_row, column + n_cols - 1))
+    header.api.Borders(9).Weight = 2  # line under the header row
+    return header_row + n_rows + 1, column
+
+
+def _write_results_to_sheet(sheet, calculator: WindLoadCalculatorDirectionalASCE7):
+    """Write the scalar results and every result table to the workbook sheet."""
+    sheet.range(WIND_VELOCITY_PRESSURE_CELL).value = round(calculator.vel_pres, 3)
+    sheet.range(WIND_GCPI_POS_CELL).value = calculator.gcpi_pos
+    sheet.range(WIND_GCPI_NEG_CELL).value = calculator.gcpi_neg
+    sheet.range(WIND_TABLES_CLEAR_RANGE).clear()
+
+    start = sheet.range(WIND_TABLES_START_CELL)
+    position = (start.row, start.column)
+    for title, table in (
+        ("Velocity Pressure Profile (qz) Table", calculator.velocity_pressure_table),
+        ("Wall Pressure Coefficient (Cp) Table", calculator.wall_cp_table),
+        (
+            "Roof Pressure Coefficient (Cp) Table - Normal Wind Direction",
+            calculator.roof_cp_display_normal,
+        ),
+        (
+            "Roof Pressure Coefficient (Cp) Table - Parallel Wind Direction",
+            calculator.roof_cp_display_parallel,
+        ),
+        (
+            "MWFRS Pressure Summary Table - Normal Wind Direction",
+            calculator.mwfrs_normal_summary,
+        ),
+        (
+            "MWFRS Pressure Summary Table - Parallel Wind Direction",
+            calculator.mwfrs_parallel_summary,
+        ),
+    ):
+        position = _write_table(sheet, table, position, title)
+
+
+def _run_from_excel(sheet) -> WindLoadCalculatorDirectionalASCE7 | None:
+    """Calculate from the sheet inputs and write the results; report errors on the sheet."""
+    status = sheet.range(WIND_STATUS_CELL)
+    try:
+        calculator = _calculator_from_sheet(sheet).calculate()
+        _write_results_to_sheet(sheet, calculator)
+    except Exception as error:  # shown to the user on the sheet, then re-raised
+        status.value = f"Error: {error}"
+        raise
+    status.value = f"Calculated {datetime.now():%Y-%m-%d %H:%M}"
+    return calculator
+
+
+def calculate_wind_loads() -> None:
+    """Excel button: calculate wind loads and write the result tables to the sheet."""
+    import xlwings as xw
+
+    from utilities._gui_helpers import LoadingWindow
+
+    sheet = xw.Book.caller().sheets.active
+    with LoadingWindow("Calculating Wind Load..."):
+        _run_from_excel(sheet)
+
+
+def export_pdf_wind_loads() -> None:
+    """Excel button: calculate, refresh the sheet tables and export the PDF report."""
+    import xlwings as xw
+
+    from utilities._gui_helpers import LoadingWindow
+
+    sheet = xw.Book.caller().sheets.active
+    with LoadingWindow("Calculating Wind Load..."):
+        calculator = _run_from_excel(sheet)
+    pdf_path = calculator.generate_pdf_report()
+    sheet.range(WIND_PDF_STATUS_CELL).value = (
+        f"PDF saved: {pdf_path}" if pdf_path else "PDF export cancelled or failed."
+    )
+
+
+# =============================================================================
+# 4. CONFIG  ->  edit these values, then run this file directly
 # =============================================================================
 if __name__ == "__main__":
 

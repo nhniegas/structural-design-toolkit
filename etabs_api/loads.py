@@ -19,7 +19,7 @@ class Loads:
         """Return defined load-pattern names."""
         result = self.patterns.GetNameList(0, [])
         ensure_success(result, "LoadPatterns.GetNameList")
-        return as_list(result[2])
+        return as_list(result[1])  # (count, names, status)
 
     def define_pattern(self, name: str, load_type: int, self_weight_multiplier: float = 0.0):
         """Define a load pattern."""

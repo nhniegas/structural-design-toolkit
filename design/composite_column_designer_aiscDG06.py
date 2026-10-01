@@ -49,10 +49,10 @@ class RectangularFilledComposite:
         Mhy_kNmm=0,
         Vbx_kN=0,
         Vhy_kN=0,
-        Asr_mm2=0.0,  # NEW: internal reinforcement area, real param
-        Fysr_mpa=414.0,  # NEW: rebar yield (414 MPa ~= 60 ksi), real param
-        ri_mm=0.0,  # NEW: corner radius; 0 = sharp/welded box (DG6 Ex 2.5)
-        shear_span_to_depth=None,  # NEW: (Mr/Vr)/d, enables Kc interpolation
+        Asr_mm2=0.0,  # internal reinforcement area
+        Fysr_mpa=414.0,  # rebar yield (414 MPa ~= 60 ksi)
+        ri_mm=0.0,  # corner radius; 0 = sharp/welded box (DG6 Ex 2.5)
+        shear_span_to_depth=None,  # (Mr/Vr)/d, enables Kc interpolation
         *,
         Lb_m=None,
         Lh_m=None,
@@ -60,14 +60,11 @@ class RectangularFilledComposite:
         Mh_kNm=None,
         label="",
     ):
-        # CONFIRMED (per source sheet labels "Moment - b, Mb (kN-mm)" /
-        # "Moment - h, Mh (kN-mm)"): moments ARE in kN-mm. Reverted to
-        # the original conversion factor - my earlier guess that this
-        # should be kN-m was wrong. Keeping the Mbx_kNmm/Mhy_kNmm names
-        # to make that unit explicit and avoid this ambiguity recurring.
+        # Moments are accepted in kN-mm (Mbx_kNmm / Mhy_kNmm) or, through the
+        # keyword-only aliases, in kN-m (Mb_kNm / Mh_kNm). Lb_m / Lh_m are aliases
+        # of Lx_m / Ly_m.
 
         # 1. Metric to US Customary Conversions
-        # Accept the standalone rev02 names while preserving the Excel API.
         self.label = label
         Lx_m = Lx_m if Lx_m is not None else (Lb_m or 0.0)
         Ly_m = Ly_m if Ly_m is not None else (Lh_m or 0.0)
@@ -158,7 +155,7 @@ class RectangularFilledComposite:
 
     def check_compactness_flexure(self, axis="b"):
         """
-        FIX: Classifies the section for local buckling under FLEXURE per
+        Classifies the section for local buckling under FLEXURE per
         DG6 Table 2-5, which uses DIFFERENT limits for the flange
         (parallel to the bending axis, width b) than for the web
         (parallel to the depth, height h):
@@ -206,7 +203,10 @@ class RectangularFilledComposite:
         LRFD axial compressive strength, phi_Pn (kips), using AXIAL
         classification (correct per DG6 - Table 2-5's single row for
         walls in axial compression applies regardless of direction).
-        Applies the bare-steel floor per DG6 p.32.
+
+        Not applied: DG6 p.32 allows the design strength to be taken as not
+        less than that of the bare steel section. That floor is not calculated
+        here, so the result is the composite strength only (conservative).
         """
         compactness = self.check_compactness_axial()
         if "Not Permitted" in compactness:
@@ -251,11 +251,7 @@ class RectangularFilledComposite:
         else:
             self.Pn = 0.877 * Pe
 
-        phi_Pn = self.phi_c * self.Pn
-
-        # NEW: bare-steel floor (DG6 p.32) - design strength need not be
-        # less than the bare steel member's own design compressive strength.
-        return phi_Pn
+        return self.phi_c * self.Pn
 
     def axial_tensile_strength(self):
         """LRFD axial tensile strength, phi_Tn (kips). Spec. Eq. I2-14."""
@@ -267,8 +263,8 @@ class RectangularFilledComposite:
     # ------------------------------------------------------------------
     def flexural_strength(self, axis="b"):
         """
-        LRFD flexural strength (kip-in), compact sections only.
-        FIX: now gated on check_compactness_flexure(), not the axial check.
+        LRFD flexural strength (kip-in), compact sections only
+        (gated on check_compactness_flexure(), not the axial check).
         Plastic Stress Distribution per DG6 Fig. 2-13 (AISC Manual Table 6-3).
         Corner radius ri included (0 by default -> reduces to sharp-corner case).
         """
@@ -314,7 +310,7 @@ class RectangularFilledComposite:
     # ------------------------------------------------------------------
     def _compute_Kc(self):
         """
-        NEW: Kc per DG6 p.34 (Spec. Eq. I4-1 commentary).
+        Kc per DG6 p.34 (Spec. Eq. I4-1 commentary).
         Kc = 1 if section is not flexure-compact, or shear-span-to-depth
         ratio (Mr/Vr)/d >= 0.7.
         Kc = 10 if flexure-compact and ratio < 0.5.
@@ -535,10 +531,10 @@ class RectangularFilledComposite:
 
 
 # ==========================================================================
-# EXCEL MACRO ENTRY POINT ("Calculate Capacity" button)
+# EXCEL ENTRY POINTS (workbook buttons "Calculate Capacity" and "Export Calcs")
 # ==========================================================================
 #
-# Cell map, per the workbook layout:
+# Cell map of the active sheet:
 #   C3  Pu   (kN)        C9  b   (mm)
 #   C4  Mb   (kN-m)      C10 h   (mm)
 #   C5  Mh   (kN-m)      C11 t   (mm)
@@ -547,32 +543,16 @@ class RectangularFilledComposite:
 #                        C14 Lb  (m)  <- unbraced length for b-axis bending
 #                        C15 Lh  (m)  <- unbraced length for h-axis bending
 #
-# Note on Lb/Lh: these map straight onto the class's Lx_m/Ly_m parameters -
-# Lb pairs with the b-axis bending stiffness (Icx = bi*hi^3/12, the same
-# term behind phi_Mnx/Mb), and Lh pairs with the h-axis bending stiffness
-# (Icy = hi*bi^3/12, behind phi_Mny/Mh). No change to the underlying math,
-# just naming it Lb/Lh here instead of the more ambiguous Lx/Ly so it can't
-# get confused with a global x/y convention.
+# Lb/Lh map onto the class's Lx_m/Ly_m parameters: Lb pairs with the b-axis
+# bending stiffness (Icx = bi*hi^3/12, behind phi_Mnx/Mb) and Lh with the
+# h-axis bending stiffness (Icy = hi*bi^3/12, behind phi_Mny/Mh).
 #
-#   B17 "SOLUTION" header (already on sheet)
-#   B19: results written from here down, cleared and rewritten on each run
+#   B17 "SOLUTION" header (already on the sheet)
+#   B19 results are written from here down, cleared and rewritten on each run
 #
-# Wire-up (classic xlwings RunPython pattern):
-#   1. In the VBA editor (Alt+F11), add a standard module with:
-#
-#       Sub CalculateCapacity()
-#           RunPython "import rectangular_filled_composite_fixed as m; m.calculate_capacity()"
-#       End Sub
-#
-#   2. Right-click the "Calculate Capacity" button -> Assign Macro ->
-#      CalculateCapacity.
-#   3. Make sure this .py file sits next to the workbook (or is on the
-#      xlwings PYTHONPATH configured in the xlwings.conf sheet / Ribbon).
-#
-# If you're instead on xlwings Lite (Excel on the web) or the newer
-# Office Scripts-based add-in rather than a desktop .xlsm with RunPython,
-# say so and I'll rewrite this entry point for that runtime instead -
-# the wiring is different even though the calculation logic is identical.
+# The workbook macros call these functions directly through xlwings:
+#   RunPython "from design import composite_column_designer_aiscDG06 as m; m.calculate_capacity()"
+#   RunPython "from design import composite_column_designer_aiscDG06 as m; m.export_calcs()"
 # ==========================================================================
 
 INPUT_CELLS = {
@@ -606,31 +586,13 @@ def calculate_capacity():
     book = xw.Book.caller()
     sht = book.sheets.active
 
-    # --- Read inputs (Batch read where possible is best, but dict comprehension is fine here) ---
-    vals = {k: sht.range(addr).value for k, addr in INPUT_CELLS.items()}
-
-    missing = [k for k, v in vals.items() if v is None]
+    col, missing = _column_from_sheet(sht)
     if missing:
         sht.range(f"{SOLUTION_LABEL_COL}{SOLUTION_START_ROW}").value = (
             f"ERROR: missing input(s): {', '.join(missing)}"
         )
         return
-
-    # --- Run the calc ------------------------------------------------------
-    col = RectangularFilledComposite(
-        b_mm=vals["b"],
-        h_mm=vals["h"],
-        t_mm=vals["t"],
-        fc_mpa=vals["fc"],
-        fy_mpa=vals["fy"],
-        Lx_m=vals["Lb"],
-        Ly_m=vals["Lh"],
-        Pu_kN=vals["Pu"],
-        Mbx_kNmm=vals["Mb"] * 1000,
-        Mhy_kNmm=vals["Mh"] * 1000,
-        Vbx_kN=vals["Vb"],
-        Vhy_kN=vals["Vh"],
-    )
+    shear_demand = {"b": col.Vux / 0.224809, "h": col.Vuy / 0.224809}  # kN
 
     results = col.interaction_check()
     phi_Vbx = col.shear_strength(axis="b")
@@ -639,9 +601,10 @@ def calculate_capacity():
     # --- Clear previous solution block dynamically -------------------------
     start_cell = sht.range(f"{SOLUTION_LABEL_COL}{SOLUTION_START_ROW}")
 
-    # Clear 30 rows down to guarantee all old data and colors are wiped
+    # Clear the rows below the header so no old data or colors are left behind
     clear_range = sht.range(
-        f"{SOLUTION_LABEL_COL}{SOLUTION_START_ROW}:{SOLUTION_VALUE_COL}{SOLUTION_START_ROW + 30}"
+        f"{SOLUTION_LABEL_COL}{SOLUTION_START_ROW}:"
+        f"{SOLUTION_VALUE_COL}{SOLUTION_START_ROW + SOLUTION_CLEAR_ROWS}"
     )
     clear_range.clear_contents()
     clear_range.color = None
@@ -670,14 +633,11 @@ def calculate_capacity():
         rows.append(("φMny (kN-m)", _kipin_to_kNm(results["phi_Mny (kip-in)"])))
         rows.append(("φVbx (kN)", _kips_to_kN(phi_Vbx)))
         rows.append(("φVhy (kN)", _kips_to_kN(phi_Vhy)))
-        rows.append(("φVbx (kN)", _kips_to_kN(phi_Vbx)))
-        rows.append(("φVhy (kN)", _kips_to_kN(phi_Vhy)))
-        rows.append(("", ""))
         rows.append(("", ""))
 
         phi_Vbx_kN = _kips_to_kN(phi_Vbx)
         if phi_Vbx_kN > 0:
-            shear_ratio_b = vals["Vb"] / phi_Vbx_kN
+            shear_ratio_b = shear_demand["b"] / phi_Vbx_kN
             rows.append(("Shear Ratio (b-axis)", round(shear_ratio_b, 3)))
             rows.append(
                 (
@@ -690,7 +650,7 @@ def calculate_capacity():
 
         phi_Vhy_kN = _kips_to_kN(phi_Vhy)
         if phi_Vhy_kN > 0:
-            shear_ratio_h = vals["Vh"] / phi_Vhy_kN
+            shear_ratio_h = shear_demand["h"] / phi_Vhy_kN
             rows.append(("Shear Ratio (h-axis)", round(shear_ratio_h, 3)))
             rows.append(
                 (
@@ -751,36 +711,13 @@ def calculate_capacity():
     sht.range(f"{SOLUTION_LABEL_COL}:{SOLUTION_VALUE_COL}").columns.autofit()
 
 
-def export_calcs():
-    """
-    Generates a detailed A4 PDF calculation report using PyLaTeX.
-    Optimized vertical spacing and margins to maximize page usage and eliminate
-    bottom whitespace.
-    """
-    book = xw.Book.caller()
-    sht = book.sheets.active
-
-    # --- Read inputs ---
+def _column_from_sheet(sht):
+    """Build the member from the input cells; returns ``(column, missing_inputs)``."""
     vals = {k: sht.range(addr).value for k, addr in INPUT_CELLS.items()}
     missing = [k for k, v in vals.items() if v is None]
     if missing:
-        sht.range(f"{SOLUTION_LABEL_COL}{SOLUTION_START_ROW}").value = (
-            "ERROR: Missing inputs for export."
-        )
-        return
-
-    # --- Prompt for save location & file name ---
-    filepath_with_ext = select_save_file(default_name="Composite_Capacity_Report")
-    if not filepath_with_ext:
-        return
-    if filepath_with_ext.lower().endswith(".pdf"):
-        filepath = filepath_with_ext[:-4]
-    else:
-        filepath = filepath_with_ext
-        filepath_with_ext = filepath + ".pdf"
-
-    # --- Run Calculations ---
-    col = RectangularFilledComposite(
+        return None, missing
+    column = RectangularFilledComposite(
         b_mm=vals["b"],
         h_mm=vals["h"],
         t_mm=vals["t"],
@@ -794,308 +731,32 @@ def export_calcs():
         Vbx_kN=vals["Vb"],
         Vhy_kN=vals["Vh"],
     )
+    return column, []
 
-    results = col.interaction_check()
-    phi_Vbx = col.shear_strength(axis="b")
-    phi_Vhy = col.shear_strength(axis="h")
 
-    # Quantities for Shear Checks
-    phi_Vbx_kN = _kips_to_kN(phi_Vbx)
-    phi_Vhy_kN = _kips_to_kN(phi_Vhy)
-    Vbx_demand = vals["Vb"]
-    Vhy_demand = vals["Vh"]
+def export_calcs():
+    """Excel button: export the A4 PDF calculation report for the active sheet."""
+    book = xw.Book.caller()
+    sht = book.sheets.active
+    status = sht.range(f"{SOLUTION_LABEL_COL}{SOLUTION_START_ROW}")
 
-    shear_ratio_b = Vbx_demand / phi_Vbx_kN if phi_Vbx_kN > 0 else 0
-    shear_ratio_h = Vhy_demand / phi_Vhy_kN if phi_Vhy_kN > 0 else 0
+    col, missing = _column_from_sheet(sht)
+    if missing:
+        status.value = f"ERROR: missing input(s) for export: {', '.join(missing)}"
+        return
 
-    # Metric extracted limits for documentation
-    lam_b, lam_h = col.bi / col.t, col.hi / col.t
-    lam = max(lam_b, lam_h)
-    lam_p_ax = 2.26 * math.sqrt(col.Es / col.Fy)
-    lam_hd = 1.48 * math.sqrt(col.Es / (1.3 * col.Fy))
+    filepath_with_ext = select_save_file(default_name="Composite_Capacity_Report")
+    if not filepath_with_ext:
+        return
+    if not filepath_with_ext.lower().endswith(".pdf"):
+        filepath_with_ext += ".pdf"
 
-    Pu_kN = vals["Pu"]
-    Pcc_kN = _kips_to_kN(results.get("Pcc (kips)", 0))
-
-    # --- Build PDF Document (Reduced margin to 0.5in to maximize vertical space) ---
-    doc = Document(geometry_options={"a4paper": True, "margin": "0.5in"})
-    doc.packages.append(Package("booktabs"))
-    doc.packages.append(Package("amsmath"))
-    doc.packages.append(Package("multicol"))
-
-    # Remove Page Numbers
-    doc.preamble.append(NoEscape(r"\pagestyle{empty}"))
-
-    # Custom Header
-    doc.append(NoEscape(r"\begin{center}"))
-    doc.append(
-        NoEscape(
-            r"{\LARGE \textbf{Rectangular Filled Composite Member Capacity (AISC DG6)}}\\[0.35cm]"
-        )
+    saved_path = export_standalone_pdf(col, filepath_with_ext)
+    status.value = (
+        f"Success: Saved to {saved_path}"
+        if saved_path
+        else "PDF Error: the report could not be compiled. Check the LaTeX installation."
     )
-    doc.append(
-        NoEscape(r"{\normalsize " + datetime.today().strftime("%B %d, %Y") + r"}")
-    )
-    doc.append(NoEscape(r"\end{center}"))
-    doc.append(NoEscape(r"\vspace{0.4cm}"))
-
-    # Start 2-Column Layout
-    doc.append(NoEscape(r"\begin{multicols}{2}"))
-
-    # Section 1: Design Parameters (LEFT ALIGNED TABLE)
-    with doc.create(Section("Design Parameters")):
-        doc.append("Fundamental parameters utilized for capacity calculations:")
-        doc.append(NoEscape(r"\vspace{0.25cm}\newline\noindent"))
-
-        with doc.create(Tabular("lr")) as table:
-            table.append(NoEscape(r"\toprule"))
-            table.add_row(("Parameter", "Value"))
-            table.append(NoEscape(r"\midrule"))
-            table.add_row((NoEscape(r"Width, $b$ (mm)"), f"{vals['b']:.1f}"))
-            table.add_row((NoEscape(r"Height, $h$ (mm)"), f"{vals['h']:.1f}"))
-            table.add_row((NoEscape(r"Thickness, $t$ (mm)"), f"{vals['t']:.1f}"))
-            table.add_row(
-                (
-                    NoEscape(r"Comp. Strength, $f^\prime_c$ (MPa)"),
-                    f"{vals['fc']:.1f}",
-                )
-            )
-            table.add_row(
-                (NoEscape(r"Yield Strength, $f_y$ (MPa)"), f"{vals['fy']:.1f}")
-            )
-            table.add_row(
-                (NoEscape(r"Unbraced Length, $L_b$ (m)"), f"{vals['Lb']:.2f}")
-            )
-            table.add_row(
-                (NoEscape(r"Unbraced Length, $L_h$ (m)"), f"{vals['Lh']:.2f}")
-            )
-            table.append(NoEscape(r"\midrule"))
-            table.add_row((NoEscape(r"Axial Demand, $P_u$ (kN)"), f"{vals['Pu']:.1f}"))
-            table.add_row(
-                (NoEscape(r"Moment Demand, $M_{bx}$ (kN-m)"), f"{vals['Mb']:.1f}")
-            )
-            table.add_row(
-                (NoEscape(r"Moment Demand, $M_{hy}$ (kN-m)"), f"{vals['Mh']:.1f}")
-            )
-            table.add_row(
-                (NoEscape(r"Shear Demand, $V_{bx}$ (kN)"), f"{vals['Vb']:.1f}")
-            )
-            table.add_row(
-                (NoEscape(r"Shear Demand, $V_{hy}$ (kN)"), f"{vals['Vh']:.1f}")
-            )
-            table.append(NoEscape(r"\bottomrule"))
-
-    # Section 2: Section Properties
-    with doc.create(Section("Classification & Logic")):
-        doc.append(NoEscape(r"\textbf{Steel Reinforcement Ratio ($A_s/A_g$):}\newline"))
-        doc.append(
-            NoEscape(
-                r"AISC requires $\rho_s \ge 1\%$. Calculated $\rho_s = "
-                + f"{col.As/col.Ag*100:.2f}"
-                + r"\%$. Condition is \textbf{Satisfied}.\vspace{0.3cm}\newline"
-            )
-        )
-
-        doc.append(NoEscape(r"\textbf{Axial Compactness:}\newline"))
-        doc.append(
-            NoEscape(
-                r"The governing slenderness $\lambda = \max(b/t, h/t) = "
-                + f"{lam:.1f}"
-                + r"$. The limit for compact sections is $\lambda_p = 2.26\sqrt{E/F_y} = "
-                + f"{lam_p_ax:.1f}"
-                + r"$. Since $\lambda \le \lambda_p$, the section is \textbf{"
-                + str(results.get("Axial Compactness", ""))
-                + r"}.\vspace{0.3cm}\newline"
-            )
-        )
-
-        doc.append(NoEscape(r"\textbf{Flexural Compactness:}\newline"))
-        doc.append(
-            NoEscape(
-                r"Evaluating web and flange slenderness limits yields a \textbf{"
-                + str(results.get("Flexural Compactness (b-axis)", ""))
-                + r"} section for b-axis bending, and a \textbf{"
-                + str(results.get("Flexural Compactness (h-axis)", ""))
-                + r"} section for h-axis bending.\vspace{0.3cm}\newline"
-            )
-        )
-
-        doc.append(NoEscape(r"\textbf{Seismic Compactness ($R_y=1.3$):}\newline"))
-        doc.append(
-            NoEscape(
-                r"The highly ductile limit is $\lambda_{hd} = 1.48\sqrt{E/(R_yF_y)} = "
-                + f"{lam_hd:.1f}"
-                + r"$. Condition yields a \textbf{"
-                + str(col.check_seismic_compactness(Ry=1.3))
-                + r"} section."
-            )
-        )
-
-    # Section 3: Design Capacities & Shear Checks
-    with doc.create(Section("Governing Capacities")):
-
-        doc.append(NoEscape(r"\textbf{1. Axial Compression ($\phi P_n$)}\newline"))
-        doc.append(
-            NoEscape(
-                r"{\small \[ P_{no} = F_y A_s + 0.85 f^\prime_c \left( A_c + A_{sr} \frac{E_s}{E_c} \right) \]}"
-            )
-        )
-        doc.append(
-            NoEscape(
-                r"Available axial strength is \textbf{$\phi P_n = "
-                + f'{_kips_to_kN(results.get("phi_Pn (kips)", 0)):.1f}'
-                + r"$ kN}.\vspace{0.3cm}\newline"
-            )
-        )
-
-        doc.append(NoEscape(r"\textbf{2. Flexural Strength ($\phi M_n$)}\newline"))
-        doc.append(
-            NoEscape(
-                r"{\small \[ M_B = M_D - F_y Z_{sn} - \frac{0.85 f^\prime_c Z_{cn}}{2} \]}"
-            )
-        )
-        doc.append(
-            NoEscape(
-                r"Resulting capacities are \textbf{$\phi M_{nx} = "
-                + f'{_kipin_to_kNm(results.get("phi_Mnx (kip-in)", 0)):.1f}'
-                + r"$ kN-m} and \textbf{$\phi M_{ny} = "
-                + f'{_kipin_to_kNm(results.get("phi_Mny (kip-in)", 0)):.1f}'
-                + r"$ kN-m}.\vspace{0.3cm}\newline"
-            )
-        )
-
-        doc.append(NoEscape(r"\textbf{3. Shear Strength \& Demand Checks}\newline"))
-        doc.append(
-            NoEscape(
-                r"{\small \[ V_n = 0.6 F_y A_v + 0.06 K_c A_c \sqrt{f^\prime_c} \]}"
-            )
-        )
-        status_vbx = "OK" if shear_ratio_b <= 1.0 else "OVERSTRESSED"
-        status_vhy = "OK" if shear_ratio_h <= 1.0 else "OVERSTRESSED"
-        doc.append(
-            NoEscape(
-                rf"$\phi V_{{bx}} = {phi_Vbx_kN:.1f}\text{{ kN}} \rightarrow D/C = {shear_ratio_b:.3f}\text{{ ({status_vbx})}}$\newline"
-            )
-        )
-        doc.append(
-            NoEscape(
-                rf"$\phi V_{{hy}} = {phi_Vhy_kN:.1f}\text{{ kN}} \rightarrow D/C = {shear_ratio_h:.3f}\text{{ ({status_vhy})}}$"
-            )
-        )
-
-    # Section 4: Interaction Check
-    with doc.create(Section("Interaction Equations (DG6)")):
-
-        if Pu_kN < Pcc_kN:
-            doc.append(
-                NoEscape(
-                    r"Since $P_u$ ("
-                    + f"{Pu_kN:.1f}"
-                    + r" kN) $< P_{cc}$ ("
-                    + f"{Pcc_kN:.1f}"
-                    + r" kN), axial forces are omitted from the check.\vspace{0.15cm}\newline"
-                )
-            )
-            eq_std = r"{\small \[ \text{Ratio} = \frac{M_{ux}}{\phi M_{nx}} + \frac{M_{uy}}{\phi M_{ny}} \le 1.0 \]}"
-            eq_alpha = r"{\small \[ \text{Ratio}_{\alpha} = \left(\frac{M_{ux}}{\phi M_{nx}}\right)^{1.5} + \left(\frac{M_{uy}}{\phi M_{ny}}\right)^{1.5} \le 1.0 \]}"
-        else:
-            doc.append(
-                NoEscape(
-                    r"Since $P_u$ ("
-                    + f"{Pu_kN:.1f}"
-                    + r" kN) $\ge P_{cc}$ ("
-                    + f"{Pcc_kN:.1f}"
-                    + r" kN), the bilinear axial term is applied.\vspace{0.15cm}\newline"
-                )
-            )
-            eq_std = r"{\small \[ \text{Ratio} = \frac{P_u - P_{cc}}{\phi P_n - P_{cc}} + \frac{M_{ux}}{\phi M_{nx}} + \frac{M_{uy}}{\phi M_{ny}} \le 1.0 \]}"
-            eq_alpha = r"{\small \[ \text{Ratio}_{\alpha} = \frac{P_u - P_{cc}}{\phi P_n - P_{cc}} + \left[ \left(\frac{M_{ux}}{\phi M_{nx}}\right)^{1.5} + \left(\frac{M_{uy}}{\phi M_{ny}}\right)^{1.5} \right]^{0.67} \le 1.0 \]}"
-
-        doc.append(NoEscape(r"\textbf{1. Standard Interaction}\newline"))
-        doc.append(NoEscape(eq_std))
-
-        std_ratio = results.get("Interaction Ratio (Standard)", "N/A")
-        if isinstance(std_ratio, (float, int)):
-            status_std = "OK" if std_ratio <= 1.0 else "OVERSTRESSED"
-            doc.append(
-                NoEscape(
-                    r"\textbf{Result: "
-                    + f"{std_ratio:.3f} ({status_std})"
-                    + r"}\vspace{0.3cm}\newline"
-                )
-            )
-
-        doc.append(NoEscape(r"\textbf{2. Modified Interaction ($\alpha=1.5$)}\newline"))
-        doc.append(NoEscape(eq_alpha))
-
-        alpha_ratio = results.get("Interaction Ratio (Alpha=1.5)", "N/A")
-        if isinstance(alpha_ratio, (float, int)):
-            status_alpha = "OK" if alpha_ratio <= 1.0 else "OVERSTRESSED"
-            doc.append(
-                NoEscape(
-                    r"\textbf{Result: " + f"{alpha_ratio:.3f} ({status_alpha})" + r"}"
-                )
-            )
-
-    # End 2-Column Layout
-    doc.append(NoEscape(r"\end{multicols}"))
-    doc.append(NoEscape(r"\vspace{0.3cm}"))
-    doc.append(NoEscape(r"\hrule"))
-    doc.append(NoEscape(r"\vspace{0.4cm}"))
-
-    # Section 5: Executive Summary
-    with doc.create(Section("Executive Summary of Results")):
-        with doc.create(Itemize()) as itemize:
-            itemize.add_item(
-                NoEscape(
-                    rf"\textbf{{Governing Axial Capacity ($\phi P_n$):}} {_kips_to_kN(results.get('phi_Pn (kips)', 0)):.1f} kN"
-                )
-            )
-            itemize.add_item(
-                NoEscape(
-                    rf"\textbf{{Governing Flexural Capacities:}} $\phi M_{{nx}} = $ {_kipin_to_kNm(results.get('phi_Mnx (kip-in)', 0)):.1f} kN-m, $\phi M_{{ny}} = $ {_kipin_to_kNm(results.get('phi_Mny (kip-in)', 0)):.1f} kN-m"
-                )
-            )
-            itemize.add_item(
-                NoEscape(
-                    rf"\textbf{{Shear Checks:}} b-axis D/C = {shear_ratio_b:.3f} ({status_vbx}), h-axis D/C = {shear_ratio_h:.3f} ({status_vhy})"
-                )
-            )
-
-            if isinstance(std_ratio, (float, int)) and isinstance(
-                alpha_ratio, (float, int)
-            ):
-                stat_std = "PASS (OK)" if std_ratio <= 1.0 else "FAIL (OVERSTRESSED)"
-                stat_alpha = (
-                    "PASS (OK)" if alpha_ratio <= 1.0 else "FAIL (OVERSTRESSED)"
-                )
-                itemize.add_item(
-                    NoEscape(
-                        rf"\textbf{{Standard Interaction Status:}} {std_ratio:.3f} $\rightarrow$ {stat_std}"
-                    )
-                )
-                itemize.add_item(
-                    NoEscape(
-                        rf"\textbf{{Modified Interaction Status ($\alpha=1.5$):}} {alpha_ratio:.3f} $\rightarrow$ {stat_alpha}"
-                    )
-                )
-            else:
-                itemize.add_item(
-                    NoEscape(
-                        r"\textbf{Final Interaction Status:} Check Failed/Not Permitted (See Compactness)"
-                    )
-                )
-
-    # --- Compile PDF ---
-    try:
-        doc.generate_pdf(filepath, clean_tex=True, compiler="pdflatex")
-        sht.range(f"{SOLUTION_LABEL_COL}{SOLUTION_START_ROW}").value = (
-            f"Success: Saved to {filepath_with_ext}"
-        )
-    except Exception as e:
-        sht.range(f"{SOLUTION_LABEL_COL}{SOLUTION_START_ROW}").value = (
-            f"PDF Error: {str(e)}"
-        )
 
 
 def _kips_to_kN(kips):
@@ -1147,6 +808,8 @@ def export_standalone_pdf(col: RectangularFilledComposite, filepath_with_ext: st
     lam = max(lam_b, lam_h)
     lam_p_ax = 2.26 * math.sqrt(col.Es / col.Fy)
     lam_hd = 1.48 * math.sqrt(col.Es / (1.3 * col.Fy))
+    lam_relation = r"\le" if lam <= lam_p_ax else ">"
+    axial_class = col.check_compactness_axial()
 
     Pu_kN = vals["Pu"]
     Pcc_kN = _kips_to_kN(results.get("Pcc (kips)", 0))
@@ -1214,16 +877,18 @@ def export_standalone_pdf(col: RectangularFilledComposite, filepath_with_ext: st
     # Section 2: Section Properties
     with doc.create(Section("Classification & Logic")):
         doc.append(NoEscape(r"\textbf{Steel Reinforcement Ratio ($A_s/A_g$):}\newline"))
+        steel_ok, steel_ratio = col.check_min_steel_ratio()
+        steel_verdict = "Satisfied" if steel_ok else "NOT satisfied"
         doc.append(
             NoEscape(
-                rf"AISC requires $\rho_s \ge 1\%$. Calculated $\rho_s = {col.As/col.Ag*100:.2f}\%$. Condition is \textbf{{Satisfied}}.\vspace{{0.3cm}}\newline"
+                rf"AISC requires $\rho_s \ge 1\%$. Calculated $\rho_s = {steel_ratio*100:.2f}\%$. Condition is \textbf{{{steel_verdict}}}.\vspace{{0.3cm}}\newline"
             )
         )
 
         doc.append(NoEscape(r"\textbf{Axial Compactness:}\newline"))
         doc.append(
             NoEscape(
-                rf"The governing slenderness $\lambda = \max(b/t, h/t) = {lam:.1f}$. The limit for compact sections is $\lambda_p = 2.26\sqrt{{E/F_y}} = {lam_p_ax:.1f}$. Since $\lambda \le \lambda_p$, the section is \textbf{{{results.get('Axial Compactness', '')}}}.\vspace{{0.3cm}}\newline"
+                rf"The governing slenderness $\lambda = \max(b/t, h/t) = {lam:.1f}$. The limit for compact sections is $\lambda_p = 2.26\sqrt{{E/F_y}} = {lam_p_ax:.1f}$. Since $\lambda {lam_relation} \lambda_p$, the section is \textbf{{{axial_class}}}.\vspace{{0.3cm}}\newline"
             )
         )
 
@@ -1425,7 +1090,7 @@ if __name__ == "__main__":
     dest_file = select_save_file(default_name="Composite_Capacity_Report")
 
     if dest_file:
-        print(f"\nGenerating PDF report...")
+        print("\nGenerating PDF report...")
 
         # ---------------------------------------------------------
         # 2. GENERATE PDF DIRECTLY FROM PYTHON (NO EXCEL)
