@@ -107,17 +107,16 @@ class ColumnFlexureDesign:
             density=material.concrete_density,  # kg/m^3
             # pylint: disable=unexpected-keyword-arg, no-value-for-parameter
             stress_strain_profile=ssp.ConcreteLinear(
-                elastic_modulus=material.concrete_modulus_coeff * (self.fc**0.5) * 1e6
-            ),  # Pa
+                elastic_modulus=material.concrete_modulus_coeff * (self.fc**0.5)
+            ),  # MPa
             ultimate_stress_strain_profile=ssp.RectangularStressBlock(
-                compressive_strength=self.fc,  # Pa
+                compressive_strength=self.fc,  # MPa
                 alpha=material.stress_block_alpha,
                 gamma=self.code.beta1(self.fc),
                 ultimate_strain=material.concrete_ultimate_strain,
             ),
             flexural_tensile_strength=material.modulus_of_rupture_coeff
-            * (self.fc**0.5)
-            * 1e6,  # Pa
+            * (self.fc**0.5),  # MPa
             colour="lightgrey",
         )
 
@@ -125,8 +124,8 @@ class ColumnFlexureDesign:
             name=fy_name,
             density=material.steel_density,  # kg/m^3
             stress_strain_profile=ssp.SteelElasticPlastic(
-                yield_strength=self.fy,  # Pa
-                elastic_modulus=material.steel_elastic_modulus,  # Pa
+                yield_strength=self.fy,  # MPa
+                elastic_modulus=material.steel_elastic_modulus,  # MPa
                 fracture_strain=material.steel_fracture_strain,
             ),
             colour="grey",
@@ -356,7 +355,7 @@ class ColumnFlexureDesign:
         Returns:
             tuple: (nominal_moment_capacity, ultimate_moment_capacity, capacity_reduction_factor)
         """
-        section = ConcreteSection(section)
+        section = _concrete_section_for(section)
 
         # Ag and Ast stay in mm2; MPa * mm2 therefore gives newtons.
         gross_area = (
@@ -485,6 +484,22 @@ class ColumnFlexureDesign:
         }
 
         return self.design_results
+
+
+def _concrete_section_for(geometry) -> ConcreteSection:
+    """Return the analysis section for a reinforced geometry, building it only once.
+
+    Building a ``ConcreteSection`` meshes the concrete, which is slow. The result
+    is stored on the geometry, so repeated capacity checks of the same section
+    (different axial loads or bending angles) reuse it and its capacity cache.
+    """
+    if isinstance(geometry, ConcreteSection):
+        return geometry
+    cached = getattr(geometry, "_column_concrete_section", None)
+    if cached is None:
+        cached = ConcreteSection(geometry)
+        setattr(geometry, "_column_concrete_section", cached)
+    return cached
 
 
 def _read_excel_table(sheet, start_cell: str) -> pd.DataFrame:
@@ -925,6 +940,77 @@ def _to_compression_positive(
     return converted
 
 
+def _expand_combo_permutations(
+    factored_loads: pd.DataFrame,
+) -> tuple[pd.DataFrame, dict[str, str]]:
+    """Give every ETABS permutation of a load combination its own combo label.
+
+    One combination with a response-spectrum or multi-direction case produces
+    several permutations, each a different P-M2-M3 set. A column must be checked
+    against every set, so each permutation becomes a separate internal combo
+    (``"<combo>-<permutation>"``).
+
+    Returns:
+        The force table with internal combo labels, and a map from each internal
+        label back to the plain combination name shown to the user.
+    """
+    converted = factored_loads.copy()
+    names = converted["Combo"].astype(str).str.strip()
+    if "Permutation" not in converted.columns:
+        converted["Combo"] = names
+        return converted, {name: name for name in names.unique()}
+    permutation = pd.to_numeric(converted["Permutation"], errors="coerce")
+    internal = names.where(
+        permutation.isna(),
+        names + "-" + permutation.fillna(0).astype(int).astype(str),
+    )
+    converted["Combo"] = internal
+    return converted, dict(zip(internal, names))
+
+
+def _collapse_combo_permutations(
+    load_checks: pd.DataFrame,
+    shear_checks: pd.DataFrame,
+    joint_results: pd.DataFrame,
+    combo_display: dict[str, str],
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Relabel permutation-level results with the plain combination name.
+
+    Flexure/axial keeps one row per column, combination and end: the governing
+    permutation, i.e. a failing one if any, otherwise the highest utilization.
+    Shear and joint rows are only relabelled; the report builder already takes
+    the worst value of every row that shares a column, combination and end.
+    """
+    def plain(series: pd.Series) -> pd.Series:
+        text = series.astype(str)
+        return text.map(combo_display).fillna(text)
+
+    if not load_checks.empty:
+        load_checks = load_checks.copy()
+        load_checks["Combo"] = plain(load_checks["Combo"])
+        utilization = pd.to_numeric(
+            load_checks.get("Flexure_Utilization"), errors="coerce"
+        )
+        load_checks["_not_pass"] = load_checks["Strength_Check"].astype(str).ne("PASS")
+        load_checks["_utilization"] = utilization.fillna(math.inf)
+        load_checks = (
+            load_checks.sort_values(
+                ["_not_pass", "_utilization"], ascending=False, kind="stable"
+            )
+            .drop_duplicates(subset=["UniqueName", "Combo", "End"], keep="first")
+            .sort_index()
+            .drop(columns=["_not_pass", "_utilization"])
+            .reset_index(drop=True)
+        )
+    if not shear_checks.empty:
+        shear_checks = shear_checks.copy()
+        shear_checks["Combo"] = plain(shear_checks["Combo"])
+    if not joint_results.empty and "Load_Combo" in joint_results.columns:
+        joint_results = joint_results.copy()
+        joint_results["Load_Combo"] = plain(joint_results["Load_Combo"])
+    return load_checks, shear_checks, joint_results
+
+
 def _new_output_sheet(wb, sheet_name: str):
     """Return or create an output sheet and clear only its prior output table.
 
@@ -1253,6 +1339,7 @@ def _evaluate_column_candidate(
     cover: float,
     is_smrf: bool,
     stop_at_first_failure: bool = False,
+    progress=None,
 ) -> tuple[bool, list[dict], dict]:
     """Check one bundled longitudinal layout against every combo/end force pair.
 
@@ -1281,6 +1368,8 @@ def _evaluate_column_candidate(
     passed = True
     for combo in sorted(force_rows["Combo"].dropna().astype(str).unique()):
         for endpoint, at_i in (("I", True), ("J", False)):
+            if progress is not None:
+                progress(member, endpoint, "Flexure and axial (P-M)", combo)
             force = _column_force_at_end(force_rows, combo, at_i)
             axial_kN = _numeric(force["P"], "P", member)
             m2_kNm = _numeric(force["M2"], "M2", member)
@@ -1325,7 +1414,7 @@ def _evaluate_column_candidate(
             )
             moment_pass = moment_demand <= moment_capacity_kNm
             tension_capacity = (
-                0.90
+                engine.code.strength.tension_controlled
                 * n_bars
                 * math.pi
                 * dmain**2
@@ -1811,6 +1900,7 @@ def _column_shear_checks(
     confinement_legs: int,
     is_smrf: bool,
     bundle_layout: list[tuple[float, float, int]] | None = None,
+    progress=None,
 ) -> tuple[list[dict], int]:
     """Check column shear in both local directions and size transverse legs.
 
@@ -1856,6 +1946,21 @@ def _column_shear_checks(
         }
     output: list[dict] = []
 
+    # The probable-strength section (1.25 fy) is the same for every combination,
+    # direction and end, so it is built once and only the axial load changes.
+    probable_row = row.copy()
+    probable_row["UniqueName"] = member
+    probable_row["fy"] = engine.fy * seismic_cfg.probable_stress_factor
+    probable_engine, probable_section = _build_column_section(
+        probable_row,
+        n_bars,
+        engine.dmain,
+        engine.dties,
+        engine.cc,
+        is_smrf,
+        bundle_layout=bundle_layout,
+    )
+
     # Find one transverse-leg count that satisfies every combo/end/direction.
     for combo in sorted(forces["Combo"].dropna().astype(str).unique()):
         end_forces = {
@@ -1868,19 +1973,11 @@ def _column_shear_checks(
             moment_theta = math.pi / 2.0 if moment_name == "M3" else 0.0
             probable_moments = []
             for end in ("I", "J"):
+                if progress is not None:
+                    progress(
+                        member, end, f"Column shear, {shear_name} (capacity design)", combo
+                    )
                 axial = _numeric(end_forces[end]["P"], "P", member) * 1000.0
-                probable_row = row.copy()
-                probable_row["UniqueName"] = member
-                probable_row["fy"] = engine.fy * seismic_cfg.probable_stress_factor
-                probable_engine, probable_section = _build_column_section(
-                    probable_row,
-                    n_bars,
-                    engine.dmain,
-                    engine.dties,
-                    engine.cc,
-                    is_smrf,
-                    bundle_layout=bundle_layout,
-                )
                 probable_mn, _, _, _, _ = probable_engine.solve_moment_capacity(
                     probable_section,
                     axial_load=axial,
@@ -1997,6 +2094,7 @@ def _evaluate_smrf_joints(
     dties: float,
     cover: float,
     column_layouts: dict[str, list[tuple[float, float, int]]],
+    progress=None,
 ) -> pd.DataFrame:
     """Evaluate SMRF column/beam ratio, panel shear, and continuity at each joint.
 
@@ -2055,6 +2153,21 @@ def _evaluate_smrf_joints(
             continue
         point_map.setdefault(point_i, []).append(member)
         point_map.setdefault(point_j, []).append(member)
+
+    column_sections: dict[tuple[str, float], tuple[ColumnFlexureDesign, object]] = {}
+    beam_end_strengths: dict[tuple[str, str, float], dict] = {}
+
+    def beam_end_strength(beam: str, end_name: str, fy_multiplier: float) -> dict:
+        """Return a beam end's strength, calculated once (it does not depend on the combo)."""
+        key = (beam, end_name, fy_multiplier)
+        if key not in beam_end_strengths:
+            beam_end_strengths[key] = _beam_end_reinforcement(
+                beam_result_groups[beam].iloc[0],
+                beam_result_groups[beam],
+                end_name,
+                fy_multiplier,
+            )
+        return dict(beam_end_strengths[key])
 
     def frame_data_row(member: str) -> pd.Series:
         """Return the unique properties row for a member or explain what is missing."""
@@ -2133,19 +2246,24 @@ def _evaluate_smrf_joints(
         forces = force_groups[member]
         force = _column_force_at_end(forces, combo, at_i_end=end == "I")
         axial = _numeric(force["P"], "P", member) * 1000.0
-        bars = int(result_by_name.loc[member]["Longitudinal_Bars"])
-        capacity_row = row.copy()
-        capacity_row["UniqueName"] = member
-        capacity_row["fy"] = _numeric(row["fy"], "fy", member) * fy_factor
-        engine, section = _build_column_section(
-            capacity_row,
-            bars,
-            dmain,
-            dties,
-            cover,
-            is_smrf,
-            bundle_layout=column_layouts.get(member),
-        )
+        # A column keeps one bar layout for the whole evaluation, so its section
+        # is built once per strength factor and reused for every joint and combo.
+        section_key = (member, fy_factor)
+        if section_key not in column_sections:
+            bars = int(result_by_name.loc[member]["Longitudinal_Bars"])
+            capacity_row = row.copy()
+            capacity_row["UniqueName"] = member
+            capacity_row["fy"] = _numeric(row["fy"], "fy", member) * fy_factor
+            column_sections[section_key] = _build_column_section(
+                capacity_row,
+                bars,
+                dmain,
+                dties,
+                cover,
+                is_smrf,
+                bundle_layout=column_layouts.get(member),
+            )
+        engine, section = column_sections[section_key]
         nominal, _, _, _, _ = engine.solve_moment_capacity(
             section, axial_load=axial, bending_angle=theta
         )
@@ -2339,12 +2457,7 @@ def _evaluate_smrf_joints(
                             f"Framing beam {beam} at joint {joint} is missing from "
                             "BEAM DESIGN; include and design it before column design."
                         )
-                    beam_strengths[beam] = _beam_end_reinforcement(
-                        beam_result_groups[beam].iloc[0],
-                        beam_result_groups[beam],
-                        end,
-                        1.0,
-                    )
+                    beam_strengths[beam] = beam_end_strength(beam, end, 1.0)
                     beam_connection = connection_by_name.loc[beam]
                     beam_i = _normalize_object_name(beam_connection["UniquePtI"])
                     beam_j = _normalize_object_name(beam_connection["UniquePtJ"])
@@ -2369,6 +2482,13 @@ def _evaluate_smrf_joints(
                 column_reinforcement_summary = []
                 for column in connected_columns:
                     column_result = result_by_name.loc[column]
+                    if progress is not None:
+                        progress(
+                            column,
+                            get_end_info(column, joint, False)[0],
+                            "Strong column - weak beam and joint shear",
+                            combo,
+                        )
                     capacity, axial = column_nominal_capacity(
                         column, joint, combo, moment_axis
                     )
@@ -2394,9 +2514,8 @@ def _evaluate_smrf_joints(
                         beam_nominal += beam_info[
                             "Mn_top_kNm" if top_controls else "Mn_bottom_kNm"
                         ] * beam_info["Moment_Projection"]
-                        probable = _beam_end_reinforcement(
-                            beam_result_groups[beam].iloc[0],
-                            beam_result_groups[beam],
+                        probable = beam_end_strength(
+                            beam,
                             get_end_info(beam, joint)[0],
                             CODE.column_seismic.probable_stress_factor,
                         )
@@ -3554,6 +3673,7 @@ def _write_consolidated_column_report(
 
 def _run_column_design_from_excel(
     write_joint_sheet: bool = True,
+    progress=None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Design frame-data columns and run SMRF checks using Excel and ETABS inputs.
 
@@ -3564,6 +3684,9 @@ def _run_column_design_from_excel(
     Args:
         write_joint_sheet: Retained for existing macro compatibility. Joint checks
             are now included in the consolidated COLUMN DESIGN output only.
+        progress: Optional callable that receives one status text at a time
+            (column mark, level, end, load combination and current check) for the
+            loading window.
     """
     try:
         workbook = xw.Book.caller()
@@ -3599,6 +3722,9 @@ def _run_column_design_from_excel(
         raise ValueError("FRAME DATA and FACTORED LOADS must contain data.")
     # ETABS: compression is negative.  Designers below: compression is positive.
     factored_loads = _to_compression_positive(factored_loads)
+    # Every ETABS permutation is checked as its own load set; the report and the
+    # loading window show only the plain combination name.
+    factored_loads, combo_display = _expand_combo_permutations(factored_loads)
     for frame in (frame_data, connectivity, factored_loads, beam_design):
         if "UniqueName" in frame.columns:
             frame["UniqueName"] = frame["UniqueName"].map(_normalize_object_name)
@@ -3645,6 +3771,28 @@ def _run_column_design_from_excel(
     column_rows = _deduplicate_frame_data(column_rows)
     if column_rows.empty:
         raise ValueError("FRAME DATA contains no rows with DesignType='Column'.")
+
+    story_by_member = (
+        dict(zip(column_rows["UniqueName"].astype(str), column_rows["Story"]))
+        if "Story" in column_rows.columns
+        else {}
+    )
+
+    def report_progress(
+        member: str, end: str, check: str, combo: str | None = None
+    ) -> None:
+        """Send the column mark, level, end, combo and check to the loading window."""
+        if progress is None:
+            return
+        level = story_by_member.get(str(member))
+        level_text = "-" if level is None or pd.isna(level) else str(level)
+        combo_line = (
+            "" if combo is None else f"Combo: {combo_display.get(str(combo), combo)}\n"
+        )
+        progress(
+            f"Column {_common_column_mark(member)}  |  Level {level_text}  |  End {end}\n"
+            f"{combo_line}Check: {check}"
+        )
 
     frame_data = _deduplicate_frame_data(frame_data)
     connectivity = connectivity.loc[
@@ -3726,6 +3874,7 @@ def _run_column_design_from_excel(
             _forces=forces,
             _layout_options=layout_options,
             _candidate_cache=candidate_cache,
+            _axial_values=axial_values,
         ) -> dict:
             """Cache strength and transverse checks for one member layout."""
             if index not in _candidate_cache:
@@ -3739,8 +3888,12 @@ def _run_column_design_from_excel(
                     cover,
                     is_smrf,
                     stop_at_first_failure=True,
+                    progress=report_progress,
                 )
                 if passes_flexure:
+                    report_progress(
+                        str(_row["UniqueName"]), "I and J", "Transverse detailing"
+                    )
                     candidate_engine, _ = _build_column_section(
                         _row,
                         sum(count for _, _, count in layout),
@@ -3759,7 +3912,7 @@ def _run_column_design_from_excel(
                         _forces,
                         candidate_engine,
                         layout,
-                        max(0.0, float(axial_values.max()) * 1000.0),
+                        max(0.0, float(_axial_values.max()) * 1000.0),
                         is_smrf,
                     )
                 else:
@@ -3818,6 +3971,7 @@ def _run_column_design_from_excel(
                 dties,
                 cover,
                 is_smrf,
+                progress=report_progress,
             )
             candidate["checks"] = checks
             candidate["limits"] = limits
@@ -3978,6 +4132,7 @@ def _run_column_design_from_excel(
                 member: selected_candidate(member)["layout"]
                 for member in column_candidates
             },
+            progress=report_progress,
         )
 
         while not initial_joints.empty:
@@ -3985,7 +4140,8 @@ def _run_column_design_from_excel(
                 initial_joints["Sum_Column_Mn_kNm"].notna()
                 & initial_joints["Sum_Beam_Mn_kNm"].notna()
                 & initial_joints.apply(
-                    lambda row: current_joint_ratio(row) < 1.2 - 1e-9,
+                    lambda row: current_joint_ratio(row)
+                    < CODE.column_seismic.strong_column_ratio - 1e-9,
                     axis=1,
                 )
             ]
@@ -4093,7 +4249,7 @@ def _run_column_design_from_excel(
             )
             initial_joints.at[joint_index, "Column_Beam_Ratio"] = ratio
             initial_joints.at[joint_index, "Strong_Column_Check"] = (
-                "PASS" if ratio >= 1.2 else "FAIL"
+                "PASS" if ratio >= CODE.column_seismic.strong_column_ratio else "FAIL"
             )
             initial_joints.at[
                 joint_index, "Column_Reinforcement_At_Joint"
@@ -4296,6 +4452,7 @@ def _run_column_design_from_excel(
                 transverse["Transverse_Legs_Per_Direction"],
                 is_smrf,
                 bundle_layout=selected_layout,
+                progress=report_progress,
             )
         transverse["Transverse_Legs_Per_Direction"] = max(
             transverse["Transverse_Legs_Per_Direction"], required_shear_legs
@@ -4391,7 +4548,9 @@ def _run_column_design_from_excel(
                 "Tie_Bar_mm": dties,
                 "Cover_mm": cover,
                 "Longitudinal_Bars": selected_bars,
-                "Longitudinal_Spacing_Limit_mm": 150.0,
+                "Longitudinal_Spacing_Limit_mm": (
+                    final_engine.code.column_strength.max_longitudinal_spacing
+                ),
                 "Reinforcement_Ratio": selected_limits.get("rho", np.nan),
                 "Reinforcement_Ratio_Limit": ratio_limit,
                 "Transverse_Spacing_Provided_mm": spacing_provided,
@@ -4479,14 +4638,19 @@ def _run_column_design_from_excel(
 
     if not is_smrf:
         joint_results = pd.DataFrame()
+    load_checks, shear_checks, joint_results = _collapse_combo_permutations(
+        load_checks, pd.DataFrame(shear_check_rows), joint_results, combo_display
+    )
     report, report_groups = _build_consolidated_column_report(
         column_results,
         load_checks,
-        pd.DataFrame(shear_check_rows),
+        shear_checks,
         joint_results,
         column_labels=frame_labels,
         level_elevations=level_elevations,
     )
+    if progress is not None:
+        progress("Writing the COLUMN DESIGN report to Excel...")
     output_sheet = _new_output_sheet(workbook, "COLUMN DESIGN")
     _write_consolidated_column_report(output_sheet, report, report_groups)
     workbook.save()
@@ -4499,11 +4663,8 @@ def run_column_design_from_excel(
     """Run the column design workflow while showing its active process in a GUI."""
     from utilities._gui_helpers import LoadingWindow
 
-    with LoadingWindow(
-        "Column design is running: reading model data, designing reinforcement, "
-        "checking BCC and joint shear, and writing the report."
-    ):
-        return _run_column_design_from_excel(write_joint_sheet)
+    with LoadingWindow("Designing columns...") as window:
+        return _run_column_design_from_excel(write_joint_sheet, progress=window.update)
 
 
 def _column_story_sort_key(story: object) -> tuple[int, str]:
@@ -4940,11 +5101,18 @@ def _draw_column_section(
     tie_thickness = tie_bar_diameter * scale
     bar_radius = main_bar_diameter * scale / 2.0
 
-    modelspace.add_lwpolyline(
-        [(left, bottom), (right, bottom), (right, top), (left, top)],
-        close=True,
-        dxfattribs={"layer": "CONCRETE", "lineweight": 25},
-    )
+    if is_circular:
+        modelspace.add_circle(
+            (x_center, y_center),
+            diameter * scale / 2.0,
+            dxfattribs={"layer": "CONCRETE", "lineweight": 25},
+        )
+    else:
+        modelspace.add_lwpolyline(
+            [(left, bottom), (right, bottom), (right, top), (left, top)],
+            close=True,
+            dxfattribs={"layer": "CONCRETE", "lineweight": 25},
+        )
     layout = _column_layout_from_report(
         row, main_bar_diameter, tie_bar_diameter, cover, is_smrf
     )

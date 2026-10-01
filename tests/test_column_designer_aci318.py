@@ -853,3 +853,106 @@ def test_dxf_draws_one_circle_per_longitudinal_bar(tmp_path):
 def test_empty_report_is_rejected(tmp_path):
     with pytest.raises(ValueError):
         col.generate_dxf_column_schedule(pd.DataFrame(), str(tmp_path / "x.dxf"), 25.0, 40.0, True)
+
+
+# --------------------------------------------------------------------------
+# LOAD-COMBINATION PERMUTATIONS
+# --------------------------------------------------------------------------
+def test_each_permutation_becomes_its_own_internal_combo():
+    """BEHAVIOUR: ETABS permutations are checked separately but named plainly."""
+    forces = pd.DataFrame(
+        {
+            "UniqueName": ["C1"] * 3,
+            "Combo": ["ULS 1", "ULS 1", "ULS 2"],
+            "Permutation": [1.0, 2.0, 1.0],
+            "P": [100.0, 200.0, 300.0],
+        }
+    )
+    expanded, display = col._expand_combo_permutations(forces)
+    assert expanded["Combo"].tolist() == ["ULS 1-1", "ULS 1-2", "ULS 2-1"]
+    assert display == {"ULS 1-1": "ULS 1", "ULS 1-2": "ULS 1", "ULS 2-1": "ULS 2"}
+    assert forces["Combo"].tolist() == ["ULS 1", "ULS 1", "ULS 2"]  # input untouched
+
+
+def test_tables_without_a_permutation_column_are_left_as_they_are():
+    """BEHAVIOUR: workbooks extracted before the Permutation column still work."""
+    forces = pd.DataFrame({"UniqueName": ["C1"], "Combo": ["ULS 1"], "P": [1.0]})
+    expanded, display = col._expand_combo_permutations(forces)
+    assert expanded["Combo"].tolist() == ["ULS 1"]
+    assert display == {"ULS 1": "ULS 1"}
+
+
+def test_report_keeps_the_governing_permutation_under_the_plain_combo_name():
+    """BEHAVIOUR: a failing permutation governs; otherwise the highest utilization."""
+    display = {"ULS 1-1": "ULS 1", "ULS 1-2": "ULS 1", "ULS 1-3": "ULS 1"}
+    checks = pd.DataFrame(
+        {
+            "UniqueName": ["C1"] * 5,
+            "Combo": ["ULS 1-1", "ULS 1-2", "ULS 1-3", "ULS 1-1", "ULS 1-2"],
+            "End": ["I", "I", "I", "J", "J"],
+            "Pu_kN": [10.0, 20.0, 30.0, 40.0, 50.0],
+            "Flexure_Utilization": [0.9, 0.4, 1.3, 0.2, 0.6],
+            "Strength_Check": ["PASS", "PASS", "FAIL", "PASS", "PASS"],
+        }
+    )
+    shear = pd.DataFrame({"UniqueName": ["C1"], "Combo": ["ULS 1-2"], "End": ["I"]})
+    joints = pd.DataFrame({"Load_Combo": ["ULS 1-3"], "Column_Beam_Ratio": [1.5]})
+
+    load, shear, joints = col._collapse_combo_permutations(checks, shear, joints, display)
+
+    assert load[["Combo", "End", "Pu_kN"]].values.tolist() == [
+        ["ULS 1", "I", 30.0],  # the failing permutation
+        ["ULS 1", "J", 50.0],  # the highest utilization
+    ]
+    assert shear["Combo"].tolist() == ["ULS 1"]
+    assert joints["Load_Combo"].tolist() == ["ULS 1"]
+
+
+# --------------------------------------------------------------------------
+# CIRCULAR COLUMNS IN THE SCHEDULE, SECTION REUSE, CONFIG VALUES
+# --------------------------------------------------------------------------
+def test_circular_column_is_drawn_with_a_circular_concrete_outline(tmp_path):
+    """BEHAVIOUR: a circular column must not be drawn as a square."""
+    engine = col.ColumnFlexureDesign(
+        width=0.0, height=0.0, diameter=600.0, dmain=25.0, dties=10.0, cc=40.0,
+        shape="circular", is_smrf=True,
+    )
+    layout = col._enumerate_column_bar_layouts(engine, 60)[0]
+    row = {
+        "Unique Name": "PD1C9", "Column Label": "C9", "Story": "L1",
+        "f′c (MPa)": 28.0, "Width (mm)": np.nan, "Depth (mm)": np.nan,
+        "Diameter (mm)": 600.0, "Longitudinal Bars": sum(c for *_, c in layout),
+        "Bundle Layout": col._column_layout_summary(layout),
+        "Tie Bar Diameter (mm)": 10.0, "Tie / Spiral Spacing (mm)": 75.0,
+    }
+    target = tmp_path / "circular.dxf"
+    col.generate_dxf_column_schedule(pd.DataFrame([row]), str(target), 25.0, 40.0, True)
+
+    concrete = [e for e in ezdxf.readfile(target).modelspace() if e.dxf.layer == "CONCRETE"]
+    assert [entity.dxftype() for entity in concrete] == ["CIRCLE"]
+
+
+def test_analysis_section_is_built_once_and_reused():
+    """BEHAVIOUR: repeated capacity checks of one section do not re-mesh it."""
+    engine = build_rect_column(400.0, 400.0)
+    concrete, steel = engine.define_materials()
+    geometry = engine.add_reinf(
+        engine.define_section(400.0, 400.0, 0.0, concrete), engine.dmain, steel, 8
+    )
+    first = col._concrete_section_for(geometry)
+    assert col._concrete_section_for(geometry) is first
+    assert col._concrete_section_for(first) is first
+
+    capacity_low = engine.solve_moment_capacity(geometry, axial_load=200e3, bending_angle=0.0)
+    capacity_high = engine.solve_moment_capacity(geometry, axial_load=800e3, bending_angle=0.0)
+    assert col._concrete_section_for(geometry) is first
+    assert capacity_low[0] != capacity_high[0]  # the axial load still matters
+
+
+def test_material_models_use_megapascals_throughout():
+    """HAND CALC: Ec = 4700*sqrt(28) = 24 870 MPa, the same unit as Es = 200 000 MPa."""
+    concrete, steel = build_rect_column(400.0, 400.0).define_materials()
+    assert concrete.stress_strain_profile.elastic_modulus == pytest.approx(
+        4700.0 * math.sqrt(28.0)
+    )
+    assert steel.stress_strain_profile.elastic_modulus == 200_000.0

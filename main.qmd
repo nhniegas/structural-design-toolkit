@@ -1,5 +1,5 @@
 ---
-title: "Rectangular Filled Composite Member Capacity (AISC DG6)"
+title: "Structural Calculation Report"
 format:
   pdf:
     documentclass: article
@@ -28,14 +28,19 @@ execute:
   warning: false
 ---
 
+<!--
+Template for written reports. Render from the project root:  quarto render main.qmd
+Each section: one cell with the inputs, one cell that prints the report as Markdown.
+-->
+
+# Rectangular Filled Composite Column (AISC DG6)
+
 ```{python}
-#| label: inputs
-import sys
-sys.path.append("helpers")           # folder containing the helper scripts
-from design._composite_column_designer_aiscDG06_rev02 import RectangularFilledComposite
+#| label: composite-inputs
+from design.composite_column_designer_aiscDG06 import RectangularFilledComposite
 
 # ------------------------- INPUTS (edit here) -------------------------
-col = RectangularFilledComposite(
+column = RectangularFilledComposite(
     label="Column C1",
     # geometry & materials
     b_mm=635.0, h_mm=635.0, t_mm=12.7,
@@ -44,7 +49,7 @@ col = RectangularFilledComposite(
     # demands (LRFD)
     Pu_kN=6672.3,
     Mb_kNm=2440.5, Mh_kNm=0.0,
-    Vb_kN=400.3,   Vh_kN=0.0,
+    Vbx_kN=400.3, Vhy_kN=0.0,
     # optional
     Asr_mm2=0.0, Fysr_mpa=414.0, ri_mm=0.0, shear_span_to_depth=None,
 )
@@ -52,6 +57,7 @@ col = RectangularFilledComposite(
 ```
 
 ```{python}
-#| label: report
-col.show()
+#| label: composite-report
+#| output: asis
+print(column.report(heading_level=2))
 ```

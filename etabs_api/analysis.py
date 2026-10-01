@@ -23,10 +23,11 @@ class Analysis:
 
     def status(self) -> list[dict]:
         """Return analysis-case status records."""
+        # Returns (count, case names, statuses, status code).
         result = self.interface.GetCaseStatus(0, [], [])
         ensure_success(result, "Analyze.GetCaseStatus")
-        names = as_list(result[2])
-        statuses = as_list(result[3])
+        names = as_list(result[1])
+        statuses = as_list(result[2])
         labels = {1: "Not Run", 2: "Could Not Start", 3: "Not Finished", 4: "Finished"}
         return [
             {"case": name, "status_code": statuses[i], "status": labels.get(statuses[i], "Unknown")}

@@ -1,50 +1,119 @@
 # Concrete Beam and Column Excel Workflow
 
-This guide describes the concrete design workflows that are currently implemented in the repository and their relationship to the Excel-based workbook architecture.
+How `spreadsheets/beam_column_designer_aci318.xlsm` works with ETABS and the Python design modules. Design code: ACI 318M-14.
 
-## Current project architecture
+## How the pieces fit
 
-The project is organized as a set of engineering modules under `design/` with a compatibility layer in `main.py`.
+- `design/beam_designer_aci318.py`: ETABS extraction, beam design, beam schedule DXF.
+- `design/column_designer_aci318.py`: column design, SMRF checks, column schedule DXF.
+- `design/aci318_config.py`: every ACI constant used by both designers, each with its clause. The designers read their factors and limits from here.
+- `etabs_api/`: ETABS connection (`connection.py`) and table extraction to Excel (`exporter.py`).
+- `utilities/_gui_helpers.py`: pickers and the loading window.
 
-- `main.py` exposes the workbook-facing API used by Excel callbacks.
-- `design/beam_designer_aci318.py` contains the reinforced-concrete beam design workflow.
-- `design/column_designer_aci318.py` contains the reinforced-concrete column design workflow and related checks.
-- `design/composite_column_designer_aiscDG06.py` and `design/wind_calculator_directional_asce7.py` are separate modules in the same toolkit.
+The workbook macros call the design modules directly. There is no intermediate `main.py` layer.
 
-This means the project is structured as a collection of reusable design engines rather than as a single monolithic workbook script.
+## Buttons and what they run
 
-## Beam design workflow
+Run them in this order.
 
-The beam module includes:
+| Step | Macro | Python function |
+|---|---|---|
+| 1. Extract from ETABS | `CallExtractForcesPropertiesCustom` | `beam_designer_aci318.extract_forces_properties_from_etabs` |
+| 2. Prepare beam data | `ExtractBeamDesignDataMacro` | `beam_designer_aci318.extract_beam_design_data` |
+| 3. Design beams | `TriggerBeamDesign` | `beam_designer_aci318.run_beam_design_from_excel` |
+| 4. Export beam DXF | `TriggerExportCADDrawings` | `beam_designer_aci318.export_cad_drawings` |
+| 5. Design columns | `TriggerColumnDesign` | `column_designer_aci318.run_column_design_from_excel` |
+| 6. Export column DXF | `TriggerExportColumnCAD` | `column_designer_aci318.export_column_cad_drawings` |
 
-- ETABS data extraction and member selection
-- beam property and force-table processing
-- flexural, shear, and torsion checks
-- reinforcement detailing and output tables
-- DXF schedule export
+Design beams before columns: the SMRF joint checks use the designed beam bars.
 
-The workbook callbacks for beam work are exposed through the compatibility layer in `main.py`, while the implementation remains in the design module.
+## Sheets
 
-## Column design workflow
+| Sheet | Written by | Contents |
+|---|---|---|
+| `OVERWRITES` | you, and step 1 | Design options and bar sizes; selected combinations (from `B6`) and members (from `C6`) |
+| `FACTORED LOADS` | step 1 | Design forces per member, combination, permutation and station (kN, kN-m) |
+| `FRAME DATA` | step 1 | Section, dimensions and material strengths per member |
+| `CONNECTIVITY` | step 1 | End joints of every beam and column |
+| `BEAM DESIGN` | steps 2 and 3 | Beam inputs, then the beam design results, from `B8` |
+| `COLUMN DESIGN` | step 5 | Consolidated column report, headers on rows 8 and 9 |
 
-The column module includes:
+Inputs on `OVERWRITES`:
 
-- section data and bar-layout checks
-- P-M interaction evaluation
-- transverse reinforcement checks
-- shear checks and SMRF-related joint review notes
-- Excel output tables
+| Cell | Input |
+|---|---|
+| `F3` | SMRF (seismic) design on or off, for beams and columns |
+| `F4` | Factored gravity combination used for beam seismic shear |
+| `I4` to `I8` | Beam main bar, stirrup bar, web bar diameters (mm), web bar fyw (MPa), cover (mm) |
+| `I10` to `I12` | Column main bar, tie bar diameters (mm), cover (mm) |
 
-The same pattern applies here: the workbook invokes the public API, but the actual engineering logic resides in the dedicated module under `design/`.
+## Step 1: ETABS extraction
 
-## Excel and `xlwings`
+The step attaches to the running ETABS model, or asks for a model file and opens it. You pick the load combinations and the members in two list dialogs. ETABS concrete design is run for the selected combinations so the design-force tables exist.
 
-`xlwings` remains the workbook interface used to read inputs, write result tables, and trigger design actions. The public functions remain available through the workbook entry point, but the design modules themselves are the authoritative implementation layer.
+What is read, and how often:
 
-## Reporting and export paths
+- **Design forces** (`Design Forces - Beams`, `Design Forces - Columns`) are read one combination at a time through `ETABSConnector.get_design_forces`. ETABS does not return these tables reliably when several combinations are selected at once. Each combination is read only once per extraction.
+- **Everything else** (frame assignments, section definitions, reinforcing, material properties, connectivity) does not depend on load combinations and is read once.
 
-The project supports optional PDF and CAD/DXF outputs for the design workflows, depending on the module being used. These export functions are part of the current engineering package and should be documented as such instead of treating the project as a simple beam-only workbook.
+Members with a purely numeric ETABS name are skipped; only named members are designed.
 
-## Important note for documentation
+### Load-combination permutations
 
-Any documentation should reflect the current state of the codebase: a multi-module structural engineering toolkit with spreadsheet automation, ETABS interactions, wind design, composite column checks, and concrete member design, all coordinated by the Excel callback facade in `main.py`.
+ETABS writes several row sets for one combination when it contains a response-spectrum or multi-direction case, naming them `ULS 107 ...-1`, `ULS 107 ...-2`, and so on. Each is a different P, M2, M3 set.
+
+`FACTORED LOADS` stores the plain combination name in `Combo` and the suffix in `Permutation`.
+
+- **Beams** take the envelope of all rows of a combination, so every permutation is covered.
+- **Columns** are checked against every permutation separately. The report and the loading window show only the plain combination name. For flexure and axial load each report row shows the governing permutation (a failing one if there is one, otherwise the highest utilization). Shear and joint values are the worst across the permutations.
+
+A workbook extracted before the `Permutation` column existed still runs, but columns are then checked against one row set per combination. Extract again to get the full check.
+
+## Steps 2 to 4: beams
+
+Step 2 filters `FRAME DATA` to beams, classifies each as supported both ends, cantilever, or beam-framed from `CONNECTIVITY`, adds the bar sizes from `OVERWRITES`, and writes the table to `BEAM DESIGN!B8`.
+
+Step 3 designs each beam at the left support, midspan and right support:
+
+- flexure by strain compatibility, including compression steel, minimum steel and crack-control spacing
+- shear and torsion, with combined transverse steel and longitudinal torsion steel
+- SMRF checks when `F3` is on: reinforcement ratio, moment-capacity ratios, probable-moment sway shear, hoop spacing
+- bar layering (up to three layers), stirrup legs and anchorage of the legs
+
+Results replace the table at `BEAM DESIGN!B8`. The sheet is cleared from `B8` to the end of its used range first, so rows from an earlier, longer run cannot remain below the new table. `Design status` reads `OK` or states the failure.
+
+Step 4 writes one `<Story>_Beam_Schedule.dxf` per story to the folder you choose.
+
+## Step 5: columns
+
+For each column the designer:
+
+1. lists the bar layouts that fit the section, including bundled bars, in increasing order of steel
+2. picks the first layout that passes axial and flexure for every load set and both ends, and the transverse detailing rules
+3. when `F3` is on, checks strong column-weak beam and joint shear at each joint, and moves a column to a heavier layout if the 6/5 ratio is not met
+4. checks column shear in both directions, using the larger of the analysis shear and the capacity-design shear from probable moments
+
+SMRF design reads column local axes and joint coordinates from ETABS, so ETABS must be open with the model.
+
+The report on `COLUMN DESIGN` has one row per column, end (I or J) and combination, grouped as identification, section and bars, flexure and axial, shear, beam-column capacity, joint shear, transverse detailing and overall status. Statuses are `PASS`, `FAIL`, `ERROR` or `BLOCKED` (a check that could not run because data for a framing member is missing); the reason is in the last column.
+
+The loading window shows the column mark, level, end, load combination and current check while the design runs.
+
+Units inside the column designer are N, mm and MPa. ETABS reports compression as negative; the designer converts to compression-positive once, when the forces are read.
+
+## Step 6: column schedule
+
+Writes `Column_Schedule.dxf` with one cell per column mark and story: the section drawn to scale with bars, hoops and crossties, and rows for size, vertical bars, joint ties, confinement ties and general ties. Circular columns are drawn with a circular outline and spiral.
+
+## Limitations
+
+- The biaxial check compares the resultant of M2 and M3 with the section capacity at that moment direction. It is not a full interaction surface.
+- Slenderness (second-order moment magnification) is not calculated; the ETABS forces must already include second-order effects.
+- Joint checks ignore slab reinforcement. Beams use local-axis angle 0 unless ETABS supplies one.
+- Crosstie spacing uses an assumed `hx` from the configuration, not the drawn layout.
+- Beam design assumes rectangular sections and uses one bar diameter per beam.
+- SMRF confinement, joint classification and anchorage details need an independent check against ACI 318M-14 Chapter 18 before use.
+
+## Tests
+
+`tests/test_beam_designer_aci318.py`, `tests/test_column_designer_aci318.py` and `tests/test_etabs_api_services.py` cover the design engines and the extraction logic against published examples, hand calculations and behaviour rules. They run without Excel or ETABS.

@@ -25,6 +25,20 @@ from utilities._gui_helpers import (
 )
 
 
+def _clear_table_area(sheet, start_cell: str) -> None:
+    """Clear from ``start_cell`` to the end of the sheet's used range.
+
+    A previous run can be longer than the next one. Clearing only the block that
+    touches ``start_cell`` would leave those older rows behind, below the table.
+    """
+    start = sheet.range(start_cell)
+    last = sheet.used_range.last_cell
+    if last.row >= start.row and last.column >= start.column:
+        sheet.range((start.row, start.column), (last.row, last.column)).clear()
+    else:
+        start.clear()
+
+
 def identify_cantilever_beams(
     frame_df: pd.DataFrame,
     conn_df: pd.DataFrame,
@@ -1864,21 +1878,21 @@ def extract_forces_properties_from_etabs():
             dropdown_cell="F4",  # Cell coordinate containing '*default'
         )
 
-        design_forces = exporter.display_factored_loads(
+        exporter.display_factored_loads(
             load_combos_selected=load_combos_selected,
             members_selected=members_selected,
             sheet_name="FACTORED LOADS",
             start_cell="B2",
         )
 
-        frame_assignments = exporter.display_frame_data(
+        exporter.display_frame_data(
             members_selected=members_selected,
             sheet_name="FRAME DATA",
             start_cell="B2",
             load_combos_selected=load_combos_selected,
         )
 
-        connectivity_data = exporter.display_connectivity_data(
+        exporter.display_connectivity_data(
             sheet_name="CONNECTIVITY",
             start_cell="B2",
             load_combos_selected=load_combos_selected,
@@ -2004,10 +2018,7 @@ def extract_beam_design_data(
 
         # 7. Clear target area starting from clear_start_cell
         beam_sheet = wb.sheets[output_sheet_name]
-        try:
-            beam_sheet.range(clear_start_cell).expand().clear()
-        except Exception:
-            beam_sheet.range(clear_start_cell).clear()
+        _clear_table_area(beam_sheet, clear_start_cell)
 
         # 8. Write filtered DataFrame at output_cell_ref and apply header fill
         beam_sheet.range(output_cell_ref).options(index=False).value = beam_df
@@ -2065,7 +2076,8 @@ def run_beam_design_from_excel():
 
         df_excel = display_beam_result_labels(df_beam_design_results)
 
-        # 6. Paste Results Back to Excel (Starting at B8)
+        # 6. Paste Results Back to Excel (Starting at B8), replacing any older table
+        _clear_table_area(sht_design, "B8")
         sht_design.range("B8").options(index=False).value = df_excel
 
         # 7. Apply Advanced Visual Formatting (Shifted to B8)

@@ -695,3 +695,41 @@ class TestBeamScheduleDxf:
         target = tmp_path / "L2_Beam_Schedule.dxf"
         beam.generate_dxf_beam_schedule("L2", results, str(target))
         assert target.exists() and target.stat().st_size > 1000
+
+
+# --------------------------------------------------------------------------
+# CLEARING OLD RESULTS FROM THE SHEET
+# --------------------------------------------------------------------------
+class _FakeRange:
+    def __init__(self, sheet, first, last=None):
+        self.sheet, self.first, self.last = sheet, first, last or first
+        self.row, self.column = first
+
+    def clear(self):
+        self.sheet.cleared.append((self.first, self.last))
+
+
+class _FakeSheet:
+    """Just enough of an xlwings sheet for ``_clear_table_area``."""
+
+    def __init__(self, last_cell):
+        self.cleared = []
+        self.used_range = type("Used", (), {"last_cell": _FakeRange(self, last_cell)})()
+
+    def range(self, first, last=None):
+        if isinstance(first, str):  # only "B8" is used here
+            first = (8, 2)
+        return _FakeRange(self, first, last)
+
+
+def test_clearing_reaches_the_end_of_the_used_range():
+    """BEHAVIOUR: rows left by a longer, older run are cleared too."""
+    sheet = _FakeSheet(last_cell=(3812, 48))
+    beam._clear_table_area(sheet, "B8")
+    assert sheet.cleared == [((8, 2), (3812, 48))]
+
+
+def test_clearing_an_empty_sheet_only_touches_the_start_cell():
+    sheet = _FakeSheet(last_cell=(1, 1))
+    beam._clear_table_area(sheet, "B8")
+    assert sheet.cleared == [((8, 2), (8, 2))]

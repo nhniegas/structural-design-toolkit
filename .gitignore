@@ -78,3 +78,8 @@ desktop.ini
 *.edb
 *.sdb
 *.ebk
+# Local ETABS models and their analysis result files
+edb/
+
+# --- Generated CAD schedules ---
+*.dxf

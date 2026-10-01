@@ -21,6 +21,13 @@ from .selection import Selection
 from .stories_grids import StoriesGrids
 
 
+# Used only when no ETABS session is running and one has to be started.
+# Set the ETABS_PROGRAM_PATH environment variable to use another installation.
+DEFAULT_ETABS_PROGRAM_PATH = (
+    r"C:\Program Files\Computers and Structures\ETABS 22\ETABS.exe"
+)
+
+
 class ETABSConnector:
     """Manage a CSI ETABS COM connection and expose common ETABS operations."""
 
@@ -49,7 +56,9 @@ class ETABSConnector:
 
     def connect(self, attach_to_existing: bool = True):
         """Attach to an active ETABS session or open a model file."""
-        self.program_path = r"C:\Program Files\Computers and Structures\ETABS 22\ETABS.exe"
+        self.program_path = os.environ.get(
+            "ETABS_PROGRAM_PATH", DEFAULT_ETABS_PROGRAM_PATH
+        )
         try:
             with LoadingWindow("Connecting to Model.."):
                 helper = comtypes.client.CreateObject("ETABSv1.Helper")
@@ -59,12 +68,18 @@ class ETABSConnector:
                     self.sap_model = self.etabs_object.SapModel
                     self.is_connected = True
                     return True
-        except Exception:
-            pass
+        except Exception as exc:
+            # No running ETABS session to attach to: fall through and open a model.
+            print(f"[connect] Could not attach to a running ETABS session: {exc}")
 
         model_path = select_etabs_file()
         if not model_path:
             return False
+        if not os.path.exists(self.program_path):
+            raise FileNotFoundError(
+                f"ETABS was not found at {self.program_path!r}. Set the "
+                "ETABS_PROGRAM_PATH environment variable to your ETABS.exe."
+            )
         with LoadingWindow("Opening Etabs Model..."):
             helper = comtypes.client.CreateObject("ETABSv1.Helper")
             helper = helper.QueryInterface(comtypes.gen.ETABSv1.cHelper)
@@ -184,54 +199,76 @@ class ETABSConnector:
             self.sap_model.DatabaseTables.SetLoadPatternsSelectedForDisplay([])
             self.sap_model.DatabaseTables.SetLoadCombinationsSelectedForDisplay([])
 
-            all_chunks = []
-            func_name = sys._getframe().f_code.co_name
             if load_combinations_for_display:
-                for combo in load_combinations_for_display:
-                    self.sap_model.DatabaseTables.SetLoadCombinationsSelectedForDisplay(
-                        [combo]
-                    )
-                    data = self.sap_model.DatabaseTables.GetTableForDisplayArray(
-                        table_name, [], "", 0
-                    )
-                    if data[5] == 0:
-                        headers = data[2]
-                        table_data = data[4]
-                        num_columns = len(headers)
-                        if num_columns > 0 and table_data:
-                            row_list = [
-                                table_data[i : i + num_columns]
-                                for i in range(0, len(table_data), num_columns)
-                            ]
-                            all_chunks.append(pd.DataFrame(row_list, columns=headers))
-                    else:
-                        print(
-                            f"[{func_name}] Failed to retrieve data for combo: {combo}. Error: {data[6]}"
-                        )
-                if all_chunks:
-                    print(f"[{func_name}] All chunked data retrieved successfully")
-                    return pd.concat(all_chunks, ignore_index=True)
-                return pd.DataFrame()
+                chunks = [
+                    self.get_design_forces(table_name, combo)
+                    if table_name in {"Design Forces - Beams", "Design Forces - Columns"}
+                    else self._get_table_for_selected_combination(table_name, combo)
+                    for combo in load_combinations_for_display
+                ]
+                chunks = [chunk for chunk in chunks if not chunk.empty]
+                return pd.concat(chunks, ignore_index=True) if chunks else pd.DataFrame()
 
-            data = self.sap_model.DatabaseTables.GetTableForDisplayArray(
-                table_name, [], "", 0
-            )
-            if data[5] == 0:
-                headers = data[2]
-                table_data = data[4]
-                num_columns = len(headers)
-                if num_columns > 0 and table_data:
-                    row_list = [
-                        table_data[i : i + num_columns]
-                        for i in range(0, len(table_data), num_columns)
-                    ]
-                    print(f"[{func_name}] Data retrieved successfully")
-                    return pd.DataFrame(row_list, columns=headers)
-                return pd.DataFrame()
-            print(f"[{func_name}] Failed to retrieve data. Error: {data[6]}")
-            return pd.DataFrame()
+            return self._read_database_table(table_name)
         except Exception as exc:
-            return {"error": str(exc)}
+            raise RuntimeError(f"Failed to read ETABS table {table_name!r}.") from exc
+
+    def _read_database_table(self, table_name: str) -> pd.DataFrame:
+        """Read one ETABS database table with the current display selection."""
+        return self.database.get_table(table_name)
+
+    def _get_table_for_selected_combination(
+        self, table_name: str, load_combination: str
+    ) -> pd.DataFrame:
+        """Read a non-design table after selecting one display combination."""
+        self.sap_model.DatabaseTables.SetLoadCombinationsSelectedForDisplay(
+            [load_combination]
+        )
+        return self._read_database_table(table_name)
+
+    def get_design_forces(
+        self, table_name: str, load_combination: str
+    ) -> pd.DataFrame:
+        """Read one design-force table for exactly one load combination.
+
+        ETABS does not reliably return frame design-force tables when multiple
+        combinations are selected in one display request. Selecting one
+        combination and reading it immediately avoids mixed schemas and keeps
+        the combination associated with every returned row.
+        """
+        if table_name not in {"Design Forces - Beams", "Design Forces - Columns"}:
+            raise ValueError(
+                "table_name must be 'Design Forces - Beams' or "
+                "'Design Forces - Columns'."
+            )
+        if not load_combination:
+            raise ValueError("load_combination must not be empty.")
+
+        self.sap_model.DatabaseTables.SetLoadCombinationsSelectedForDisplay(
+            [load_combination]
+        )
+        data = self._read_database_table(table_name)
+        if data.empty:
+            return data
+
+        identifier = next(
+            (
+                column
+                for column in ("UniqueName", "Beam", "Column", "Label", "Name")
+                if column in data.columns
+            ),
+            None,
+        )
+        if identifier is None:
+            raise RuntimeError(
+                f"{table_name} for combination {load_combination!r} has no member "
+                "identifier column."
+            )
+        if identifier != "UniqueName":
+            data = data.rename(columns={identifier: "UniqueName"})
+        if "Combo" not in data.columns:
+            data.insert(0, "Combo", load_combination)
+        return data
 
     def get_unique_name(self):
         """Return the first selected ETABS object unique name."""

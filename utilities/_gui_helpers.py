@@ -3,13 +3,11 @@ GUI Helper module providing interactive file picking and dual listbox selection 
 """
 
 import ctypes
-import multiprocessing
 import subprocess
 import sys
-import threading
 import time
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox
 
 # Fix blurry text on High-DPI displays for all Tkinter popups
 try:
@@ -241,6 +239,8 @@ class LoadingWindow:
     def __init__(self, message: str = "Processing, please wait..."):
         self.message = message
         self.proc: subprocess.Popen | None = None
+        self._last_detail = ""
+        self._last_update = 0.0
 
     def __enter__(self):
         self.start()
@@ -252,6 +252,9 @@ class LoadingWindow:
     def start(self):
         """Starts the loading popup."""
         gui_script = f"""import ctypes
+import queue
+import sys
+import threading
 import tkinter as tk
 from tkinter import ttk
 
@@ -284,12 +287,64 @@ progress = ttk.Progressbar(root, mode="indeterminate", length=300)
 progress.pack(pady=5)
 progress.start(10)
 
+# Progress lines sent by LoadingWindow.update() arrive on stdin, one per line.
+detail = tk.Label(root, text="", font=("Arial", 9), wraplength=340, justify="center")
+updates = queue.Queue()
+
+def read_updates():
+    try:
+        sys.stdin.reconfigure(encoding="utf-8")
+        for line in sys.stdin:
+            updates.put(line.rstrip("\\n").replace("\\t", "\\n"))
+    except Exception:
+        pass
+
+def show_updates():
+    text = None
+    while not updates.empty():
+        text = updates.get_nowait()
+    if text is not None:
+        if not detail.winfo_ismapped():
+            detail.pack(pady=(6, 0))
+        detail.config(text=text)
+        root.update_idletasks()
+        needed = height + detail.winfo_reqheight() + 16
+        if needed > root.winfo_height():
+            root.geometry(f"{{width}}x{{needed}}+{{x}}+{{y}}")
+    root.after(100, show_updates)
+
+threading.Thread(target=read_updates, daemon=True).start()
+root.after(100, show_updates)
+
 root.lift()
 root.focus_force()
 root.mainloop()
 """
-        self.proc = subprocess.Popen([sys.executable, "-c", gui_script])
+        self.proc = subprocess.Popen(
+            [sys.executable, "-c", gui_script],
+            stdin=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+        )
         time.sleep(0.5)
+
+    def update(self, detail: str) -> None:
+        """Show a progress line under the main message while the task runs.
+
+        Calls that arrive faster than the window can show them are dropped.
+        """
+        if not self.proc or self.proc.stdin is None or detail == self._last_detail:
+            return
+        now = time.monotonic()
+        if now - self._last_update < 0.1:
+            return
+        self._last_detail = detail
+        self._last_update = now
+        try:
+            self.proc.stdin.write(str(detail).replace("\n", "\t") + "\n")
+            self.proc.stdin.flush()
+        except (OSError, ValueError):
+            pass
 
     def stop(self):
         """Stops the loading popup."""

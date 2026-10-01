@@ -11,6 +11,9 @@ class ETABSDataExporter:
 
     def __init__(self, etabs_instance):
         self.etabs = etabs_instance
+        # Design forces are needed twice per extraction (member list, then the
+        # force table); each combination is read from ETABS only once.
+        self._design_force_cache: dict[tuple[str, str], pd.DataFrame] = {}
 
     @staticmethod
     def _get_sheet(sheet_name: str):
@@ -51,12 +54,41 @@ class ETABSDataExporter:
 
     def get_available_members(self, load_combos: list) -> list:
         """Return all non-numeric member names participating in design forces."""
-        raw_beam_forces = self.etabs.get_data("Design Forces - Beams", load_combos)
-        raw_col_forces = self.etabs.get_data("Design Forces - Columns", load_combos)
-        combined_names = pd.concat(
-            [raw_beam_forces["UniqueName"], raw_col_forces["UniqueName"]]
+        raw_beam_forces = self._read_design_forces(
+            "Design Forces - Beams", load_combos
         )
+        raw_col_forces = self._read_design_forces(
+            "Design Forces - Columns", load_combos
+        )
+        name_series = [
+            frame["UniqueName"]
+            for frame in (raw_beam_forces, raw_col_forces)
+            if "UniqueName" in frame.columns
+        ]
+        if not name_series:
+            raise ValueError(
+                "ETABS returned no member identifiers from the selected design-force "
+                "combinations."
+            )
+        combined_names = pd.concat(name_series)
         return [m for m in combined_names.unique().tolist() if not str(m).isnumeric()]
+
+    def _read_design_forces(
+        self, table_name: str, load_combinations: list | None
+    ) -> pd.DataFrame:
+        """Read design forces one combination at a time through the ETABS API."""
+        if not load_combinations:
+            return pd.DataFrame()
+        chunks = []
+        for combination in load_combinations:
+            key = (table_name, str(combination))
+            if key not in self._design_force_cache:
+                self._design_force_cache[key] = self.etabs.get_design_forces(
+                    table_name, combination
+                )
+            chunks.append(self._design_force_cache[key])
+        chunks = [chunk for chunk in chunks if not chunk.empty]
+        return pd.concat(chunks, ignore_index=True) if chunks else pd.DataFrame()
 
     def display_selected_inputs(
         self,
@@ -109,15 +141,41 @@ class ETABSDataExporter:
         header_color: tuple = (189, 215, 238),
     ) -> pd.DataFrame:
         """Extract and normalize design forces."""
-        beam_forces = self.etabs.get_data("Design Forces - Beams", load_combos_selected)
-        col_forces = self.etabs.get_data("Design Forces - Columns", load_combos_selected)
-        if "Beam" in beam_forces.columns:
-            beam_forces.rename(columns={"Beam": "Label"}, inplace=True)
-        if "Column" in col_forces.columns:
-            col_forces.rename(columns={"Column": "Label"}, inplace=True)
-        design_forces = pd.concat([beam_forces, col_forces], ignore_index=True)
+        beam_forces = self._read_design_forces(
+            "Design Forces - Beams", load_combos_selected
+        )
+        col_forces = self._read_design_forces(
+            "Design Forces - Columns", load_combos_selected
+        )
+        # ETABS labels beams in a "Beam" column and columns in a "Column" column;
+        # both become one "Label" column so no member loses its label.
+        design_forces = pd.concat(
+            [
+                beam_forces.rename(columns={"Beam": "Label"}),
+                col_forces.rename(columns={"Column": "Label"}),
+            ],
+            ignore_index=True,
+        )
         if "Combo" in design_forces.columns:
-            design_forces["Combo"] = design_forces["Combo"].str[:-2].str.strip()
+            # ETABS appends a permutation suffix ("-1", "-2", ...) to every combo
+            # name. The combo keeps its plain name and the suffix moves to its own
+            # column, so the column designer can still check every permutation.
+            combo_parts = (
+                design_forces["Combo"]
+                .astype(str)
+                .str.strip()
+                .str.extract(r"^(.*?)(?:-(\d+))?$")
+            )
+            design_forces["Combo"] = combo_parts[0].str.strip()
+            permutation = pd.to_numeric(combo_parts[1], errors="coerce")
+            if "Permutation" in design_forces.columns:
+                design_forces["Permutation"] = permutation
+            else:
+                design_forces.insert(
+                    design_forces.columns.get_loc("Combo") + 1,
+                    "Permutation",
+                    permutation,
+                )
         numeric_cols = ["Station", "P", "V2", "V3", "T", "M2", "M3"]
         for col in numeric_cols:
             if col in design_forces.columns:
@@ -136,8 +194,6 @@ class ETABSDataExporter:
                 design_forces["Combo"].isin(load_combos_selected)
             ].copy()
         design_forces.drop_duplicates(inplace=True)
-        if "Column" in design_forces.columns:
-            design_forces.drop(columns=["Column"], inplace=True)
         self._write_dataframe_to_excel(
             df=design_forces,
             sheet_name=sheet_name,
@@ -154,24 +210,25 @@ class ETABSDataExporter:
         load_combos_selected: list = None,
         header_color: tuple = (189, 215, 238),
     ) -> pd.DataFrame:
-        """Extract frame assignments and related section data."""
+        """Extract frame assignments and related section data.
+
+        These tables do not depend on load combinations, so each is read once.
+        ``load_combos_selected`` is accepted only for caller compatibility.
+        """
         frame_assignments = self.etabs.get_data(
-            "Frame Assignments - Section Properties", load_combos_selected
+            "Frame Assignments - Section Properties"
         )
         frame_section_properties_rectangular = self.etabs.get_data(
-            "Frame Section Property Definitions - Concrete Rectangular",
-            load_combos_selected,
+            "Frame Section Property Definitions - Concrete Rectangular"
         )
         frame_section_properties_circular = self.etabs.get_data(
-            "Frame Section Property Definitions - Concrete Circle", load_combos_selected
+            "Frame Section Property Definitions - Concrete Circle"
         )
         concrete_beam_reinforcing = self.etabs.get_data(
-            "Frame Section Property Definitions - Concrete Beam Reinforcing",
-            load_combos_selected,
+            "Frame Section Property Definitions - Concrete Beam Reinforcing"
         )
         concrete_column_reinforcing = self.etabs.get_data(
-            "Frame Section Property Definitions - Concrete Column Reinforcing",
-            load_combos_selected,
+            "Frame Section Property Definitions - Concrete Column Reinforcing"
         )
 
         frame_assignments = frame_assignments[["Story", "UniqueName", "SectProp"]].copy()
@@ -214,10 +271,10 @@ class ETABSDataExporter:
             how="left",
         ).merge(reinforcing, on="SectProp", how="left")
         concrete_data = self.etabs.get_data(
-            "Material Properties - Concrete Data", load_combos_selected
+            "Material Properties - Concrete Data"
         )
         rebar_data = self.etabs.get_data(
-            "Material Properties - Rebar Data", load_combos_selected
+            "Material Properties - Rebar Data"
         )
         fc_map = dict(
             zip(
