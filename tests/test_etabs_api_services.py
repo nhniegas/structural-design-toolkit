@@ -131,10 +131,27 @@ def fake_connector():
     return SimpleNamespace(sap_model=model, ensure_connected=lambda: None)
 
 
-def real_connector(database: FakeInterface) -> ETABSConnector:
+class FakeModel:
+    """A model with a unit setting, like ``SapModel``."""
+
+    def __init__(self, database, units=9):
+        self.DatabaseTables = database
+        self.units = units
+        self.unit_changes = []
+
+    def GetPresentUnits(self):
+        return self.units
+
+    def SetPresentUnits(self, units):
+        self.units = units
+        self.unit_changes.append(units)
+        return 0
+
+
+def real_connector(database: FakeInterface, units: int = 9) -> ETABSConnector:
     """An ``ETABSConnector`` wired to a fake database interface (no ETABS needed)."""
     api = ETABSConnector()
-    api.sap_model = SimpleNamespace(DatabaseTables=database)
+    api.sap_model = FakeModel(database, units)
     api.is_connected = True
     return api
 
@@ -188,6 +205,43 @@ def test_a_failed_table_read_raises_instead_of_returning_an_error_object():
     database.GetTableForDisplayArray = lambda *_: ((), 0, (), 0, (), 1)
     with pytest.raises(RuntimeError, match="Material Properties"):
         real_connector(database).get_data("Material Properties - Concrete Data")
+
+
+# --------------------------------------------------------------------------
+# UNITS: tables are always read in N-mm
+# --------------------------------------------------------------------------
+def test_a_model_already_in_n_mm_is_read_without_touching_its_units():
+    api = real_connector(FakeInterface(), units=9)
+    api.get_data("Material Properties - Concrete Data")
+    assert api.sap_model.unit_changes == []
+
+
+def test_a_model_in_other_units_is_read_in_n_mm_and_then_restored():
+    """BEHAVIOUR: a kN-m model is switched to N-mm for the read, then put back."""
+    database = FakeInterface()
+    api = real_connector(database, units=6)
+    units_during_read = []
+    original_read = database.GetTableForDisplayArray
+
+    def read(*args):
+        units_during_read.append(api.sap_model.units)
+        return original_read(*args)
+
+    database.GetTableForDisplayArray = read
+    api.get_data("Material Properties - Concrete Data")
+
+    assert units_during_read == [9]
+    assert api.sap_model.unit_changes == [9, 6]
+    assert api.get_units() == 6
+
+
+def test_units_are_restored_even_when_the_read_fails():
+    database = FakeInterface()
+    database.GetTableForDisplayArray = lambda *_: ((), 0, (), 0, (), 1)  # status 1
+    api = real_connector(database, units=4)
+    with pytest.raises(RuntimeError):
+        api.get_data("Material Properties - Concrete Data")
+    assert api.get_units() == 4
 
 
 # --------------------------------------------------------------------------

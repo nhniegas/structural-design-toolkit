@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+from contextlib import contextmanager
 
 import comtypes
 import comtypes.client
@@ -14,6 +15,7 @@ from .analysis import Analysis
 from .assignments import Assignments
 from .database import DatabaseTables
 from .geometry import Geometry
+from .helpers import ensure_success
 from .loads import Loads
 from .properties import Properties
 from .results import Results
@@ -26,6 +28,19 @@ from .stories_grids import StoriesGrids
 DEFAULT_ETABS_PROGRAM_PATH = (
     r"C:\Program Files\Computers and Structures\ETABS 22\ETABS.exe"
 )
+
+
+# ETABS unit-system codes (eUnits). The API returns table values in the model's
+# "present units", which are independent of the display units shown in the ETABS
+# window. Extraction always reads in N-mm so the conversions to kN and kN-m in
+# exporter.py are valid whatever the model was created in.
+UNIT_NAMES = {
+    1: "lb-in", 2: "lb-ft", 3: "kip-in", 4: "kip-ft",
+    5: "kN-mm", 6: "kN-m", 7: "kgf-mm", 8: "kgf-m",
+    9: "N-mm", 10: "N-m", 11: "tonf-mm", 12: "tonf-m",
+    13: "kN-cm", 14: "kgf-cm", 15: "N-cm", 16: "tonf-cm",
+}
+EXTRACTION_UNITS = 9  # N, mm, C
 
 
 class ETABSConnector:
@@ -213,9 +228,37 @@ class ETABSConnector:
         except Exception as exc:
             raise RuntimeError(f"Failed to read ETABS table {table_name!r}.") from exc
 
+    def get_units(self) -> int:
+        """Return the model's present (API) unit-system code; see ``UNIT_NAMES``."""
+        return int(self.sap_model.GetPresentUnits())
+
+    @contextmanager
+    def extraction_units(self):
+        """Read in N-mm for the duration of the block, then restore the model's units.
+
+        Does nothing when the model is already in N-mm. The display units in the
+        ETABS window are not affected.
+        """
+        original = self.get_units()
+        if original == EXTRACTION_UNITS:
+            yield
+            return
+        ensure_success(
+            self.sap_model.SetPresentUnits(EXTRACTION_UNITS),
+            f"SetPresentUnits({UNIT_NAMES[EXTRACTION_UNITS]})",
+        )
+        try:
+            yield
+        finally:
+            ensure_success(
+                self.sap_model.SetPresentUnits(original),
+                f"SetPresentUnits({UNIT_NAMES.get(original, original)})",
+            )
+
     def _read_database_table(self, table_name: str) -> pd.DataFrame:
-        """Read one ETABS database table with the current display selection."""
-        return self.database.get_table(table_name)
+        """Read one ETABS database table, in N-mm, with the current display selection."""
+        with self.extraction_units():
+            return self.database.get_table(table_name)
 
     def _get_table_for_selected_combination(
         self, table_name: str, load_combination: str
