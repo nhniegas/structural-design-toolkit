@@ -61,6 +61,81 @@ def select_etabs_file() -> str:
     return file_path
 
 
+def select_option(
+    title: str, prompt: str, options: list[str], default_index: int = 0
+) -> str | None:
+    """Show a screen-centered dialog with one choice per option.
+
+    Returns the chosen option, or ``None`` when the window is closed without
+    confirming.
+    """
+    if not options:
+        raise ValueError("select_option needs at least one option.")
+    result: dict[str, str | None] = {"value": None}
+
+    root = tk.Tk()
+    root.title(title)
+
+    width, height = 460, 120 + 28 * len(options)
+    x = (root.winfo_screenwidth() // 2) - (width // 2)
+    y = (root.winfo_screenheight() // 2) - (height // 2)
+    root.geometry(f"{width}x{height}+{x}+{y}")
+    root.resizable(False, False)
+    root.attributes("-topmost", True)
+
+    def close():
+        """Tear the window down without raising Tcl errors."""
+        try:
+            root.quit()
+            root.destroy()
+        except tk.TclError:
+            pass
+
+    def confirm():
+        result["value"] = options[choice.get()]
+        close()
+
+    root.protocol("WM_DELETE_WINDOW", close)
+    root.bind("<Return>", lambda _event: confirm())  # Enter confirms the selection
+
+    tk.Label(root, text=prompt, font=("Arial", 9, "bold"), wraplength=width - 40).pack(
+        pady=(18, 8)
+    )
+    choice = tk.IntVar(root, value=min(max(default_index, 0), len(options) - 1))
+    frame_options = tk.Frame(root)
+    frame_options.pack(fill=tk.X, padx=30)
+    for index, option in enumerate(options):
+        tk.Radiobutton(
+            frame_options,
+            text=option,
+            variable=choice,
+            value=index,
+            font=("Arial", 9),
+            anchor="w",
+            justify="left",
+            wraplength=width - 80,
+        ).pack(fill=tk.X, anchor="w")
+
+    tk.Button(
+        root,
+        text="OK / Confirm",
+        width=16,
+        height=1,
+        bg="#007ACC",
+        fg="white",
+        font=("Arial", 9, "bold"),
+        command=confirm,
+    ).pack(side=tk.BOTTOM, pady=(0, 15))
+
+    try:
+        root.lift()
+        root.focus_force()
+        root.mainloop()
+    except tk.TclError:
+        pass
+    return result["value"]
+
+
 class DualListboxSelector:
     """Creates a screen-centered dual listbox popup window with extended selection and select all capabilities."""
 
