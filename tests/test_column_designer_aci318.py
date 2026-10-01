@@ -956,3 +956,220 @@ def test_material_models_use_megapascals_throughout():
         4700.0 * math.sqrt(28.0)
     )
     assert steel.stress_strain_profile.elastic_modulus == 200_000.0
+
+
+# ==========================================================================
+# 12. BUNDLED BARS IN THE SCHEDULE DRAWING
+# ==========================================================================
+def _site(count, corner=False, shaft_side=-1.0):
+    """A bottom-face position (or the bottom-left corner) holding ``count`` bars."""
+    if corner:
+        return col.BarSite(0.0, 0.0, count, (1.0, 0.0), (0.0, 1.0), is_corner=True)
+    return col.BarSite(0.0, 0.0, count, (1.0, 0.0), (0.0, 1.0), shaft_side=shaft_side)
+
+
+def _offsets(site, diameter=20.0):
+    return [(round(x, 3), round(y, 3)) for x, y in col._bundle_bar_offsets(site, diameter)]
+
+
+def test_two_bars_on_a_face_are_stacked_toward_the_core():
+    assert _offsets(_site(2)) == [(0.0, 0.0), (0.0, 20.0)]
+
+
+def test_two_bars_at_a_corner_sit_on_the_diagonal():
+    """BEHAVIOUR: the second bar is one bar diameter away along the 45-degree line."""
+    first, second = _offsets(_site(2, corner=True))
+    assert first == (0.0, 0.0)
+    assert second == (round(20.0 / math.sqrt(2.0), 3),) * 2
+
+
+def test_three_bars_form_an_l_shape():
+    """Corner: one bar along each face. Face: two along the face, third behind the
+    bar on the tie-shaft side."""
+    assert _offsets(_site(3, corner=True)) == [(0.0, 0.0), (20.0, 0.0), (0.0, 20.0)]
+    assert _offsets(_site(3, shaft_side=-1.0)) == [(-10.0, 0.0), (10.0, 0.0), (-10.0, 20.0)]
+    assert _offsets(_site(3, shaft_side=1.0)) == [(10.0, 0.0), (-10.0, 0.0), (10.0, 20.0)]
+
+
+def test_three_bars_on_a_circular_column_form_a_triangle():
+    """BEHAVIOUR: with no tie shaft to clear, the third bar sits between the other two."""
+    engine = col.ColumnFlexureDesign(0.0, 0.0, 700.0, dmain=25.0, dties=10.0, cc=40.0,
+                                     shape="circular", is_smrf=True)
+    layout = next(l for l in col._enumerate_column_bar_layouts(engine, 60) if l[0][2] == 3)
+    for site in col._circular_bar_sites(layout):
+        first, second, third = col._bundle_bar_offsets(site, 25.0)
+        assert math.dist(first, second) == pytest.approx(25.0)
+        assert math.dist(first, third) == pytest.approx(25.0)   # touches both outer bars
+        assert math.dist(second, third) == pytest.approx(25.0)
+        # the third bar is on the line from the position to the column centre
+        assert third[0] * site.along[0] + third[1] * site.along[1] == pytest.approx(0.0, abs=1e-9)
+        assert third[0] * site.inward[0] + third[1] * site.inward[1] > 0
+
+
+def test_four_bars_form_a_square():
+    assert sorted(_offsets(_site(4, corner=True))) == [(0.0, 0.0), (0.0, 20.0), (20.0, 0.0), (20.0, 20.0)]
+    assert sorted(_offsets(_site(4))) == [(-10.0, 0.0), (-10.0, 20.0), (10.0, 0.0), (10.0, 20.0)]
+
+
+def test_bars_of_a_bundle_touch_but_never_overlap():
+    for count in (2, 3, 4):
+        for site in (_site(count), _site(count, corner=True)):
+            centres = col._bundle_bar_offsets(site, 20.0)
+            gaps = [math.dist(a, b) for i, a in enumerate(centres) for b in centres[i + 1:]]
+            assert min(gaps) == pytest.approx(20.0)
+
+
+def test_bar_layout_text_round_trips():
+    layout = [(62.5, 62.5, 3), (250.0, 62.5, 1), (437.5, 62.5, 2)]
+    assert col._decode_bar_layout(col._encode_bar_layout(layout)) == layout
+    assert col._decode_bar_layout(None) is None
+    assert col._decode_bar_layout(float("nan")) is None
+
+
+def test_drawing_uses_the_designed_layout_not_a_lookalike():
+    """BEHAVIOUR: two layouts with the same bar total and bundle summary are told apart.
+
+    A 500 x 800 column has layouts with more bars on the long faces and others
+    with more on the short faces. The schedule must draw the one the design chose.
+    """
+    engine = build_rect_column(500.0, 800.0, is_smrf=True)
+    layouts = col._enumerate_column_bar_layouts(engine, 200)
+    by_summary = {}
+    for layout in layouts:
+        key = (sum(c for *_, c in layout), col._column_layout_summary(layout))
+        by_summary.setdefault(key, []).append(layout)
+    twins = next(group for group in by_summary.values() if len(group) > 1)
+    designed = twins[-1]  # not the first match, which the old lookup would return
+
+    row = pd.Series({
+        "Unique Name": "PD1C1", "Width (mm)": 500.0, "Depth (mm)": 800.0,
+        "Diameter (mm)": np.nan, "f′c (MPa)": 28.0,
+        "Longitudinal Bars": sum(c for *_, c in designed),
+        "Bundle Layout": col._column_layout_summary(designed),
+        "Bar Layout Data (x, y, n)": col._encode_bar_layout(designed),
+    })
+    drawn = col._column_layout_from_report(row, 25.0, 10.0, 40.0, True)
+    rounded = lambda layout: sorted((round(x, 2), round(y, 2), c) for x, y, c in layout)
+    assert rounded(drawn) == rounded(designed)
+    assert rounded(drawn) != rounded(twins[0])
+
+
+def test_reports_without_layout_data_still_draw():
+    """Older reports have only the bundle summary; the lookup falls back to it."""
+    row = pd.Series(_report_row())
+    assert "Bar Layout Data (x, y, n)" not in row
+    layout = col._column_layout_from_report(row, 25.0, 10.0, 40.0, True)
+    assert sum(c for *_, c in layout) == 16
+
+
+@pytest.mark.parametrize("count", [3, 4])
+def test_bundle_of_three_or_four_gets_a_flat_run_before_the_hook(count):
+    """The tie turns sharply, runs flat across the two outer bars, then bends 45
+    degrees toward the core, so the extension leaves the bundle diagonally."""
+    points = col._crosstie_end_points(
+        bar=(100.0, 50.0), count=count, outward=(0.0, -1.0), toward_tail=(1.0, 0.0),
+        bar_diameter=20.0, bend_radius=15.0, tail_length=75.0,
+    )
+    corner, flat_end = points[0], points[1]
+    assert corner == pytest.approx((75.0, 35.0))    # beside the first bar, at the outer face
+    assert flat_end == pytest.approx((110.0, 35.0))  # past the second bar, same level: flat
+    tip, before_tip = points[-1], points[-2]
+    heading = math.degrees(math.atan2(tip[1] - before_tip[1], tip[0] - before_tip[0]))
+    assert heading == pytest.approx(45.0)            # into the core (+y) and away from the shaft (+x)
+    assert math.dist(tip, before_tip) == pytest.approx(75.0)
+
+
+def test_single_bar_keeps_the_normal_hook():
+    points = col._crosstie_end_points(
+        bar=(100.0, 50.0), count=1, outward=(0.0, -1.0), toward_tail=(1.0, 0.0),
+        bar_diameter=20.0, bend_radius=15.0, tail_length=75.0,
+    )
+    assert points[0] == pytest.approx((85.0, 50.0))  # shaft beside the bar, no flat run
+    assert all(math.dist(point, (100.0, 50.0)) == pytest.approx(15.0) for point in points[:-1])
+
+
+def _section_parts(layout, width, depth, dmain, dties, cover, style):
+    """Tie bodies and bar circles of one drawn section, at 1:1."""
+    from shapely.geometry import LineString, Point
+
+    sites = col._rect_bar_sites(layout, style)
+    hook_corner = min((s for s in sites if s.is_corner), key=lambda s: (s.x, -s.y))
+    ties = col._hoop_tie_bars(
+        0.0, 0.0, width, depth, cover, dmain, dties, 1.0, hook_corner_count=hook_corner.count
+    ) + col._crosstie_bars(layout, 0.0, 0.0, 1.0, dmain, dties, style)
+    bodies = [
+        LineString(tie.path).buffer(dties / 2.0, cap_style="flat", join_style="mitre")
+        for tie in ties
+    ]
+    bars = [
+        Point(site.x + dx, site.y + dy).buffer(dmain / 2.0, 32)
+        for site in sites
+        for dx, dy in col._bundle_bar_offsets(site, dmain)
+    ]
+    return ties, bodies, bars
+
+
+@pytest.mark.parametrize("style", col.INNER_TIE_STYLES)
+@pytest.mark.parametrize(
+    "width, depth, dmain, dties",
+    [(700.0, 700.0, 25.0, 10.0), (500.0, 800.0, 28.0, 12.0), (400.0, 400.0, 20.0, 10.0)],
+)
+def test_no_tie_is_drawn_through_a_bar(width, depth, dmain, dties, style):
+    """BEHAVIOUR: ties only touch the bars, for every layout the design can select
+    whose bar positions are at least 110 mm apart.
+
+    Closer than that, a 75 mm hook extension leaving a corner bundle diagonally
+    can reach the bundle at the next position; that is a real congestion problem
+    the drawing shows rather than hides.
+    """
+    engine = build_rect_column(width, depth, dmain=dmain, dties=dties, is_smrf=True)
+    bar_area = math.pi * dmain**2 / 4.0
+    max_bars = int(CODE.column_strength.rho_max_smrf * width * depth / bar_area)
+    for layout in col._enumerate_column_bar_layouts(engine, max_bars):
+        xs = sorted({round(x, 1) for x, _, _ in layout})
+        ys = sorted({round(y, 1) for _, y, _ in layout})
+        if min(xs[1] - xs[0], ys[1] - ys[0]) < 110.0:
+            continue
+        _, bodies, bars = _section_parts(layout, width, depth, dmain, dties, 40.0, style)
+        worst = max(body.intersection(bar).area for body in bodies for bar in bars)
+        assert worst <= 0.05 * bar_area, col._column_layout_summary(layout)
+
+
+def test_inner_hoops_replace_pairs_of_crossties():
+    """BEHAVIOUR: each closed inner hoop encloses two neighbouring bar positions."""
+    engine = build_rect_column(700.0, 700.0, is_smrf=True)
+    layout = next(l for l in col._enumerate_column_bar_layouts(engine, 200)
+                  if len(l) == 20 and all(c == 1 for *_, c in l))  # 4 interior bars per face
+    crossties = col._crosstie_bars(layout, 0.0, 0.0, 1.0, 25.0, 10.0, "crossties")
+    hoops = col._crosstie_bars(layout, 0.0, 0.0, 1.0, 25.0, 10.0, "hoops")
+    assert len(crossties) == 8          # 4 vertical + 4 horizontal single ties
+    assert len(hoops) == 8              # 2 + 2 closed hoops, each drawn as two legs
+    xs = [x for x, _ in hoops[1].path]  # right leg of the first vertical hoop
+    assert max(xs) - min(xs) > 100.0    # it spans two bar positions, a crosstie does not
+
+
+def test_unknown_inner_tie_style_is_rejected():
+    engine = build_rect_column(500.0, 500.0, is_smrf=True)
+    layout = col._enumerate_column_bar_layouts(engine, 60)[0]
+    with pytest.raises(ValueError, match="inner_tie_style"):
+        col._rect_bar_sites(layout, "spirals")
+
+
+@pytest.mark.parametrize("style", col.INNER_TIE_STYLES)
+def test_schedule_draws_every_bar_of_a_bundled_layout(tmp_path, style):
+    engine = build_rect_column(700.0, 700.0, is_smrf=True)
+    layout = next(l for l in col._enumerate_column_bar_layouts(engine, 200)
+                  if max(c for *_, c in l) == 3)
+    row = _report_row(width=700.0, depth=700.0)
+    row.update({
+        "Longitudinal Bars": sum(c for *_, c in layout),
+        "Bundle Layout": col._column_layout_summary(layout),
+        "Bar Layout Data (x, y, n)": col._encode_bar_layout(layout),
+    })
+    target = tmp_path / f"bundled_{style}.dxf"
+    col.generate_dxf_column_schedule(pd.DataFrame([row]), str(target), 25.0, 40.0, True, style)
+    document = ezdxf.readfile(target)
+    circles = [e for e in document.modelspace()
+               if e.dxftype() == "CIRCLE" and e.dxf.layer == "LONGITUDINAL"]
+    assert len(circles) == sum(c for *_, c in layout)
+    assert len(document.audit().errors) == 0

@@ -105,7 +105,37 @@ Units inside the column designer are N, mm and MPa. ETABS reports compression as
 
 ## Step 6: column schedule
 
-Writes `Column_Schedule.dxf` with one cell per column mark and story: the section drawn to scale with bars, hoops and crossties, and rows for size, vertical bars, joint ties, confinement ties and general ties. Circular columns are drawn with a circular outline and spiral.
+Asks for the output folder and for the interior tie style, then writes `Column_Schedule.dxf` with one cell per column mark and story: the section drawn to scale with bars, hoops and interior ties, and rows for size, vertical bars, joint ties, confinement ties and general ties. Circular columns are drawn with a circular outline and spiral.
+
+The drawing uses the exact bar layout the design selected. The report stores it in the `Bar Layout Data (x, y, n)` column as `x,y,count` per bar position (mm from the bottom-left corner of the section; from the centre for circular columns). A report written before that column existed is drawn from the bundle summary instead, which cannot always tell two similar layouts apart, so run the column design again before exporting.
+
+Interior tie style:
+
+| Choice | What is drawn |
+|---|---|
+| Crossties | One tie per pair of opposite face bars, with a 135-degree hook at each end |
+| Closed inner hoops | Closed hoops, each enclosing two neighbouring bar positions on opposite faces. An odd position left over keeps a crosstie |
+
+### Bundled bars
+
+A layout position holds one to four bars. The position is the bar that sits against the tie; the others are placed so the bars touch:
+
+| Bars | At a corner | On a face |
+|---|---|---|
+| 2 | Second bar on the diagonal, toward the core | Second bar directly behind the first, toward the core |
+| 3 | L-shape: one bar along each face | Two along the face, the third behind the bar on the tie's shaft side |
+| 4 | 2 x 2 square | 2 x 2 square |
+
+On a circular column, bundles follow the face rules with "toward the core" meaning toward the centre, except that the third bar of a 3-bar bundle sits centred behind the other two, forming a triangle.
+
+Hooks at bundles:
+
+- **One bar, or a corner pair on the diagonal:** the normal 135-degree bend around the bar.
+- **Bundle of three or four, or a second bar stacked behind the bar a hoop closes on:** no bend around the first bar. The tie turns with a sharp corner, runs flat past two bars, then bends 45 degrees toward the core. The hook extension leaves the bundle diagonally into the core, 135 degrees from the leg the tie arrived on, and clears every bar of the bundle.
+
+Where bar positions are closer than about 110 mm, a hook extension leaving a corner bundle can reach the bundle at the next position. The drawing shows that overlap as it is; check such sections for congestion.
+
+The design calculation places each bundle as one equivalent bar at the layout position. The drawn bars are offset from that point by up to one bar diameter, which changes the capacity only slightly and is not fed back into the design.
 
 ## Limitations
 
