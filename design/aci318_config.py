@@ -181,6 +181,8 @@ class BeamSeismicConfig:
 class ColumnStrengthConfig:
     """Axial-flexure limits and reinforcement ratios for columns."""
 
+    earth_contact_cover: float = 75.0  # mm, cast against earth            ACI 20.6.1.3.1
+
     rho_min: float = 0.01  #                                                  ACI 10.6.1.1
     rho_max: float = 0.08  #                                                  ACI 10.6.1.1
     rho_max_smrf: float = 0.06  #                                             ACI 18.7.4.1
@@ -265,6 +267,8 @@ class DetailingDrawingConfig:
     arc_steps: int = 12  # segments per bend arc
     first_hoop_offset: float = 50.0  # mm, first hoop from support face
     column_joint_tie_spacing: float = 100.0  # mm, "JOINT REIN." row
+    column_confinement_tie_spacing: float = 100.0  # mm, "CONFINMT" row
+    column_schedule_base_label: str = "FDN"  # level below the bottom-most story
     column_general_tie_spacing: float = 150.0  # mm, "TIES" row outside confinement
 
 

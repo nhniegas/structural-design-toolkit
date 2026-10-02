@@ -1,0 +1,229 @@
+"""
+tests/test_model_setup.py
+=========================
+Checks for the ETABS model setup: etabs_api/ubc97.py, load_combinations.py and
+the planning functions of model_setup.py. None of them needs ETABS.
+
+The UBC 97 values are checked against the two office models, whose ETABS
+"per code" coefficients are known.
+"""
+
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from etabs_api import load_combinations as lc  # noqa: E402
+from etabs_api import model_setup as ms  # noqa: E402
+from etabs_api import ubc97  # noqa: E402
+
+
+# --------------------------------------------------------------------------
+# UBC 97 COEFFICIENTS
+# --------------------------------------------------------------------------
+def test_near_source_factors_are_interpolated_on_distance():
+    """Type A at 8.9 km: Na between 1.2 (5 km) and 1.0 (10 km), Nv between 1.6 and 1.2."""
+    na, nv = ubc97.near_source_factors("A", 8.9)
+    assert na == pytest.approx(1.044)
+    assert nv == pytest.approx(1.288)
+
+
+def test_near_source_factors_are_constant_outside_the_table():
+    assert ubc97.near_source_factors("A", 0.5) == (1.5, 2.0)
+    assert ubc97.near_source_factors("A", 40.0) == (1.0, 1.0)
+    assert ubc97.near_source_factors("C", 1.0) == (1.0, 1.0)
+
+
+def test_coefficients_match_the_test_model():
+    """ETABS, zone 4, SE, source A at 8.9 km: Ca = 0.37584, Cv = 1.23648."""
+    ca, cv = ubc97.seismic_coefficients(0.4, "SE", "A", 8.9)
+    assert ca == pytest.approx(0.37584)
+    assert cv == pytest.approx(1.23648)
+
+
+def test_coefficients_of_soil_sd_at_8_km():
+    """HAND CALC: Ca = 0.44 Na = 0.44 x 1.08, Cv = 0.64 Nv = 0.64 x 1.36."""
+    ca, cv = ubc97.seismic_coefficients(0.4, "SD", "A", 8.0)
+    assert ca == pytest.approx(0.4752)
+    assert cv == pytest.approx(0.8704)
+
+
+def test_near_source_does_not_apply_below_zone_4():
+    assert ubc97.seismic_coefficients(0.2, "SD", "A", 1.0) == (0.28, 0.40)
+
+
+@pytest.mark.parametrize("args", [(0.35, "SD"), (0.4, "SF"), (0.4, "SD", "D")])
+def test_invalid_inputs_are_refused(args):
+    with pytest.raises(ValueError):
+        ubc97.seismic_coefficients(*args)
+
+
+def test_vertical_effect_and_spectrum_scale():
+    assert ubc97.vertical_effect_factor(0.37584, 1.0) == pytest.approx(0.18792)
+    assert ubc97.response_spectrum_scale(1.0, 8.5) == pytest.approx(1153.72, abs=0.01)
+
+
+# --------------------------------------------------------------------------
+# LOAD COMBINATIONS
+# --------------------------------------------------------------------------
+PATTERNS = {
+    "SELFWEIGHT": "Dead", "SIDL": "Super Dead", "LIVERED": "Reducible Live",
+    "LIVENRED": "Live", "LIVEROOF": "Roof Live", "WX": "Wind", "WY": "Wind",
+    "EQXPE": "Seismic", "EQXSD": "Seismic (Drift)",
+}
+
+
+def _combos(ca=0.4):
+    return {combo.name: combo for combo in lc.build_combinations(PATTERNS, ca)}
+
+
+def test_vertical_effect_goes_into_the_dead_load_factor():
+    """Ev = 0.5 x 0.4 = 0.20: added in the 1.2 D case, subtracted in the 0.9 D case."""
+    combos = _combos()
+    heavy = dict(combos["ULS 107 (1.2 + Ev) DL + f LL + 1.0 EQ1"].cases)
+    light = dict(combos["ULS 110 (0.9 - Ev) DL + 1.0 RSA4"].cases)
+    assert heavy["SELFWEIGHT"] == pytest.approx(1.4) and heavy["SIDL"] == pytest.approx(1.4)
+    assert light["SELFWEIGHT"] == pytest.approx(0.7)
+
+
+def test_live_factor_and_roof_live_in_the_seismic_combination():
+    cases = dict(_combos()["ULS 107 (1.2 + Ev) DL + f LL + 1.0 EQ1"].cases)
+    assert cases["LIVERED"] == 0.5 and cases["LIVENRED"] == 0.5
+    assert "LIVEROOF" not in cases and "WX" not in cases and "EQXPE" not in cases
+
+
+def test_roof_live_combination_contains_the_roof_live_load():
+    cases = dict(_combos()["ULS 102 1.2 DL + 1.6 Lr + f LL"].cases)
+    assert cases["LIVEROOF"] == 1.6 and cases["LIVERED"] == 0.5
+
+
+def test_seismic_combinations_point_at_their_directional_combination():
+    combos = _combos()
+    assert combos["ULS 107 (1.2 + Ev) DL + f LL + 1.0 EQ3"].combos == [("EQ_COMBO_03", 1.0)]
+    assert combos["ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA3"].combos == [("RSA_COMBO_03", 1.0)]
+    assert combos["EQ_COMBO_03"].cases == [("EQXNE", -1.0), ("EQYPE", 0.3)]
+    assert combos["RSA_COMBO_05"].cases == [("RSAY", 1.0), ("RSAX", 0.3)]
+
+
+def test_static_and_spectrum_sets_share_one_number_and_one_format():
+    names = list(_combos())
+    for number in (107, 110):
+        assert sum(n.startswith(f"ULS {number} ") and " EQ" in n for n in names) == 8
+        assert sum(n.startswith(f"ULS {number} ") and " RSA" in n for n in names) == 8
+    assert not any(" - " in n and not ("(0.9 - Ev)" in n or "(0.6 - " in n or "- 1.0 Em" in n)
+                   for n in names)
+
+
+def test_only_strength_combinations_are_design_combinations():
+    combos = _combos()
+    assert all(c.design == name.startswith("ULS ") for name, c in combos.items())
+
+
+def test_special_combinations_amplify_the_envelope():
+    combos = _combos()
+    assert combos["SSLC 100 1.2 DL + f LL + 1.0 Em EQ"].combos == [("ENVE_EQ", 2.8)]
+    assert combos["SSLC 102 0.9 DL - 1.0 Em RSA"].combos == [("ENVE_RSA", -2.8)]
+    assert combos["ENVE_EQ"].envelope and len(combos["ENVE_EQ"].combos) == 8
+
+
+def test_combinations_only_use_what_was_created_before_them():
+    """ETABS needs a combination to exist before another one can use it."""
+    seen = set()
+    for combo in lc.build_combinations(PATTERNS, 0.4):
+        assert all(name in seen for name, _ in combo.combos), combo.name
+        seen.add(combo.name)
+    assert len(seen) == 148
+
+
+def test_service_seismic_factor_is_one_over_1_4():
+    combos = _combos()
+    combo = combos["SLS 104 (1.0 + 0.714 Ev) DL + 0.714 EQ1"]
+    assert combo.combos[0][1] == pytest.approx(1 / 1.4)
+    assert dict(combo.cases)["SELFWEIGHT"] == pytest.approx(1.0 + 0.2 / 1.4)
+
+
+# --------------------------------------------------------------------------
+# MATERIALS, SECTIONS, SETTINGS
+# --------------------------------------------------------------------------
+def test_concrete_grade_matches_the_office_models():
+    """C05 in the models: f'c = 34.4828 MPa, E = 27599.35 MPa."""
+    grade = ms.concrete_properties(5)
+    assert grade["name"] == "C05"
+    assert grade["fc"] == pytest.approx(34.482758, abs=1e-5)
+    assert grade["E"] == pytest.approx(27599.35, abs=0.01)
+
+
+def test_rebar_grade_60():
+    grade = ms.rebar_properties(60)
+    assert grade["name"] == "G60" and grade["fy"] == pytest.approx(413.685, abs=0.001)
+
+
+def _sections(ranges):
+    settings = ms.merge_settings({"sections": ranges, "section_concrete_ksi": [6]})
+    return ms.section_definitions(settings)
+
+
+EMPTY = {"G": {"width": [], "depth": []}, "B": {"width": [], "depth": []},
+         "CR": {"size": []}, "C": {"diameter": []}}
+
+
+def test_beam_sections_keep_width_to_depth_at_least_0_3():
+    ranges = {**EMPTY, "G": {"width": [200, 600, 200], "depth": [400, 800, 400]}}
+    names = [s["name"] for s in _sections(ranges)]
+    # 200X800 is 0.25, below the limit; 600X400 is wider than deep
+    assert names == ["G_200X400_C06_G60", "G_400X400_C06_G60", "G_400X800_C06_G60",
+                     "G_600X800_C06_G60"]
+
+
+def test_rectangular_columns_keep_the_short_side_at_least_half_the_long_one():
+    ranges = {**EMPTY, "CR": {"size": [400, 1000, 300]}}
+    sizes = {(s["width"], s["depth"]) for s in _sections(ranges)}
+    assert (400, 700) in sizes and (700, 400) in sizes       # both orientations
+    assert (400, 1000) not in sizes                           # 0.4
+    assert all(s["kind"] == "column" for s in _sections(ranges))
+
+
+def test_circular_columns_are_named_by_diameter():
+    ranges = {**EMPTY, "C": {"diameter": [600, 700, 100]}}
+    assert [s["name"] for s in _sections(ranges)] == ["C_600_C06_G60", "C_700_C06_G60"]
+
+
+def test_extra_patterns_are_added_once_and_soil_is_not_standard():
+    settings = ms.merge_settings({"extra_dead": ["elevator dead", "SIDL"], "extra_live": ["Stage"]})
+    patterns = {name: kind for name, kind, _ in ms.load_patterns(settings)}
+    assert patterns["ELEVATOR DEAD"] == "Super Dead" and patterns["STAGE"] == "Live"
+    assert "SOIL" not in patterns
+    assert len(patterns) == len(ms.STANDARD_PATTERNS) + 2
+
+
+def test_only_self_weight_carries_the_self_weight_multiplier():
+    assert [name for name, _, sw in ms.STANDARD_PATTERNS if sw] == ["SELFWEIGHT"]
+
+
+def test_modes_are_three_per_story_with_a_floor():
+    assert ms.number_of_modes(10) == 30
+    assert ms.number_of_modes(1) == 12
+
+
+def test_saved_settings_keep_new_defaults(tmp_path):
+    path = tmp_path / "model.setup.json"
+    ms.save_settings({"seismic": {"soil_type": "SE"}}, str(path))
+    merged = ms.merge_settings(ms.load_settings(str(path)))
+    assert merged["seismic"]["soil_type"] == "SE"
+    assert merged["seismic"]["r_factor"] == 8.5          # from the defaults
+    assert ms.settings_path(r"C:\x\MODEL.EDB") == r"C:\x\MODEL.setup.json"
+
+
+def test_model_text_is_rewritten_to_per_code_seismic_inputs():
+    line = ('  SEISMIC "EQXPE"  "UBC 97"    DIR "X+ECC"  ECC 0.05  TOPSTORY "RD"    '
+            'BOTTOMSTORY "Base"   PERIODTYPE "PROGCALC"   CT 0.02  Ca 0.37584  Cv 1.23648  '
+            'SOURCETYPE "B"    SOURCEDIST 15  I 1  R 8.5')
+    other = '  SEISMIC "OLD"  "UBC 97"    DIR "X"  CT 0.03  Ca 0.4  Cv 0.56  I 1  R 8.5'
+    settings = ms.merge_settings({"seismic": {"soil_type": "SE", "distance_km": 8.9}})
+    text, changed = ms.per_code_seismic_text("\n".join(["$ LOAD PATTERNS", line, other]), settings)
+    assert changed == 1
+    lines = text.splitlines()
+    assert lines[1].endswith('CT 0.02  SOIL "SE"  Z 0.4  SOURCETYPE "A"    SOURCEDIST 8.9  I 1  R 8.5')
+    assert "Ca " not in lines[1] and lines[2] == other       # other patterns untouched

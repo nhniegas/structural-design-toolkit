@@ -1173,3 +1173,345 @@ def test_schedule_draws_every_bar_of_a_bundled_layout(tmp_path, style):
                if e.dxftype() == "CIRCLE" and e.dxf.layer == "LONGITUDINAL"]
     assert len(circles) == sum(c for *_, c in layout)
     assert len(document.audit().errors) == 0
+
+
+# ==========================================================================
+# 13. SQUARE COLUMNS, LEGS PER EDGE, COLUMN STACKS, REPORT PER AXIS
+# ==========================================================================
+def _positions_per_edge(layout):
+    xs = {round(x, 3) for x, _, _ in layout}
+    ys = {round(y, 3) for _, y, _ in layout}
+    return len(xs), len(ys)
+
+
+def test_square_column_gets_the_same_bars_on_every_face():
+    """BEHAVIOUR: a square column is never offered an unequal bar arrangement."""
+    layouts = col._enumerate_column_bar_layouts(build_rect_column(500.0, 500.0), 80)
+    assert layouts
+    assert all(nx == ny for nx, ny in map(_positions_per_edge, layouts))
+
+
+def test_rectangular_column_may_still_have_unequal_faces():
+    layouts = col._enumerate_column_bar_layouts(build_rect_column(500.0, 800.0), 80)
+    assert any(nx != ny for nx, ny in map(_positions_per_edge, layouts))
+
+
+def test_support_legs_and_bar_counts_are_given_per_edge():
+    """HAND CALC: 4 positions on the X edge need 2 + ceil(2/2) = 3 legs; 6 on the
+    Y edge need 2 + ceil(4/2) = 4 legs."""
+    engine = build_rect_column(500.0, 800.0, is_smrf=True)
+    layout = next(l for l in col._enumerate_column_bar_layouts(engine, 80)
+                  if _positions_per_edge(l) == (4, 6) and all(c == 1 for *_, c in l))
+    assert col._alternating_support_legs(engine, layout) == (3, 4)
+    assert col._bars_per_edge(engine, layout) == (4, 6)
+
+
+def test_circular_column_has_no_edges():
+    engine = col.ColumnFlexureDesign(0.0, 0.0, 600.0, shape="circular")
+    layout = col._enumerate_column_bar_layouts(engine, 40)[0]
+    assert col._alternating_support_legs(engine, layout) == (1, 1)
+    assert col._bars_per_edge(engine, layout) == (None, None)
+
+
+def test_shear_legs_are_sized_per_direction():
+    """BEHAVIOUR: V2 (along the depth) uses the legs counted along the X edge and
+    V3 (along the width) the legs counted along the Y edge."""
+    engine = build_rect_column(is_smrf=False)
+    layout = col._enumerate_column_bar_layouts(engine, 40)[1]
+    rows, most = col._column_shear_checks(
+        frame_row(), force_table(), engine, sum(c for *_, c in layout), 100.0,
+        (9, 7), False, bundle_layout=layout)
+    by_direction = {row["Shear_Direction"]: row["Provided_Transverse_Legs"] for row in rows}
+    assert by_direction == {"V2": 9, "V3": 7}
+    assert most == 9
+
+
+def test_column_stacks_are_listed_from_the_top_level_down():
+    """Columns stand on each other when one's bottom joint is the other's top joint."""
+    ends = {
+        "GF-C1": ("P0", "P1"), "2F-C1": ("P1", "P2"), "3F-C1": ("P2", "P3"),
+        "GF-C2": ("Q0", "Q1"), "2F-C2": ("Q1", "Q2"),
+        "GF-C3": ("R0", "R1"),
+    }
+    stacks = col._column_stacks(ends)
+    assert sorted(stacks) == [
+        ["2F-C2", "GF-C2"], ["3F-C1", "2F-C1", "GF-C1"], ["GF-C3"],
+    ]
+
+
+def _column_result(name="C1"):
+    return {"UniqueName": name, "Story": "2F", "Width_mm": 500.0, "Depth_mm": 500.0,
+            "Longitudinal_Bars": 12,
+            "Longitudinal_Bar_Layout": "12 single bars", "Design_Status": "PASS"}
+
+
+def _load_check(end, combo="ULS 1"):
+    return {"UniqueName": "C1", "Combo": combo, "End": end, "Pu_kN": 100.0,
+            "Mu2_kNm": 1.0, "Mu3_kNm": 2.0, "phi_Mn_kNm": 50.0,
+            "Flexure_Utilization": 0.1, "Axial_Check": "PASS", "Flexure_Check": "PASS",
+            "Strength_Check": "PASS"}
+
+
+def _joint(axis, ratio, utilization, sway):
+    return {"Load_Combo": "ULS 1", "Column_End_Members": f"C1:J:{axis}",
+            "Sway_Direction": sway, "Framing_Beam_Reinforcement": f"beams {axis}",
+            "Column_Reinforcement_At_Joint": "C1 (J): 12 bars",
+            "Sum_Column_Mn_kNm": 100.0 * ratio, "Sum_Beam_Mn_kNm": 100.0,
+            "Column_Beam_Ratio": ratio, "Strong_Column_Check": "PASS" if ratio >= 1.2 else "FAIL",
+            "Joint_Shear_Demand_kN": 500.0 * utilization, "phi_Vn_kN": 500.0,
+            "Joint_Shear_Utilization": utilization, "Joint_Shear_Check": "PASS"}
+
+
+def _report(joints):
+    report, _ = col._build_consolidated_column_report(
+        pd.DataFrame([_column_result()]),
+        pd.DataFrame([_load_check("I"), _load_check("J")]),
+        pd.DataFrame(),
+        pd.DataFrame(joints),
+        joint_na_reason="N/A - no beam frames into this end",
+    )
+    return report
+
+
+def test_report_lists_the_top_of_the_column_before_the_bottom():
+    report = _report([_joint("X", 1.5, 0.4, "Positive")])
+    assert report["End"].tolist() == ["J", "I"]
+
+
+def test_joint_checks_are_reported_for_each_column_axis():
+    """BEHAVIOUR: each axis shows its own governing case, with matching values."""
+    report = _report([
+        _joint("X", 1.5, 0.4, "Positive"), _joint("X", 1.3, 0.6, "Negative"),
+        _joint("Y", 2.0, 0.2, "Positive"),
+    ])
+    top = report.loc[report["End"] == "J"].iloc[0]
+    assert top["BCC_Ratio_X"] == pytest.approx(1.3)           # lowest ratio along X
+    assert top["Sum_Column_Mn_X_kNm"] == pytest.approx(130.0)  # from the same case
+    assert top["BCC_Ratio_Y"] == pytest.approx(2.0)
+    assert top["Joint_Shear_Utilization_X"] == pytest.approx(0.6)   # highest along X
+    assert top["Joint_Shear_Demand_X_kN"] == pytest.approx(300.0)   # from the same case
+    assert top["Joint_Shear_Capacity_X_kN"] == pytest.approx(500.0)
+    assert top["Beam_Reinforcement_Y"] == "beams Y"
+    assert top["BCC_Status"] == "PASS"
+
+
+def test_empty_joint_cells_say_why():
+    report = _report([_joint("X", 1.5, 0.4, "Positive")])
+    top = report.loc[report["End"] == "J"].iloc[0]
+    bottom = report.loc[report["End"] == "I"].iloc[0]
+    assert top["BCC_Ratio_Y"] == "N/A - no beam frames in along Y"
+    assert bottom["BCC_Ratio_X"] == "N/A - no beam frames into this end"
+    assert bottom["Joint_Shear_Status"] == "N/A - no beam frames into this end"
+
+
+# ==========================================================================
+# 14. ETABS LOCAL AXES: DEPTH (t3) ALONG LOCAL 2, WIDTH (t2) ALONG LOCAL 3
+# ==========================================================================
+def _wide_column(width=800.0, depth=600.0):
+    """A column wider than it is deep, with the same bar positions on each face."""
+    row = frame_row(width=width, depth=depth)
+    engine = build_rect_column(width, depth)
+    layout = next(
+        l for l in col._enumerate_column_bar_layouts(engine, 40)
+        if _positions_per_edge(l)[0] == _positions_per_edge(l)[1]
+    )
+    bars = sum(count for *_, count in layout)
+    engine, section = col._build_column_section(
+        row, bars, 25.0, 10.0, 40.0, False, bundle_layout=layout)
+    return row, engine, section, layout, bars
+
+
+def _capacity(engine, section, m2, m3):
+    angle = col._section_bending_angle(m2, m3)
+    return abs(float(engine.solve_moment_capacity(section, 0.0, angle)[0]))
+
+
+def test_m3_bends_the_section_over_its_depth():
+    """ETABS: I33 = t2 * t3^3 / 12, so M3 uses the depth as its lever and M2 the width.
+
+    The same bars sit on every face, so the capacity must be larger over the
+    longer dimension: M2 (over the 800 width) above M3 (over the 600 depth).
+    """
+    _, engine, section, _, _ = _wide_column(800.0, 600.0)
+    assert _capacity(engine, section, 1.0, 0.0) > 1.2 * _capacity(engine, section, 0.0, 1.0)
+
+
+def test_m3_capacity_matches_the_turned_section():
+    """An 800 x 600 column under M3 is a 600 x 800 column under M2."""
+    _, engine, section, layout, bars = _wide_column(800.0, 600.0)
+    turned_layout = [(y, x, count) for x, y, count in layout]
+    turned_engine, turned_section = col._build_column_section(
+        frame_row(width=600.0, depth=800.0), bars, 25.0, 10.0, 40.0, False,
+        bundle_layout=turned_layout)
+    assert _capacity(engine, section, 0.0, 1.0) == pytest.approx(
+        _capacity(turned_engine, turned_section, 1.0, 0.0), rel=1e-3)
+
+
+def test_v2_shear_uses_the_depth_as_its_effective_depth():
+    """HAND CALC: V2 acts along local 2 (the depth): d = 600 - 40 - 10 - 12.5 = 537.5 mm.
+    V3 acts along the width: d = 800 - 62.5 = 737.5 mm."""
+    row, engine, _, layout, bars = _wide_column(800.0, 600.0)
+    rows, _ = col._column_shear_checks(
+        row, force_table(), engine, bars, 100.0, 4, False, bundle_layout=layout)
+    vc = {r["Shear_Direction"]: r["Vc_kN"] for r in rows}  # Vc is proportional to b * d
+    assert vc["V2"] / vc["V3"] == pytest.approx((800 * 537.5) / (600 * 737.5))
+
+
+# ==========================================================================
+# 15. CALCULATION REPORT (PDF) CONTENT
+# ==========================================================================
+def _tables(member):
+    return {table.title: table for table in member.tables}
+
+
+def test_column_report_shows_the_governing_combination_per_end():
+    """BEHAVIOUR: per end, the combination with the highest utilization is reported."""
+    checks = pd.DataFrame([
+        {**_load_check("J", "ULS 1"), "Flexure_Utilization": 0.30},
+        {**_load_check("J", "ULS 2"), "Flexure_Utilization": 0.80},
+        {**_load_check("I", "ULS 1"), "Flexure_Utilization": 0.55},
+        {**_load_check("I", "ULS 2"), "Flexure_Utilization": 0.10},
+    ])
+    report, _ = col._build_consolidated_column_report(
+        pd.DataFrame([_column_result()]), checks, pd.DataFrame(),
+        pd.DataFrame([_joint("X", 1.5, 0.4, "Positive"), _joint("X", 1.3, 0.6, "Negative")]),
+    )
+    member = col._column_calc_member(report)
+    flexure = _tables(member)["Axial load and flexure - governing combination at each end"]
+    assert [(row[0], row[1], row[6]) for row in flexure.rows] == [
+        ("Top (J)", "ULS 2", "0.80"), ("Bottom (I)", "ULS 1", "0.55"),
+    ]
+    assert member.heading == "Column C1 (2F)"
+    assert member.summary[-1] == "PASS"
+
+
+def test_column_report_keeps_the_reason_where_a_joint_check_is_missing():
+    report = _report([_joint("X", 1.5, 0.4, "Positive")])
+    member = col._column_calc_member(report)
+    capacity = _tables(member)["Strong column - weak beam"]
+    by_end_axis = {(row[0], row[1]): row for row in capacity.rows}
+    assert by_end_axis[("Top (J)", "X")][5] == "1.50"
+    assert by_end_axis[("Top (J)", "Y")][2] == "N/A - no beam frames in along Y"
+
+
+def test_report_sheet_headers_map_back_to_field_names():
+    """Every worksheet header must be unique, or the sheet cannot be read back."""
+    labels = list(col.COLUMN_REPORT_LABELS.values())
+    assert len(labels) == len(set(labels))
+
+
+def test_column_report_joint_shear_names_no_combination():
+    """Joint shear does not depend on the load combination, so none is shown."""
+    member = col._column_calc_member(_report([_joint("X", 1.5, 0.4, "Positive")]))
+    joint = _tables(member)["Joint shear"]
+    assert "Combination" not in joint.header
+    by_end_axis = {(row[0], row[1]): row for row in joint.rows}
+    assert by_end_axis[("Top (J)", "X")][2:] == ["200.00", "500.00", "0.40", "PASS"]
+    assert by_end_axis[("Top (J)", "Y")][-1] == "N/A - no beam frames in along Y"
+
+
+@pytest.mark.parametrize("name, mark", [
+    ("2F - C1", "C1"), ("2F-C7A", "C7A"), ("2GC-5A", "C5A"), ("2-C5A", "C5A"), ("PD1-C12", "C12"), ("PD1GC-12", "C12"),
+    ("PD2PC-1A", "PC1A"), ("PD2-PC2A", "PC2A"), ("PC-1", "PC1"), ("TOPGC-3", "C3"), ("1234", "1234"),
+])
+def test_column_mark_from_unique_name(name, mark):
+    """The level is dropped; a planted column keeps its P."""
+    assert col._common_column_mark(name) == mark
+
+
+def _stack_connectivity():
+    """Three columns of one stack (UG, 2F, PD1) and one more on 2F and PD1."""
+    return pd.DataFrame([
+        {"UniqueName": "UG-C1", "UniquePtI": "a0", "UniquePtJ": "a1"},
+        {"UniqueName": "2-C1", "UniquePtI": "a1", "UniquePtJ": "a2"},
+        {"UniqueName": "PD1-C1", "UniquePtI": "a2", "UniquePtJ": "a3"},
+        {"UniqueName": "2-C2", "UniquePtI": "b1", "UniquePtJ": "b2"},
+        {"UniqueName": "PD1-C2", "UniquePtI": "b2", "UniquePtJ": "b3"},
+    ])
+
+
+def test_story_order_comes_from_the_stacks_not_the_names():
+    """By name, PD1 (the number 1) would sort below 2F. The stack says otherwise."""
+    story_of = {"UG-C1": "UG", "2-C1": "2F", "PD1-C1": "PD1", "2-C2": "2F", "PD1-C2": "PD1"}
+    assert col._story_order_from_stacks(_stack_connectivity(), story_of) == ["UG", "2F", "PD1"]
+
+
+def test_story_order_falls_back_to_the_names_without_connectivity():
+    story_of = {"a": "3F", "b": "2F"}
+    assert col._story_order_from_stacks(pd.DataFrame(), story_of) == ["2F", "3F"]
+
+
+# ==========================================================================
+# 16. BOTTOM-STORY COVER AND THE SCHEDULE TEXT
+# ==========================================================================
+def _two_story_frame():
+    frame = pd.DataFrame([
+        {**frame_row("GF-C1", 800.0, 600.0).to_dict(), "Story": "GF"},
+        {**frame_row("2-C1", 800.0, 600.0).to_dict(), "Story": "2F"},
+        {"UniqueName": "2GX-1", "Story": "2F", "DesignType": "Beam", "Width": 300.0, "Depth": 600.0},
+    ])
+    connectivity = pd.DataFrame([
+        {"UniqueName": "GF-C1", "UniquePtI": "p0", "UniquePtJ": "p1"},
+        {"UniqueName": "2-C1", "UniquePtI": "p1", "UniquePtJ": "p2"},
+    ])
+    return frame, connectivity
+
+
+def test_bottom_story_cover_can_move_the_bars_inward():
+    frame, connectivity = _two_story_frame()
+    out, story = col._apply_bottom_story_cover(frame, connectivity, 40.0, "bars")
+    by_name = out.set_index("UniqueName")
+    assert story == "GF"
+    assert by_name.loc["GF-C1", "DesignCover"] == 75.0
+    assert pd.isna(by_name.loc["2-C1", "DesignCover"])           # upper story untouched
+    assert (by_name.loc["GF-C1", "Width"], by_name.loc["GF-C1", "Depth"]) == (800.0, 600.0)
+
+
+def test_bottom_story_cover_can_enlarge_the_section_instead():
+    """HAND CALC: 75 - 40 = 35 mm more on every face, so 70 mm on each dimension."""
+    frame, connectivity = _two_story_frame()
+    out, _ = col._apply_bottom_story_cover(frame, connectivity, 40.0, "enlarge")
+    by_name = out.set_index("UniqueName")
+    assert (by_name.loc["GF-C1", "Width"], by_name.loc["GF-C1", "Depth"]) == (870.0, 670.0)
+    assert (by_name.loc["2-C1", "Width"], by_name.loc["2GX-1", "Width"]) == (800.0, 300.0)
+
+
+def test_no_bottom_story_cover_changes_nothing():
+    frame, connectivity = _two_story_frame()
+    out, story = col._apply_bottom_story_cover(frame, connectivity, 40.0, "none")
+    assert story is None and out is frame
+
+
+def test_section_uses_the_cover_of_its_own_row():
+    """With 75 mm cover the first bar sits at 75 + 10 + 12.5 = 97.5 mm."""
+    row = frame_row()
+    row["DesignCover"] = 75.0
+    engine, _ = col._build_column_section(row, 8, 25.0, 10.0, 40.0, False)
+    layout = col._enumerate_column_bar_layouts(engine, 20)[0]
+    assert engine.cc == 75.0
+    assert min(x for x, _, _ in layout) == pytest.approx(97.5)
+
+
+def test_schedule_text_follows_the_office_convention(tmp_path):
+    """Sizes as 32mm(dia), spacing as @ 100mm; confinement shows the standard 100 mm."""
+    report = pd.DataFrame([_report_row()])
+    report["Tie / Spiral Spacing (mm)"] = 150.0
+    target = tmp_path / "schedule.dxf"
+    col.generate_dxf_column_schedule(report, str(target), 25.0, 40.0, True)
+    texts = {entity.dxf.text for entity in ezdxf.readfile(target).modelspace().query("TEXT")}
+    tie = f"{float(report.iloc[0]['Tie Bar Diameter (mm)']):g}mm%%C"
+    assert {"500X500", "16-25mm%%C", f"{tie} @ 100mm", f"{tie} @ 150mm"} <= texts
+    assert sum(text == f"{tie} @ 100mm" for text in (
+        entity.dxf.text for entity in ezdxf.readfile(target).modelspace().query("TEXT")
+    )) == 2      # joint and confinement rows
+
+
+def test_schedule_floor_level_is_the_range_the_column_spans(tmp_path):
+    report = pd.DataFrame([
+        _report_row("GF-C1", "GF"), _report_row("2-C1", "2F"), _report_row("PD1-C1", "PD1"),
+    ])
+    target = tmp_path / "schedule.dxf"
+    col.generate_dxf_column_schedule(
+        report, str(target), 25.0, 40.0, True, story_order=["GF", "2F", "PD1"])
+    texts = {entity.dxf.text for entity in ezdxf.readfile(target).modelspace().query("TEXT")}
+    assert {"FDN TO GF", "GF TO 2F", "2F TO PD1"} <= texts
