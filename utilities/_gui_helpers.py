@@ -48,6 +48,23 @@ def select_save_file(default_name="Composite_Column_Report") -> str:
     return file_path
 
 
+def select_save_path(
+    title: str, default_name: str, extension: str, description: str
+) -> str:
+    """Opens a native Windows Save As dialog for a file of the given extension."""
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+    file_path = filedialog.asksaveasfilename(
+        title=title,
+        initialfile=default_name,
+        defaultextension=extension,
+        filetypes=[(description, f"*{extension}"), ("All files", "*.*")],
+    )
+    root.destroy()
+    return file_path
+
+
 def select_etabs_file() -> str:
     """Opens a native Windows file dialog to select an ETABS .edb file."""
     root = tk.Tk()
@@ -130,6 +147,80 @@ def select_option(
     try:
         root.lift()
         root.focus_force()
+        root.mainloop()
+    except tk.TclError:
+        pass
+    return result["value"]
+
+
+def enter_values(
+    title: str, prompt: str, labels: list[str], defaults: dict[str, str] | None = None
+) -> dict[str, str] | None:
+    """Show a screen-centered dialog with one text box per label.
+
+    Returns ``{label: typed text}``, or ``None`` when the window is closed
+    without confirming.
+    """
+    if not labels:
+        raise ValueError("enter_values needs at least one label.")
+    result: dict[str, dict[str, str] | None] = {"value": None}
+
+    root = tk.Tk()
+    root.title(title)
+
+    width, height = 460, 150 + 30 * len(labels)
+    x = (root.winfo_screenwidth() // 2) - (width // 2)
+    y = (root.winfo_screenheight() // 2) - (height // 2)
+    root.geometry(f"{width}x{height}+{x}+{y}")
+    root.resizable(False, False)
+    root.attributes("-topmost", True)
+
+    def close():
+        """Tear the window down without raising Tcl errors."""
+        try:
+            root.quit()
+            root.destroy()
+        except tk.TclError:
+            pass
+
+    def confirm():
+        result["value"] = {label: entry.get() for label, entry in entries.items()}
+        close()
+
+    root.protocol("WM_DELETE_WINDOW", close)
+    root.bind("<Return>", lambda _event: confirm())  # Enter confirms the values
+
+    tk.Label(root, text=prompt, font=("Arial", 9, "bold"), wraplength=width - 40).pack(
+        pady=(18, 8)
+    )
+    frame_entries = tk.Frame(root)
+    frame_entries.pack(fill=tk.X, padx=30)
+    frame_entries.columnconfigure(1, weight=1)
+    entries: dict[str, tk.Entry] = {}
+    for row, label in enumerate(labels):
+        tk.Label(frame_entries, text=label, font=("Arial", 9), anchor="w").grid(
+            row=row, column=0, sticky="w", pady=3, padx=(0, 12)
+        )
+        entry = tk.Entry(frame_entries, font=("Arial", 9))
+        entry.insert(0, (defaults or {}).get(label, ""))
+        entry.grid(row=row, column=1, sticky="ew", pady=3)
+        entries[label] = entry
+
+    tk.Button(
+        root,
+        text="OK / Confirm",
+        width=16,
+        height=1,
+        bg="#007ACC",
+        fg="white",
+        font=("Arial", 9, "bold"),
+        command=confirm,
+    ).pack(side=tk.BOTTOM, pady=(0, 15))
+
+    try:
+        root.lift()
+        root.focus_force()
+        entries[labels[0]].focus_set()
         root.mainloop()
     except tk.TclError:
         pass

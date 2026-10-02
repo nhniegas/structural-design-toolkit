@@ -30,6 +30,14 @@ from concreteproperties.stress_strain_profile import (
     RectangularStressBlock,
     SteelElasticPlastic,
 )
+from utilities._calc_report import (
+    MemberReport,
+    ReportTable,
+    Tex,
+    build_calc_report,
+    is_blank,
+    number,
+)
 
 
 class ColumnFlexureDesign:
@@ -682,10 +690,63 @@ def _extract_frame_labels(frame_table: pd.DataFrame) -> dict[str, str]:
 
 
 def _common_column_mark(unique_name: object) -> str:
-    """Extract the shared column mark from a floor-qualified unique name."""
+    """Extract the shared column mark from a floor-qualified unique name.
+
+    ``2F - C1`` and ``2GC-1`` both give ``C1``; a planted column ``PD2PC-1A``
+    gives ``PC1A``.
+    """
     text = _normalize_object_name(unique_name)
-    match = re.search(r"(C\d+[A-Z]*)\s*$", text, flags=re.IGNORECASE)
-    return match.group(1).upper() if match else text
+    match = re.search(r"(?:GC|(P)C|C)-?(\d+[A-Z]*)\s*$", text, flags=re.IGNORECASE)
+    if not match:
+        return text
+    return f"{'P' if match.group(1) else ''}C{match.group(2)}".upper()
+
+
+def _story_order_from_stacks(
+    connectivity: pd.DataFrame, story_of: dict[str, str]
+) -> list[str]:
+    """Stories from the bottom up, read from how the columns stand on each other.
+
+    ETABS draws a column from its bottom joint (I) to its top joint (J), so a
+    column whose bottom joint is another column's top joint is one story higher.
+    Story names are free text (``UG``, ``PD1``, ``2F``) and cannot be ordered
+    reliably by name; stories the stacks do not relate fall back to the name.
+    """
+    stories = list(dict.fromkeys(str(story) for story in story_of.values()))
+    if connectivity.empty or not {"UniqueName", "UniquePtI", "UniquePtJ"} <= set(
+        connectivity.columns
+    ):
+        return sorted(stories, key=_column_story_sort_key)
+    ends = {
+        _normalize_object_name(row.UniqueName): (
+            _normalize_object_name(row.UniquePtI), _normalize_object_name(row.UniquePtJ)
+        )
+        for row in connectivity.itertuples()
+    }
+    story_at_top = {
+        ends[member][1]: str(story) for member, story in story_of.items() if member in ends
+    }
+    above: dict[str, set[str]] = {story: set() for story in stories}
+    for member, story in story_of.items():
+        below = story_at_top.get(ends.get(member, ("", ""))[0])
+        if below is not None and below != str(story):
+            above[below].add(str(story))
+    waiting = {story: 0 for story in stories}
+    for higher in above.values():
+        for story in higher:
+            waiting[story] += 1
+    ordered: list[str] = []
+    while len(ordered) < len(stories):
+        ready = [s for s in stories if s not in ordered and waiting[s] == 0]
+        if not ready:  # stacks contradict each other: finish by name
+            ready = [s for s in stories if s not in ordered]
+            ordered.extend(sorted(ready, key=_column_story_sort_key))
+            break
+        lowest = min(ready, key=_column_story_sort_key)
+        ordered.append(lowest)
+        for story in above[lowest]:
+            waiting[story] -= 1
+    return ordered
 
 
 def _unit_vector(vector: np.ndarray, description: str) -> np.ndarray:
@@ -925,6 +986,16 @@ def _frame_local_axes(
     return local_1, rotated_2, rotated_3
 
 
+def _section_bending_angle(moment_2: float, moment_3: float) -> float:
+    """Bending angle of the section for moments about ETABS local 2 and local 3.
+
+    ETABS puts the section depth (t3, ``Depth``) along local 2 and the width
+    (t2, ``Width``) along local 3. M3 therefore bends the section over its
+    depth, which is angle 0 here, and M2 bends it over its width, angle pi/2.
+    """
+    return math.atan2(moment_2, moment_3)
+
+
 def _to_compression_positive(
     factored_loads: pd.DataFrame, code: AciCode = CODE
 ) -> pd.DataFrame:
@@ -1037,8 +1108,14 @@ def _build_column_section(
     is_smrf: bool,
     bundle_layout: list[tuple[float, float, int]] | None = None,
 ) -> tuple[ColumnFlexureDesign, object]:
-    """Create a column engine and reinforced geometry for a frame-data row."""
+    """Create a column engine and reinforced geometry for a frame-data row.
+
+    A row with a ``DesignCover`` value uses it in place of ``cover``.
+    """
     member = str(row["UniqueName"])
+    own_cover = row.get("DesignCover")
+    if own_cover is not None and pd.notna(own_cover):
+        cover = float(own_cover)
     diameter = row.get("Diameter")
     is_circular = pd.notna(diameter) and float(diameter) > 0
     width = 0.0 if is_circular else _numeric(row["Width"], "Width", member)
@@ -1261,11 +1338,16 @@ def _enumerate_column_bar_layouts(
         )
         max_nx = max(min_nx, int(span_x // min_pitch))
         max_ny = max(min_ny, int(span_y // min_pitch))
+        # A square column gets the same bars on all four faces: nothing on site
+        # tells its faces apart, so an unequal cage could be placed turned 90 degrees.
+        is_square = abs(engine.width - engine.height) <= 1e-6
 
         for nx in range(min_nx, max_nx + 1):
             if span_x / nx > max_spacing + 1e-8 or span_x / nx < min_pitch - 1e-8:
                 continue
             for ny in range(min_ny, max_ny + 1):
+                if is_square and ny != nx:
+                    continue
                 if span_y / ny > max_spacing + 1e-8 or span_y / ny < min_pitch - 1e-8:
                     continue
                 positions = _perimeter_bar_positions(engine, nx, ny)
@@ -1375,7 +1457,7 @@ def _evaluate_column_candidate(
             m2_kNm = _numeric(force["M2"], "M2", member)
             m3_kNm = _numeric(force["M3"], "M3", member)
             moment_demand = math.hypot(m2_kNm, m3_kNm)
-            theta = math.atan2(m3_kNm, m2_kNm)
+            theta = _section_bending_angle(m2_kNm, m3_kNm)
             try:
                 nominal, design, _, design_p, phi = engine.solve_moment_capacity(
                     section,
@@ -1690,6 +1772,8 @@ def _smrf_transverse_design(
             ),
             "Spiral_Clear_Spacing_mm": clear_spacing,
             "Transverse_Legs_Per_Direction": 1,
+            "Required_Legs_X": 1,
+            "Required_Legs_Y": 1,
             "Alternating_Support_Check": "N/A for continuous spiral",
         }
 
@@ -1787,8 +1871,54 @@ def _smrf_transverse_design(
         "Hx_Limit_mm": hx_limit,
         "Hx_Assumed_mm": hx,
         "Transverse_Legs_Per_Direction": max(required_legs_x, required_legs_y),
+        # Legs counted along the X edge run parallel to Y and confine the core
+        # width; legs counted along the Y edge confine the core depth.
+        "Required_Legs_X": required_legs_x,
+        "Required_Legs_Y": required_legs_y,
         "Alternating_Support_Check": "Pending post-check",
     }
+
+
+def _alternating_support_legs(
+    engine: ColumnFlexureDesign, bundle_layout: list[tuple[float, float, int]]
+) -> tuple[int, int]:
+    """Tie legs needed along the X edge and along the Y edge to support alternate bars.
+
+    The two hoop legs hold the corner bars; every second bar position between
+    them needs a crosstie leg. A circular column has a continuous spiral instead.
+    """
+    if engine.shape == "circular":
+        return 1, 1
+    positions = [(x, y) for x, y, _ in bundle_layout]
+    min_x, max_x = min(x for x, _ in positions), max(x for x, _ in positions)
+    min_y, max_y = min(y for _, y in positions), max(y for _, y in positions)
+    tolerance = 1e-6
+    bars_along_x_edge = max(
+        len({round(x, 5) for x, y in positions if abs(y - face) <= tolerance})
+        for face in (min_y, max_y)
+    )
+    bars_along_y_edge = max(
+        len({round(y, 5) for x, y in positions if abs(x - face) <= tolerance})
+        for face in (min_x, max_x)
+    )
+    return (
+        max(2, 2 + math.ceil(max(0, bars_along_x_edge - 2) / 2)),
+        max(2, 2 + math.ceil(max(0, bars_along_y_edge - 2) / 2)),
+    )
+
+
+def _bars_per_edge(
+    engine: ColumnFlexureDesign, bundle_layout: list[tuple[float, float, int]]
+) -> tuple[int | None, int | None]:
+    """Number of bars on one X edge and on one Y edge (corner bars count on both)."""
+    if engine.shape == "circular":
+        return None, None
+    min_x = min(x for x, _, _ in bundle_layout)
+    min_y = min(y for _, y, _ in bundle_layout)
+    return (
+        sum(count for x, y, count in bundle_layout if abs(y - min_y) <= 1e-6),
+        sum(count for x, y, count in bundle_layout if abs(x - min_x) <= 1e-6),
+    )
 
 
 def _post_check_alternating_support(
@@ -1800,27 +1930,7 @@ def _post_check_alternating_support(
     if engine.shape == "circular":
         return provided_legs, 0, "N/A for continuous spiral"
 
-    positions = [(x, y) for x, y, _ in bundle_layout]
-    min_x = min(x for x, _ in positions)
-    max_x = max(x for x, _ in positions)
-    min_y = min(y for _, y in positions)
-    max_y = max(y for _, y in positions)
-    tolerance = 1e-6
-    bars_on_horizontal_face = max(
-        len({round(x, 5) for x, y in positions if abs(y - face) <= tolerance})
-        for face in (min_y, max_y)
-    )
-    bars_on_vertical_face = max(
-        len({round(y, 5) for x, y in positions if abs(x - face) <= tolerance})
-        for face in (min_x, max_x)
-    )
-    required_horizontal = max(
-        2, 2 + math.ceil(max(0, bars_on_horizontal_face - 2) / 2)
-    )
-    required_vertical = max(
-        2, 2 + math.ceil(max(0, bars_on_vertical_face - 2) / 2)
-    )
-    required_legs = max(required_horizontal, required_vertical)
+    required_legs = max(_alternating_support_legs(engine, bundle_layout))
     final_legs = max(provided_legs, required_legs)
     added_legs = final_legs - provided_legs
     status = (
@@ -1832,6 +1942,26 @@ def _post_check_alternating_support(
         )
     )
     return final_legs, added_legs, status
+
+
+def _column_stacks(ends: dict[str, tuple[str, str]]) -> list[list[str]]:
+    """Group columns that stand on top of each other, top level first.
+
+    ``ends`` maps each column to its ``(bottom joint, top joint)``. A column is
+    directly above another when its bottom joint is the other's top joint.
+    """
+    by_bottom_joint = {bottom: member for member, (bottom, _) in ends.items()}
+    by_top_joint = {top: member for member, (_, top) in ends.items()}
+    stacks = []
+    for member, (_, top) in ends.items():
+        if top in by_bottom_joint:
+            continue  # another column stands on this one, so it is not the top
+        stack, current = [], member
+        while current is not None and current not in stack:
+            stack.append(current)
+            current = by_top_joint.get(ends[current][0])
+        stacks.append(stack)
+    return stacks
 
 
 def _beam_end_reinforcement(
@@ -1918,7 +2048,7 @@ def _column_shear_checks(
     engine: ColumnFlexureDesign,
     n_bars: int,
     spacing: float,
-    confinement_legs: int,
+    confinement_legs: int | tuple[int, int],
     is_smrf: bool,
     bundle_layout: list[tuple[float, float, int]] | None = None,
     progress=None,
@@ -1926,8 +2056,13 @@ def _column_shear_checks(
     """Check column shear in both local directions and size transverse legs.
 
     The function compares analysis shear with the capacity-based probable-moment
-    shear, then selects one leg count sufficient for all force combinations.
+    shear, then selects, for each direction, a leg count sufficient for all force
+    combinations. ``confinement_legs`` is the starting count: one number for both
+    directions, or ``(legs along the X edge, legs along the Y edge)``.
     Forces are kN, moments kN-m, dimensions mm, and stresses MPa at the interface.
+
+    Returns the check rows (each with the legs provided in its direction) and
+    the larger of the two leg counts.
     """
     member = str(row["UniqueName"])
     if engine.shape == "circular":
@@ -1946,7 +2081,15 @@ def _column_shear_checks(
     phi_shear = engine.code.strength.shear
     seismic_cfg = engine.code.column_seismic
     shear_cfg = engine.code.column_shear
-    maximum_legs = max(1, confinement_legs)
+    if isinstance(confinement_legs, (tuple, list)):
+        legs_along_x, legs_along_y = (max(1, int(value)) for value in confinement_legs)
+    else:
+        legs_along_x = legs_along_y = max(1, int(confinement_legs))
+    # V2 acts along local 2, the depth. It is carried by the legs that run
+    # parallel to the depth, which are the ones counted along the X edge.
+    # V3 acts along the width and uses the legs counted along the Y edge.
+    starting_legs = {"V2": legs_along_x, "V3": legs_along_y}
+    provided_legs = dict(starting_legs)
 
     station_values = pd.to_numeric(forces["Station"], errors="coerce").dropna()
     if station_values.empty or station_values.max() <= station_values.min():
@@ -1956,9 +2099,9 @@ def _column_shear_checks(
     clear_length = float(station_values.max() - station_values.min())
     if engine.shape == "rectangular":
         axis_dimensions = {
-            # V2 acts along local 2: breadth and effective depth are along local 3/2.
-            "V2": (engine.height, engine.width),
-            "V3": (engine.width, engine.height),
+            # (breadth, overall depth). V2 acts along local 2, the section depth.
+            "V2": (engine.width, engine.height),
+            "V3": (engine.height, engine.width),
         }
     else:
         axis_dimensions = {
@@ -1991,7 +2134,11 @@ def _column_shear_checks(
         for shear_name, (breadth, overall_depth) in axis_dimensions.items():
             v_name = shear_name
             moment_name = "M3" if shear_name == "V2" else "M2"
-            moment_theta = math.pi / 2.0 if moment_name == "M3" else 0.0
+            moment_theta = (
+                _section_bending_angle(0.0, 1.0)
+                if moment_name == "M3"
+                else _section_bending_angle(1.0, 0.0)
+            )
             probable_moments = []
             for end in ("I", "J"):
                 if progress is not None:
@@ -2055,8 +2202,8 @@ def _column_shear_checks(
                         required_vs * spacing / (fyt * effective_depth * tie_area)
                     ),
                 )
-                required_legs = max(required_legs, confinement_legs)
-                maximum_legs = max(maximum_legs, required_legs)
+                required_legs = max(required_legs, starting_legs[shear_name])
+                provided_legs[shear_name] = max(provided_legs[shear_name], required_legs)
                 output.append(
                     {
                         "UniqueName": member,
@@ -2079,15 +2226,16 @@ def _column_shear_checks(
                     }
                 )
     for item in output:
+        direction_legs = provided_legs[item["Shear_Direction"]]
         shear_capacity = phi_shear * (
             item["_shear_concrete_N"]
-            + maximum_legs
+            + direction_legs
             * tie_area
             * fyt
             * item["_effective_depth_mm"]
             / spacing
         ) / 1000.0
-        item["Provided_Transverse_Legs"] = maximum_legs
+        item["Provided_Transverse_Legs"] = direction_legs
         item["phi_Vn_kN"] = shear_capacity
         item["Shear_Utilization"] = (
             item["Design_Shear_kN"] / shear_capacity
@@ -2099,7 +2247,7 @@ def _column_shear_checks(
         )
         del item["_effective_depth_mm"]
         del item["_shear_concrete_N"]
-    return output, maximum_legs
+    return output, max(provided_legs.values())
 
 
 def _evaluate_smrf_joints(
@@ -2263,7 +2411,7 @@ def _evaluate_smrf_joints(
         )
         m2_direction = float(np.dot(moment_axis, local_2))
         m3_direction = float(np.dot(moment_axis, local_3))
-        theta = math.atan2(m3_direction, m2_direction)
+        theta = _section_bending_angle(m2_direction, m3_direction)
         forces = force_groups[member]
         force = _column_force_at_end(forces, combo, at_i_end=end == "I")
         axial = _numeric(force["P"], "P", member) * 1000.0
@@ -2323,6 +2471,25 @@ def _evaluate_smrf_joints(
             else "FAIL - offset exceeds 1:6",
             offset_ratio,
         )
+
+    def column_frame_axis(column: str, frame_direction: np.ndarray) -> str:
+        """Column axis a beam line runs along: 'X' (width, local 3) or 'Y' (depth, local 2).
+
+        Empty when the column's orientation is not known.
+        """
+        if column not in frame_angles or column not in connection_by_name.index:
+            return ""
+        connection = connection_by_name.loc[column]
+        point_i = _normalize_object_name(connection["UniquePtI"])
+        point_j = _normalize_object_name(connection["UniquePtJ"])
+        if point_i not in point_coordinates or point_j not in point_coordinates:
+            return ""
+        _, axis_2, axis_3 = _frame_local_axes(
+            point_coordinates[point_i], point_coordinates[point_j], frame_angles[column]
+        )
+        along_2 = abs(float(np.dot(frame_direction, axis_2)))
+        along_3 = abs(float(np.dot(frame_direction, axis_3)))
+        return "Y" if along_2 >= along_3 else "X"
 
     rows: list[dict] = []
     for joint, connected_beams in beams_at_point.items():
@@ -2461,6 +2628,7 @@ def _evaluate_smrf_joints(
                                 ),
                                 "Column_End_Members": ", ".join(
                                     f"{column}:{get_end_info(column, joint, False)[0]}"
+                                    f":{column_frame_axis(column, representative)}"
                                     for column in connected_columns
                                     if column in connection_by_name.index
                                 ),
@@ -2596,13 +2764,14 @@ def _evaluate_smrf_joints(
                             point_coordinates[point_j],
                             frame_angles[column],
                         )
+                        # Column depth lies along local 2 and width along local 3.
                         joint_depth = (
-                            abs(float(np.dot(representative, column_axis_2))) * col_w
-                            + abs(float(np.dot(representative, column_axis_3))) * col_d
+                            abs(float(np.dot(representative, column_axis_2))) * col_d
+                            + abs(float(np.dot(representative, column_axis_3))) * col_w
                         )
                         joint_width = (
-                            abs(float(np.dot(moment_axis, column_axis_2))) * col_w
-                            + abs(float(np.dot(moment_axis, column_axis_3))) * col_d
+                            abs(float(np.dot(moment_axis, column_axis_2))) * col_d
+                            + abs(float(np.dot(moment_axis, column_axis_3))) * col_w
                         )
                     largest_beam_width = max(
                         beam_strengths[beam]["Beam_Width_mm"] for beam in members
@@ -2720,6 +2889,7 @@ def _evaluate_smrf_joints(
                             ),
                             "Column_End_Members": ", ".join(
                                 f"{column}:{get_end_info(column, joint, False)[0]}"
+                                f":{column_frame_axis(column, representative)}"
                                 for column in connected_columns
                             ),
                             "Column_Axial_Loads_kN": ", ".join(
@@ -2758,6 +2928,32 @@ def _evaluate_smrf_joints(
     return pd.DataFrame(rows)
 
 
+# Per-end report fields of the joint checks. X is the column's width direction
+# (local 3) and Y its depth direction (local 2): "X" values are for the beams
+# framing along X.
+BCC_REPORT_FIELDS = [
+    "Column_Reinforcement_At_Joint",
+    "Beam_Reinforcement_X",
+    "Sum_Column_Mn_X_kNm",
+    "Sum_Beam_Mn_X_kNm",
+    "BCC_Ratio_X",
+    "Beam_Reinforcement_Y",
+    "Sum_Column_Mn_Y_kNm",
+    "Sum_Beam_Mn_Y_kNm",
+    "BCC_Ratio_Y",
+    "BCC_Status",
+]
+JOINT_SHEAR_REPORT_FIELDS = [
+    "Joint_Shear_Demand_X_kN",
+    "Joint_Shear_Capacity_X_kN",
+    "Joint_Shear_Utilization_X",
+    "Joint_Shear_Demand_Y_kN",
+    "Joint_Shear_Capacity_Y_kN",
+    "Joint_Shear_Utilization_Y",
+    "Joint_Shear_Status",
+]
+
+
 def _build_consolidated_column_report(
     column_results: pd.DataFrame,
     load_checks: pd.DataFrame,
@@ -2765,8 +2961,15 @@ def _build_consolidated_column_report(
     joint_results: pd.DataFrame,
     column_labels: dict[str, str] | None = None,
     level_elevations: dict[str, float] | None = None,
+    joint_na_reason: str = "N/A",
 ) -> tuple[pd.DataFrame, list[tuple[str, list[str]]]]:
-    """Combine column, force, shear, and joint checks into one I/J report."""
+    """Combine column, force, shear, and joint checks into one I/J report.
+
+    Joint checks are reported for each column axis. The values shown for an axis
+    belong to one governing case: the lowest strong-column ratio, and the highest
+    joint shear utilization. ``joint_na_reason`` is written where an end has no
+    joint check at all.
+    """
     def summarize_status(values: list[str]) -> str:
         """Apply conservative PASS/FAIL/BLOCKED precedence to paired joint checks."""
         normalized = list(dict.fromkeys(value.strip() for value in values if value.strip()))
@@ -2792,11 +2995,15 @@ def _build_consolidated_column_report(
                 "Width_mm",
                 "Depth_mm",
                 "Diameter_mm",
-                "f'c_MPa",
+                "Cover_mm",
+                "f\'c_MPa",
                 "fy_MPa",
                 "fyt_MPa",
                 "Longitudinal_Bars",
+                "Bars_X_Edge",
+                "Bars_Y_Edge",
                 "Bundle_Layout",
+                "Vertical_Bar_Continuity",
                 "Bar_Layout_Data",
                 "Reinforcement_Ratio",
                 "Reinforcement_Ratio_Limit",
@@ -2838,24 +3045,14 @@ def _build_consolidated_column_report(
         groups.append(
             (
                 f"BEAM-COLUMN CAPACITY - {end}",
-                [
-                    f"Beam_Reinforcement_{end}",
-                    f"Column_Reinforcement_At_Joint_{end}",
-                    f"BCC_Ratio_{end}",
-                    f"BCC_Status_{end}",
-                ],
+                [f"{name}_{end}" for name in BCC_REPORT_FIELDS],
             )
         )
     for end in ("I", "J"):
         groups.append(
             (
                 f"JOINT SHEAR - {end}",
-                [
-                    f"Joint_Shear_Demand_kN_{end}",
-                    f"Joint_Shear_Capacity_kN_{end}",
-                    f"Joint_Shear_Utilization_{end}",
-                    f"Joint_Shear_Status_{end}",
-                ],
+                [f"{name}_{end}" for name in JOINT_SHEAR_REPORT_FIELDS],
             )
         )
     groups.append(
@@ -2884,7 +3081,8 @@ def _build_consolidated_column_report(
                 "Provided_Ash_s_Ratio_Y",
                 "Confinement_Check",
                 "Transverse_Spacing_Check",
-                "Alternating_Support_Check",
+                "Alternating_Support_Check_X",
+                "Alternating_Support_Check_Y",
                 "Alternating_Support_Added_Legs",
                 "Tie_Diameter_Check",
                 "SMRF_Dimension_Check",
@@ -2904,15 +3102,31 @@ def _build_consolidated_column_report(
             ["UniqueName", "Combo", "End"], dropna=False
         )
     } if not shear_checks.empty else {}
-    joint_groups: dict[tuple[str, str, str], list[pd.Series]] = {}
+    # Joint rows per column, combination, end and column axis. Entries are
+    # "member:end:axis"; an empty axis means the column orientation is unknown.
+    joint_groups: dict[tuple[str, str, str, str], list[pd.Series]] = {}
     if not joint_results.empty:
         for _, joint_row in joint_results.iterrows():
             combo = str(joint_row.get("Load_Combo", ""))
             for entry in str(joint_row.get("Column_End_Members", "")).split(","):
-                if ":" not in entry:
+                parts = [part.strip() for part in entry.rsplit(":", 2)]
+                if len(parts) == 3 and parts[1] in ("I", "J"):
+                    member, end, axis = parts
+                elif len(parts) >= 2:
+                    member, end, axis = ":".join(parts[:-1]), parts[-1], ""
+                else:
                     continue
-                member, end = (part.strip() for part in entry.rsplit(":", 1))
-                joint_groups.setdefault((member, combo, end), []).append(joint_row)
+                joint_groups.setdefault((member, combo, end, axis), []).append(joint_row)
+
+    def number(item: pd.Series, key: str) -> float:
+        """Read a numeric joint value; NaN when it is missing or text."""
+        return pd.to_numeric(pd.Series([item.get(key)]), errors="coerce").iloc[0]
+
+    def unique_text(items: list[pd.Series], key: str) -> str:
+        """Join the distinct text values of one joint field."""
+        return " | ".join(
+            dict.fromkeys(str(item.get(key)) for item in items if pd.notna(item.get(key)))
+        )
 
     report_rows: list[dict] = []
     for _, column in column_results.iterrows():
@@ -2938,11 +3152,15 @@ def _build_consolidated_column_report(
                 "Width_mm": column.get("Width_mm"),
                 "Depth_mm": column.get("Depth_mm"),
                 "Diameter_mm": column.get("Diameter_mm"),
+                "Cover_mm": column.get("Cover_mm"),
                 "f'c_MPa": column.get("f'c_MPa"),
                 "fy_MPa": column.get("fy_MPa"),
                 "fyt_MPa": column.get("fyt_MPa"),
                 "Longitudinal_Bars": column.get("Longitudinal_Bars"),
+                "Bars_X_Edge": column.get("Bars_X_Edge"),
+                "Bars_Y_Edge": column.get("Bars_Y_Edge"),
                 "Bundle_Layout": column.get("Longitudinal_Bar_Layout"),
+                "Vertical_Bar_Continuity": column.get("Vertical_Bar_Continuity"),
                 "Bar_Layout_Data": column.get("Longitudinal_Bar_Coordinates"),
                 "Reinforcement_Ratio": column.get("Reinforcement_Ratio"),
                 "Reinforcement_Ratio_Limit": column.get(
@@ -3000,8 +3218,11 @@ def _build_consolidated_column_report(
                 "Transverse_Spacing_Check": column.get(
                     "Transverse_Spacing_Check"
                 ),
-                "Alternating_Support_Check": column.get(
-                    "Alternating_Support_Check"
+                "Alternating_Support_Check_X": column.get(
+                    "Alternating_Support_Check_X"
+                ),
+                "Alternating_Support_Check_Y": column.get(
+                    "Alternating_Support_Check_Y"
                 ),
                 "Alternating_Support_Added_Legs": column.get(
                     "Alternating_Support_Added_Legs"
@@ -3069,99 +3290,86 @@ def _build_consolidated_column_report(
                         else "FAIL"
                     )
 
-                joint_rows = joint_groups.get((member, combo, end), [])
-                if not joint_rows:
-                    for prefix in (
-                        "Beam_Reinforcement",
-                        "Column_Reinforcement_At_Joint",
-                        "BCC_Ratio",
-                        "BCC_Status",
-                        "Joint_Shear_Demand_kN",
-                        "Joint_Shear_Capacity_kN",
-                        "Joint_Shear_Utilization",
-                        "Joint_Shear_Status",
-                    ):
-                        report_row[f"{prefix}_{end}"] = "N/A"
-                else:
-                    beam_summaries = list(
-                        dict.fromkeys(
-                            str(item.get("Framing_Beam_Reinforcement", ""))
-                            for item in joint_rows
-                            if pd.notna(item.get("Framing_Beam_Reinforcement"))
-                        )
+                end_rows: list[pd.Series] = []
+                for axis in ("X", "Y"):
+                    axis_rows = joint_groups.get(
+                        (member, combo, end, axis), []
+                    ) + joint_groups.get((member, combo, end, ""), [])
+                    end_rows.extend(axis_rows)
+                    missing = (
+                        unique_text(axis_rows, "Joint_Check_Reason")
+                        if axis_rows
+                        else f"N/A - no beam frames in along {axis}"
                     )
-                    report_row[f"Beam_Reinforcement_{end}"] = " | ".join(
-                        beam_summaries
-                    )
-                    report_row[f"Column_Reinforcement_At_Joint_{end}"] = " | ".join(
-                        list(
-                            dict.fromkeys(
-                                str(item.get("Column_Reinforcement_At_Joint", ""))
-                                for item in joint_rows
-                                if pd.notna(
-                                    item.get("Column_Reinforcement_At_Joint")
-                                )
-                            )
-                        )
-                    )
-                    bcc_values = [
-                        pd.to_numeric(
-                            pd.Series([item.get("Column_Beam_Ratio")]),
-                            errors="coerce",
-                        ).iloc[0]
-                        for item in joint_rows
+                    # Strong column - weak beam: the case with the lowest ratio.
+                    rated = [
+                        item for item in axis_rows
+                        if pd.notna(number(item, "Column_Beam_Ratio"))
                     ]
-                    finite_bcc = [value for value in bcc_values if pd.notna(value)]
-                    report_row[f"BCC_Ratio_{end}"] = (
-                        min(finite_bcc) if finite_bcc else "N/A"
+                    if rated:
+                        governing = min(
+                            rated, key=lambda item: number(item, "Column_Beam_Ratio")
+                        )
+                        report_row[f"Beam_Reinforcement_{axis}_{end}"] = governing.get(
+                            "Framing_Beam_Reinforcement"
+                        )
+                        report_row[f"Sum_Column_Mn_{axis}_kNm_{end}"] = number(
+                            governing, "Sum_Column_Mn_kNm"
+                        )
+                        report_row[f"Sum_Beam_Mn_{axis}_kNm_{end}"] = number(
+                            governing, "Sum_Beam_Mn_kNm"
+                        )
+                        report_row[f"BCC_Ratio_{axis}_{end}"] = number(
+                            governing, "Column_Beam_Ratio"
+                        )
+                    else:
+                        for prefix in (
+                            f"Beam_Reinforcement_{axis}",
+                            f"Sum_Column_Mn_{axis}_kNm",
+                            f"Sum_Beam_Mn_{axis}_kNm",
+                            f"BCC_Ratio_{axis}",
+                        ):
+                            report_row[f"{prefix}_{end}"] = missing
+                    # Joint shear: the case with the highest utilization.
+                    sheared = [
+                        item for item in axis_rows
+                        if pd.notna(number(item, "Joint_Shear_Utilization"))
+                    ]
+                    if sheared:
+                        governing = max(
+                            sheared,
+                            key=lambda item: number(item, "Joint_Shear_Utilization"),
+                        )
+                        report_row[f"Joint_Shear_Demand_{axis}_kN_{end}"] = number(
+                            governing, "Joint_Shear_Demand_kN"
+                        )
+                        report_row[f"Joint_Shear_Capacity_{axis}_kN_{end}"] = number(
+                            governing, "phi_Vn_kN"
+                        )
+                        report_row[f"Joint_Shear_Utilization_{axis}_{end}"] = number(
+                            governing, "Joint_Shear_Utilization"
+                        )
+                    else:
+                        for prefix in (
+                            f"Joint_Shear_Demand_{axis}_kN",
+                            f"Joint_Shear_Capacity_{axis}_kN",
+                            f"Joint_Shear_Utilization_{axis}",
+                        ):
+                            report_row[f"{prefix}_{end}"] = missing
+
+                if end_rows:
+                    report_row[f"Column_Reinforcement_At_Joint_{end}"] = unique_text(
+                        end_rows, "Column_Reinforcement_At_Joint"
                     )
                     report_row[f"BCC_Status_{end}"] = summarize_status(
-                        [
-                            str(item.get("Strong_Column_Check", "N/A"))
-                            for item in joint_rows
-                        ]
-                    )
-                    demand_values = [
-                        pd.to_numeric(
-                            pd.Series([item.get("Joint_Shear_Demand_kN")]),
-                            errors="coerce",
-                        ).iloc[0]
-                        for item in joint_rows
-                    ]
-                    capacity_values = [
-                        pd.to_numeric(
-                            pd.Series([item.get("phi_Vn_kN")]), errors="coerce"
-                        ).iloc[0]
-                        for item in joint_rows
-                    ]
-                    ratio_values = [
-                        pd.to_numeric(
-                            pd.Series([item.get("Joint_Shear_Utilization")]),
-                            errors="coerce",
-                        ).iloc[0]
-                        for item in joint_rows
-                    ]
-                    report_row[f"Joint_Shear_Demand_kN_{end}"] = (
-                        max(value for value in demand_values if pd.notna(value))
-                        if any(pd.notna(value) for value in demand_values)
-                        else "N/A"
-                    )
-                    report_row[f"Joint_Shear_Capacity_kN_{end}"] = (
-                        min(value for value in capacity_values if pd.notna(value))
-                        if any(pd.notna(value) for value in capacity_values)
-                        else "N/A"
-                    )
-                    report_row[f"Joint_Shear_Utilization_{end}"] = (
-                        max(value for value in ratio_values if pd.notna(value))
-                        if any(pd.notna(value) for value in ratio_values)
-                        else "N/A"
+                        [str(item.get("Strong_Column_Check", "N/A")) for item in end_rows]
                     )
                     report_row[f"Joint_Shear_Status_{end}"] = summarize_status(
-                        [
-                            str(item.get("Joint_Shear_Check", "N/A"))
-                            for item in joint_rows
-                        ]
+                        [str(item.get("Joint_Shear_Check", "N/A")) for item in end_rows]
                     )
+                else:
+                    for name in BCC_REPORT_FIELDS + JOINT_SHEAR_REPORT_FIELDS:
+                        report_row[f"{name}_{end}"] = joint_na_reason
             report_rows.append(report_row)
 
     report = pd.DataFrame(
@@ -3176,7 +3384,6 @@ def _build_consolidated_column_report(
             kind="stable",
         )
         .drop(columns="_story_sort")
-        .round(2)
         .reset_index(drop=True)
     )
     return _expand_column_report_hierarchy(report)
@@ -3192,11 +3399,15 @@ def _expand_column_report_hierarchy(
         "Width_mm",
         "Depth_mm",
         "Diameter_mm",
-        "f'c_MPa",
+        "Cover_mm",
+        "f\'c_MPa",
         "fy_MPa",
         "fyt_MPa",
         "Longitudinal_Bars",
+        "Bars_X_Edge",
+        "Bars_Y_Edge",
         "Bundle_Layout",
+        "Vertical_Bar_Continuity",
         "Bar_Layout_Data",
         "Reinforcement_Ratio",
         "Reinforcement_Ratio_Limit",
@@ -3221,18 +3432,8 @@ def _expand_column_report_hierarchy(
             "Shear_Utilization",
             "Shear_Check",
         ],
-        "BEAM-COLUMN CAPACITY": [
-            "Column_Reinforcement_At_Joint",
-            "Beam_Reinforcement",
-            "BCC_Ratio",
-            "BCC_Status",
-        ],
-        "JOINT SHEAR": [
-            "Joint_Shear_Demand_kN",
-            "Joint_Shear_Capacity_kN",
-            "Joint_Shear_Utilization",
-            "Joint_Shear_Status",
-        ],
+        "BEAM-COLUMN CAPACITY": list(BCC_REPORT_FIELDS),
+        "JOINT SHEAR": list(JOINT_SHEAR_REPORT_FIELDS),
     }
     detailing_columns = [
         "Transverse_Type",
@@ -3257,7 +3458,8 @@ def _expand_column_report_hierarchy(
         "Provided_Ash_s_Ratio_Y",
         "Confinement_Check",
         "Transverse_Spacing_Check",
-        "Alternating_Support_Check",
+        "Alternating_Support_Check_X",
+        "Alternating_Support_Check_Y",
         "Alternating_Support_Added_Legs",
         "Tie_Diameter_Check",
         "SMRF_Dimension_Check",
@@ -3307,7 +3509,8 @@ def _expand_column_report_hierarchy(
                     "Joint_Shear_Status",
                     "Confinement_Check",
                     "Transverse_Spacing_Check",
-                    "Alternating_Support_Check",
+                    "Alternating_Support_Check_X",
+                    "Alternating_Support_Check_Y",
                     "Tie_Diameter_Check",
                     "SMRF_Dimension_Check",
                     "Transverse_Reinforcement_Check",
@@ -3355,7 +3558,7 @@ def _expand_column_report_hierarchy(
             for column in column_names
         ],
     )
-    long_report["_end_order"] = long_report["End"].map({"I": 0, "J": 1})
+    long_report["_end_order"] = long_report["End"].map({"J": 0, "I": 1})
     long_report["_elevation"] = [
         float(wide_report.loc[index // 2, "Level_Elevation_m"])
         if pd.notna(wide_report.loc[index // 2, "Level_Elevation_m"])
@@ -3381,93 +3584,121 @@ def _expand_column_report_hierarchy(
             kind="stable",
         )
         .drop(columns=["_end_order", "_elevation", "_label_sort", "_story_sort", "_member_sort"])
-        .round(2)
         .reset_index(drop=True)
     )
     return long_report, report_groups
+
+
+# Worksheet header of every report field. The sheet is read back through the
+# same names (DXF schedule, calculation report).
+COLUMN_REPORT_LABELS = {
+    "Column_Label": "Column Label",
+    "UniqueName": "Unique Name",
+    "Story": "Story",
+    "End": "End",
+    "Combo": "Load Combination",
+    "Section": "Section",
+    "Shape": "Shape",
+    "Width_mm": "Width (mm)",
+    "Depth_mm": "Depth (mm)",
+    "Diameter_mm": "Diameter (mm)",
+    "Cover_mm": "Concrete Cover (mm)",
+    "f'c_MPa": "f′c (MPa)",
+    "fy_MPa": "fᵧ (MPa)",
+    "fyt_MPa": "fᵧₜ (MPa)",
+    "Longitudinal_Bars": "Longitudinal Bars",
+    "Bars_X_Edge": "Bars on X Edge",
+    "Bars_Y_Edge": "Bars on Y Edge",
+    "Bundle_Layout": "Bundle Layout",
+    "Vertical_Bar_Continuity": "Vertical Bar Continuity",
+    "Bar_Layout_Data": "Bar Layout Data (x, y, n)",
+    "Beam_Reinforcement_X": "Beam Bars at Joint, X",
+    "Sum_Column_Mn_X_kNm": "ΣMₙ,Column X (kN·m)",
+    "Sum_Beam_Mn_X_kNm": "ΣMₙ,Beam X (kN·m)",
+    "BCC_Ratio_X": "ΣMₙ,Column / ΣMₙ,Beam, X",
+    "Beam_Reinforcement_Y": "Beam Bars at Joint, Y",
+    "Sum_Column_Mn_Y_kNm": "ΣMₙ,Column Y (kN·m)",
+    "Sum_Beam_Mn_Y_kNm": "ΣMₙ,Beam Y (kN·m)",
+    "BCC_Ratio_Y": "ΣMₙ,Column / ΣMₙ,Beam, Y",
+    "Joint_Shear_Demand_X_kN": "Joint Shear Demand X (kN)",
+    "Joint_Shear_Capacity_X_kN": "ϕ Joint Shear Capacity X (kN)",
+    "Joint_Shear_Utilization_X": "Joint Shear Utilization X",
+    "Joint_Shear_Demand_Y_kN": "Joint Shear Demand Y (kN)",
+    "Joint_Shear_Capacity_Y_kN": "ϕ Joint Shear Capacity Y (kN)",
+    "Joint_Shear_Utilization_Y": "Joint Shear Utilization Y",
+    "Alternating_Support_Check_X": "Bar Support Check, X Edge",
+    "Alternating_Support_Check_Y": "Bar Support Check, Y Edge",
+    "Reinforcement_Ratio": "ρ Longitudinal",
+    "Reinforcement_Ratio_Limit": "ρ Limit",
+    "Pu_kN": "Pᵤ (kN)",
+    "Mu2_kNm": "Mᵤ₂ (kN·m)",
+    "Mu3_kNm": "Mᵤ₃ (kN·m)",
+    "phi_Mn_kNm": "ϕMₙ (kN·m)",
+    "Flexure_Utilization": "Flexure Utilization",
+    "Axial_Check": "Axial Check",
+    "Flexure_Check": "Flexure Check",
+    "Analysis_Vu_kN": "Analysis Vᵤ (kN)",
+    "Probable_Ve_kN": "Probable Vₑ (kN)",
+    "Design_Vu_kN": "Design Vᵤ (kN)",
+    "Vc_kN": "V꜀ (kN)",
+    "Concrete_Shear_Neglected": "Concrete Shear Neglected",
+    "phi_Vn_kN": "ϕVₙ (kN)",
+    "Shear_Utilization": "Shear Utilization",
+    "Shear_Check": "Shear Check",
+    "Column_Reinforcement_At_Joint": "Column Bars Contributing at Joint",
+    "Beam_Reinforcement": "Beam Bars at Joint",
+    "BCC_Ratio": "ΣMₙ,Column / ΣMₙ,Beam",
+    "BCC_Status": "BCC Check",
+    "Joint_Shear_Demand_kN": "Joint Shear Demand (kN)",
+    "Joint_Shear_Capacity_kN": "ϕ Joint Shear Capacity (kN)",
+    "Joint_Shear_Utilization": "Joint Shear Utilization",
+    "Joint_Shear_Status": "Joint Shear Check",
+    "Transverse_Type": "Hoop / Spiral Type",
+    "Transverse_Provision_Summary": "Transverse Reinforcement Provision",
+    "Tie_Bar_mm": "Tie Bar Diameter (mm)",
+    "Transverse_Spacing_mm": "Tie / Spiral Spacing (mm)",
+    "Transverse_Legs_X": "Tie Legs along X Edge",
+    "Transverse_Legs_Y": "Tie Legs along Y Edge",
+    "Confinement_Criteria_Governing": "Governing ACI 18.7.5 Expression",
+    "High_Axial_or_High_fc_Check": "High Pᵤ / f′c Condition",
+    "Confinement_18_7_5_a": "ρₛ,req from 18.7.5(a)",
+    "Confinement_18_7_5_b": "ρₛ,req from 18.7.5(b)",
+    "Confinement_18_7_5_c": "ρₛ,req from 18.7.5(c)",
+    "Confinement_18_7_5_d": "ρₛ,req from 18.7.5(d)",
+    "Confinement_18_7_5_e": "ρₛ,req from 18.7.5(e)",
+    "Confinement_18_7_5_f": "ρₛ,req from 18.7.5(f)",
+    "Kf": "kᶠ",
+    "Kn": "kₙ",
+    "Required_Ash_s_Ratio_X": "Required Aₛₕ/(s b꜀), X",
+    "Provided_Ash_s_Ratio_X": "Provided Aₛₕ/(s b꜀), X",
+    "Required_Ash_s_Ratio_Y": "Required Aₛₕ/(s b꜀), Y",
+    "Provided_Ash_s_Ratio_Y": "Provided Aₛₕ/(s b꜀), Y",
+    "Confinement_Check": "Confinement Ratio Check",
+    "Transverse_Spacing_Check": "Tie Spacing Check",
+    "Alternating_Support_Check": "Longitudinal Bar Support Check",
+    "Alternating_Support_Added_Legs": "Added Hoop Legs",
+    "Tie_Diameter_Check": "Tie Diameter Check",
+    "SMRF_Dimension_Check": "SMRF Column Dimension Check",
+    "Transverse_Reinforcement_Check": "Transverse Reinforcement Check",
+    "Column_Design_Status": "Overall Design Status",
+    "Design_Status_Reason": "Design Status Reason",
+}
 
 
 def _write_consolidated_column_report(
     sheet, report: pd.DataFrame, groups: list[tuple[str, list[str]]]
 ) -> None:
     """Write the report values in one range transfer, then apply worksheet formatting."""
-    display_names = {
-        "Column_Label": "Column Label",
-        "UniqueName": "Unique Name",
-        "Story": "Story",
-        "End": "End",
-        "Combo": "Load Combination",
-        "Section": "Section",
-        "Shape": "Shape",
-        "Width_mm": "Width (mm)",
-        "Depth_mm": "Depth (mm)",
-        "Diameter_mm": "Diameter (mm)",
-        "f'c_MPa": "f′c (MPa)",
-        "fy_MPa": "fᵧ (MPa)",
-        "fyt_MPa": "fᵧₜ (MPa)",
-        "Longitudinal_Bars": "Longitudinal Bars",
-        "Bundle_Layout": "Bundle Layout",
-        "Bar_Layout_Data": "Bar Layout Data (x, y, n)",
-        "Reinforcement_Ratio": "ρ Longitudinal",
-        "Reinforcement_Ratio_Limit": "ρ Limit",
-        "Pu_kN": "Pᵤ (kN)",
-        "Mu2_kNm": "Mᵤ₂ (kN·m)",
-        "Mu3_kNm": "Mᵤ₃ (kN·m)",
-        "phi_Mn_kNm": "ϕMₙ (kN·m)",
-        "Flexure_Utilization": "Flexure Utilization",
-        "Axial_Check": "Axial Check",
-        "Flexure_Check": "Flexure Check",
-        "Analysis_Vu_kN": "Analysis Vᵤ (kN)",
-        "Probable_Ve_kN": "Probable Vₑ (kN)",
-        "Design_Vu_kN": "Design Vᵤ (kN)",
-        "Vc_kN": "V꜀ (kN)",
-        "Concrete_Shear_Neglected": "Concrete Shear Neglected",
-        "phi_Vn_kN": "ϕVₙ (kN)",
-        "Shear_Utilization": "Shear Utilization",
-        "Shear_Check": "Shear Check",
-        "Column_Reinforcement_At_Joint": "Column Bars Contributing at Joint",
-        "Beam_Reinforcement": "Beam Bars at Joint",
-        "BCC_Ratio": "ΣMₙ,Column / ΣMₙ,Beam",
-        "BCC_Status": "BCC Check",
-        "Joint_Shear_Demand_kN": "Joint Shear Demand (kN)",
-        "Joint_Shear_Capacity_kN": "ϕ Joint Shear Capacity (kN)",
-        "Joint_Shear_Utilization": "Joint Shear Utilization",
-        "Joint_Shear_Status": "Joint Shear Check",
-        "Transverse_Type": "Hoop / Spiral Type",
-        "Transverse_Provision_Summary": "Transverse Reinforcement Provision",
-        "Tie_Bar_mm": "Tie Bar Diameter (mm)",
-        "Transverse_Spacing_mm": "Tie / Spiral Spacing (mm)",
-        "Transverse_Legs_X": "Hoop Legs X",
-        "Transverse_Legs_Y": "Hoop Legs Y",
-        "Confinement_Criteria_Governing": "Governing ACI 18.7.5 Expression",
-        "High_Axial_or_High_fc_Check": "High Pᵤ / f′c Condition",
-        "Confinement_18_7_5_a": "ρₛ,req from 18.7.5(a)",
-        "Confinement_18_7_5_b": "ρₛ,req from 18.7.5(b)",
-        "Confinement_18_7_5_c": "ρₛ,req from 18.7.5(c)",
-        "Confinement_18_7_5_d": "ρₛ,req from 18.7.5(d)",
-        "Confinement_18_7_5_e": "ρₛ,req from 18.7.5(e)",
-        "Confinement_18_7_5_f": "ρₛ,req from 18.7.5(f)",
-        "Kf": "kᶠ",
-        "Kn": "kₙ",
-        "Required_Ash_s_Ratio_X": "Required Aₛₕ/(s b꜀), X",
-        "Provided_Ash_s_Ratio_X": "Provided Aₛₕ/(s b꜀), X",
-        "Required_Ash_s_Ratio_Y": "Required Aₛₕ/(s b꜀), Y",
-        "Provided_Ash_s_Ratio_Y": "Provided Aₛₕ/(s b꜀), Y",
-        "Confinement_Check": "Confinement Ratio Check",
-        "Transverse_Spacing_Check": "Tie Spacing Check",
-        "Alternating_Support_Check": "Longitudinal Bar Support Check",
-        "Alternating_Support_Added_Legs": "Added Hoop Legs",
-        "Tie_Diameter_Check": "Tie Diameter Check",
-        "SMRF_Dimension_Check": "SMRF Column Dimension Check",
-        "Transverse_Reinforcement_Check": "Transverse Reinforcement Check",
-        "Column_Design_Status": "Overall Design Status",
-        "Design_Status_Reason": "Design Status Reason",
-    }
+    display_names = COLUMN_REPORT_LABELS
     clean_report = report.rename(
         columns={
             name: display_names.get(name, name.replace("_", " "))
             for name in report.columns
         }
+    )
+    # ETABS draws a column from its bottom joint (I) to its top joint (J).
+    clean_report["End"] = clean_report["End"].map(
+        lambda end: {"I": "Bottom (I)", "J": "Top (J)"}.get(end, end)
     )
     header_row = 9
     first_col = 2
@@ -3544,8 +3775,9 @@ def _write_consolidated_column_report(
     body = sheet.range((header_row + 1, first_col), (last_row, last_col))
     body.number_format = "0.00"
     body.api.WrapText = False
-    body.api.ShrinkToFit = True
+    body.api.ShrinkToFit = False  # shrunk text was unreadable; columns are sized instead
     body.api.VerticalAlignment = -4108
+    body.api.HorizontalAlignment = -4108  # centred under the header
     body.api.Borders(9).LineStyle = 1
     body.api.Borders(9).Weight = 2
     body.api.Font.Size = 9
@@ -3559,46 +3791,42 @@ def _write_consolidated_column_report(
         name: first_col + index
         for index, name in enumerate(clean_report.columns)
     }
-    widths = {
-        "Column Label": 13,
-        "Unique Name": 17,
-        "Story": 10,
-        "End": 6,
-        "Load Combination": 36,
-        "Section": 22,
-        "Bundle Layout": 25,
-        "Column Bars Contributing at Joint": 48,
-        "Beam Bars at Joint": 42,
-        "Transverse Reinforcement Provision": 36,
-        "Governing ACI 18.7.5 Expression": 17,
-        "ρₛ,req from 18.7.5(a)": 17,
-        "ρₛ,req from 18.7.5(b)": 17,
-        "ρₛ,req from 18.7.5(c)": 17,
-        "ρₛ,req from 18.7.5(d)": 17,
-        "ρₛ,req from 18.7.5(e)": 17,
-        "ρₛ,req from 18.7.5(f)": 17,
-        "Overall Design Status": 17,
-        "Longitudinal Bar Support Check": 38,
+    # Whole numbers are shown without decimals and small ratios with enough digits.
+    whole_number_columns = {
+        "Width (mm)", "Depth (mm)", "Diameter (mm)", "Concrete Cover (mm)",
+        "Longitudinal Bars",
+        "Bars on X Edge", "Bars on Y Edge", "Tie Bar Diameter (mm)",
+        "Tie / Spiral Spacing (mm)", "Tie Legs along X Edge", "Tie Legs along Y Edge",
+        "Added Hoop Legs",
     }
-    for name, width in widths.items():
-        if name in name_to_col:
-            sheet.range(
-                (header_row + 1, name_to_col[name]),
-                (last_row, name_to_col[name]),
-            ).column_width = width
+    ratio_columns = {
+        "ρ Longitudinal", "ρ Limit", "kᶠ", "kₙ",
+        "Required Aₛₕ/(s b꜀), X", "Provided Aₛₕ/(s b꜀), X",
+        "Required Aₛₕ/(s b꜀), Y", "Provided Aₛₕ/(s b꜀), Y",
+    } | {name for name in clean_report.columns if name.startswith("ρₛ,req")}
+    # Columns whose text is long: left-aligned, with a fixed width.
+    fixed_widths = {"Bar Layout Data (x, y, n)": 18, "Design Status Reason": 60}
+
+    def shown_length(value) -> int:
+        """Length of a cell as Excel will show it."""
+        if value is None or (isinstance(value, float) and math.isnan(value)):
+            return 0
+        if isinstance(value, float):
+            return len(f"{value:.2f}")
+        return len(str(value))
+
     for name in clean_report.columns:
-        if name not in widths and name not in {
-            "Column Label",
-            "Unique Name",
-            "Story",
-            "End",
-            "Load Combination",
-            "Section",
-        }:
-            sheet.range(
-                (header_row + 1, name_to_col[name]),
-                (last_row, name_to_col[name]),
-            ).column_width = 14
+        column = name_to_col[name]
+        cells = sheet.range((header_row + 1, column), (last_row, column))
+        if name in whole_number_columns:
+            cells.number_format = "0"
+        elif name in ratio_columns:
+            cells.number_format = "0.0000"
+        longest = max((shown_length(value) for value in clean_report[name]), default=0)
+        width = fixed_widths.get(name, min(max(longest + 3, len(name) // 2 + 3, 10), 60))
+        cells.column_width = width
+        if name in fixed_widths or longest > 40:
+            cells.api.HorizontalAlignment = -4131  # long text reads better from the left
     leaf_header.row_height = 36
 
     # Merge repeated hierarchy labels while retaining one value per visible group.
@@ -3626,7 +3854,7 @@ def _write_consolidated_column_report(
             if name == "End":
                 end_fill = (
                     (235, 243, 250)
-                    if key[-1] == "I"
+                    if str(key[-1]).startswith("Bottom")
                     else (250, 242, 232)
                 )
                 sheet.range((first_row, column), (final_row, last_col)).color = (
@@ -3680,6 +3908,27 @@ def _write_consolidated_column_report(
     label_divider.Weight = 3
     label_divider.Color = 31 + 78 * 256 + 121 * 65536
 
+    # Close the table on its left edge.
+    left_edge = sheet.range((8, first_col), (last_row, first_col)).api.Borders(7)
+    left_edge.LineStyle = 1
+    left_edge.Weight = 3
+    left_edge.Color = 31 + 78 * 256 + 121 * 65536
+
+    # Make the column mark and the member name stand out from the data.
+    for name, fill, font_color, font_size in (
+        ("Column Label", (31, 78, 121), (255, 255, 255), 12),
+        ("Unique Name", (189, 215, 238), (0, 0, 0), 10),
+    ):
+        cells = sheet.range(
+            (header_row + 1, name_to_col[name]), (last_row, name_to_col[name])
+        )
+        cells.color = fill
+        cells.api.Font.Bold = True
+        cells.api.Font.Size = font_size
+        cells.api.Font.Color = font_color[0] + font_color[1] * 256 + font_color[2] * 65536
+        cells.api.HorizontalAlignment = -4108
+        cells.api.VerticalAlignment = -4108
+
     # Apply a stronger end boundary after each visual data group on the right.
     group_start = first_col
     for label, names in groups:
@@ -3699,6 +3948,8 @@ def _write_consolidated_column_report(
 def _run_column_design_from_excel(
     write_joint_sheet: bool = True,
     progress=None,
+    continuous_vertical_bars: bool = False,
+    bottom_story_cover: str = "none",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Design frame-data columns and run SMRF checks using Excel and ETABS inputs.
 
@@ -3712,6 +3963,10 @@ def _run_column_design_from_excel(
         progress: Optional callable that receives one status text at a time
             (column mark, level, end, load combination and current check) for the
             loading window.
+        continuous_vertical_bars: Carry the larger number of vertical bars of an
+            upper level down to the levels below it. A lower column then uses the
+            lightest of its own layouts that has at least as many bars as the
+            level above and passes every check.
     """
     try:
         workbook = xw.Book.caller()
@@ -3773,16 +4028,16 @@ def _run_column_design_from_excel(
             etabs.get_data("Point Object Connectivity"), "Point Object Connectivity"
         )
         frame_angles = _extract_frame_angles(local_axes)
-        frame_labels = _extract_frame_labels(local_axes)
-        frame_labels = {
-            member: _common_column_mark(member)
-            for member in frame_labels
-        }
         point_coordinates = _extract_point_coordinates(point_table)
     else:
         frame_angles = {}
-        frame_labels = {}
         point_coordinates = {}
+    # The mark comes from the unique name, so every column has one whether or
+    # not ETABS is connected and whatever its local-axis angle is.
+    frame_labels = {
+        member: _common_column_mark(member)
+        for member in frame_data["UniqueName"].astype(str)
+    }
 
     if beam_design.empty:
         raise ValueError(
@@ -3790,6 +4045,10 @@ def _run_column_design_from_excel(
             "column design so beam-column checks use designed longitudinal bars."
         )
 
+    # Before the column rows are taken, so every later step sees the same section.
+    frame_data, _ = _apply_bottom_story_cover(
+        frame_data, connectivity, cover, bottom_story_cover
+    )
     column_rows = frame_data.loc[
         frame_data["DesignType"].astype(str).str.strip().str.casefold().eq("column")
     ].copy()
@@ -3852,6 +4111,17 @@ def _run_column_design_from_excel(
             )
         else:
             level_elevations[member] = np.nan
+    if not any(pd.notna(value) for value in level_elevations.values()):
+        # No joint coordinates (ETABS not connected): order the levels of a mark
+        # by how the columns stand on each other.
+        story_of = dict(
+            zip(column_rows["UniqueName"].astype(str), column_rows["Story"].astype(str))
+        )
+        rank = {
+            story: float(index)
+            for index, story in enumerate(_story_order_from_stacks(connectivity, story_of))
+        }
+        level_elevations = {member: rank[story] for member, story in story_of.items()}
 
     column_candidates: dict[str, dict] = {}
     candidate_capacity_cache: dict[tuple, float] = {}
@@ -4003,6 +4273,58 @@ def _run_column_design_from_excel(
             candidate["checks_complete"] = True
         return candidate
 
+    continuity_notes: dict[str, str] = {}
+    for state in column_candidates.values():
+        layout = state["layout_options"][state["selected_index"]]
+        state["own_design_bars"] = sum(count for _, _, count in layout)
+
+    def column_ends(member: str) -> tuple[str, str]:
+        """Return the (bottom joint, top joint) of a column."""
+        connection = connection_by_name.loc[member]
+        point_i = _normalize_object_name(connection["UniquePtI"])
+        point_j = _normalize_object_name(connection["UniquePtJ"])
+        if point_i in point_coordinates and point_j in point_coordinates:
+            if point_coordinates[point_i][2] > point_coordinates[point_j][2]:
+                return point_j, point_i
+        return point_i, point_j  # ETABS draws columns from the bottom (I) up (J)
+
+    def apply_vertical_bar_continuity() -> None:
+        """Give each lower level at least the bar count of the level above it."""
+        stacks = _column_stacks({member: column_ends(member) for member in column_candidates})
+        for stack in stacks:
+            required = 0
+            for member in stack:  # top level first
+                state = column_candidates[member]
+                options = state["layout_options"]
+                bars = sum(count for _, _, count in options[state["selected_index"]])
+                if bars >= required:
+                    required = bars
+                    continue
+                report_progress(member, "I and J", "Vertical bar continuity")
+                match = None
+                for index in range(state["selected_index"] + 1, len(options)):
+                    if sum(count for _, _, count in options[index]) < required:
+                        continue
+                    if state["evaluate_candidate"](index)["passes"]:
+                        match = index
+                        break
+                if match is None:
+                    continuity_notes[member] = (
+                        f"Could not match the {required} bars of the level above; "
+                        f"kept {bars}"
+                    )
+                    continue
+                state["selected_index"] = match
+                new_bars = sum(count for _, _, count in options[match])
+                continuity_notes[member] = (
+                    f"Raised from {state['own_design_bars']} to {new_bars} bars "
+                    "to match the level above"
+                )
+                required = max(required, new_bars)
+
+    if continuous_vertical_bars:
+        apply_vertical_bar_continuity()
+
     for state in column_candidates.values():
         state["initial_index"] = state["selected_index"]
 
@@ -4048,9 +4370,9 @@ def _run_column_design_from_excel(
             moment_axis = np.array(
                 [-math.sin(direction_radians), math.cos(direction_radians), 0.0]
             )
-            theta = math.atan2(
-                float(np.dot(moment_axis, local_3)),
+            theta = _section_bending_angle(
                 float(np.dot(moment_axis, local_2)),
+                float(np.dot(moment_axis, local_3)),
             )
             force = _column_force_at_end(
                 force_frames[member], combo, at_i_end=at_i_end
@@ -4229,6 +4551,11 @@ def _run_column_design_from_excel(
                     state["selected_index"], upgrade["index"]
                 )
 
+        # Strong-column upgrades can add bars to a lower level only, so the
+        # continuity rule is applied once more before the ratios are finalised.
+        if continuous_vertical_bars:
+            apply_vertical_bar_continuity()
+
         for joint_index, joint_row in initial_joints.iterrows():
             joint = str(joint_row["Joint_Point"])
             nominal_delta = 0.0
@@ -4368,46 +4695,29 @@ def _run_column_design_from_excel(
                 maximum_compression,
                 spacing_provided,
             )
-            leg_count, added_legs, alternating_status = (
-                _post_check_alternating_support(
-                    final_engine,
-                    selected_layout,
-                    transverse["Transverse_Legs_Per_Direction"],
-                )
+            support_x, support_y = _alternating_support_legs(
+                final_engine, selected_layout
             )
-            transverse["Transverse_Legs_Per_Direction"] = leg_count
-            transverse["Transverse_Legs_X"] = leg_count
-            transverse["Transverse_Legs_Y"] = leg_count
-            transverse["Alternating_Support_Check"] = alternating_status
-            transverse["Alternating_Support_Added_Legs"] = added_legs
-            if final_engine.shape == "rectangular":
-                core_width = final_engine.width - 2.0 * (
-                    final_engine.cc + final_engine.dties / 2.0
+            legs_x = max(transverse["Required_Legs_X"], support_x)
+            legs_y = max(transverse["Required_Legs_Y"], support_y)
+            transverse["Transverse_Legs_X"] = legs_x
+            transverse["Transverse_Legs_Y"] = legs_y
+            transverse["Transverse_Legs_Per_Direction"] = max(legs_x, legs_y)
+            transverse["Alternating_Support_Added_Legs"] = max(
+                0, support_x - transverse["Required_Legs_X"]
+            ) + max(0, support_y - transverse["Required_Legs_Y"])
+            if final_engine.shape == "circular":
+                support_text = "N/A for continuous spiral"
+                transverse["Alternating_Support_Check"] = support_text
+                transverse["Alternating_Support_Check_X"] = support_text
+                transverse["Alternating_Support_Check_Y"] = support_text
+            else:
+                transverse["Alternating_Support_Check"] = "PASS"
+                transverse["Alternating_Support_Check_X"] = (
+                    f"PASS - {support_x} legs needed along the X edge"
                 )
-                core_height = final_engine.height - 2.0 * (
-                    final_engine.cc + final_engine.dties / 2.0
-                )
-                tie_area = math.pi * final_engine.dties**2 / 4.0
-                provided_ratio_x = (
-                    leg_count * tie_area / (spacing_provided * core_width)
-                )
-                provided_ratio_y = (
-                    leg_count * tie_area / (spacing_provided * core_height)
-                )
-                transverse["Provided_Ash_s_Ratio_X"] = provided_ratio_x
-                transverse["Provided_Ash_s_Ratio_Y"] = provided_ratio_y
-                transverse["Provided_Confinement_Ratio_X"] = provided_ratio_x
-                transverse["Provided_Confinement_Ratio_Y"] = provided_ratio_y
-                transverse["Provided_Confinement_Ratio"] = min(
-                    provided_ratio_x, provided_ratio_y
-                )
-                transverse["Confinement_Check"] = (
-                    "PASS"
-                    if provided_ratio_x
-                    >= transverse["Required_Confinement_Ratio_X"]
-                    and provided_ratio_y
-                    >= transverse["Required_Confinement_Ratio_Y"]
-                    else "FAIL"
+                transverse["Alternating_Support_Check_Y"] = (
+                    f"PASS - {support_y} legs needed along the Y edge"
                 )
             spacing_provided = transverse["Transverse_Spacing_Provided_mm"]
             if transverse["Confinement_Check"] != "PASS":
@@ -4418,6 +4728,8 @@ def _run_column_design_from_excel(
                 "Transverse_Legs_Per_Direction": 2,
                 "Confinement_Check": "N/A - non-SMRF detailing",
                 "Alternating_Support_Check": "N/A - non-SMRF detailing",
+                "Alternating_Support_Check_X": "N/A - non-SMRF detailing",
+                "Alternating_Support_Check_Y": "N/A - non-SMRF detailing",
                 "Alternating_Support_Added_Legs": 0,
                 "Transverse_Legs_X": 2,
                 "Transverse_Legs_Y": 2,
@@ -4465,28 +4777,28 @@ def _run_column_design_from_excel(
             else "FAIL"
         )
 
-        member_shear_checks = chosen_candidate["shear_checks"]
-        required_shear_legs = chosen_candidate["required_shear_legs"]
-        if member_shear_checks is None:
-            member_shear_checks, required_shear_legs = _column_shear_checks(
-                row,
-                forces,
-                final_engine,
-                selected_bars,
-                spacing_provided,
-                transverse["Transverse_Legs_Per_Direction"],
-                is_smrf,
-                bundle_layout=selected_layout,
-                progress=report_progress,
+        member_shear_checks, _ = _column_shear_checks(
+            row,
+            forces,
+            final_engine,
+            selected_bars,
+            spacing_provided,
+            (transverse["Transverse_Legs_X"], transverse["Transverse_Legs_Y"]),
+            is_smrf,
+            bundle_layout=selected_layout,
+            progress=report_progress,
+        )
+        # Shear along the depth (V2) uses the legs counted along the X edge and
+        # shear along the width (V3) the legs counted along the Y edge.
+        for check in member_shear_checks:
+            key = (
+                "Transverse_Legs_X"
+                if check["Shear_Direction"] == "V2"
+                else "Transverse_Legs_Y"
             )
+            transverse[key] = max(transverse[key], check["Provided_Transverse_Legs"])
         transverse["Transverse_Legs_Per_Direction"] = max(
-            transverse["Transverse_Legs_Per_Direction"], required_shear_legs
-        )
-        transverse["Transverse_Legs_X"] = max(
-            transverse["Transverse_Legs_X"], required_shear_legs
-        )
-        transverse["Transverse_Legs_Y"] = max(
-            transverse["Transverse_Legs_Y"], required_shear_legs
+            transverse["Transverse_Legs_X"], transverse["Transverse_Legs_Y"]
         )
         if final_engine.shape == "rectangular" and is_smrf:
             core_width = final_engine.width - 2.0 * (
@@ -4496,23 +4808,11 @@ def _run_column_design_from_excel(
                 final_engine.cc + final_engine.dties / 2.0
             )
             tie_area = math.pi * final_engine.dties**2 / 4.0
-            transverse["Provided_Confinement_Ratio"] = min(
-                transverse["Transverse_Legs_X"]
-                * tie_area
-                / (spacing_provided * core_width),
-                transverse["Transverse_Legs_Y"]
-                * tie_area
-                / (spacing_provided * core_height),
-            )
             transverse["Provided_Ash_s_Ratio_X"] = (
-                transverse["Transverse_Legs_X"]
-                * tie_area
-                / (spacing_provided * core_width)
+                transverse["Transverse_Legs_X"] * tie_area / (spacing_provided * core_width)
             )
             transverse["Provided_Ash_s_Ratio_Y"] = (
-                transverse["Transverse_Legs_Y"]
-                * tie_area
-                / (spacing_provided * core_height)
+                transverse["Transverse_Legs_Y"] * tie_area / (spacing_provided * core_height)
             )
             transverse["Provided_Confinement_Ratio_X"] = transverse[
                 "Provided_Ash_s_Ratio_X"
@@ -4520,6 +4820,9 @@ def _run_column_design_from_excel(
             transverse["Provided_Confinement_Ratio_Y"] = transverse[
                 "Provided_Ash_s_Ratio_Y"
             ]
+            transverse["Provided_Confinement_Ratio"] = min(
+                transverse["Provided_Ash_s_Ratio_X"], transverse["Provided_Ash_s_Ratio_Y"]
+            )
             transverse["Confinement_Check"] = (
                 "PASS"
                 if transverse["Provided_Ash_s_Ratio_X"]
@@ -4571,7 +4874,7 @@ def _run_column_design_from_excel(
                 "fyt_MPa": final_engine.fyt,
                 "Main_Bar_mm": dmain,
                 "Tie_Bar_mm": dties,
-                "Cover_mm": cover,
+                "Cover_mm": final_engine.cc,
                 "Longitudinal_Bars": selected_bars,
                 "Longitudinal_Spacing_Limit_mm": (
                     final_engine.code.column_strength.max_longitudinal_spacing
@@ -4632,6 +4935,18 @@ def _run_column_design_from_excel(
                 "Alternating_Support_Check": transverse[
                     "Alternating_Support_Check"
                 ],
+                "Alternating_Support_Check_X": transverse[
+                    "Alternating_Support_Check_X"
+                ],
+                "Alternating_Support_Check_Y": transverse[
+                    "Alternating_Support_Check_Y"
+                ],
+                "Bars_X_Edge": _bars_per_edge(final_engine, selected_layout)[0],
+                "Bars_Y_Edge": _bars_per_edge(final_engine, selected_layout)[1],
+                "Vertical_Bar_Continuity": continuity_notes.get(
+                    member,
+                    "Own design" if continuous_vertical_bars else "Not applied",
+                ),
                 "Alternating_Support_Added_Legs": transverse[
                     "Alternating_Support_Added_Legs"
                 ],
@@ -4674,6 +4989,11 @@ def _run_column_design_from_excel(
         joint_results,
         column_labels=frame_labels,
         level_elevations=level_elevations,
+        joint_na_reason=(
+            "N/A - no beam frames into this end"
+            if is_smrf
+            else "N/A - seismic design is off"
+        ),
     )
     if progress is not None:
         progress("Writing the COLUMN DESIGN report to Excel...")
@@ -4683,14 +5003,137 @@ def _run_column_design_from_excel(
     return report, joint_results
 
 
+BOTTOM_COVER_MODES = ("none", "enlarge", "bars")
+BOTTOM_COVER_QUESTION = {
+    "Yes - use {cover:g} mm cover on the bottom-most story": True,
+    "No - keep {normal:g} mm cover on every story": False,
+}
+BOTTOM_COVER_MODE_OPTIONS = {
+    "Enlarge the section - add {extra:g} mm on every face, the bars stay where they are": "enlarge",
+    "Keep the section size - move the vertical bars inward": "bars",
+}
+
+
+def _apply_bottom_story_cover(
+    frame_data: pd.DataFrame,
+    connectivity: pd.DataFrame,
+    cover: float,
+    mode: str,
+    code: AciCode = CODE,
+) -> tuple[pd.DataFrame, str | None]:
+    """Give the columns of the bottom-most story the earth-contact cover.
+
+    ``mode`` is ``"enlarge"`` (each face moves out by the extra cover, so every
+    dimension grows by twice that and the bars keep their position) or
+    ``"bars"`` (the section is kept and the bars move inward). The bottom-most
+    story is read from how the columns stand on each other.
+
+    Returns the frame data and the name of that story (None when nothing changed).
+    """
+    if mode not in BOTTOM_COVER_MODES:
+        raise ValueError(f"bottom_story_cover must be one of {BOTTOM_COVER_MODES}.")
+    bottom_cover = code.column_strength.earth_contact_cover
+    extra = bottom_cover - cover
+    if mode == "none" or extra <= 0:
+        return frame_data, None
+    is_column = frame_data["DesignType"].astype(str).str.strip().str.casefold().eq("column")
+    story_of = dict(zip(
+        frame_data.loc[is_column, "UniqueName"].astype(str),
+        frame_data.loc[is_column, "Story"].astype(str),
+    ))
+    order = _story_order_from_stacks(connectivity, story_of)
+    if not order:
+        return frame_data, None
+    frame_data = frame_data.copy()
+    rows = is_column & frame_data["Story"].astype(str).eq(order[0])
+    if "DesignCover" not in frame_data.columns:
+        frame_data["DesignCover"] = np.nan
+    frame_data.loc[rows, "DesignCover"] = bottom_cover
+    if mode == "enlarge":
+        for name in ("Width", "Depth", "Diameter"):
+            if name not in frame_data.columns:
+                continue
+            values = pd.to_numeric(frame_data[name], errors="coerce")
+            grow = rows & values.gt(0)
+            frame_data[name] = frame_data[name].astype(object)
+            frame_data.loc[grow, name] = values[grow] + 2.0 * extra
+    return frame_data, order[0]
+
+
+VERTICAL_BAR_OPTIONS = {
+    "Yes - lower levels use at least the bars of the level above": True,
+    "No - design every level on its own": False,
+}
+
+
 def run_column_design_from_excel(
     write_joint_sheet: bool = True,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Run the column design workflow while showing its active process in a GUI."""
-    from utilities._gui_helpers import LoadingWindow
+    continuous_vertical_bars: bool | None = None,
+    bottom_story_cover: str | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame] | None:
+    """Run the column design workflow while showing its active process in a GUI.
+
+    ``continuous_vertical_bars`` and ``bottom_story_cover`` (one of
+    ``BOTTOM_COVER_MODES``) are asked for in dialogs when they are not given.
+    Closing a dialog cancels the run and returns ``None``.
+    """
+    from utilities._gui_helpers import LoadingWindow, select_option
+
+    if bottom_story_cover is None:
+        try:
+            workbook = xw.Book.caller()
+        except Exception:
+            workbook = xw.books.active
+        normal = _numeric(
+            workbook.sheets["OVERWRITES"].range("I12").value, "I12 (column cover)", "OVERWRITES"
+        )
+        bottom = CODE.column_strength.earth_contact_cover
+        bottom_story_cover = "none"
+        if bottom > normal:
+            questions = {
+                text.format(cover=bottom, normal=normal): value
+                for text, value in BOTTOM_COVER_QUESTION.items()
+            }
+            chosen = select_option(
+                "Column Design - Bottom Story Cover",
+                f"Use {bottom:g} mm concrete cover for the columns of the bottom-most story?",
+                list(questions),
+                default_index=1,
+            )
+            if chosen is None:
+                return None
+            if questions[chosen]:
+                modes = {
+                    text.format(extra=bottom - normal): value
+                    for text, value in BOTTOM_COVER_MODE_OPTIONS.items()
+                }
+                chosen = select_option(
+                    "Column Design - Bottom Story Cover",
+                    f"How should the {bottom:g} mm cover be provided?",
+                    list(modes),
+                )
+                if chosen is None:
+                    return None
+                bottom_story_cover = modes[chosen]
+
+    if continuous_vertical_bars is None:
+        chosen = select_option(
+            "Column Design - Vertical Bars",
+            "Carry the larger number of vertical bars of an upper level down to the "
+            "levels below it?",
+            list(VERTICAL_BAR_OPTIONS),
+        )
+        if chosen is None:
+            return None
+        continuous_vertical_bars = VERTICAL_BAR_OPTIONS[chosen]
 
     with LoadingWindow("Designing columns...") as window:
-        return _run_column_design_from_excel(write_joint_sheet, progress=window.update)
+        return _run_column_design_from_excel(
+            write_joint_sheet,
+            progress=window.update,
+            continuous_vertical_bars=continuous_vertical_bars,
+            bottom_story_cover=bottom_story_cover,
+        )
 
 
 def _column_story_sort_key(story: object) -> tuple[int, str]:
@@ -5506,10 +5949,13 @@ def generate_dxf_column_schedule(
     cover: float,
     is_smrf: bool,
     inner_tie_style: str = "crossties",
+    story_order: list[str] | None = None,
 ) -> None:
     """Create one grouped column schedule DXF for the supplied floor report.
 
     ``inner_tie_style`` is ``"crossties"`` or ``"hoops"`` (closed inner hoops).
+    ``story_order`` lists the stories from the bottom up; without it the order
+    is guessed from the story names.
     """
     if report.empty:
         raise ValueError("Column design report has no rows to export.")
@@ -5535,6 +5981,12 @@ def generate_dxf_column_schedule(
     grouped_labels = []
     report = report.copy()
     report["_DXF Mark"] = report["Unique Name"].map(_common_column_mark)
+    known = [str(story) for story in (story_order or [])]
+    story_names = report["Story"].dropna().astype(str).unique()
+    full_order = known + sorted(
+        (story for story in story_names if story not in known), key=_column_story_sort_key
+    )
+    story_rank = {story: index for index, story in enumerate(full_order)}
     for label, members in report.groupby("_DXF Mark", sort=False):
         elevation_column = next(
             (
@@ -5546,9 +5998,7 @@ def generate_dxf_column_schedule(
         )
         if elevation_column is None:
             members = members.assign(
-                _elevation=members["Story"].map(
-                    lambda value: _column_story_sort_key(value)[0]
-                )
+                _elevation=members["Story"].map(lambda value: story_rank.get(str(value), -1))
             )
         else:
             members = members.assign(
@@ -5566,11 +6016,16 @@ def generate_dxf_column_schedule(
                 ).drop_duplicates("Unique Name"),
             )
         )
-    left_widths = [20.0, 22.0, 25.0]
+    # Proportions of the office column schedule: F'c, floor level and mark
+    # columns, then one detail column per mark.
+    left_widths = [30.0, 50.0, 59.0]
     detail_width = 90.0
-    header_height = 10.0
-    drawing_height = 76.0
-    data_height = 8.0
+    header_height = 8.0
+    drawing_height = 88.0
+    data_height = 7.0
+    text_height = 3.5  # headers, row names and values
+    level_text_height = 4.5  # F'c and floor level
+    diameter_sign = "%%C"  # drawn as the diameter symbol in CAD
     field_names = (
         "SIZE",
         "VERTICAL BARS",
@@ -5605,11 +6060,7 @@ def generate_dxf_column_schedule(
 
     # Arrange the schedule by story so the level properties are written once
     # and shared by every column mark on that level.
-    story_values = sorted(
-        report["Story"].dropna().astype(str).unique(),
-        key=_column_story_sort_key,
-        reverse=True,
-    )
+    story_values = sorted(story_names, key=story_rank.get, reverse=True)
     labels = list(dict.fromkeys(report["_DXF Mark"].astype(str)))
     story_content_height = drawing_height + len(field_names) * data_height
     story_x_positions = [0.0]
@@ -5650,7 +6101,7 @@ def generate_dxf_column_schedule(
                     title,
                     story_x_positions[column_index],
                     y_top - story_header_height / 2.0,
-                    2.0,
+                    text_height,
                     left_widths[column_index],
                 )
         add_cell(
@@ -5670,19 +6121,22 @@ def generate_dxf_column_schedule(
                 "MARK",
                 story_x_positions[2],
                 y_top - story_header_height / 2.0,
-                2.0,
+                text_height,
                 left_widths[2],
             )
-        add_text(fc_value, story_x_positions[0],         y_top - story_header_height - story_content_height / 2.0,
-        2.8,
-        left_widths[0],
-        )
+        level_y = y_top - story_header_height - story_content_height / 2.0
+        add_text(fc_value, story_x_positions[0], level_y, level_text_height, left_widths[0])
+        # A column runs from the level below to its own story: "3F TO PD1".
+        rank = story_rank[story]
+        below = full_order[rank - 1] if rank > 0 else CODE.drawing.column_schedule_base_label
+        level_range = f"{below} TO {story}"
         add_text(
-        story,
-        story_x_positions[1],
-        y_top - story_header_height - story_content_height / 2.0,
-        2.8,
-        left_widths[1],
+            level_range,
+            story_x_positions[1],
+            level_y,
+            # long story names are written smaller so they stay inside the cell
+            min(level_text_height, left_widths[1] / (0.95 * len(level_range))),
+            left_widths[1],
         )
 
         for field_index, field_name in enumerate(field_names):
@@ -5698,7 +6152,7 @@ def generate_dxf_column_schedule(
                 field_name,
                 story_x_positions[2],
                 row_top - data_height / 2.0,
-                1.8,
+                text_height,
                 left_widths[2],
             )
 
@@ -5712,7 +6166,7 @@ def generate_dxf_column_schedule(
                     label,
                     x_left,
                     y_top - story_header_height / 2.0,
-                    1.8,
+                    text_height,
                     detail_width,
                 )
             add_cell(
@@ -5731,7 +6185,10 @@ def generate_dxf_column_schedule(
                     drawing_height * 0.82,
                     main_bar_diameter,
                     float(row["Tie Bar Diameter (mm)"]),
-                    cover,
+                    # a column designed with its own cover is drawn with it
+                    float(row["Concrete Cover (mm)"])
+                    if pd.notna(row.get("Concrete Cover (mm)"))
+                    else cover,
                     is_smrf,
                     inner_tie_style,
                 )
@@ -5740,7 +6197,7 @@ def generate_dxf_column_schedule(
                     "-",
                     x_left,
                     y_top - story_header_height - drawing_height / 2.0,
-                    2.8,
+                    level_text_height,
                     detail_width,
                 )
 
@@ -5756,28 +6213,62 @@ def generate_dxf_column_schedule(
                 if row is None:
                     value = "-"
                 else:
+                    tie = f"{float(row['Tie Bar Diameter (mm)']):g}mm{diameter_sign}"
                     if field_name == "SIZE":
                         diameter = float(row["Diameter (mm)"] or 0.0)
-                        value = f"Ø{diameter:.0f}" if diameter > 0 else f"{float(row['Width (mm)']):.0f}x{float(row['Depth (mm)']):.0f}"
+                        value = (
+                            f"{diameter:.0f}mm{diameter_sign}"
+                            if diameter > 0
+                            else f"{float(row['Width (mm)']):.0f}X{float(row['Depth (mm)']):.0f}"
+                        )
                     elif field_name == "VERTICAL BARS":
-                        value = f"{int(float(row['Longitudinal Bars']))}-D{main_bar_diameter:g}"
+                        value = (
+                            f"{int(float(row['Longitudinal Bars']))}-"
+                            f"{main_bar_diameter:g}mm{diameter_sign}"
+                        )
                     elif field_name == "JOINT REIN.":
-                        value = (
-                            f"D{float(row['Tie Bar Diameter (mm)']):g} @ "
-                            f"{CODE.drawing.column_joint_tie_spacing:g}"
-                        )
+                        value = f"{tie} @ {CODE.drawing.column_joint_tie_spacing:g}mm"
                     elif field_name == "CONFINMT":
-                        value = f"D{float(row['Tie Bar Diameter (mm)']):g} @ {float(row['Tie / Spiral Spacing (mm)']):g}"
-                    else:
-                        value = (
-                            f"D{float(row['Tie Bar Diameter (mm)']):g} @ "
-                            f"{CODE.drawing.column_general_tie_spacing:g}"
+                        # The standard spacing, unless the design needs a closer one.
+                        designed = pd.to_numeric(
+                            row.get("Tie / Spiral Spacing (mm)"), errors="coerce"
                         )
-                add_text(value, x_left, row_top - data_height / 2.0, 1.8, detail_width)
+                        spacing = CODE.drawing.column_confinement_tie_spacing
+                        if pd.notna(designed) and designed < spacing:
+                            spacing = float(designed)
+                        value = f"{tie} @ {spacing:g}mm"
+                    else:
+                        value = f"{tie} @ {CODE.drawing.column_general_tie_spacing:g}mm"
+                add_text(value, x_left, row_top - data_height / 2.0, text_height, detail_width)
         y_top = block_bottom
 
     doc.saveas(output_filepath)
     return
+
+
+def _read_column_report_sheet(sheet) -> pd.DataFrame:
+    """Read the COLUMN DESIGN report back, with its worksheet header names.
+
+    Label, name, story and end are merged cells on the sheet; they are filled
+    down so every row carries them.
+    """
+    used_last_row = sheet.used_range.last_cell.row
+    header_values = sheet.range((9, 2), (9, sheet.used_range.last_cell.column)).value
+    last_column = max(
+        (index + 2 for index, value in enumerate(header_values) if value is not None),
+        default=0,
+    )
+    if last_column == 0 or used_last_row < 10:
+        return pd.DataFrame()
+    headers = sheet.range((9, 2), (9, last_column)).value
+    values = sheet.range((10, 2), (used_last_row, last_column)).options(ndim=2).value
+    report = pd.DataFrame(values, columns=headers).dropna(how="all")
+    identifiers = ("Column Label", "Unique Name", "Story", "End")
+    if any(name not in report.columns for name in identifiers):
+        return pd.DataFrame()
+    for column in identifiers:
+        report[column] = report[column].ffill()
+    return report.dropna(subset=["Unique Name"])
 
 
 INNER_TIE_STYLE_LABELS = {
@@ -5822,20 +6313,9 @@ def export_column_cad_drawings(
         workbook = xw.Book.caller()
     except Exception:
         workbook = xw.books.active
-    sheet = workbook.sheets["COLUMN DESIGN"]
-    used_last_row = sheet.used_range.last_cell.row
-    header_values = sheet.range((9, 2), (9, sheet.used_range.last_cell.column)).value
-    last_column = max(
-        index + 2 for index, value in enumerate(header_values) if value is not None
-    )
-    headers = sheet.range((9, 2), (9, last_column)).value
-    values = sheet.range((10, 2), (used_last_row, last_column)).options(ndim=2).value
-    report = pd.DataFrame(values, columns=headers).dropna(how="all")
-    for column in ("Column Label", "Unique Name", "Story", "End"):
-        report[column] = report[column].ffill()
-    report = report.dropna(subset=["Unique Name"]).drop_duplicates(
-        subset=["Unique Name"], keep="first"
-    )
+    report = _read_column_report_sheet(workbook.sheets["COLUMN DESIGN"])
+    if not report.empty:
+        report = report.drop_duplicates(subset=["Unique Name"], keep="first")
     if report.empty:
         raise ValueError("COLUMN DESIGN contains no designed columns to export.")
 
@@ -5857,8 +6337,267 @@ def export_column_cad_drawings(
             cover,
             is_smrf,
             inner_tie_style,
+            story_order=_story_order_from_stacks(
+                _read_excel_table(workbook.sheets["CONNECTIVITY"], "B2"),
+                dict(zip(report["Unique Name"].astype(str), report["Story"].astype(str))),
+            ),
         )
     return [output_path]
+
+
+# =============================================================================
+# CALCULATION REPORT (PDF)
+# =============================================================================
+def _governing_row(rows: pd.DataFrame, value: str, check: str, lowest: bool = False):
+    """Row of the governing combination: a failing one first, then the extreme value."""
+    values = pd.to_numeric(rows[value], errors="coerce")
+    rated = rows[values.notna()]
+    if rated.empty:
+        return None
+    failing = rated[rated[check].astype(str).str.startswith("FAIL")]
+    pool = failing if not failing.empty else rated
+    pool_values = pd.to_numeric(pool[value], errors="coerce")
+    return pool.loc[pool_values.idxmin() if lowest else pool_values.idxmax()]
+
+
+def _column_calc_member(rows: pd.DataFrame) -> MemberReport:
+    """Build the report tables of one column from its report rows (internal names)."""
+    first = rows.iloc[0]
+    name = str(first["UniqueName"])
+    circular = not is_blank(first.get("Diameter_mm")) and float(first["Diameter_mm"]) > 0
+    ends = [
+        (end, label, rows[rows["End"] == end])
+        for end, label in (("J", "Top (J)"), ("I", "Bottom (I)"))
+    ]
+
+    size_rows = (
+        [[Tex("Diameter (mm)"), number(first.get("Diameter_mm"), 0), "Shape", first.get("Shape")]]
+        if circular
+        else [[Tex("Width, X (mm)"), number(first.get("Width_mm"), 0),
+               Tex("Depth, Y (mm)"), number(first.get("Depth_mm"), 0)]]
+    )
+    section = ReportTable(
+        "Section and vertical reinforcement",
+        ["Parameter", "Value", "Parameter", "Value"],
+        [["Section", first.get("Section"), "Column mark", first.get("Column_Label")]]
+        + size_rows
+        + [
+            [Tex(r"$f'_c$ (MPa)"), number(first.get("f'c_MPa")),
+             Tex("$f_y$ (MPa)"), number(first.get("fy_MPa"))],
+            [Tex("$f_{yt}$ (MPa)"), number(first.get("fyt_MPa")),
+             "Vertical bars", number(first.get("Longitudinal_Bars"), 0)],
+            ["Bars on X edge", number(first.get("Bars_X_Edge"), 0),
+             "Bars on Y edge", number(first.get("Bars_Y_Edge"), 0)],
+            [Tex(r"Steel ratio, $\rho$"), number(first.get("Reinforcement_Ratio"), 4),
+             Tex(r"Limit on $\rho$"), number(first.get("Reinforcement_Ratio_Limit"), 4)],
+            ["Bundles", first.get("Bundle_Layout"),
+             "Vertical bar continuity", first.get("Vertical_Bar_Continuity")],
+        ],
+        "lp{4.6cm}lp{6.2cm}",
+    )
+
+    flexure_rows, shear_rows, capacity_rows, joint_rows = [], [], [], []
+    worst_flexure = worst_shear = float("nan")
+    for end, label, end_rows in ends:
+        if end_rows.empty:
+            continue
+        governing = _governing_row(end_rows, "Flexure_Utilization", "Flexure_Check")
+        if governing is not None:
+            utilization = float(governing["Flexure_Utilization"])
+            worst_flexure = max(utilization, worst_flexure) if worst_flexure == worst_flexure else utilization
+            flexure_rows.append([
+                label, governing.get("Combo"), number(governing.get("Pu_kN")),
+                number(governing.get("Mu2_kNm")), number(governing.get("Mu3_kNm")),
+                number(governing.get("phi_Mn_kNm")), number(utilization),
+                governing.get("Axial_Check"), governing.get("Flexure_Check"),
+            ])
+        governing = _governing_row(end_rows, "Shear_Utilization", "Shear_Check")
+        if governing is not None:
+            utilization = float(governing["Shear_Utilization"])
+            worst_shear = max(utilization, worst_shear) if worst_shear == worst_shear else utilization
+            shear_rows.append([
+                label, governing.get("Combo"), number(governing.get("Analysis_Vu_kN")),
+                number(governing.get("Probable_Ve_kN")), number(governing.get("Design_Vu_kN")),
+                number(governing.get("Vc_kN")), number(governing.get("phi_Vn_kN")),
+                number(utilization), governing.get("Shear_Check"),
+            ])
+        for axis in ("X", "Y"):
+            governing = _governing_row(end_rows, f"BCC_Ratio_{axis}", "BCC_Status", lowest=True)
+            if governing is None:
+                capacity_rows.append(
+                    [label, axis, end_rows.iloc[0].get(f"BCC_Ratio_{axis}"), "--", "--", "--", "--"]
+                )
+            else:
+                capacity_rows.append([
+                    label, axis, governing.get("Combo"),
+                    number(governing.get(f"Sum_Column_Mn_{axis}_kNm")),
+                    number(governing.get(f"Sum_Beam_Mn_{axis}_kNm")),
+                    number(governing.get(f"BCC_Ratio_{axis}")), governing.get("BCC_Status"),
+                ])
+            governing = _governing_row(
+                end_rows, f"Joint_Shear_Utilization_{axis}", "Joint_Shear_Status"
+            )
+            if governing is None:
+                joint_rows.append(
+                    [label, axis, "--", "--", "--",
+                     end_rows.iloc[0].get(f"Joint_Shear_Utilization_{axis}")]
+                )
+            else:
+                joint_rows.append([
+                    label, axis,
+                    number(governing.get(f"Joint_Shear_Demand_{axis}_kN")),
+                    number(governing.get(f"Joint_Shear_Capacity_{axis}_kN")),
+                    number(governing.get(f"Joint_Shear_Utilization_{axis}")),
+                    governing.get("Joint_Shear_Status"),
+                ])
+
+    combo = "p{5.4cm}"
+    tables = [
+        section,
+        ReportTable(
+            "Axial load and flexure - governing combination at each end",
+            ["End", "Combination", Tex("$P_u$"), Tex("$M_{u2}$"), Tex("$M_{u3}$"),
+             Tex(r"$\phi M_n$"), Tex(r"$M_u/\phi M_n$"), "Axial", "Flexure"],
+            flexure_rows, "l" + combo + "rrrrrll",
+            "Forces in kN, moments in kN-m. The resultant of Mu2 and Mu3 is compared with the "
+            "section strength in that direction at the same axial load.",
+        ),
+        ReportTable(
+            "Column shear - governing combination at each end",
+            ["End", "Combination", Tex("$V_u$"), Tex("$V_e$"), Tex("Design $V_u$"),
+             Tex("$V_c$"), Tex(r"$\phi V_n$"), Tex(r"$V_u/\phi V_n$"), "Check"],
+            shear_rows, "l" + combo + "rrrrrrl",
+            "Forces in kN. Ve is the shear from the probable moment strengths at the column ends.",
+        ),
+        ReportTable(
+            "Strong column - weak beam",
+            ["End", "Axis", "Combination", Tex(r"$\Sigma M_{nc}$"), Tex(r"$\Sigma M_{nb}$"),
+             Tex(r"$\Sigma M_{nc}/\Sigma M_{nb}$"), "Check"],
+            capacity_rows, "ll" + combo + "rrrl",
+            "Moments in kN-m. Each axis shows the combination with the lowest ratio.",
+        ),
+        ReportTable(
+            "Joint shear",
+            ["End", "Axis", Tex("$V_j$"), Tex(r"$\phi V_n$"),
+             Tex(r"$V_j/\phi V_n$"), "Check"],
+            joint_rows, "llrrrl",
+            "Forces in kN. The demand comes from the beam bars at 1.25 fy and the capacity from "
+            "the joint size and confinement, so the check is the same for every load combination.",
+        ),
+    ]
+
+    confinement = [
+        [f"Required steel ratio, 18.7.5({letter})", number(first.get(f"Confinement_18_7_5_{letter}"), 4)]
+        for letter in "abcdef"
+        if not is_blank(first.get(f"Confinement_18_7_5_{letter}"))
+    ]
+    tables.append(ReportTable(
+        "Transverse reinforcement",
+        ["Parameter", "Value"],
+        [
+            ["Type", first.get("Transverse_Type")],
+            ["Provided", first.get("Transverse_Provision_Summary")],
+            ["Tie bar diameter (mm)", number(first.get("Tie_Bar_mm"), 0)],
+            ["Spacing (mm)", number(first.get("Transverse_Spacing_mm"), 0)],
+            ["Tie legs along X edge", number(first.get("Transverse_Legs_X"), 0)],
+            ["Tie legs along Y edge", number(first.get("Transverse_Legs_Y"), 0)],
+            ["Governing ACI 18.7.5 expression", first.get("Confinement_Criteria_Governing")],
+            ["High axial load or high concrete strength rule", first.get("High_Axial_or_High_fc_Check")],
+        ]
+        + confinement
+        + [
+            [Tex("$k_f$"), number(first.get("Kf"), 3)],
+            [Tex("$k_n$"), number(first.get("Kn"), 3)],
+            [Tex("Required $A_{sh}/(s\\,b_c)$, X"), number(first.get("Required_Ash_s_Ratio_X"), 4)],
+            [Tex("Provided $A_{sh}/(s\\,b_c)$, X"), number(first.get("Provided_Ash_s_Ratio_X"), 4)],
+            [Tex("Required $A_{sh}/(s\\,b_c)$, Y"), number(first.get("Required_Ash_s_Ratio_Y"), 4)],
+            [Tex("Provided $A_{sh}/(s\\,b_c)$, Y"), number(first.get("Provided_Ash_s_Ratio_Y"), 4)],
+            ["Confinement ratio check", first.get("Confinement_Check")],
+            ["Tie spacing check", first.get("Transverse_Spacing_Check")],
+            ["Bar support check, X edge", first.get("Alternating_Support_Check_X")],
+            ["Bar support check, Y edge", first.get("Alternating_Support_Check_Y")],
+            ["Tie diameter check", first.get("Tie_Diameter_Check")],
+            ["SMRF column dimension check", first.get("SMRF_Dimension_Check")],
+            ["Transverse reinforcement check", first.get("Transverse_Reinforcement_Check")],
+        ],
+        "lp{10cm}",
+    ))
+    status = str(first.get("Column_Design_Status"))
+    tables.append(ReportTable(
+        "Design status",
+        ["Parameter", "Value"],
+        [["Overall design status", status], ["Reason", first.get("Design_Status_Reason")]],
+        "lp{13cm}",
+    ))
+
+    size = (
+        f"D{float(first['Diameter_mm']):g}" if circular
+        else f"{float(first['Width_mm']):g} x {float(first['Depth_mm']):g}"
+    )
+    return MemberReport(
+        heading=f"Column {name} ({first.get('Story')})",
+        summary=[first.get("Column_Label"), name, first.get("Story"), size,
+                 number(first.get("Longitudinal_Bars"), 0), number(worst_flexure),
+                 number(worst_shear), status],
+        tables=tables,
+    )
+
+
+def build_column_calc_report(report: pd.DataFrame, filepath: str, information: list) -> str | None:
+    """Write the column calculation PDF from the report (internal field names)."""
+    members = [
+        _column_calc_member(rows)
+        for _, rows in report.groupby("UniqueName", sort=False)
+    ]
+    if not members:
+        raise ValueError("COLUMN DESIGN contains no designed columns to report.")
+    return build_calc_report(
+        "Concrete Column Design Calculations (ACI 318M-14)",
+        list(information) + [("Columns reported", len(members))],
+        ["Mark", "Column", "Story", "Size (mm)", "Bars", "Flexure D/C", "Shear D/C", "Status"],
+        members,
+        filepath,
+        "p{1.5cm}p{3cm}p{1.4cm}p{2.4cm}p{1.2cm}p{2cm}p{2cm}p{2.8cm}",
+    )
+
+
+def export_column_calculations(filepath: str | None = None) -> str | None:
+    """Triggered by the EXPORT CALC button: save the column calculation PDF."""
+    from utilities._gui_helpers import LoadingWindow, select_save_file, show_warning
+
+    try:
+        workbook = xw.Book.caller()
+    except Exception:
+        workbook = xw.books.active
+    report = _read_column_report_sheet(workbook.sheets["COLUMN DESIGN"])
+    if report.empty:
+        show_warning("Design the columns first: COLUMN DESIGN has no design results.")
+        return None
+    # Back to the internal field names and end letters used by the design.
+    internal = {label: field for field, label in COLUMN_REPORT_LABELS.items()}
+    report = report.rename(columns={name: internal.get(name, name) for name in report.columns})
+    report["End"] = report["End"].map(
+        lambda end: {"Bottom (I)": "I", "Top (J)": "J"}.get(end, end)
+    )
+
+    filepath = filepath or select_save_file(default_name="Column_Design_Calculations")
+    if not filepath:
+        return None  # User canceled the save dialog
+
+    overwrites = workbook.sheets["OVERWRITES"]
+    information = [
+        ("Design code", "ACI 318M-14"),
+        ("Seismic design (SMRF)", "Yes" if overwrites.range("F3").value is True else "No"),
+        ("Vertical bar diameter (mm)", number(overwrites.range("I10").value, 0)),
+        ("Tie bar diameter (mm)", number(overwrites.range("I11").value, 0)),
+        ("Concrete cover (mm)", number(overwrites.range("I12").value, 0)),
+        ("Values shown", "Governing load combination at each end of each column"),
+    ]
+    with LoadingWindow("Writing the column calculation report..."):
+        saved = build_column_calc_report(report, filepath, information)
+    if saved is None:
+        show_warning("The PDF could not be written. Check that LaTeX (pdflatex) is installed.")
+    return saved
 
 
 if __name__ == "__main__":

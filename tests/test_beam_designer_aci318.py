@@ -733,3 +733,139 @@ def test_clearing_an_empty_sheet_only_touches_the_start_cell():
     sheet = _FakeSheet(last_cell=(1, 1))
     beam._clear_table_area(sheet, "B8")
     assert sheet.cleared == [((8, 2), (8, 2))]
+
+
+# --------------------------------------------------------------------------
+# SMRF MOMENT STRENGTH RATIOS ARE ENFORCED, DESIGN SHEAR IS REPORTED
+# --------------------------------------------------------------------------
+def _three_zone_engines(top=6, bottom=2):
+    engines = {}
+    for name in ("Left Support Face", "Midspan Zone", "Right Support Face"):
+        engine = beam.BeamFlexureDesign(400.0, 600.0, 28.0, 415.0, 415.0, 25.0, 10.0, 40.0)
+        engine.n_top, engine.n_bot = (top, bottom) if "Support" in name else (2, 2)
+        engines[name] = engine
+    return engines
+
+
+def test_bottom_bars_are_added_until_positive_strength_is_half_the_negative():
+    """ACI 18.6.3.2: at the joint face Mn+ >= 0.5 Mn-, and every section >= 0.25 max."""
+    engines = _three_zone_engines(top=6, bottom=2)
+    checker = beam.BeamSeismicDesign(engines, 6000.0)
+    assert not checker.check_flexural_capacity_ratios()["all_passed"]
+
+    assert checker.enforce_flexural_capacity_ratios() is True
+
+    check = checker.check_flexural_capacity_ratios()
+    assert check["all_passed"]
+    assert engines["Left Support Face"].n_bot > 2          # bars were added at the support
+    assert engines["Left Support Face"].n_top == 6          # the governing top steel is untouched
+    left = check["locations"]["Left Support Face"]
+    assert left["Mn_pos"] >= 0.5 * check["max_M_neg_support"]
+
+
+def test_design_reports_the_design_shear_and_the_smrf_checks():
+    results = beam.execute_beam_design(
+        df_beam_props=_mock_beam_properties(), df_frame_forces=_mock_force_table(),
+        enable_seismic_design=True, gravity_combo_name="GRAV",
+    )
+    row = results.iloc[0]
+    assert row["Ve_left_kN"] >= row["V_sway_max_kN"] > 0    # sway shear plus gravity shear
+    assert row["SMRF_Flexure_Ratio_Check"] in ("PASS", "FAIL")
+    assert row["SMRF_Rho_Check"] in ("PASS", "FAIL")
+
+
+def test_non_seismic_design_marks_the_smrf_checks_not_applicable():
+    results = beam.execute_beam_design(
+        df_beam_props=_mock_beam_properties(), df_frame_forces=_mock_force_table(),
+        enable_seismic_design=False, gravity_combo_name="GRAV",
+    )
+    assert set(results["SMRF_Flexure_Ratio_Check"]) == {"N/A"}
+    assert set(results["SMRF_Rho_Check"]) == {"N/A"}
+
+
+# --------------------------------------------------------------------------
+# CALCULATION REPORT (PDF) CONTENT
+# --------------------------------------------------------------------------
+def _beam_report_member(seismic=False):
+    results = beam.execute_beam_design(
+        _mock_beam_properties(), _mock_force_table(), seismic, "GRAV"
+    )
+    top = results[results["Face"] == "TOP"].iloc[0]
+    bottom = results[results["Face"] == "BOTTOM"].iloc[0]
+    return beam._beam_calc_member(top, bottom, seismic), bottom
+
+
+def test_beam_report_recomputes_strength_from_the_designed_bars():
+    """HAND CHECK: the midspan bottom row carries Mu = 270 kN-m and phi*Mn above it."""
+    member, bottom = _beam_report_member()
+    tables = {table.title: table for table in member.tables}
+    midspan = next(row for row in tables["Flexure"].rows
+                   if row[0] == "Midspan" and row[1] == "Bottom")
+    assert float(midspan[2]) == pytest.approx(270.0, abs=0.01)   # Mu
+    assert float(midspan[10]) >= 270.0                            # phi*Mn
+    assert midspan[-1] == "PASS"
+    assert len(tables["Flexure"].rows) == 6       # three locations, two faces
+    assert len(tables["Shear and torsion"].rows) == 3
+    assert member.summary[3] == "PASS"
+    assert member.summary[4] == bottom["Design_Status"]
+
+
+def test_beam_report_adds_the_seismic_tables_only_for_smrf():
+    plain, _ = _beam_report_member(seismic=False)
+    seismic, _ = _beam_report_member(seismic=True)
+    assert not any("SMRF" in table.title for table in plain.tables)
+    assert {"Seismic moment strengths (SMRF)", "Seismic design shear (SMRF)"} <= {
+        table.title for table in seismic.tables
+    }
+
+
+# --------------------------------------------------------------------------
+# GRAVITY BEAMS ARE LEFT OUT OF THE SEISMIC PROVISIONS
+# --------------------------------------------------------------------------
+def _design(support, seismic):
+    return beam.execute_beam_design(
+        _mock_beam_properties(support=support), _mock_force_table(), seismic, "GRAV"
+    )
+
+
+def test_gravity_beam_gets_the_same_design_with_seismic_on_or_off():
+    """BEHAVIOUR: a beam on no column is designed for gravity only."""
+    on = _design(beam.GRAVITY_BEAM_STATUS, True)
+    off = _design(beam.GRAVITY_BEAM_STATUS, False)
+    pd.testing.assert_frame_equal(on, off)
+    assert set(on["SMRF_Flexure_Ratio_Check"]) == {"N/A"}
+    assert (on["V_sway_max_kN"] == 0).all()
+
+
+def test_frame_beam_still_gets_the_seismic_provisions():
+    on = _design("Supported Both Ends", True)
+    assert set(on["SMRF_Flexure_Ratio_Check"]) != {"N/A"}
+    assert (on["V_sway_max_kN"] > 0).all()
+
+
+def test_schedules_are_written_per_story_for_girders_and_for_gravity_beams(tmp_path, monkeypatch):
+    girder = _design("Supported Both Ends", False)
+    gravity = _design(beam.GRAVITY_BEAM_STATUS, False).assign(UniqueName="B2")
+    results = pd.concat([girder, gravity], ignore_index=True)
+
+    class _Range:
+        def options(self, *args, **kwargs):
+            return self
+        value = beam.display_beam_result_labels(results)
+
+    class _Sheet:
+        def range(self, address):
+            return _Range()
+
+    book = types.SimpleNamespace(sheets={"BEAM DESIGN": _Sheet()})
+    monkeypatch.setattr(beam, "select_output_directory", lambda: str(tmp_path))
+    monkeypatch.setattr(beam.xw.Book, "caller", staticmethod(lambda: book), raising=False)
+    written = []
+    monkeypatch.setattr(
+        beam, "generate_dxf_beam_schedule",
+        lambda story_name, df_story, output_filepath: written.append(
+            (Path(output_filepath).name, sorted(df_story["UniqueName"].unique()))
+        ),
+    )
+    beam.export_cad_drawings()
+    assert written == [("L2_Girder_Schedule.dxf", ["B1"]), ("L2_Beam_Schedule.dxf", ["B2"])]

@@ -107,7 +107,8 @@ class ETABSConnector:
 
     def open_model(self, model_path: str):
         """Open an ETABS model file."""
-        self.model_path = model_path
+        # ETABS misreads a path with forward slashes as relative to its own folder.
+        self.model_path = os.path.normpath(model_path)
         if not os.path.exists(self.model_path):
             print(f"Model file not found: {self.model_path}")
             return False

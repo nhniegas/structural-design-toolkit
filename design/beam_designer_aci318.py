@@ -17,10 +17,18 @@ import xlwings as xw
 
 from design.aci318_config import CODE, AciCode
 from etabs_api import ETABSConnector, ETABSDataExporter
+from utilities._calc_report import (
+    MemberReport,
+    ReportTable,
+    Tex,
+    build_calc_report,
+    number,
+)
 from utilities._gui_helpers import (
     DualListboxSelector,
     LoadingWindow,
     select_output_directory,
+    select_save_file,
     show_warning,
 )
 
@@ -37,6 +45,18 @@ def _clear_table_area(sheet, start_cell: str) -> None:
         sheet.range((start.row, start.column), (last.row, last.column)).clear()
     else:
         start.clear()
+
+
+GRAVITY_BEAM_STATUS = "Beam-Framed / Floating"  # neither end is on a column or wall
+
+
+def is_gravity_beam(support_status: object) -> bool:
+    """True for a beam that frames into other beams only.
+
+    A gravity beam is not part of the moment frame, so the seismic (SMRF)
+    provisions are not applied to it even when seismic design is switched on.
+    """
+    return str(support_status).strip() == GRAVITY_BEAM_STATUS
 
 
 def identify_cantilever_beams(
@@ -84,7 +104,7 @@ def identify_cantilever_beams(
     has_support_i = beams["UniquePtI"].isin(support_joints)
     has_support_j = beams["UniquePtJ"].isin(support_joints)
 
-    beams["SupportStatus"] = "Beam-Framed / Floating"
+    beams["SupportStatus"] = GRAVITY_BEAM_STATUS
     beams.loc[has_support_i & has_support_j, "SupportStatus"] = "Supported Both Ends"
     beams.loc[has_support_i & ~has_support_j, "SupportStatus"] = (
         "Cantilever (Free at PtJ)"
@@ -827,6 +847,38 @@ class BeamSeismicDesign:
             "locations": results,
         }
 
+    def enforce_flexural_capacity_ratios(self, max_rounds: int = 60) -> bool:
+        """Add bars until the ACI 18.6.3.2 strength ratios are met.
+
+        At a support face the positive moment strength must be at least half the
+        negative strength, and every section must have at least a quarter of the
+        largest support strength, top and bottom. Bars are added one at a time
+        where a rule is not met. Returns False when the bar limit is reached first.
+        """
+        max_layers = self.code.beam_detailing.max_layers
+        for _ in range(max_rounds):
+            check = self.check_flexural_capacity_ratios()
+            if check["all_passed"]:
+                return True
+            changed = False
+            for loc_name, result in check["locations"].items():
+                eng = self.flexure_engines[loc_name]
+                limit = max_layers * eng.max_bar_per_layer
+                needs_bottom = (
+                    not result["pass_half"]
+                    or result["Mn_pos"] < check["req_quarter_cap"]
+                )
+                needs_top = result["Mn_neg"] < check["req_quarter_cap"]
+                if needs_bottom and eng.n_bot < limit:
+                    eng.n_bot += 1
+                    changed = True
+                if needs_top and eng.n_top < limit:
+                    eng.n_top += 1
+                    changed = True
+            if not changed:
+                return False
+        return self.check_flexural_capacity_ratios()["all_passed"]
+
     def compute_probable_moment(
         self,
         eng: object,
@@ -1292,11 +1344,18 @@ def execute_beam_design(
         c_cover = b_row.get("cc", 40)
         span_ln = b_row.get("ClearSpan_Ln", 6000)
 
+        # Seismic provisions apply to the frame members only, not to gravity beams.
+        seismic_here = enable_seismic_design and not is_gravity_beam(
+            b_row.get("SupportStatus", "")
+        )
+
         df_grav = df_b[df_b["Combo"] == gravity_combo_name]
         Vu_grav_left = df_grav["Vu_left"].max() if not df_grav.empty else 0.0
         Vu_grav_right = df_grav["Vu_right"].max() if not df_grav.empty else 0.0
 
         prev_state = None
+        smrf_flexure_check = "N/A"
+        smrf_rho_check = "N/A"
 
         while True:
             # --- STEP 3A: Flexure Design ---
@@ -1426,10 +1485,23 @@ def execute_beam_design(
 
             # --- STEP 3B: Seismic & Shear Design ---
             seismic_checker = BeamSeismicDesign(
-                flex_engines, span_ln, Pu_axial_load, enable_seismic_design, code
+                flex_engines, span_ln, Pu_axial_load, seismic_here, code
             )
 
-            if is_cantilever and enable_seismic_design:
+            # ACI 18.6.3: strength ratios along the span and the 2.5 % steel limit.
+            # A cantilever is not part of the moment frame, so it is left out.
+            if seismic_here and not is_cantilever:
+                ratios_met = seismic_checker.enforce_flexural_capacity_ratios()
+                for eng in flex_engines.values():
+                    eng.clean_single_bars()
+                smrf_flexure_check = "PASS" if ratios_met else "FAIL"
+                smrf_rho_check = (
+                    "PASS"
+                    if seismic_checker.check_reinforcement_ratio_limits()["all_passed"]
+                    else "FAIL"
+                )
+
+            if is_cantilever and seismic_here:
                 # "Free at PtI" means the support is at the J end (right engine).
                 supported_eng = (
                     flex_eng_right
@@ -1476,13 +1548,13 @@ def execute_beam_design(
 
                 Vu_L = (
                     max(df_c_top["Vu_left"], seismic_res["Vu_seismic_left"])
-                    if enable_seismic_design
+                    if seismic_here
                     else df_c_top["Vu_left"]
                 )
                 Vu_M = df_c_top["Vu_mid_2h"]
                 Vu_R = (
                     max(df_c_top["Vu_right"], seismic_res["Vu_seismic_right"])
-                    if enable_seismic_design
+                    if seismic_here
                     else df_c_top["Vu_right"]
                 )
 
@@ -1537,7 +1609,7 @@ def execute_beam_design(
                         s_max = min(s_r["s_max_code"], t_r["s_max_torsion"])
 
                         # SEISMIC SPACING OVERRIDE
-                        if enable_seismic_design and leg_var in ["L", "R"]:
+                        if seismic_here and leg_var in ["L", "R"]:
                             s_max_seismic = min(
                                 d_eff_z * seismic_cfg.hoop_spacing_d_fraction,
                                 seismic_cfg.hoop_spacing_bar_multiple * d_m,
@@ -1677,12 +1749,17 @@ def execute_beam_design(
 
             # Post-Checks
             summary["V_sway_max_kN"] = seismic_res["V_sway_max"]
+            # Design shear at each end: gravity shear plus the sway shear above.
+            summary["Ve_left_kN"] = seismic_res["Vu_seismic_left"]
+            summary["Ve_right_kN"] = seismic_res["Vu_seismic_right"]
             summary["Vc_zero_left"] = seismic_res["Vc_zero_left"]
             summary["Vc_zero_right"] = seismic_res["Vc_zero_right"]
             summary["Anchorage_Check"] = (
                 "PASSED" if anchorage_passed_all else "ADJUSTED"
             )
             summary["Alternating_Tie_Check"] = "PASSED"
+            summary["SMRF_Flexure_Ratio_Check"] = smrf_flexure_check
+            summary["SMRF_Rho_Check"] = smrf_rho_check
 
             # --- NEW: Catch Congestion Warnings ---
             if (
@@ -1691,6 +1768,14 @@ def execute_beam_design(
                 or flex_eng_right.rebar_congestion_exceeded
             ):
                 summary["Design_Status"] = "FAILED: MAX BARS EXCEEDED (>3 LAYERS)"
+            elif smrf_flexure_check == "FAIL":
+                summary["Design_Status"] = (
+                    "FAILED: SMRF MOMENT STRENGTH RATIOS (ACI 18.6.3.2)"
+                )
+            elif smrf_rho_check == "FAIL":
+                summary["Design_Status"] = (
+                    "FAILED: SMRF STEEL RATIO ABOVE 2.5% (ACI 18.6.3.1)"
+                )
             elif (
                 s_2h < detailing.min_acceptable_spacing
                 or s_mid < detailing.min_acceptable_spacing
@@ -1769,6 +1854,10 @@ _BEAM_RESULT_LABELS = {
     "Spacing_2H": "s₂H (mm)",
     "Spacing_Mid": "sₘᵢd (mm)",
     "V_sway_max_kN": "Vₛway,max (kN)",
+    "Ve_left_kN": "Vₑ, left (kN)",
+    "Ve_right_kN": "Vₑ, right (kN)",
+    "SMRF_Flexure_Ratio_Check": "SMRF moment strength ratio check",
+    "SMRF_Rho_Check": "SMRF steel ratio check",
     "n_side_per_face_gov": "Side bars / face (governing)",
     "Stirrup_Legs": "Stirrup legs",
     "Vc_zero_left": "Concrete shear suppressed (left)",
@@ -2522,17 +2611,301 @@ def export_cad_drawings():
     if df_results.empty:
         return
 
-    stories = df_results["Story"].unique()
-    for story in stories:
-        df_story = df_results[df_results["Story"] == story]
-        filename = f"{story}_Beam_Schedule.dxf"
-        filepath = os.path.join(output_dir, filename)
+    # One schedule of girders and one of gravity beams for each story.
+    if "SupportStatus" in df_results.columns:
+        gravity = df_results["SupportStatus"].map(is_gravity_beam)
+    else:
+        gravity = pd.Series(False, index=df_results.index)
+    for story in df_results["Story"].unique():
+        on_story = df_results["Story"] == story
+        for label, rows in (
+            ("Girder", df_results[on_story & ~gravity]),
+            ("Beam", df_results[on_story & gravity]),
+        ):
+            if rows.empty:
+                continue
+            generate_dxf_beam_schedule(
+                story_name=f"{story} {label.upper()}S",
+                df_story=rows,
+                output_filepath=os.path.join(
+                    output_dir, f"{story}_{label}_Schedule.dxf"
+                ),
+            )
 
-        generate_dxf_beam_schedule(
-            story_name=str(story),
-            df_story=df_story,
-            output_filepath=filepath,
+
+# =============================================================================
+# CALCULATION REPORT (PDF)
+# =============================================================================
+_BEAM_LOCATIONS = (("left", "Left support"), ("mid", "Midspan"), ("right", "Right support"))
+
+
+def _beam_calc_member(
+    top: pd.Series, bottom: pd.Series, seismic: bool, code: AciCode = CODE
+) -> MemberReport:
+    """Build the report tables of one beam from its TOP and BOTTOM result rows.
+
+    The bar counts, stirrup legs and spacings are the designed ones. Depths,
+    strengths and ratios are worked out again from them with the design engines.
+    """
+    name = str(top["UniqueName"])
+    width, height = float(top["Width"]), float(top["Depth"])
+    fc, fy = float(top["f'c"]), float(top["fy"])
+    fyt = float(top.get("fyw", fy))
+    d_main, d_stirrup, cover = float(top["dm"]), float(top["ds"]), float(top["cc"])
+    span = float(top["ClearSpan_Ln"])
+    is_cantilever = "Cantilever" in str(top.get("SupportStatus", ""))
+    seismic = seismic and not is_gravity_beam(top.get("SupportStatus", ""))
+
+    def bars(row: pd.Series, location: str) -> list[int]:
+        return [int(float(row.get(f"n_{location}_L{layer}") or 0)) for layer in (1, 2, 3)]
+
+    engines = {}
+    for location, _ in _BEAM_LOCATIONS:
+        engine = BeamFlexureDesign(
+            width, height, fc, fy, fyt, d_main, d_stirrup, cover, code=code
         )
+        engine.n_top = sum(bars(top, location))
+        engine.n_bot = sum(bars(bottom, location))
+        engines[location] = engine
+
+    section = ReportTable(
+        "Section and materials",
+        ["Parameter", "Value", "Parameter", "Value"],
+        [
+            ["Section", top.get("SectProp"), "Support condition", top.get("SupportStatus")],
+            [Tex("Width, $b$ (mm)"), number(width, 0), Tex("Depth, $h$ (mm)"), number(height, 0)],
+            [Tex("Clear span, $L_n$ (mm)"), number(span, 0), Tex("Cover (mm)"), number(cover, 0)],
+            [Tex(r"$f'_c$ (MPa)"), number(fc), Tex("$f_y$ (MPa)"), number(fy)],
+            [Tex("$f_{yt}$ (MPa)"), number(fyt), Tex("Main bar (mm)"), number(d_main, 0)],
+            ["Stirrup bar (mm)", number(d_stirrup, 0), "Web bar (mm)", number(top.get("dw"), 0)],
+        ],
+        "llll",
+    )
+
+    flexure_rows = []
+    flexure_passes = True
+    for location, label in _BEAM_LOCATIONS:
+        for face, row, negative in (("Top", top, True), ("Bottom", bottom, False)):
+            layers = bars(row, location)
+            # Layer 1 is the topmost; a bottom face fills from layer 3 upward.
+            layout = "+".join(str(n) for n in (layers if negative else layers[::-1]) if n)
+            demand = float(row.get(f"Mu_{location}") or 0.0)
+            engine = engines[location]
+            try:
+                result = engine.solve_moment_capacity(is_negative_moment=negative)
+                depth = engine.compute_effective_depths(negative)[0]
+                ratio = demand / result["phi_Mn"] if result["phi_Mn"] > 0 else float("nan")
+                passed = demand <= result["phi_Mn"] + 1e-6
+                flexure_passes = flexure_passes and passed
+                flexure_rows.append([
+                    label, face, number(demand), layout or "0",
+                    number(result["As_provided"], 0), number(depth, 1),
+                    number(result["a"], 1), number(result["et"], 4),
+                    number(result["phi"], 2), number(result["Mn"]),
+                    number(result["phi_Mn"]), number(ratio), "PASS" if passed else "FAIL",
+                ])
+            except (ValueError, ZeroDivisionError):
+                flexure_rows.append(
+                    [label, face, number(demand), layout or "0"] + ["--"] * 8
+                    + ["PASS" if demand <= 1e-6 else "FAIL"]
+                )
+    flexure = ReportTable(
+        "Flexure",
+        ["Location", "Face", Tex("$M_u$"), "Bars", Tex("$A_s$"), Tex("$d$"), Tex("$a$"),
+         Tex(r"$\varepsilon_t$"), Tex(r"$\phi$"), Tex("$M_n$"), Tex(r"$\phi M_n$"),
+         Tex(r"$M_u/\phi M_n$"), "Check"],
+        flexure_rows,
+        "ll" + "r" * 10 + "l",
+        "Moments in kN-m, areas in mm2, depths in mm. Bars are listed per layer, from the face inward.",
+    )
+
+    legs = int(float(top.get("Stirrup_Legs") or 0))
+    stirrup_area = legs * math.pi * d_stirrup**2 / 4.0
+    fyt_shear = min(fyt, code.material.max_fyt_shear)
+    phi_shear = code.strength.shear
+    shear_rows = []
+    for location, label, v_key, t_key, s_key in (
+        ("left", "Left support", "Vu_left", "Tu_left", "Spacing_2H"),
+        ("mid", "Beyond 2h", "Vu_mid_2h", "Tu_mid_2h", "Spacing_Mid"),
+        ("right", "Right support", "Vu_right", "Tu_right", "Spacing_2H"),
+    ):
+        engine = engines[location]
+        depth = min(
+            engine.compute_effective_depths(True)[0],
+            engine.compute_effective_depths(False)[0],
+        )
+        analysis_shear = float(top.get(v_key) or 0.0)
+        capacity_shear = (
+            float(top.get(f"Ve_{location}_kN") or 0.0)
+            if seismic and location != "mid"
+            else float("nan")
+        )
+        design_shear = (
+            analysis_shear if math.isnan(capacity_shear)
+            else max(analysis_shear, capacity_shear)
+        )
+        torsion_demand = float(top.get(t_key) or 0.0)
+        suppressed = location != "mid" and top.get(f"Vc_zero_{location}") in (True, "True", 1)
+        spacing = float(top.get(s_key) or 0.0)
+        shear = BeamShearDesign(
+            width, height, depth, fc, fyt, d_stirrup, legs, suppress_Vc=suppressed, code=code
+        )
+        shear_result = shear.solve_shear_capacity(design_shear)
+        torsion_result = BeamTorsionDesign(
+            width, height, depth, fc, fy, fyt, d_stirrup, cover, code=code
+        ).solve_torsion_capacity(torsion_demand, design_shear)
+        steel_shear = (
+            stirrup_area * fyt_shear * depth / spacing / 1000.0 if spacing > 0 else 0.0
+        )
+        steel_shear_limit = (
+            shear_result["max_allowable_phi_Vn"] / phi_shear - shear_result["Vc"]
+        )
+        capacity = phi_shear * (shear_result["Vc"] + min(steel_shear, steel_shear_limit))
+        ratio = design_shear / capacity if capacity > 0 else float("nan")
+        shear_rows.append([
+            label, number(analysis_shear), number(capacity_shear), number(design_shear),
+            number(torsion_demand), number(depth, 1), number(shear_result["Vc"]),
+            legs, number(spacing, 0), number(steel_shear), number(capacity), number(ratio),
+            number(torsion_result["At_s_demand"], 3), number(torsion_result["Al_design"], 0),
+            "PASS" if design_shear <= capacity + 1e-6 else "FAIL",
+        ])
+    shear = ReportTable(
+        "Shear and torsion",
+        ["Zone", Tex("$V_u$"), Tex("$V_e$"), Tex("Design $V_u$"), Tex("$T_u$"), Tex("$d$"),
+         Tex("$V_c$"), "Legs", Tex("$s$"), Tex("$V_s$"), Tex(r"$\phi V_n$"),
+         Tex(r"$V_u/\phi V_n$"), Tex("$A_t/s$"), Tex("$A_l$"), "Check"],
+        shear_rows,
+        "l" + "r" * 13 + "l",
+        "Forces in kN, torsion in kN-m, lengths in mm, At/s in mm2/mm, Al in mm2. "
+        "Vu and Tu are the envelopes of all combinations. Vc is taken as zero where the "
+        "seismic rule requires it. The stirrups also carry the torsion steel At/s.",
+    )
+
+    tables = [section, flexure, shear]
+    if seismic and not is_cantilever:
+        try:
+            checker = BeamSeismicDesign(
+                {"Left Support Face": engines["left"], "Midspan Zone": engines["mid"],
+                 "Right Support Face": engines["right"]},
+                span, code=code,
+            )
+            strengths = checker.check_flexural_capacity_ratios()
+            seismic_rows = [
+                [location, number(values["Mn_neg"]), number(values["Mn_pos"]),
+                 number(values["Mn_pos"] / values["Mn_neg"]) if values["Mn_neg"] else "--"]
+                for location, values in strengths["locations"].items()
+            ]
+            tables.append(ReportTable(
+                "Seismic moment strengths (SMRF)",
+                ["Location", Tex("$M_n^-$ (kN-m)"), Tex("$M_n^+$ (kN-m)"), Tex("$M_n^+/M_n^-$")],
+                seismic_rows,
+                "lrrr",
+            ))
+        except (ValueError, KeyError, ZeroDivisionError):
+            pass
+    if seismic:
+        tables.append(ReportTable(
+            "Seismic design shear (SMRF)",
+            ["Parameter", "Value"],
+            [
+                [Tex("Sway shear from probable moments, $V_{sway}$ (kN)"), number(top.get("V_sway_max_kN"))],
+                [Tex("Design shear, left, $V_e$ (kN)"), number(top.get("Ve_left_kN"))],
+                [Tex("Design shear, right, $V_e$ (kN)"), number(top.get("Ve_right_kN"))],
+                ["Concrete shear taken as zero, left", top.get("Vc_zero_left") in (True, "True", 1)],
+                ["Concrete shear taken as zero, right", top.get("Vc_zero_right") in (True, "True", 1)],
+                ["Moment strength ratio check (ACI 18.6.3.2)", top.get("SMRF_Flexure_Ratio_Check")],
+                ["Steel ratio check (ACI 18.6.3.1)", top.get("SMRF_Rho_Check")],
+            ],
+            "lr",
+        ))
+
+    status = str(top.get("Design_Status"))
+    tables.append(ReportTable(
+        "Detailing and status",
+        ["Parameter", "Value"],
+        [
+            ["Stirrup legs", legs],
+            ["Stirrup spacing within 2h of supports (mm)", number(top.get("Spacing_2H"), 0)],
+            ["Stirrup spacing elsewhere (mm)", number(top.get("Spacing_Mid"), 0)],
+            ["Side bars per face", number(top.get("n_side_per_face_gov"), 0)],
+            ["Stirrup anchorage check", top.get("Anchorage_Check")],
+            ["Alternating tie check", top.get("Alternating_Tie_Check")],
+            ["Design status", status],
+        ],
+        "lr",
+    ))
+
+    return MemberReport(
+        heading=f"Beam {name} ({top.get('Story')})",
+        summary=[name, top.get("Story"), top.get("SectProp"),
+                 "PASS" if flexure_passes else "FAIL", status],
+        tables=tables,
+    )
+
+
+def build_beam_calc_report(
+    df_results: pd.DataFrame, filepath: str, seismic: bool, gravity_combo: object = None
+) -> str | None:
+    """Write the beam calculation PDF from the BEAM DESIGN result table."""
+    members = []
+    for _, rows in df_results.groupby("UniqueName", sort=False):
+        top = rows[rows["Face"] == "TOP"]
+        bottom = rows[rows["Face"] == "BOTTOM"]
+        if top.empty or bottom.empty:
+            continue
+        members.append(_beam_calc_member(top.iloc[0], bottom.iloc[0], seismic))
+    if not members:
+        raise ValueError("BEAM DESIGN contains no designed beams to report.")
+    information = [
+        ("Design code", "ACI 318M-14"),
+        ("Seismic design (SMRF)", "Yes" if seismic else "No"),
+        ("Factored gravity combination", gravity_combo if seismic else "Not used"),
+        ("Design forces", "Envelope of all extracted load combinations"),
+        ("Beams reported", len(members)),
+    ]
+    return build_calc_report(
+        "Concrete Beam Design Calculations (ACI 318M-14)",
+        information,
+        ["Beam", "Story", "Section", "Flexure", "Design status"],
+        members,
+        filepath,
+        "p{3.2cm}p{1.3cm}p{5.2cm}p{1.6cm}p{5.5cm}",
+    )
+
+
+def export_beam_calculations(filepath: str | None = None) -> str | None:
+    """Triggered by the EXPORT CALC button: save the beam calculation PDF."""
+    try:
+        wb = xw.Book.caller()
+    except Exception:
+        wb = xw.books.active
+
+    df_results = (
+        wb.sheets["BEAM DESIGN"]
+        .range("B8")
+        .options(pd.DataFrame, header=1, index=False, expand="table")
+        .value
+    )
+    df_results = restore_beam_result_labels(df_results)
+    if df_results.empty or "Design_Status" not in df_results.columns:
+        show_warning("Design the beams first: BEAM DESIGN has no design results.")
+        return None
+
+    filepath = filepath or select_save_file(default_name="Beam_Design_Calculations")
+    if not filepath:
+        return None  # User canceled the save dialog
+
+    overwrites = wb.sheets["OVERWRITES"]
+    with LoadingWindow("Writing the beam calculation report..."):
+        saved = build_beam_calc_report(
+            df_results,
+            filepath,
+            seismic=overwrites.range("F3").value is True,
+            gravity_combo=overwrites.range("F4").value,
+        )
+    if saved is None:
+        show_warning("The PDF could not be written. Check that LaTeX (pdflatex) is installed.")
+    return saved
 
 
 if __name__ == "__main__":
