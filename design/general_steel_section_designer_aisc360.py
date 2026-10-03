@@ -2,16 +2,17 @@
 general_steel_section_designer_aisc360.py   -   ONE self-contained script
 =======================================================
 AISC 360-22 capacity checks for wide-flange / I-shaped members  +  one-page PDF calculation
-report (pylatex) driven from Excel through xlwings.
+report (pylatex).
 
     Section database : steelpy (AISC Shapes DB: W, M, S, HP)
     PDF report       : pylatex + a LaTeX install with pdflatex (extarticle, amsmath, booktabs, multicol)
-    Excel button     : xlwings  ->  RunPython "from design import general_steel_section_designer_aisc360 as steel; steel.export_calcs()"
+    Terminal         : python main.py steel   (input dialog, then printout, PDF report or both)
+    In code          : calculate(values) -> summary_text(check) / export_pdf(check, path)
 
-Install once:   pip install steelpy pylatex xlwings
+Install once:   pip install steelpy pylatex
 
 UNITS  (inputs / outputs)
-    Excel:  lengths of members in m,  forces in kN,  moments / torque in kN-m,  stresses in MPa
+    Inputs: lengths of members in m,  forces in kN,  moments / torque in kN-m,  stresses in MPa
     Class:  section dims / lengths in mm, area mm^2, I mm^4, S,Z mm^3, Cw mm^6, stresses MPa,
             forces kN, moments kN.m
 
@@ -31,7 +32,7 @@ NOTES
 CODE MAP (search for the banner comments)
     [1] SectionProps / Stiffener / CheckResult       [4] LatexRenderer   (pylatex, mimics DG6 report layout)
     [2] WideFlangeCapacity  (all AISC checks)        [5] WideFlangeReport (build -> render -> compile -> fit)
-    [3] Demands / content model / ReportBuilder      [6] Excel (xlwings) entry point  export_calcs()
+    [3] Demands / content model / ReportBuilder      [6] Terminal workflow  calculate / summary_text / export_pdf
 """
 
 from __future__ import annotations
@@ -49,10 +50,13 @@ from pylatex import Document, Itemize, Package, Section as LxSection, Tabular
 from pylatex.utils import NoEscape, escape_latex
 from steelpy import aisc
 
-try:  # xlwings is only needed for export_calcs()
-    import xlwings as xw
-except ImportError:  # script still works standalone (see __main__)
-    xw = None
+import sys
+
+if __package__ in (None, ""):
+    # Run as a script: make the project folder importable.
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from utilities.design_cli import Field, run_design  # noqa: E402
 
 
 # =========================================================================== #
@@ -2319,204 +2323,133 @@ class WideFlangeReport:
 
 
 # =========================================================================== #
-# [6]  EXCEL (xlwings) ENTRY POINT
-#      Edit INPUT_CELLS to match your sheet.  Blank OPTIONAL cells fall back to the defaults below.
+# [6]  TERMINAL WORKFLOW  (python main.py steel)
 # =========================================================================== #
-INPUT_CELLS = {
-    "section": "C4",  # steelpy name, e.g. W14X90
-    "Fy": "C5",  # MPa
-    "Fu": "C6",  # MPa
-    "method": "C7",  # LRFD / ASD
-    "Lx": "C9",  # m   unbraced length about x (buckling)
-    "Ly": "C10",  # m   unbraced length about y (buckling)
-    "Lz": "C11",  # m   torsional unbraced length (blank -> = Ly)
-    "Kx": "C12",
-    "Ky": "C13",
-    "Kz": "C14",
-    "Lb": "C15",  # m   LTB unbraced length (blank -> = Ly)
-    "Cb": "C16",  # LTB factor (blank -> 1.0)
-    "axial": "C18",  # C = compression, T = tension
-    "Pr": "C19",  # kN
-    "Mrx": "C20",  # kN-m
-    "Mry": "C21",  # kN-m
-    "Vrx": "C22",  # kN
-    "Vry": "C23",  # kN
-    "Tr": "C24",  # kN-m   (blank -> 0)
-    "a": "C26",  # mm  stiffener spacing (blank -> unstiffened)
-    "st_b": "C27",  # mm  stiffener plate width (one plate)
-    "st_t": "C28",  # mm  stiffener plate thickness
-    "tension_field": "C29",  # Y / N
-}
-REQUIRED = ("section", "Fy", "Fu", "Ly", "Pr", "Mrx", "Mry", "Vrx", "Vry")
-SOLUTION_LABEL_COL = "F"  # status message goes here
-SOLUTION_START_ROW = 4
+INPUTS = [
+    Field("section", "Section (AISC name, e.g. W14X90)", "W14X90", kind="text"),
+    Field("Fy", "Yield strength Fy (MPa)", 345.0),
+    Field("Fu", "Tensile strength Fu (MPa)", 450.0),
+    Field("method", "Design method", "LRFD", kind="choice", choices=("LRFD", "ASD")),
+    Field("Lx", "Unbraced length about x, Lx (m)", None, optional=True),
+    Field("Ly", "Unbraced length about y, Ly (m)", 4.0),
+    Field("Lz", "Torsional unbraced length Lz (m)", None, optional=True),
+    Field("Kx", "Effective length factor Kx", 1.0),
+    Field("Ky", "Effective length factor Ky", 1.0),
+    Field("Kz", "Effective length factor Kz", 1.0),
+    Field("Lb", "Lateral-torsional unbraced length Lb (m)", None, optional=True),
+    Field("Cb", "LTB modification factor Cb", 1.0),
+    Field("axial", "Axial force", "Compression", kind="choice",
+          choices=("Compression", "Tension")),
+    Field("Pr", "Axial demand Pr (kN)", 0.0),
+    Field("Mrx", "Moment demand about x, Mrx (kN-m)", 0.0),
+    Field("Mry", "Moment demand about y, Mry (kN-m)", 0.0),
+    Field("Vrx", "Shear demand along the web, Vrx (kN)", 0.0),
+    Field("Vry", "Shear demand along the flanges, Vry (kN)", 0.0),
+    Field("Tr", "Torsion demand Tr (kN-m)", 0.0),
+    Field("a", "Stiffener spacing a (mm)", None, optional=True),
+    Field("st_b", "Stiffener plate width (mm)", None, optional=True),
+    Field("st_t", "Stiffener plate thickness (mm)", None, optional=True),
+    Field("tension_field", "Tension field action", "No", kind="choice", choices=("Yes", "No")),
+]
 
 
-def select_save_file(default_name: str = "WideFlange_Capacity_Report") -> Optional[str]:
-    """Save-as dialog (tkinter). Falls back to the current folder if no GUI is available."""
-    try:
-        # Tell Windows this app is DPI-aware to prevent blurriness
-        try:
-            from ctypes import windll
+@dataclass
+class SteelCheck:
+    """A member with its demands: what ``calculate`` returns."""
 
-            windll.shcore.SetProcessDpiAwareness(1)
-        except Exception:
-            pass  # Fails silently on non-Windows OS or older Windows versions
-
-        import tkinter as tk
-        from tkinter import filedialog
-
-        root = tk.Tk()
-        root.withdraw()
-        root.attributes("-topmost", True)
-        path = filedialog.asksaveasfilename(
-            defaultextension=".pdf",
-            filetypes=[("PDF files", "*.pdf")],
-            initialfile=default_name,
-            title="Save calculation report",
-        )
-        root.destroy()
-        return path or None
-    except Exception:
-        import os
-
-        return os.path.join(os.getcwd(), default_name + ".pdf")
+    member: WideFlangeCapacity
+    demands: Demands
 
 
-def _num(v, default=0.0) -> float:
-    return default if v in (None, "") else float(v)
+def calculate(values: dict) -> SteelCheck:
+    """The member and its demands from a dict of the inputs (keys of ``INPUTS``).
 
+    Lengths are in m. Blank lengths take Ly; the checks run here, so an input
+    outside the method's scope fails now and not when the report is written.
+    """
+    ly = float(values["Ly"])
 
-def export_from_values(vals: dict, filepath: str) -> str:
-    """Excel-independent core: dict of sheet values -> PDF.  Lengths in m, forces kN, moments kN-m."""
-    Ly = _num(vals["Ly"])
+    def length(key):
+        return (ly if values.get(key) is None else float(values[key])) * 1e3
+
     member = WideFlangeCapacity(
-        str(vals["section"]).strip(),
-        Fy=float(vals["Fy"]),
-        Fu=float(vals["Fu"]),
-        design_method=str(vals.get("method") or "LRFD").strip().upper(),
-        Lx=_num(vals.get("Lx"), Ly) * 1e3,
-        Ly=Ly * 1e3,
-        Lz=_num(vals.get("Lz"), Ly) * 1e3,
-        Kx=_num(vals.get("Kx"), 1.0),
-        Ky=_num(vals.get("Ky"), 1.0),
-        Kz=_num(vals.get("Kz"), 1.0),
-        Lb=_num(vals.get("Lb"), Ly) * 1e3,
-        Cb=_num(vals.get("Cb"), 1.0),
+        str(values["section"]).strip(),
+        Fy=float(values["Fy"]),
+        Fu=float(values["Fu"]),
+        design_method=str(values.get("method") or "LRFD").upper(),
+        Lx=length("Lx"),
+        Ly=ly * 1e3,
+        Lz=length("Lz"),
+        Kx=float(values.get("Kx") or 1.0),
+        Ky=float(values.get("Ky") or 1.0),
+        Kz=float(values.get("Kz") or 1.0),
+        Lb=length("Lb"),
+        Cb=float(values.get("Cb") or 1.0),
     )
-    axial = (
-        "tension"
-        if str(vals.get("axial") or "C").strip().upper().startswith("T")
-        else "compression"
-    )
-    st_b, st_t = vals.get("st_b"), vals.get("st_t")
+    st_b, st_t = values.get("st_b"), values.get("st_t")
     demands = Demands(
-        Pr=_num(vals["Pr"]),
-        axial=axial,
-        Mrx=_num(vals["Mrx"]),
-        Mry=_num(vals["Mry"]),
-        Vrx=_num(vals["Vrx"]),
-        Vry=_num(vals["Vry"]),
-        Tr=_num(vals.get("Tr")),
-        a=(float(vals["a"]) if vals.get("a") else None),
-        stiffener=(Stiffener(b=float(st_b), t=float(st_t)) if st_b and st_t else None),
-        tension_field=str(vals.get("tension_field") or "N")
-        .strip()
-        .upper()
-        .startswith("Y"),
+        Pr=float(values.get("Pr") or 0.0),
+        axial="tension" if str(values.get("axial", "")).lower().startswith("t") else "compression",
+        Mrx=float(values.get("Mrx") or 0.0),
+        Mry=float(values.get("Mry") or 0.0),
+        Vrx=float(values.get("Vrx") or 0.0),
+        Vry=float(values.get("Vry") or 0.0),
+        Tr=float(values.get("Tr") or 0.0),
+        a=float(values["a"]) if values.get("a") else None,
+        stiffener=Stiffener(b=float(st_b), t=float(st_t)) if st_b and st_t else None,
+        tension_field=str(values.get("tension_field", "No")).lower().startswith("y"),
     )
-    return WideFlangeReport(member).export(filepath, demands)
+    ReportBuilder(member).run(demands)
+    return SteelCheck(member, demands)
 
 
-def export_calcs():
-    """Excel button macro:  RunPython "from design import general_steel_section_designer_aisc360 as steel; steel.export_calcs()" """
-    if xw is None:
-        raise RuntimeError("xlwings is not installed (pip install xlwings)")
-    book = xw.Book.caller()
-    sht = book.sheets.active
-    status = sht.range(f"{SOLUTION_LABEL_COL}{SOLUTION_START_ROW}")
+def _plain(latex: str) -> str:
+    """LaTeX of the report as readable terminal text."""
+    text = str(latex)
+    for old, new in ((r"\textbf", ""), (r"\to", "->"), (r"\times", "x"), (r"\phi", "phi"),
+                     (r"\Omega", "Omega"), (r"\le", "<="), (r"\ge", ">="), (r"\_", "_"),
+                     (r"\%", "%"), (r"\,", " "), ("$", ""), ("{", ""), ("}", ""),
+                     ("^2", "2"), ("^", "")):
+        text = text.replace(old, new)
+    return re.sub(r"\s+", " ", text).strip()
 
-    # --- Read inputs
-    vals = {k: sht.range(addr).value for k, addr in INPUT_CELLS.items()}
-    missing = [k for k in REQUIRED if vals.get(k) is None]
-    if missing:
-        status.value = "ERROR: Missing inputs for export: " + ", ".join(missing)
-        return
 
-    # --- Prompt for save location & file name
-    filepath_with_ext = select_save_file(default_name="WideFlange_Capacity_Report")
-    if not filepath_with_ext:
-        return
-    filepath = (
-        filepath_with_ext[:-4]
-        if filepath_with_ext.lower().endswith(".pdf")
-        else filepath_with_ext
-    )
+def summary_text(check: SteelCheck) -> str:
+    """The results as plain text: section data, every result table and the summary."""
+    content = ReportBuilder(check.member).build(check.demands)
+    lines = ["", "=" * 72, _plain(content.title), "=" * 72]
+    for section in content.columns:
+        tables = [item for item in section.items if isinstance(item, Tbl)]
+        if not tables:
+            continue
+        lines += ["", f"--- {_plain(section.title)} ---"]
+        for table in tables:
+            width = max((len(_plain(row[0])) for row in table.rows), default=10) + 2
+            for row in table.rows:
+                lines.append(f"{_plain(row[0]):<{width}} " + "  ".join(_plain(c) for c in row[1:]))
+    lines += ["", f"--- {_plain(content.summary.title)} ---"]
+    for item in content.summary.items:
+        if isinstance(item, Bullets):
+            lines += [f"* {_plain(entry)}" for entry in item.items]
+    lines.append("=" * 72)
+    return "\n".join(lines)
 
-    # --- Calculate + compile PDF
+
+def export_pdf(check: SteelCheck, path: str) -> Optional[str]:
+    """Write the one-page PDF calculation report; returns its path, or None when LaTeX fails."""
     try:
-        pdf = export_from_values(vals, filepath)
-        status.value = f"Success: Saved to {pdf}"
-    except Exception as e:
-        status.value = f"PDF Error: {str(e)}"
+        return WideFlangeReport(check.member).export(path, check.demands)
+    except Exception as error:  # pylatex raises several kinds when the compile fails
+        print(f"PDF Error: {error}")
+        return None
+
+
+def run():
+    """Terminal workflow: input dialog, then printout, PDF report or both."""
+    return run_design(sys.modules[__name__], "Steel Section (AISC 360-22)",
+                      "steel_section", "WideFlange_Capacity_Report")
 
 
 # =========================================================================== #
 if __name__ == "__main__":
-    # ---------------------------------------------------------
-    # 1. DEFINE THE MEMBER & STABILITY MODIFIERS
-    # ---------------------------------------------------------
-    # Standalone demo (no Excel needed)
-    m = WideFlangeCapacity("W6X12", Fy=248, Fu=323, Lx=3400, Ly=3400, Lb=3400, Cb=1.0)
-    print(m.summary())
-
-    print("-" * 60)
-    print("Waiting for save location in popup dialog...")
-
-    # Use the existing GUI dialog function already defined in your script
-    dest_file = select_save_file(default_name="W6X12_report")
-
-    if dest_file:
-        print("Generating PDF...")
-
-        # ---------------------------------------------------------
-        # 2. RUN CAPACITY CHECKS & EXPORT REPORT
-        # ---------------------------------------------------------
-        # BASIC DEMANDS:
-        # Pr, Mrx, Mry, Vrx, Vry, Tr : Magnitudes of applied loads.
-        # axial                      : "compression" or "tension".
-        #
-        # ADVANCED DETAILING & SHEAR PARAMETERS:
-        # a             : Stiffener spacing (mm). Modifies web shear buckling (kv).
-        # stiffener     : Transverse stiffener plate dimensions (Stiffener object). Triggers G2.4 checks.
-        # tension_field : True/False. Enables post-buckling shear strength (boosts Vrx).
-        # panel         : "interior" or "end". Tension field sets stricter limits on end panels.
-        # An, U         : Net area (mm^2) and shear lag factor for tensile rupture (Chapter D).
-        # bolt_holes    : Dict for tension-flange rupture (F13.1). e.g., {"Afn": 1800}
-        # interaction   : "H1" (default) or "H2" (stress-based interaction form).
-        # use_H1_3      : True/False. Permits alternative H1.3 single-axis interaction check.
-
-        out_path = m.export_report(
-            dest_file,
-            # Basic Demands
-            Pr=130,
-            axial="compression",
-            Mrx=1,
-            Mry=1,
-            Vrx=1,
-            Vry=1,
-            Tr=0.005,
-            # Advanced Parameters (Examples - adjust or remove as needed)
-            #a=1000,  # 1000 mm stiffener spacing
-            #stiffener=Stiffener(b=50.0, t=5.0),  # 50x5 mm stiffener plates
-            #tension_field=True,  # Set True to utilize tension field action
-            # panel="interior",  # "interior" or "end" panel
-            # An=2290,  # Net area for tension checks (mm^2)
-            # U=1.0,  # Shear lag factor
-            # bolt_holes=None,  # e.g., {"Afn": 1800}
-            # interaction="H1",  # Override interaction equation ("H1" or "H2")
-            # use_H1_3=False,  # Override to force H1.3 check if permitted
-        )
-        print(f"Export complete: {out_path}")
-    else:
-        print("Export cancelled by user.")
+    run()

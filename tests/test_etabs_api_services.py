@@ -10,16 +10,16 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 
-from etabs_api.analysis import Analysis
-from etabs_api.connection import ETABSConnector
-from etabs_api.database import DatabaseTables
-from etabs_api.exporter import ETABSDataExporter
-from etabs_api.geometry import Geometry
-from etabs_api.helpers import ensure_success, return_code
-from etabs_api.loads import Loads
-from etabs_api.results import Results
-from etabs_api.selection import Selection
-from etabs_api.stories_grids import StoriesGrids
+from etabs_api.core.analysis import Analysis
+from etabs_api.core.connection import ETABSConnector
+from etabs_api.core.database import DatabaseTables
+from etabs_api.workflows.exporter import ETABSDataExporter
+from etabs_api.core.geometry import Geometry
+from etabs_api.core.helpers import ensure_success, return_code
+from etabs_api.core.loads import Loads
+from etabs_api.core.results import Results
+from etabs_api.core.selection import Selection
+from etabs_api.core.stories_grids import StoriesGrids
 
 
 class FakeInterface:

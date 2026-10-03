@@ -5,18 +5,17 @@ All reference tables (Kz, wall Cp, roof Cp, GCpi) are module-level constants,
 so the calculator class needs no workbook: give it the inputs and call
 ``calculate()``.
 
-Two ways to use it:
-  * Standalone - edit the CONFIG block at the bottom of this file and run it.
-    It prints every table and asks where to save the PDF report (PyLaTeX).
-  * From Excel - the workbook buttons call ``calculate_wind_loads()`` and
-    ``export_pdf_wind_loads()`` (section 3), which read the inputs from the
-    active sheet and write the result tables back to it. xlwings is imported
-    only by those two functions.
+Run it from the terminal with ``python main.py wind``: a dialog asks for the
+inputs, then whether to print the result tables, export the PDF report, or
+both. In code, the same steps are ``calculate(values)``,
+``summary_text(calculator)`` and ``export_pdf(calculator, path)``.
 """
 
 from __future__ import annotations
 
+import os
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -24,6 +23,12 @@ import numpy as np
 import pandas as pd
 from pylatex import Document, Itemize, Package, Section, Subsection, Tabular
 from pylatex.utils import NoEscape
+
+if __package__ in (None, ""):
+    # Run as a script: make the project folder importable.
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from utilities.design_cli import Field, run_design  # noqa: E402
 
 # =============================================================================
 # 1. REFERENCE TABLES  (ASCE 7 - SI units, extracted from the source workbook)
@@ -991,10 +996,10 @@ class WindLoadCalculatorDirectionalASCE7:
     # -------------------------------------------------------------------
     # TERMINAL SUMMARY
     # -------------------------------------------------------------------
-    def print_summary(self):
-        """Prints every intermediate and final table to the terminal."""
-        pd.set_option("display.max_columns", None)
-        pd.set_option("display.width", 120)
+    def summary_text(self) -> str:
+        """Every intermediate and final table as terminal text."""
+        lines = []
+        print = lines.append  # the lines below were written as print calls
 
         print("\n" + "=" * 78)
         print("ASCE 7 WIND LOAD CALCULATOR - DIRECTIONAL PROCEDURE (MWFRS)")
@@ -1038,6 +1043,11 @@ class WindLoadCalculatorDirectionalASCE7:
         print("\n--- MWFRS Pressure Summary - Parallel Wind Direction ---")
         print(self.mwfrs_parallel_summary.to_string(index=False))
         print("=" * 78 + "\n")
+        return "\n".join(lines)
+
+    def print_summary(self):
+        """Prints every intermediate and final table to the terminal."""
+        print(self.summary_text())
 
     # -------------------------------------------------------------------
     # PDF REPORT
@@ -1289,175 +1299,50 @@ class WindLoadCalculatorDirectionalASCE7:
 
 
 # =============================================================================
-# 3. EXCEL ENTRY POINTS  (called by the workbook buttons through xlwings)
+# 3. TERMINAL WORKFLOW  (python main.py wind)
 # =============================================================================
-# Input cells on the active sheet.
-WIND_INPUT_CELLS = {
-    "building_class": "C2",
-    "basic_wind_speed": "C3",
-    "enclosure_class": "C4",
-    "exposure_category": "C5",
-    "wind_dir_factor": "C6",
-    "topographic_factor": "C7",
-    "ground_elevation_factor": "C8",
-    "gust_effect_factor": "C9",
-    "l_input": "C13",
-    "b_input": "C14",
-    "ridge_direction_input": "C15",
-    "raw_heights": "C16",
-    "eave_height": "C18",
-    "apex_height": "C19",
-}
-_NUMERIC_WIND_INPUTS = {
-    "basic_wind_speed",
-    "wind_dir_factor",
-    "topographic_factor",
-    "ground_elevation_factor",
-    "gust_effect_factor",
-    "l_input",
-    "b_input",
-    "eave_height",
-    "apex_height",
-}
-# Output cells on the active sheet.
-WIND_VELOCITY_PRESSURE_CELL = "C10"
-WIND_GCPI_POS_CELL = "C11"
-WIND_GCPI_NEG_CELL = "C12"
-WIND_STATUS_CELL = "B23"
-WIND_PDF_STATUS_CELL = "D23"
-WIND_TABLES_START_CELL = "B24"
-WIND_TABLES_CLEAR_RANGE = "B24:K1000"
+INPUTS = [
+    Field("building_class", "Building classification", "Risk Category IV", kind="text"),
+    Field("basic_wind_speed", "Basic wind speed V (m/s)", 61.111),
+    Field("enclosure_class", "Enclosure", "Enclosed Buildings", kind="choice",
+          choices=tuple(GCPI_TABLE.index)),
+    Field("exposure_category", "Exposure category", "D", kind="choice", choices=("B", "C", "D")),
+    Field("wind_dir_factor", "Wind directionality factor Kd", 0.85),
+    Field("topographic_factor", "Topographic factor Kzt", 1.0),
+    Field("ground_elevation_factor", "Ground elevation factor Ke", 1.0),
+    Field("gust_effect_factor", "Gust effect factor G", 0.85),
+    Field("l_input", "Building length L (m)", 180.0),
+    Field("b_input", "Building width B (m)", 180.0),
+    Field("ridge_direction_input", "Ridge runs along", "B", kind="choice", choices=("L", "B")),
+    Field("raw_heights", "Heights for the qz profile (m, comma separated)", "10", kind="text",
+          optional=True),
+    Field("eave_height", "Eave height (m)", 15.0),
+    Field("apex_height", "Apex height (m)", 20.0),
+]
 
 
-def _calculator_from_sheet(sheet) -> WindLoadCalculatorDirectionalASCE7:
-    """Build the calculator from the input cells of a workbook sheet."""
-    values = {}
-    for name, address in WIND_INPUT_CELLS.items():
-        value = sheet.range(address).value
-        if name in _NUMERIC_WIND_INPUTS:
-            try:
-                value = float(value)
-            except (TypeError, ValueError) as error:
-                raise ValueError(
-                    f"Wind input {address} ({name}) must be numeric; received {value!r}."
-                ) from error
-        values[name] = value
-    return WindLoadCalculatorDirectionalASCE7(**values)
+def calculate(values: dict) -> WindLoadCalculatorDirectionalASCE7:
+    """The calculator from a dict of the inputs (keys of ``INPUTS``), with every table worked out."""
+    inputs = {field.key: values.get(field.key) for field in INPUTS}
+    inputs["raw_heights"] = inputs["raw_heights"] or ""
+    return WindLoadCalculatorDirectionalASCE7(**inputs).calculate()
 
 
-def _write_table(sheet, table: pd.DataFrame, top_left: tuple[int, int], title: str):
-    """Write a titled, bordered table and return the cell for the next table."""
-    row, column = top_left
-    title_cell = sheet.range((row, column))
-    title_cell.value = title
-    title_cell.api.Font.Bold = True
-    header_row = row + 1
-    sheet.range((header_row, column)).options(index=False).value = table
-    n_rows, n_cols = len(table.index) + 1, len(table.columns)
-    body = sheet.range((header_row, column), (header_row + n_rows - 1, column + n_cols - 1))
-    body.api.Borders.LineStyle = -4142  # xlNone: start from a clean block
-    for border in (7, 8, 9, 10, 11):  # outside edges and inside vertical lines
-        body.api.Borders(border).Weight = 2
-    header = sheet.range((header_row, column), (header_row, column + n_cols - 1))
-    header.api.Borders(9).Weight = 2  # line under the header row
-    return header_row + n_rows + 1, column
+def summary_text(calculator: WindLoadCalculatorDirectionalASCE7) -> str:
+    """Every intermediate and final table as terminal text."""
+    return calculator.summary_text()
 
 
-def _write_results_to_sheet(sheet, calculator: WindLoadCalculatorDirectionalASCE7):
-    """Write the scalar results and every result table to the workbook sheet."""
-    sheet.range(WIND_VELOCITY_PRESSURE_CELL).value = round(calculator.vel_pres, 3)
-    sheet.range(WIND_GCPI_POS_CELL).value = calculator.gcpi_pos
-    sheet.range(WIND_GCPI_NEG_CELL).value = calculator.gcpi_neg
-    sheet.range(WIND_TABLES_CLEAR_RANGE).clear()
-
-    start = sheet.range(WIND_TABLES_START_CELL)
-    position = (start.row, start.column)
-    for title, table in (
-        ("Velocity Pressure Profile (qz) Table", calculator.velocity_pressure_table),
-        ("Wall Pressure Coefficient (Cp) Table", calculator.wall_cp_table),
-        (
-            "Roof Pressure Coefficient (Cp) Table - Normal Wind Direction",
-            calculator.roof_cp_display_normal,
-        ),
-        (
-            "Roof Pressure Coefficient (Cp) Table - Parallel Wind Direction",
-            calculator.roof_cp_display_parallel,
-        ),
-        (
-            "MWFRS Pressure Summary Table - Normal Wind Direction",
-            calculator.mwfrs_normal_summary,
-        ),
-        (
-            "MWFRS Pressure Summary Table - Parallel Wind Direction",
-            calculator.mwfrs_parallel_summary,
-        ),
-    ):
-        position = _write_table(sheet, table, position, title)
+def export_pdf(calculator: WindLoadCalculatorDirectionalASCE7, path: str) -> str | None:
+    """Write the PDF calculation report; returns its path, or None when LaTeX fails."""
+    return calculator.generate_pdf_report(save_path=path)
 
 
-def _run_from_excel(sheet) -> WindLoadCalculatorDirectionalASCE7 | None:
-    """Calculate from the sheet inputs and write the results; report errors on the sheet."""
-    status = sheet.range(WIND_STATUS_CELL)
-    try:
-        calculator = _calculator_from_sheet(sheet).calculate()
-        _write_results_to_sheet(sheet, calculator)
-    except Exception as error:  # shown to the user on the sheet, then re-raised
-        status.value = f"Error: {error}"
-        raise
-    status.value = f"Calculated {datetime.now():%Y-%m-%d %H:%M}"
-    return calculator
+def run():
+    """Terminal workflow: input dialog, then printout, PDF report or both."""
+    return run_design(sys.modules[__name__], "Wind Loads (ASCE 7, Directional)",
+                      "wind_loads", "ASCE_7_MWFRS_Directional_Procedure_Report")
 
 
-def calculate_wind_loads() -> None:
-    """Excel button: calculate wind loads and write the result tables to the sheet."""
-    import xlwings as xw
-
-    from utilities._gui_helpers import LoadingWindow
-
-    sheet = xw.Book.caller().sheets.active
-    with LoadingWindow("Calculating Wind Load..."):
-        _run_from_excel(sheet)
-
-
-def export_pdf_wind_loads() -> None:
-    """Excel button: calculate, refresh the sheet tables and export the PDF report."""
-    import xlwings as xw
-
-    from utilities._gui_helpers import LoadingWindow
-
-    sheet = xw.Book.caller().sheets.active
-    with LoadingWindow("Calculating Wind Load..."):
-        calculator = _run_from_excel(sheet)
-    pdf_path = calculator.generate_pdf_report()
-    sheet.range(WIND_PDF_STATUS_CELL).value = (
-        f"PDF saved: {pdf_path}" if pdf_path else "PDF export cancelled or failed."
-    )
-
-
-# =============================================================================
-# 4. CONFIG  ->  edit these values, then run this file directly
-# =============================================================================
 if __name__ == "__main__":
-
-    calculator = WindLoadCalculatorDirectionalASCE7(
-        building_class="Risk Category IV",
-        basic_wind_speed=61.111111111111114,  # m/s
-        enclosure_class="Enclosed Buildings",
-        exposure_category="D",
-        wind_dir_factor=0.85,  # Kd
-        topographic_factor=1.0,  # Kzt
-        ground_elevation_factor=1.0,  # Ke
-        gust_effect_factor=0.85,  # G
-        l_input=180,  # m
-        b_input=180,  # m
-        ridge_direction_input="B",  # "L" or "B"
-        raw_heights="10",  # comma-separated, e.g. "10, 12.5"
-        eave_height=15,  # m
-        apex_height=20,  # m
-    )
-
-    calculator.calculate()
-    calculator.print_summary()
-    calculator.generate_pdf_report(
-        output_filename="ASCE_7_MWFRS_Directional_Procedure_Report"
-    )
+    run()

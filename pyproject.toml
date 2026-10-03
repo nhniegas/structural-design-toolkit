@@ -1,0 +1,20 @@
+# Registers the `xs` command for main.py:  pip install -e .   then   xs wind / xs setup / xs --help
+# Dependencies stay in requirements.txt (pip install -r requirements.txt).
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xlwings-structural"
+version = "0.1.0"
+description = "Structural design checks and ETABS workflows"
+requires-python = ">=3.10"
+
+[project.scripts]
+xs = "main:main"
+
+[tool.setuptools]
+py-modules = ["main"]
+
+[tool.setuptools.packages.find]
+include = ["design*", "etabs_api*", "utilities*", "geotech*"]

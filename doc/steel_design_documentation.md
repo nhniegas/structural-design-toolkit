@@ -1,30 +1,37 @@
 # Steel and Composite Design Modules
 
-Two modules: the rectangular filled composite column designer, which has a workbook, and the general steel section designer, which currently runs from Python only.
+Two modules: the rectangular filled composite column designer (`python main.py composite`) and the general steel section designer (`python main.py steel`). Both run from the terminal; neither needs Excel.
+
+Every design module run from the terminal offers the same names:
+
+| Name | What it is |
+|---|---|
+| `INPUTS` | the input fields, in dialog order |
+| `calculate(values)` | runs the checks from a dict of the inputs, keyed as in `INPUTS` |
+| `summary_text(result)` | the results as plain text |
+| `export_pdf(result, path)` | writes the PDF report; returns its path, or `None` if LaTeX fails |
+| `run()` | the terminal workflow (`python main.py ...`) |
+
 
 ## Composite column: `design/composite_column_designer_aiscDG06.py`
 
 Rectangular or square concrete-filled steel box members, LRFD, per AISC Design Guide 6 (2nd edition) Section 2.5 and AISC 360 Chapter I.
 
-### Workbook
+### From the terminal
 
-`spreadsheets/composite_column_designer_aiscDG06.xlsm`, sheet `CONCRETE-FILLED`.
+From the project folder, with the environment active:
 
-| Button macro | Python function | Result |
-|---|---|---|
-| `CalculateCapacity` | `calculate_capacity()` | Writes the results block from `B19` |
-| `ExportCalcs` | `export_calcs()` | Asks where to save, writes a one-page PDF report |
+```powershell
+python main.py composite
+```
 
-Input cells:
+1. A dialog asks for the inputs. Choices are listed in brackets beside the box (type one of them); boxes marked optional may be left blank. The values typed last time are filled in again.
+2. If a value is not valid, a message names it and the dialog opens again with your entries.
+3. A second dialog asks what to do with the results: **Print the results in the terminal**, **Export a PDF calculation report**, or **Both**. Exporting asks where to save the PDF.
 
-| Cell | Input | Cell | Input |
-|---|---|---|---|
-| `C3` | Pu (kN) | `C9` | b (mm) |
-| `C4` | Mb (kN-m) | `C10` | h (mm) |
-| `C5` | Mh (kN-m) | `C11` | t (mm) |
-| `C6` | Vb (kN) | `C12` | f'c (MPa) |
-| `C7` | Vh (kN) | `C13` | fy (MPa) |
-| | | `C14`, `C15` | Lb, Lh (m), unbraced lengths |
+Closing either dialog stops without printing or saving anything. Running the file directly (`python design/composite_column_designer_aiscDG06.py`) does the same.
+
+Inputs: Pu (kN); Mb, Mh (kN-m); Vb, Vh (kN); b, h, t (mm); f'c, Fy (MPa); Lb, Lh (m), the unbraced lengths. The printout lists the compactness checks, phi Pn, phi Mn and phi Vn about each axis, the shear ratios and the interaction ratios with OK / NOT OK.
 
 ### Checks
 
@@ -40,17 +47,17 @@ Inputs are metric. The engine converts to US customary units internally and conv
 ### Python use
 
 ```python
-from design.composite_column_designer_aiscDG06 import RectangularFilledComposite, export_standalone_pdf
+from design import composite_column_designer_aiscDG06 as composite
 
-column = RectangularFilledComposite(
-    b_mm=635, h_mm=635, t_mm=12.7, fc_mpa=41.37, fy_mpa=344.74,
-    Lb_m=9.144, Lh_m=9.144, Pu_kN=6672.3, Mb_kNm=2440.5, Vbx_kN=400.3,
-)
-print(column.interaction_check())
-export_standalone_pdf(column, "column_report.pdf")
+column = composite.calculate(dict(
+    Pu=6672.3, Mb=2440.5, Mh=0, Vb=400.3, Vh=0,
+    b=635, h=635, t=12.7, fc=41.37, fy=344.74, Lb=9.144, Lh=9.144,
+))
+print(composite.summary_text(column))
+composite.export_pdf(column, "column_report.pdf")
 ```
 
-The workbook export and `export_standalone_pdf` produce the same report.
+`calculate` returns a `RectangularFilledComposite`; its methods (`interaction_check()`, `report()`, ...) can also be called directly. The terminal and `export_pdf` produce the same report.
 
 ### Limitations
 
@@ -62,8 +69,37 @@ The workbook export and `export_standalone_pdf` produce the same report.
 
 AISC 360-22 capacity checks for doubly symmetric I-shapes, LRFD or ASD, with a one-page PDF report.
 
+### From the terminal
+
+From the project folder, with the environment active:
+
+```powershell
+python main.py steel
+```
+
+1. A dialog asks for the inputs. Choices are listed in brackets beside the box (type one of them); boxes marked optional may be left blank. The values typed last time are filled in again.
+2. If a value is not valid, a message names it and the dialog opens again with your entries.
+3. A second dialog asks what to do with the results: **Print the results in the terminal**, **Export a PDF calculation report**, or **Both**. Exporting asks where to save the PDF.
+
+Closing either dialog stops without printing or saving anything. Running the file directly (`python design/general_steel_section_designer_aisc360.py`) does the same.
+
+Inputs: the section name (e.g. `W14X90`), Fy and Fu (MPa), LRFD or ASD, unbraced lengths Lx, Ly, Lz and Lb (m; a blank length takes Ly), K factors, Cb, compression or tension, the demands Pr (kN), Mrx, Mry (kN-m), Vrx, Vry (kN), Tr (kN-m), and optionally the stiffener spacing and plate size (mm) and tension-field action. The printout lists the section properties, every capacity table and the summary with the governing ratio, PASS or FAIL.
+
+### Python use
+
 - **Sections**: rolled W, M, S and HP shapes from the `steelpy` database, or built-up shapes from plate sizes with `WideFlangeCapacity.from_plates`.
 - **Checks**: classification (Table B4.1), tension (Chapter D), compression including slender elements (E3, E4, E7), flexure about both axes (F2 to F6, F13), shear including tension-field action and stiffeners (G2, G6), combined forces and torsion (H1 to H4).
+
+```python
+from design import general_steel_section_designer_aisc360 as steel
+
+check = steel.calculate({"section": "W14X90", "Fy": 345, "Fu": 450, "Ly": 4.0,
+                         "Pr": 800, "Mrx": 150, "Mry": 20, "Vrx": 100, "Vry": 10})
+print(steel.summary_text(check))
+steel.export_pdf(check, "W14X90_report.pdf")
+```
+
+`calculate` takes lengths in m. The class can also be used directly, with lengths in mm:
 
 ```python
 from design.general_steel_section_designer_aisc360 import WideFlangeCapacity
@@ -74,10 +110,9 @@ print(member.combined_forces_torsion_capacity(Pr=800, Mrx=150, Mry=20))
 member.export_report("W14X90_report", Pr=800, Mrx=150, Mry=20, Vrx=100, Vry=10)
 ```
 
-Lengths are in mm, forces in kN, moments in kN-m, stresses in MPa.
+With the class, lengths are in mm; forces are in kN, moments in kN-m, stresses in MPa.
 
 ### Status
 
-- No workbook is wired to this module yet. `export_calcs()` and its `INPUT_CELLS` map are ready for one.
-- The module has no automated tests yet.
+- `tests/test_design_cli.py` checks the terminal workflow and the uniform names; the capacity equations themselves have no automated tests yet.
 - Required strengths must already include second-order effects (Chapter C). Warping torsion is checked only if the bimoment and warping shear stress are supplied.

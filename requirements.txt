@@ -17,5 +17,8 @@ matplotlib
 PyLaTeX
 IPython
 ipykernel  # lets Quarto run the Python cells in main.qmd
+nbformat   # the next three are needed by quarto render
+nbclient
+pyyaml
 
 # Tests and lint: pip install -r .github/requirements-ci.txt

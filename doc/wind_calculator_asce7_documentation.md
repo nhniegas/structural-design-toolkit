@@ -2,40 +2,45 @@
 
 `design/wind_calculator_directional_asce7.py` computes MWFRS wind pressures for a rectangular building with a symmetrical gable roof, using the ASCE 7 directional procedure in SI units.
 
-## Workbook
+## From the terminal
 
-`spreadsheets/wind_load_calculator_asce7.xlsm`. The buttons act on the active sheet.
+From the project folder, with the environment active:
 
-| Button macro | Python function | Result |
-|---|---|---|
-| `RunDataLoad` | `calculate_wind_loads()` | Calculates and writes the results to the sheet |
-| `ExportCalcs` | `export_pdf_wind_loads()` | Calculates, refreshes the sheet, and saves a PDF report |
+```powershell
+python main.py wind
+```
 
-Input cells:
+1. A dialog asks for the inputs. Choices are listed in brackets beside the box (type one of them); boxes marked optional may be left blank. The values typed last time are filled in again.
+2. If a value is not valid, a message names it and the dialog opens again with your entries.
+3. A second dialog asks what to do with the results: **Print the results in the terminal**, **Export a PDF calculation report**, or **Both**. Exporting asks where to save the PDF.
 
-| Cell | Input |
+Closing either dialog stops without printing or saving anything. Running the file directly (`python design/wind_calculator_directional_asce7.py`) does the same.
+
+Inputs:
+
+| Input | Notes |
 |---|---|
-| `C2` | Building classification (text, reported only) |
-| `C3` | Basic wind speed V (m/s) |
-| `C4` | Enclosure classification, e.g. `Enclosed Buildings` |
-| `C5` | Exposure category: `B`, `C` or `D` |
-| `C6` to `C9` | Kd, Kzt, Ke, gust-effect factor G |
-| `C13`, `C14` | Plan dimensions L and B (m) |
-| `C15` | Direction of ridge: `L` or `B` |
-| `C16` | Extra heights to report (m), comma separated |
-| `C18`, `C19` | Eave height and apex height (m) |
+| Building classification | text, reported only |
+| Basic wind speed V (m/s) | |
+| Enclosure | `Enclosed Buildings`, `Partially Enclosed Buildings`, `Partially Open Buildings` or `Open Buildings` |
+| Exposure category | `B`, `C` or `D` |
+| Kd, Kzt, Ke, G | directionality, topographic, ground elevation and gust-effect factors |
+| L, B (m) | plan dimensions |
+| Ridge runs along | `L` or `B` |
+| Heights for the qz profile (m) | extra heights to report, comma separated; optional |
+| Eave height, apex height (m) | |
 
-Output cells:
+The printout and the PDF give the velocity pressure, GCpi, and six tables: the velocity pressure profile, wall Cp, roof Cp for wind normal to the ridge, roof Cp for wind parallel to the ridge, and the MWFRS pressure summary for each wind direction.
 
-| Cell | Output |
+Every design module run from the terminal offers the same names:
+
+| Name | What it is |
 |---|---|
-| `C10` | Velocity pressure without Kz, `0.613 Kd Kzt Ke V²` (Pa) |
-| `C11`, `C12` | Internal pressure coefficients +GCpi and -GCpi |
-| `B23` | Status: time of the last calculation, or the error message |
-| `D23` | PDF export status |
-| `B24` downward | Six result tables; `B24:K1000` is cleared on every run |
-
-The six tables are the velocity pressure profile, wall Cp, roof Cp for wind normal to the ridge, roof Cp for wind parallel to the ridge, and the MWFRS pressure summary for each wind direction.
+| `INPUTS` | the input fields, in dialog order |
+| `calculate(values)` | runs the checks from a dict of the inputs, keyed as in `INPUTS` |
+| `summary_text(result)` | the results as plain text |
+| `export_pdf(result, path)` | writes the PDF report; returns its path, or `None` if LaTeX fails |
+| `run()` | the terminal workflow (`python main.py ...`) |
 
 ## Calculation
 
@@ -46,38 +51,36 @@ The six tables are the velocity pressure profile, wall Cp, roof Cp for wind norm
    - wind normal to the ridge below 10 degrees, and wind parallel to the ridge at any slope: distance zones from the windward edge.
 4. Net pressure `p = q G Cp - qh (GCpi)` for both signs of internal pressure. Windward walls use qz at each height; all other surfaces use qh at the mean roof height.
 
-The reference tables are constants in the module, not read from the workbook.
+The reference tables are constants in the module.
 
 ## Python use
 
 ```python
-from design.wind_calculator_directional_asce7 import WindLoadCalculatorDirectionalASCE7
+from design import wind_calculator_directional_asce7 as wind
 
-calculator = WindLoadCalculatorDirectionalASCE7(
+calculator = wind.calculate(dict(
     building_class="Risk Category II", basic_wind_speed=60.0,
     enclosure_class="Enclosed Buildings", exposure_category="C",
     wind_dir_factor=0.85, topographic_factor=1.0, ground_elevation_factor=1.0,
     gust_effect_factor=0.85, l_input=20.0, b_input=10.0, ridge_direction_input="L",
     raw_heights="3, 4.5", eave_height=6.0, apex_height=8.0,
-).calculate()
-
-print(calculator.mwfrs_normal_summary)
-calculator.generate_pdf_report(save_path="wind_report.pdf")
+))
+print(wind.summary_text(calculator))
+print(calculator.mwfrs_normal_summary)   # each table is also a DataFrame
+wind.export_pdf(calculator, "wind_report.pdf")
 ```
-
-Running the file directly uses the inputs in the CONFIG block at the bottom, prints every table, and asks where to save the PDF. `xlwings` is needed only for the two workbook functions.
 
 ## Errors
 
-Invalid inputs raise a `ValueError` that names the input: an exposure category other than B, C or D, a ridge direction other than L or B, non-positive dimensions, an apex below the eave, or an unknown enclosure classification. From the workbook the message is written to `B23`.
+Invalid inputs raise a `ValueError` that names the input: an exposure category other than B, C or D, a ridge direction other than L or B, non-positive dimensions, an apex below the eave, or an unknown enclosure classification. From the terminal the message is shown and the input dialog opens again.
 
 ## Limitations
 
-- Symmetrical gable roof on a rectangular plan only. The `OVERWRITES` cells for angle and mean roof height on the sheet are not read by the code.
+- Symmetrical gable roof on a rectangular plan only; the roof angle and mean roof height are worked out from the eave and apex heights.
 - MWFRS only; components and cladding are not covered.
 - Exposure category, Kzt and the gust-effect factor are inputs, not calculated.
 - Roof Cp at 35 degrees should be checked against Fig. 27.3-1 of your ASCE 7 edition before use. The tabulated values at that slope are the same as at 30 degrees, which may be a transcription error from the original workbook.
 
 ## Tests
 
-`tests/test_wind_calculator_asce7.py` checks the velocity pressure equation, Kz interpolation, the steep-roof coefficient, the zone method, wall coefficients, the net pressure equation and the input checks.
+`tests/test_wind_calculator_asce7.py` checks the velocity pressure equation, Kz interpolation, the steep-roof coefficient, the zone method, wall coefficients, the net pressure equation and the input checks. `tests/test_design_cli.py` checks the terminal workflow.

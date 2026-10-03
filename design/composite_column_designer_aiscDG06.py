@@ -5,6 +5,11 @@ Axial, flexural, shear, and combined interaction strength of
 rectangular/square concrete-filled steel composite members (LRFD),
 per AISC Design Guide 6 (2nd Ed.) Section 2.5 and AISC 360 Chapter I.
 
+Run it from the terminal with ``python main.py composite``: a dialog asks for
+the inputs, then whether to print the results, export the PDF report, or both.
+In code, the same steps are ``calculate(values)``, ``summary_text(column)`` and
+``export_pdf(column, path)``.
+
 Known limitation: noncompact/slender flexural strength (Spec. Eq. I3-5b)
 is not implemented - it needs a first-yield moment My with no closed-form
 equation given in DG6 for rectangular sections, so it's intentionally
@@ -12,10 +17,9 @@ left as a clear error rather than a guessed formula.
 """
 
 import math
-import sys
 import os
+import sys
 from datetime import datetime
-import xlwings as xw
 from pylatex import (
     Document,
     Section,
@@ -25,8 +29,11 @@ from pylatex import (
     Itemize,
 )
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from utilities._gui_helpers import select_save_file
+if __package__ in (None, ""):
+    # Run as a script: make the project folder importable.
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from utilities.design_cli import Field, run_design  # noqa: E402
 
 
 class RectangularFilledComposite:
@@ -531,232 +538,101 @@ class RectangularFilledComposite:
 
 
 # ==========================================================================
-# EXCEL ENTRY POINTS (workbook buttons "Calculate Capacity" and "Export Calcs")
+# TERMINAL WORKFLOW  (python main.py composite)
 # ==========================================================================
-#
-# Cell map of the active sheet:
-#   C3  Pu   (kN)        C9  b   (mm)
-#   C4  Mb   (kN-m)      C10 h   (mm)
-#   C5  Mh   (kN-m)      C11 t   (mm)
-#   C6  Vb   (kN)        C12 f'c (MPa)
-#   C7  Vh   (kN)        C13 fy  (MPa)
-#                        C14 Lb  (m)  <- unbraced length for b-axis bending
-#                        C15 Lh  (m)  <- unbraced length for h-axis bending
-#
-# Lb/Lh map onto the class's Lx_m/Ly_m parameters: Lb pairs with the b-axis
-# bending stiffness (Icx = bi*hi^3/12, behind phi_Mnx/Mb) and Lh with the
-# h-axis bending stiffness (Icy = hi*bi^3/12, behind phi_Mny/Mh).
-#
-#   B17 "SOLUTION" header (already on the sheet)
-#   B19 results are written from here down, cleared and rewritten on each run
-#
-# The workbook macros call these functions directly through xlwings:
-#   RunPython "from design import composite_column_designer_aiscDG06 as m; m.calculate_capacity()"
-#   RunPython "from design import composite_column_designer_aiscDG06 as m; m.export_calcs()"
-# ==========================================================================
-
-INPUT_CELLS = {
-    "Pu": "C3",
-    "Mb": "C4",
-    "Mh": "C5",
-    "Vb": "C6",
-    "Vh": "C7",
-    "b": "C9",
-    "h": "C10",
-    "t": "C11",
-    "fc": "C12",
-    "fy": "C13",
-    "Lb": "C14",
-    "Lh": "C15",
-}
-
-SOLUTION_START_ROW = 19
-SOLUTION_LABEL_COL = "B"
-SOLUTION_VALUE_COL = "C"
-SOLUTION_CLEAR_ROWS = 30  # rows below SOLUTION_START_ROW to clear before writing
+INPUTS = [
+    Field("Pu", "Axial demand Pu (kN)", 6672.3),
+    Field("Mb", "Moment demand about the b-axis, Mb (kN-m)", 2440.5),
+    Field("Mh", "Moment demand about the h-axis, Mh (kN-m)", 0.0),
+    Field("Vb", "Shear demand along b, Vb (kN)", 400.3),
+    Field("Vh", "Shear demand along h, Vh (kN)", 0.0),
+    Field("b", "Width b (mm)", 635.0),
+    Field("h", "Height h (mm)", 635.0),
+    Field("t", "Wall thickness t (mm)", 12.7),
+    Field("fc", "Concrete strength f'c (MPa)", 41.37),
+    Field("fy", "Steel yield strength Fy (MPa)", 344.74),
+    Field("Lb", "Unbraced length for b-axis bending, Lb (m)", 9.144),
+    Field("Lh", "Unbraced length for h-axis bending, Lh (m)", 9.144),
+]
 
 
-def calculate_capacity():
-    """
-    Reads demand forces and section properties from the active sheet,
-    runs the DG6 capacity check, and writes a results block starting at
-    B19 under the "SOLUTION" header. Bound to the "Calculate Capacity"
-    button via the VBA RunPython wrapper.
-    """
-    book = xw.Book.caller()
-    sht = book.sheets.active
-
-    col, missing = _column_from_sheet(sht)
-    if missing:
-        sht.range(f"{SOLUTION_LABEL_COL}{SOLUTION_START_ROW}").value = (
-            f"ERROR: missing input(s): {', '.join(missing)}"
-        )
-        return
-    shear_demand = {"b": col.Vux / 0.224809, "h": col.Vuy / 0.224809}  # kN
-
-    results = col.interaction_check()
-    phi_Vbx = col.shear_strength(axis="b")
-    phi_Vhy = col.shear_strength(axis="h")
-
-    # --- Clear previous solution block dynamically -------------------------
-    start_cell = sht.range(f"{SOLUTION_LABEL_COL}{SOLUTION_START_ROW}")
-
-    # Clear the rows below the header so no old data or colors are left behind
-    clear_range = sht.range(
-        f"{SOLUTION_LABEL_COL}{SOLUTION_START_ROW}:"
-        f"{SOLUTION_VALUE_COL}{SOLUTION_START_ROW + SOLUTION_CLEAR_ROWS}"
-    )
-    clear_range.clear_contents()
-    clear_range.color = None
-    clear_range.font.bold = False
-
-    # --- Build Results Array -----------------------------------------------
-    rows = []
-
-    if "Error" in results:
-        rows.append(("ERROR", results["Error"]))
-    else:
-        rows.append(("As/Ag Check (>=1%)", results["As/Ag Check (>=1%)"]))
-        rows.append(("Axial Compactness", results["Axial Compactness"]))
-        rows.append(
-            ("Flexural Compactness (b-axis)", results["Flexural Compactness (b-axis)"])
-        )
-        rows.append(
-            ("Flexural Compactness (h-axis)", results["Flexural Compactness (h-axis)"])
-        )
-        rows.append(
-            ("Seismic Compactness (Ry=1.3)", col.check_seismic_compactness(Ry=1.3))
-        )
-        rows.append(("", ""))
-        rows.append(("φPn (kN)", _kips_to_kN(results["phi_Pn (kips)"])))
-        rows.append(("φMnx (kN-m)", _kipin_to_kNm(results["phi_Mnx (kip-in)"])))
-        rows.append(("φMny (kN-m)", _kipin_to_kNm(results["phi_Mny (kip-in)"])))
-        rows.append(("φVbx (kN)", _kips_to_kN(phi_Vbx)))
-        rows.append(("φVhy (kN)", _kips_to_kN(phi_Vhy)))
-        rows.append(("", ""))
-
-        phi_Vbx_kN = _kips_to_kN(phi_Vbx)
-        if phi_Vbx_kN > 0:
-            shear_ratio_b = shear_demand["b"] / phi_Vbx_kN
-            rows.append(("Shear Ratio (b-axis)", round(shear_ratio_b, 3)))
-            rows.append(
-                (
-                    "STATUS (Shear-b)",
-                    "OK" if shear_ratio_b <= 1.0 else "NOT OK - OVERSTRESSED",
-                )
-            )
-        else:
-            rows.append(("Shear Ratio (b-axis)", "N/A"))
-
-        phi_Vhy_kN = _kips_to_kN(phi_Vhy)
-        if phi_Vhy_kN > 0:
-            shear_ratio_h = shear_demand["h"] / phi_Vhy_kN
-            rows.append(("Shear Ratio (h-axis)", round(shear_ratio_h, 3)))
-            rows.append(
-                (
-                    "STATUS (Shear-h)",
-                    "OK" if shear_ratio_h <= 1.0 else "NOT OK - OVERSTRESSED",
-                )
-            )
-
-        rows.append(("", ""))
-
-        std_ratio = results["Interaction Ratio (Standard)"]
-        rows.append(("Interaction Ratio (Standard)", std_ratio))
-        if isinstance(std_ratio, (int, float)):
-            rows.append(
-                (
-                    "STATUS (Standard)",
-                    "OK" if std_ratio <= 1.0 else "NOT OK - OVERSTRESSED",
-                )
-            )
-
-        alpha_ratio = results["Interaction Ratio (Alpha=1.5)"]
-        rows.append(("Interaction Ratio (Alpha=1.5)", alpha_ratio))
-        if isinstance(alpha_ratio, (int, float)):
-            rows.append(
-                (
-                    "STATUS (Alpha=1.5)",
-                    "OK" if alpha_ratio <= 1.0 else "NOT OK - OVERSTRESSED",
-                )
-            )
-
-    # --- Batch Write & Format ----------------------------------------------
-    start_cell.value = rows
-
-    # Format the labels column to be bold
-    label_range = sht.range(
-        (SOLUTION_START_ROW, start_cell.column),
-        (SOLUTION_START_ROW + len(rows) - 1, start_cell.column),
-    )
-    label_range.font.bold = True
-
-    # Format the STATUS rows with colors based on utilization
-    for i, (label, val) in enumerate(rows):
-        if "STATUS" in str(label):
-            row_idx = SOLUTION_START_ROW + i
-            status_cells = sht.range(
-                f"{SOLUTION_LABEL_COL}{row_idx}:{SOLUTION_VALUE_COL}{row_idx}"
-            )
-            status_cells.font.bold = True
-
-            if "NOT OK" in str(val):
-                status_cells.color = (255, 199, 206)  # Light red background
-                status_cells.font.color = (156, 0, 6)  # Dark red text
-            elif "OK" in str(val):
-                status_cells.color = (198, 239, 206)  # Light green background
-                status_cells.font.color = (0, 97, 0)  # Dark green text
-
-    # Autofit the entire columns so input labels and solution labels both fit
-    sht.range(f"{SOLUTION_LABEL_COL}:{SOLUTION_VALUE_COL}").columns.autofit()
-
-
-def _column_from_sheet(sht):
-    """Build the member from the input cells; returns ``(column, missing_inputs)``."""
-    vals = {k: sht.range(addr).value for k, addr in INPUT_CELLS.items()}
-    missing = [k for k, v in vals.items() if v is None]
-    if missing:
-        return None, missing
+def calculate(values: dict) -> "RectangularFilledComposite":
+    """The member from a dict of the inputs (keys of ``INPUTS``), with its checks run."""
     column = RectangularFilledComposite(
-        b_mm=vals["b"],
-        h_mm=vals["h"],
-        t_mm=vals["t"],
-        fc_mpa=vals["fc"],
-        fy_mpa=vals["fy"],
-        Lx_m=vals["Lb"],
-        Ly_m=vals["Lh"],
-        Pu_kN=vals["Pu"],
-        Mbx_kNmm=vals["Mb"] * 1000,
-        Mhy_kNmm=vals["Mh"] * 1000,
-        Vbx_kN=vals["Vb"],
-        Vhy_kN=vals["Vh"],
+        b_mm=values["b"],
+        h_mm=values["h"],
+        t_mm=values["t"],
+        fc_mpa=values["fc"],
+        fy_mpa=values["fy"],
+        Lx_m=values["Lb"],
+        Ly_m=values["Lh"],
+        Pu_kN=values["Pu"],
+        Mbx_kNmm=values["Mb"] * 1000,
+        Mhy_kNmm=values["Mh"] * 1000,
+        Vbx_kN=values["Vb"],
+        Vhy_kN=values["Vh"],
     )
-    return column, []
+    column.interaction_check()  # raises early for inputs outside the method's scope
+    return column
 
 
-def export_calcs():
-    """Excel button: export the A4 PDF calculation report for the active sheet."""
-    book = xw.Book.caller()
-    sht = book.sheets.active
-    status = sht.range(f"{SOLUTION_LABEL_COL}{SOLUTION_START_ROW}")
+def result_rows(column: "RectangularFilledComposite") -> list[tuple[str, object]]:
+    """The results as (label, value) rows; an empty label separates groups."""
+    results = column.interaction_check()
+    if "Error" in results:
+        return [("ERROR", results["Error"])]
+    shear_demand = {"b": column.Vux / 0.224809, "h": column.Vuy / 0.224809}  # kN
+    phi_v = {"b": _kips_to_kN(column.shear_strength(axis="b")),
+             "h": _kips_to_kN(column.shear_strength(axis="h"))}
 
-    col, missing = _column_from_sheet(sht)
-    if missing:
-        status.value = f"ERROR: missing input(s) for export: {', '.join(missing)}"
-        return
+    def status(ratio) -> str:
+        return "OK" if ratio <= 1.0 else "NOT OK - OVERSTRESSED"
 
-    filepath_with_ext = select_save_file(default_name="Composite_Capacity_Report")
-    if not filepath_with_ext:
-        return
-    if not filepath_with_ext.lower().endswith(".pdf"):
-        filepath_with_ext += ".pdf"
+    rows = [
+        ("As/Ag Check (>=1%)", results["As/Ag Check (>=1%)"]),
+        ("Axial Compactness", results["Axial Compactness"]),
+        ("Flexural Compactness (b-axis)", results["Flexural Compactness (b-axis)"]),
+        ("Flexural Compactness (h-axis)", results["Flexural Compactness (h-axis)"]),
+        ("Seismic Compactness (Ry=1.3)", column.check_seismic_compactness(Ry=1.3)),
+        ("", ""),
+        ("phi Pn (kN)", round(_kips_to_kN(results["phi_Pn (kips)"]), 1)),
+        ("phi Mnx (kN-m)", round(_kipin_to_kNm(results["phi_Mnx (kip-in)"]), 1)),
+        ("phi Mny (kN-m)", round(_kipin_to_kNm(results["phi_Mny (kip-in)"]), 1)),
+        ("phi Vbx (kN)", round(phi_v["b"], 1)),
+        ("phi Vhy (kN)", round(phi_v["h"], 1)),
+        ("", ""),
+    ]
+    for axis, name in (("b", "b-axis"), ("h", "h-axis")):
+        if phi_v[axis] > 0:
+            ratio = shear_demand[axis] / phi_v[axis]
+            rows += [(f"Shear Ratio ({name})", round(ratio, 3)),
+                     (f"STATUS (Shear-{axis})", status(ratio))]
+        else:
+            rows.append((f"Shear Ratio ({name})", "N/A"))
+    rows.append(("", ""))
+    for key, label in (("Interaction Ratio (Standard)", "Standard"),
+                       ("Interaction Ratio (Alpha=1.5)", "Alpha=1.5")):
+        ratio = results[key]
+        rows.append((key, ratio))
+        if isinstance(ratio, (int, float)):
+            rows.append((f"STATUS ({label})", status(ratio)))
+    return rows
 
-    saved_path = export_standalone_pdf(col, filepath_with_ext)
-    status.value = (
-        f"Success: Saved to {saved_path}"
-        if saved_path
-        else "PDF Error: the report could not be compiled. Check the LaTeX installation."
-    )
+
+def summary_text(column: "RectangularFilledComposite") -> str:
+    """The results as plain text for the terminal."""
+    title = "RECTANGULAR FILLED COMPOSITE COLUMN (AISC DG6)"
+    lines = ["", "=" * 64, title, "=" * 64]
+    for label, value in result_rows(column):
+        lines.append("" if not label else f"{label:<34} {value}")
+    lines.append("=" * 64)
+    return "\n".join(lines)
+
+
+def run():
+    """Terminal workflow: input dialog, then printout, PDF report or both."""
+    return run_design(sys.modules[__name__], "Composite Column (AISC DG6)",
+                      "composite_column", "Composite_Capacity_Report")
 
 
 def _kips_to_kN(kips):
@@ -771,8 +647,8 @@ def _kipin_to_kNm(kipin):
     return round(kipin / 8.8507, 3)
 
 
-def export_standalone_pdf(col: RectangularFilledComposite, filepath_with_ext: str):
-    """Generates the A4 PDF report from a class instance, independent of Excel."""
+def export_pdf(col: RectangularFilledComposite, filepath_with_ext: str):
+    """Write the A4 PDF calculation report; returns its path, or None when LaTeX fails."""
     if filepath_with_ext.lower().endswith(".pdf"):
         filepath = filepath_with_ext[:-4]
     else:
@@ -1049,57 +925,4 @@ def export_standalone_pdf(col: RectangularFilledComposite, filepath_with_ext: st
 
 # =========================================================================== #
 if __name__ == "__main__":
-    print("-" * 60)
-    print("Standalone Demo: AISC DG6 Example 2.5")
-    print("-" * 60)
-
-    # ---------------------------------------------------------
-    # 1. DEFINE THE COMPOSITE MEMBER & ADVANCED PARAMETERS
-    # ---------------------------------------------------------
-    col = RectangularFilledComposite(
-        # Geometry & Materials
-        b_mm=635.0,  # 25 inches
-        h_mm=635.0,  # 25 inches
-        t_mm=12.7,  # 0.5 inches
-        fc_mpa=41.37,  # ~6 ksi
-        fy_mpa=344.74,  # ~50 ksi
-        Lx_m=9.144,  # 30 ft
-        Ly_m=9.144,  # 30 ft
-        # Advanced Parameters
-        Asr_mm2=0.0,
-        Fysr_mpa=414.0,
-        ri_mm=0.0,
-        shear_span_to_depth=None,
-        # Demands
-        Pu_kN=6672.3,  # ~1500 kips
-        Mbx_kNmm=2440472.0,  # ~1800 kip-ft
-        Mhy_kNmm=0,
-        Vbx_kN=400.3,  # ~90 kips
-        Vhy_kN=0,
-    )
-
-    print("Running capacity checks...")
-    results = col.interaction_check()
-    for key, val in results.items():
-        print(f"  {key:<32}: {val}")
-
-    print("-" * 60)
-    print("Waiting for save location in popup dialog...")
-
-    # Use the existing GUI dialog function
-    dest_file = select_save_file(default_name="Composite_Capacity_Report")
-
-    if dest_file:
-        print("\nGenerating PDF report...")
-
-        # ---------------------------------------------------------
-        # 2. GENERATE PDF DIRECTLY FROM PYTHON (NO EXCEL)
-        # ---------------------------------------------------------
-        out_path = export_standalone_pdf(col, dest_file)
-
-        if out_path:
-            print(f"Export complete: {out_path}")
-        else:
-            print("Export failed. Check LaTeX installation.")
-    else:
-        print("Export cancelled by user.")
+    run()

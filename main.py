@@ -1,21 +1,100 @@
-"""Project entry point for the ETABS model automation.
+"""Terminal entry point for the ETABS workflows and the design checks.
 
-    python main.py      define the standard parameters of an ETABS model:
-                        materials, frame sections, load patterns, the UBC 97
-                        response spectrum, load cases and load combinations
-                        (etabs_api/model_setup.py)
+    python main.py setup     define materials, frame sections, load patterns, the UBC 97
+                             response spectrum, load cases, mass source, P-delta and
+                             load combinations       (etabs_api/workflows/model_setup.py)
+    python main.py grids     build or update the stories, grids, columns and walls from
+                             a DXF of framing plans  (etabs_api/workflows/grid_column_model.py)
+    python main.py tag       give every beam and column of the open model its unique
+                             name, in a tagged copy  (etabs_api/workflows/frame_tagger.py)
+    python main.py composite rectangular filled composite column, AISC DG6
+                             (design/composite_column_designer_aiscDG06.py)
+    python main.py steel     wide-flange member, AISC 360-22
+                             (design/general_steel_section_designer_aisc360.py)
+    python main.py wind      MWFRS wind pressures, ASCE 7 directional procedure
+                             (design/wind_calculator_directional_asce7.py)
+    python main.py --help    list the commands
 
-The Excel workbooks do not use this file. Every Excel button runs its design
-module directly:
+After ``pip install -e .`` (pyproject.toml) the same commands run as ``xs setup``,
+``xs wind`` and so on, from any folder while the environment is active.
 
-    beam_column_designer_aci318.xlsm        design/beam_designer_aci318.py
-                                            design/column_designer_aci318.py
-                                            etabs_api/frame_tagger.py
-    composite_column_designer_aiscDG06.xlsm design/composite_column_designer_aiscDG06.py
-    wind_load_calculator_asce7.xlsm         design/wind_calculator_directional_asce7.py
+Each command asks for its inputs in dialogs. The design checks then ask whether
+to print the results in the terminal, export a PDF report, or both.
 """
 
-from etabs_api.model_setup import run_model_setup
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+
+def _setup():
+    from etabs_api.workflows.model_setup import run_model_setup
+
+    return run_model_setup()
+
+
+def _grids():
+    from etabs_api.workflows.grid_column_model import run_grid_column_model
+
+    return run_grid_column_model()
+
+
+def _tag():
+    from etabs_api.workflows.frame_tagger import auto_tag_frames
+
+    return auto_tag_frames()
+
+
+def _composite():
+    from design.composite_column_designer_aiscDG06 import run
+
+    return run()
+
+
+def _steel():
+    from design.general_steel_section_designer_aisc360 import run
+
+    return run()
+
+
+def _wind():
+    from design.wind_calculator_directional_asce7 import run
+
+    return run()
+
+
+COMMANDS = {
+    "setup": (_setup, "define materials, sections, loads, spectrum, cases and combinations"),
+    "grids": (_grids, "build or update stories, grids, columns and walls from a DXF"),
+    "tag": (_tag, "give every beam and column of the open model its unique name"),
+    "composite": (_composite, "check a rectangular filled composite column (AISC DG6)"),
+    "steel": (_steel, "check a wide-flange steel member (AISC 360-22)"),
+    "wind": (_wind, "MWFRS wind pressures by the ASCE 7 directional procedure"),
+}
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="xs" if Path(sys.argv[0]).stem == "xs" else "python main.py",
+        description="ETABS workflows and design checks. Each one asks for its inputs in dialogs.",
+    )
+    commands = parser.add_subparsers(dest="command", metavar="command")
+    for name, (_, text) in COMMANDS.items():
+        commands.add_parser(name, help=text, description=text)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    arguments = parser.parse_args(argv)
+    if arguments.command is None:
+        parser.print_help()
+        return 1
+    COMMANDS[arguments.command][0]()
+    return 0
+
 
 if __name__ == "__main__":
-    run_model_setup()
+    raise SystemExit(main())

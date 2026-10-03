@@ -1,20 +1,24 @@
-"""Dedicated ETABS API package.
+"""ETABS API package.
 
-This package centralizes the ETABS COM connection and Excel export helpers so
-the design modules can depend on a single ETABS-focused namespace.
+* ``etabs_api.core``       thin wrappers around the ETABS COM interface
+* ``etabs_api.workflows``  automation built on the office conventions
+
+The names below are kept at the package level for the design modules.
 """
 
-from .connection import ETABSConnector
-from .exporter import ETABSDataExporter
-from .analysis import Analysis
-from .assignments import Assignments
-from .database import DatabaseTables
-from .geometry import Geometry
-from .loads import Loads
-from .properties import Properties
-from .results import Results
-from .selection import Selection
-from .stories_grids import StoriesGrids
+from .core import (
+    Analysis,
+    Assignments,
+    DatabaseTables,
+    ETABSConnector,
+    Geometry,
+    Loads,
+    Properties,
+    Results,
+    Selection,
+    StoriesGrids,
+)
+from .workflows.exporter import ETABSDataExporter
 
 __all__ = [
     "ETABSConnector",

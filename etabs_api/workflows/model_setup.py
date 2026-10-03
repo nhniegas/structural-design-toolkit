@@ -7,10 +7,17 @@ Defines, in the model that is open in ETABS or in a new blank one:
 * load patterns         the office standard set, UBC 97 seismic, ASCE 7-10 wind
 * response spectrum     the UBC 97 function, with Ca and Cv from the seismic inputs
 * load cases            modal and the two response spectrum cases
+* mass source           dead loads, non-reducible live and, optionally, reducible live
+* P-delta               iterative, on dead loads, non-reducible live and half the reducible live
 * load combinations     NSCP 2015, see ``load_combinations.py``
 
-Run it with ``python main.py``. The inputs are asked for in dialogs and saved
-beside the model, so they are not asked again for the same model.
+Run this file to use it:
+
+    python etabs_api/workflows/model_setup.py
+
+The inputs are asked for in dialogs and saved beside the model, so they are
+not asked again for the same model. ``setup_model`` does the same without
+dialogs, from a settings dictionary, for use in your own scripts.
 
 The planning functions work on plain data and need no ETABS.
 """
@@ -22,10 +29,17 @@ import json
 import math
 import os
 import re
+import sys
+from dataclasses import dataclass
 
-from .helpers import as_list, return_code
-from .load_combinations import Combination, build_combinations
-from .ubc97 import (
+if __package__ in (None, ""):
+    # Run as a script: make the project folder (two levels up) importable.
+    sys.path.insert(
+        0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+from etabs_api.core.helpers import as_list, return_code
+from etabs_api.workflows.load_combinations import Combination, build_combinations
+from etabs_api.workflows.ubc97 import (
     response_spectrum_scale,
     seismic_coefficients,
     vertical_effect_factor,
@@ -51,22 +65,19 @@ BEAM_PREFIXES = ("G", "B", "FTB")  # girders, beams, footing tie beams
 OMEGA0 = 2.8
 RHO = 1.0
 LIVE_FACTOR = 0.5  # f on live load in the seismic and wind combinations
+NON_REDUCIBLE_LIVE = "LIVENRED"  # always part of the seismic mass and the P-delta load
+NON_REDUCIBLE_LIVE_FACTOR = 1.0
+REDUCIBLE_LIVE_MASS_FACTOR = 0.20  # used when reducible live is included in the mass
+REDUCIBLE_LIVE_PDELTA_FACTOR = 0.50  # reducible live is always part of the P-delta load
+PDELTA_TOLERANCE = 0.0001
 
 # The office standard load patterns: (name, ETABS type, self weight multiplier).
 STANDARD_PATTERNS = (
     ("SELFWEIGHT", "Dead", 1.0),
     ("SIDL", "Super Dead", 0.0),
-    ("CMUWALLS", "Super Dead", 0.0),
     ("EXTERIOR WALLS", "Super Dead", 0.0),
-    ("FACADE", "Super Dead", 0.0),
-    ("FLOORBEAMS", "Super Dead", 0.0),
-    ("DLBALCONY", "Super Dead", 0.0),
-    ("H2ODEAD", "Super Dead", 0.0),
     ("LIVERED", "Reducible Live", 0.0),
     ("LIVENRED", "Live", 0.0),
-    ("LIVEMECH", "Live", 0.0),
-    ("LIVEOTHER", "Live", 0.0),
-    ("LLBALCONY", "Live", 0.0),
     ("LIVEROOF", "Roof Live", 0.0),
     ("WX", "Wind", 0.0),
     ("WY", "Wind", 0.0),
@@ -110,6 +121,8 @@ DEFAULT_SETTINGS = {
     "extra_dead": [],
     "extra_live": [],
     "extra_reducible_live": [],
+    # Seismic mass: every dead pattern at 1.0, plus these fractions of live load.
+    "mass": {"include_reducible_live": False},
 }
 
 
@@ -189,6 +202,42 @@ def load_patterns(settings: dict) -> list[tuple[str, str, float]]:
                 patterns.append((name, kind, 0.0))
                 taken.add(name)
     return patterns
+
+
+def mass_source_loads(settings: dict) -> list[tuple[str, float]]:
+    """Load patterns of the seismic mass, with their factors.
+
+    Every dead and super dead pattern counts in full. Non-reducible live load
+    (``LIVENRED``) is always included. Reducible live load is included at 20 %
+    when that option is chosen.
+    """
+    mass = settings["mass"]
+    loads = []
+    for name, kind, _ in load_patterns(settings):
+        if kind in ("Dead", "Super Dead"):
+            loads.append((name, 1.0))
+        elif name == NON_REDUCIBLE_LIVE:
+            loads.append((name, NON_REDUCIBLE_LIVE_FACTOR))
+        elif kind == "Reducible Live" and mass["include_reducible_live"]:
+            loads.append((name, REDUCIBLE_LIVE_MASS_FACTOR))
+    return loads
+
+
+def pdelta_loads(settings: dict) -> list[tuple[str, float]]:
+    """Load patterns of the P-delta load, with their factors.
+
+    The dead and non-reducible live loads count as in the mass source.
+    Reducible live load is always included, at 50 %.
+    """
+    loads = []
+    for name, kind, _ in load_patterns(settings):
+        if kind in ("Dead", "Super Dead"):
+            loads.append((name, 1.0))
+        elif name == NON_REDUCIBLE_LIVE:
+            loads.append((name, NON_REDUCIBLE_LIVE_FACTOR))
+        elif kind == "Reducible Live":
+            loads.append((name, REDUCIBLE_LIVE_PDELTA_FACTOR))
+    return loads
 
 
 def seismic_values(settings: dict) -> dict:
@@ -348,36 +397,45 @@ def define_materials(model, settings: dict, log: SetupLog) -> None:
             log.done("materials")
 
 
+def create_section(api, section: dict, log: SetupLog) -> bool:
+    """Create one concrete frame section with its stiffness modifiers and rebar data.
+
+    ``section`` has name, kind ("beam", "column" or "circle"), width (t2),
+    depth (t3), material and rebar.
+    """
+    name, material, rebar = section["name"], section["material"], section["rebar"]
+    if section["kind"] == "circle":
+        created = api.SetCircle(name, material, section["depth"])
+    else:  # (name, material, depth t3, width t2)
+        created = api.SetRectangle(name, material, section["depth"], section["width"])
+    if not log.check(created, f"section {name}"):
+        return False
+    factor = BEAM_MODIFIER if section["kind"] == "beam" else COLUMN_MODIFIER
+    # area, shear 2, shear 3, torsion, I22, I33, mass, weight
+    log.check(api.SetModifiers(name, [1.0, 1.0, 1.0, 1.0, factor, factor, 1.0, 1.0]),
+              f"{name} stiffness modifiers")
+    if section["kind"] == "beam":
+        log.check(api.SetRebarBeam(name, rebar, rebar, BEAM_COVER, BEAM_COVER, 0, 0, 0, 0),
+                  f"{name} reinforcement data")
+    else:
+        circular = section["kind"] == "circle"
+        # pattern 1 rectangular / 2 circular; confinement 1 ties / 2 spiral; to be designed
+        log.check(
+            api.SetRebarColumn(name, rebar, rebar, 2 if circular else 1,
+                               2 if circular else 1, COLUMN_COVER, 8 if circular else 0,
+                               5, 3, "20", "10", 150.0, 3, 3, True),
+            f"{name} reinforcement data",
+        )
+    return True
+
+
 def define_sections(model, settings: dict, log: SetupLog, progress=None) -> None:
-    api = model.PropFrame
     sections = section_definitions(settings)
     for index, section in enumerate(sections):
-        name, material, rebar = section["name"], section["material"], section["rebar"]
         if progress is not None and index % 20 == 0:
-            progress(f"Section {index + 1} of {len(sections)}\t{name}")
-        if section["kind"] == "circle":
-            created = api.SetCircle(name, material, section["depth"])
-        else:  # (name, material, depth t3, width t2)
-            created = api.SetRectangle(name, material, section["depth"], section["width"])
-        if not log.check(created, f"section {name}"):
-            continue
-        log.done("frame sections")
-        factor = BEAM_MODIFIER if section["kind"] == "beam" else COLUMN_MODIFIER
-        # area, shear 2, shear 3, torsion, I22, I33, mass, weight
-        log.check(api.SetModifiers(name, [1.0, 1.0, 1.0, 1.0, factor, factor, 1.0, 1.0]),
-                  f"{name} stiffness modifiers")
-        if section["kind"] == "beam":
-            log.check(api.SetRebarBeam(name, rebar, rebar, BEAM_COVER, BEAM_COVER, 0, 0, 0, 0),
-                      f"{name} reinforcement data")
-        else:
-            circular = section["kind"] == "circle"
-            # pattern 1 rectangular / 2 circular; confinement 1 ties / 2 spiral; to be designed
-            log.check(
-                api.SetRebarColumn(name, rebar, rebar, 2 if circular else 1,
-                                   2 if circular else 1, COLUMN_COVER, 8 if circular else 0,
-                                   5, 3, "20", "10", 150.0, 3, 3, True),
-                f"{name} reinforcement data",
-            )
+            progress(f"Section {index + 1} of {len(sections)}\t{section['name']}")
+        if create_section(model.PropFrame, section, log):
+            log.done("frame sections")
 
 
 def remove_blank_model_defaults(model) -> None:
@@ -404,6 +462,29 @@ def define_load_patterns(model, settings: dict, log: SetupLog) -> None:
             ok = log.check(api.Add(name, code, self_weight, True), f"load pattern {name}")
         if ok:
             log.done("load patterns")
+
+
+def define_mass_source(model, settings: dict, log: SetupLog) -> None:
+    """Seismic mass from the load patterns only (no element self mass, no added mass)."""
+    loads = mass_source_loads(settings)
+    names = [name for name, _ in loads]
+    factors = [factor for _, factor in loads]
+    # (from elements, from added mass, from loads, number of loads, patterns, factors)
+    result = model.PropMaterial.SetMassSource_1(False, False, True, len(loads), names, factors)
+    if log.check(result, "mass source"):
+        log.done("mass source loads", len(loads))
+
+
+def define_pdelta(model, settings: dict, log: SetupLog) -> None:
+    """Iterative P-delta based on loads; the API has no call for it, so the table is used."""
+    rows = [
+        {"LoadPattern": name, "ScaleFactor": factor,
+         "RelConTol": PDELTA_TOLERANCE if index == 0 else "",
+         "AutoMethod": "Iterative Based on Loads" if index == 0 else ""}
+        for index, (name, factor) in enumerate(pdelta_loads(settings))
+    ]
+    if _edit_table(model, "P-Delta Option Definition", rows, log, replace_all=True):
+        log.done("P-delta loads", len(rows))
 
 
 def define_lateral_loads(model, settings: dict, log: SetupLog) -> None:
@@ -575,6 +656,8 @@ def apply_model_setup(model, settings: dict, progress=None) -> SetupLog:
             ("Materials", lambda: define_materials(model, settings, log)),
             ("Frame sections", lambda: define_sections(model, settings, log, progress)),
             ("Load patterns", lambda: define_load_patterns(model, settings, log)),
+            ("Mass source", lambda: define_mass_source(model, settings, log)),
+            ("P-delta", lambda: define_pdelta(model, settings, log)),
             ("Seismic and wind", lambda: define_lateral_loads(model, settings, log)),
             ("Response spectrum", lambda: define_spectrum_and_cases(model, settings, log)),
             ("Load combinations", lambda: define_combinations(model, settings, log, progress)),
@@ -585,6 +668,178 @@ def apply_model_setup(model, settings: dict, progress=None) -> SetupLog:
     finally:
         model.SetPresentUnits(original_units)
     return log
+
+
+# =============================================================================
+# WITHOUT DIALOGS (scripts, Quarto)
+# =============================================================================
+@dataclass
+class SetupResult:
+    """What a setup run defined, or would define when it was only planned."""
+
+    settings: dict
+    path: str | None = None
+    log: SetupLog | None = None  # None: planned only, ETABS was not touched
+
+    def report(self, heading_level: int = 2) -> str:
+        """The inputs and the definitions as Markdown."""
+        h = "#" * heading_level
+        settings, s, w = self.settings, self.settings["seismic"], self.settings["wind"]
+        values = seismic_values(settings)
+        sections = section_definitions(settings)
+        patterns = load_patterns(settings)
+        combos = combinations(settings)
+
+        def table(header: list, rows: list) -> list[str]:
+            lines = ["| " + " | ".join(header) + " |", "|" + "---|" * len(header)]
+            return lines + ["| " + " | ".join(str(c) for c in row) + " |" for row in rows] + [""]
+
+        out = []
+        if self.log is None:
+            out += ["*Planned only: nothing was changed in ETABS.*", ""]
+        else:
+            out += [f"Model: `{os.path.basename(self.path)}`", ""]
+            out += table(["Defined", "Count"], list(self.log.counts.items()))
+            if self.log.problems:
+                out += [f"**{len(self.log.problems)} items failed:**", ""]
+                out += [f"- {problem}" for problem in self.log.problems] + [""]
+
+        out += [f"{h} Seismic parameters (UBC 97)", ""]
+        out += table(["Parameter", "Value"], [
+            ["Seismic zone factor, Z", f"{s['zone_factor']:g}"],
+            ["Soil profile type", s["soil_type"]],
+            ["Seismic source type", s["source_type"]],
+            ["Distance to the source (km)", f"{s['distance_km']:g}"],
+            ["Importance factor, I", f"{s['importance']:g}"],
+            ["R", f"{s['r_factor']:g}"],
+            ["Ct", f"{s['ct']:g}"],
+            ["Ca", f"{values['ca']:.4f}"],
+            ["Cv", f"{values['cv']:.4f}"],
+            ["Vertical effect, Ev = 0.5 Ca I D", f"{values['ev']:.3f} D"],
+            ["Response spectrum scale factor, g I / R (mm/s2)", f"{values['scale']:.1f}"],
+        ])
+        out += [f"{h} Wind parameters (ASCE 7-10)", ""]
+        out += table(["Parameter", "Value"], [
+            ["Wind speed (mph)", f"{w['speed']:g}"], ["Exposure type", w["exposure"]],
+            ["Kzt", f"{w['kzt']:g}"], ["Gust factor", f"{w['gust']:g}"], ["Kd", f"{w['kd']:g}"],
+        ])
+        out += [f"{h} Materials", ""]
+        out += table(
+            ["Material", "Type", "Strength (MPa)", "E (MPa)"],
+            [[p["name"], "Concrete", f"{p['fc']:.2f}", f"{p['E']:.0f}"]
+             for p in map(concrete_properties, settings["concrete_ksi"])]
+            + [[p["name"], "Rebar", f"{p['fy']:.2f}", f"{REBAR_MODULUS:.0f}"]
+               for p in map(rebar_properties, settings["rebar_ksi"])],
+        )
+        out += [f"{h} Frame sections", ""]
+        rows = []
+        for prefix, label in (("G", "Girders"), ("B", "Beams"), ("FTB", "Footing tie beams"),
+                              ("CR", "Rectangular columns"), ("C", "Circular columns")):
+            group = [x for x in sections if x["name"].startswith(prefix + "_")]
+            if group:
+                widths = sorted({x["width"] for x in group})
+                depths = sorted({x["depth"] for x in group})
+                modifier = BEAM_MODIFIER if group[0]["kind"] == "beam" else COLUMN_MODIFIER
+                rows.append([label, f"`{prefix}_`", len(group), f"{widths[0]} to {widths[-1]}",
+                             f"{depths[0]} to {depths[-1]}", f"{modifier:g}"])
+        out += table(["Kind", "Prefix", "Sections", "Width (mm)", "Depth (mm)",
+                      "I22, I33 modifier"], rows)
+        out += [f"{h} Load patterns", ""]
+        out += table(["Pattern", "Type", "Self weight"],
+                     [[name, kind, f"{sw:g}"] for name, kind, sw in patterns])
+        mass, pdelta = dict(mass_source_loads(settings)), dict(pdelta_loads(settings))
+        out += [f"{h} Mass source and P-delta loads", ""]
+        out += table(
+            ["Load pattern", "Mass source", "P-delta"],
+            [[name, f"{mass[name]:g}" if name in mass else "-",
+              f"{pdelta[name]:g}" if name in pdelta else "-"]
+             for name, _, _ in patterns if name in mass or name in pdelta],
+        )
+        out += [f"{h} Load combinations (NSCP 2015)", ""]
+        out += [f"{len(combos)} combinations; the ULS ones are the concrete design "
+                "combinations. Each seismic combination below exists eight times for the "
+                "static cases (EQ1 to EQ8) and eight times for the response spectrum cases "
+                "(RSA1 to RSA8).", ""]
+        seen, rows = set(), []
+        for combo in combos:
+            if not combo.name.startswith(("ULS", "SLS", "SSLC")):
+                continue
+            name = re.sub(r" (EQ|RSA)\d*$", " E", combo.name)
+            if name not in seen:
+                seen.add(name)
+                dead = next((f"{factor:.3g}" for case, factor in combo.cases
+                             if case == "SELFWEIGHT"), "-")
+                rows.append([name, dead, "Yes" if combo.design else "No"])
+        out += table(["Combination", "Dead load factor", "Design"], rows)
+        return "\n".join(out)
+
+
+def _attach_or_start(start: bool):
+    """The running ETABS, or a new one when ``start`` is set and none is running."""
+    import comtypes.client
+
+    from etabs_api.core.connection import DEFAULT_ETABS_PROGRAM_PATH
+
+    helper = comtypes.client.CreateObject("ETABSv1.Helper")
+    helper = helper.QueryInterface(comtypes.gen.ETABSv1.cHelper)
+    try:
+        return helper.GetObject("CSI.ETABS.API.ETABSObject").SapModel
+    except Exception:
+        if not start:
+            raise RuntimeError("ETABS is not running. Open the model in ETABS first.") from None
+    etabs = helper.CreateObject(os.environ.get("ETABS_PROGRAM_PATH", DEFAULT_ETABS_PROGRAM_PATH))
+    etabs.ApplicationStart()
+    return etabs.SapModel
+
+
+def setup_model(
+    settings: dict | None = None,
+    target: str = "open",
+    path: str | None = None,
+    copy_model: bool = False,
+    apply: bool = True,
+) -> SetupResult:
+    """Set up a model without dialogs.
+
+    ``settings`` holds only what differs from ``DEFAULT_SETTINGS``. ``target``
+    is ``"open"`` (the model open in ETABS; ``copy_model`` saves it beside
+    itself as ``<name> - SETUP.EDB`` first) or ``"new"`` (a blank model saved
+    at ``path``). With ``apply=False`` nothing is sent to ETABS and the result
+    only describes what would be defined.
+    """
+    settings = merge_settings(settings)
+    seismic_values(settings)  # refuse invalid seismic inputs before touching ETABS
+    if not apply:
+        return SetupResult(settings)
+    if target not in ("open", "new"):
+        raise ValueError('target must be "open" or "new".')
+    new_model = target == "new"
+    if new_model and not path:
+        raise ValueError('A new model needs the path to save it at.')
+    model = _attach_or_start(start=new_model)
+    if new_model:
+        path = os.path.splitext(os.path.abspath(path))[0] + ".EDB"
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        model.InitializeNewModel(UNITS_N_MM)
+        model.File.NewBlank()
+    else:
+        path = os.path.splitext(os.path.normpath(str(model.GetModelFilename())))[0] + ".EDB"
+        if not os.path.isfile(path):
+            raise RuntimeError("Save the ETABS model first: it has no file yet.")
+        if copy_model:
+            stem, extension = os.path.splitext(path)
+            path, counter = f"{stem} - SETUP{extension}", 2
+            while os.path.exists(path):
+                path, counter = f"{stem} - SETUP ({counter}){extension}", counter + 1
+    if return_code(model.File.Save(path)) != 0:
+        raise RuntimeError(f"ETABS could not save the model: {path}")
+    log = apply_model_setup(model, settings)
+    if new_model:
+        remove_blank_model_defaults(model)
+        make_seismic_per_code(model, path, settings, log)
+    model.File.Save(path)
+    save_settings(settings, settings_path(path))
+    return SetupResult(settings, path, log)
 
 
 # =============================================================================
@@ -701,6 +956,24 @@ def ask_settings(settings: dict) -> dict | None:
     settings["extra_dead"] = _names(answers["Extra super dead patterns"])
     settings["extra_live"] = _names(answers["Extra live patterns"])
     settings["extra_reducible_live"] = _names(answers["Extra reducible live patterns"])
+
+    # ---- mass source ----
+    from utilities._gui_helpers import select_option
+
+    options = {
+        f"Yes - include {REDUCIBLE_LIVE_MASS_FACTOR:.0%} of the reducible live load": True,
+        "No - dead loads and non-reducible live load only": False,
+    }
+    chosen = select_option(
+        "Model Setup - Mass Source",
+        "The seismic mass takes every dead load and the non-reducible live load. "
+        "Include reducible live load (LIVERED) as well?",
+        list(options),
+        default_index=0 if settings["mass"]["include_reducible_live"] else 1,
+    )
+    if chosen is None:
+        return None
+    settings["mass"]["include_reducible_live"] = options[chosen]
     return settings
 
 
@@ -715,7 +988,7 @@ def run_model_setup() -> str | None:
         show_warning,
     )
 
-    from .connection import DEFAULT_ETABS_PROGRAM_PATH
+    from etabs_api.core.connection import DEFAULT_ETABS_PROGRAM_PATH
 
     title = "Model Setup"
     source = select_option(title, "Which model should be set up?", [
@@ -746,8 +1019,9 @@ def run_model_setup() -> str | None:
         path = select_save_path("Save the new ETABS model as", "New Model", ".EDB", "ETABS model")
         if not path:
             return None
-        model.InitializeNewModel(UNITS_N_MM)
-        model.File.NewBlank()
+        # The dialog returns forward slashes, which ETABS reads as a path
+        # inside its own program folder.
+        path = os.path.splitext(os.path.normpath(path))[0] + ".EDB"
     else:
         path = os.path.splitext(os.path.normpath(str(model.GetModelFilename())))[0] + ".EDB"
         if not os.path.isfile(path):
@@ -781,6 +1055,11 @@ def run_model_setup() -> str | None:
         return None
 
     with LoadingWindow("Defining the model parameters...") as window:
+        if new_model:
+            # Only now, after every dialog was confirmed, so a cancelled run
+            # does not replace the model that is open in ETABS.
+            model.InitializeNewModel(UNITS_N_MM)
+            model.File.NewBlank()
         if return_code(model.File.Save(path)) != 0:
             show_warning(f"ETABS could not save the model:\n{path}", title=title)
             return None
@@ -806,3 +1085,7 @@ def run_model_setup() -> str | None:
         message += f"\n\n{len(log.problems)} items failed:\n" + "\n".join(log.problems[:12])
     show_warning(message, title=title)
     return path
+
+
+if __name__ == "__main__":
+    run_model_setup()
