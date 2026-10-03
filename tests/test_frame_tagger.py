@@ -1,7 +1,7 @@
 """
 tests/test_frame_tagger.py
 ==========================
-Checks for etabs_api/frame_tagger.py, the automatic beam and column tagging.
+Checks for etabs_api/workflows/frame_tagger.py, the automatic beam and column tagging.
 
 The planning functions take plain joints and frames, so the tests build small
 framing plans by hand and need neither ETABS nor Excel.
@@ -23,7 +23,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from etabs_api import frame_tagger as ft  # noqa: E402
+from etabs_api.workflows import frame_tagger as ft  # noqa: E402
 
 XS = (0.0, 5000.0, 10000.0)
 YS = (0.0, 6000.0)

@@ -83,3 +83,6 @@ edb/
 
 # --- Generated CAD schedules ---
 *.dxf
+
+/.quarto/
+**/*.quarto_ipynb

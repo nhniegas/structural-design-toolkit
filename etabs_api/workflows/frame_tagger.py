@@ -15,6 +15,11 @@ right; Y lines are numbered left to right with letters bottom to top. Columns
 are numbered once over the combined plan of all levels, so a column keeps its
 number and letter on every level.
 
+Run it on the model that is open in ETABS, from the workbook button or with:
+
+    python main.py tag
+    python etabs_api/workflows/frame_tagger.py
+
 The planning functions work on plain data and need neither ETABS nor Excel.
 """
 
@@ -23,9 +28,15 @@ from __future__ import annotations
 import math
 import os
 import re
+import sys
 from dataclasses import dataclass
 
-from .helpers import as_list, return_code
+if __package__ in (None, ""):
+    # Run as a script: make the project folder (two levels up) importable.
+    sys.path.insert(
+        0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+from etabs_api.core.helpers import as_list, return_code  # noqa: E402
 
 MAX_BEND_DEGREES = 45.0  # a line continues through a joint up to this bend
 GAP_OFFSET = 250.0  # mm; sideways tolerance when a line continues across a gap
@@ -469,7 +480,7 @@ def auto_tag_frames(prefixes: dict[str, str] | None = None) -> str | None:
     """
     from utilities._gui_helpers import LoadingWindow, enter_values, show_warning
 
-    from .connection import ETABSConnector
+    from etabs_api.core.connection import ETABSConnector
 
     connector = ETABSConnector()
     if not connector.connect():
@@ -540,3 +551,7 @@ def auto_tag_frames(prefixes: dict[str, str] | None = None) -> str | None:
         message += f"\n\n{len(failed)} members could not be renamed."
     show_warning(message, title="Auto Tagging")
     return new_path
+
+
+if __name__ == "__main__":
+    auto_tag_frames()

@@ -1,17 +1,95 @@
 # ETABS Model Setup
 
-`python main.py` defines the standard parameters of an ETABS concrete model. The frame geometry is still built by hand; this step covers the definitions under the ETABS *Define* menu.
+`python main.py setup` defines the standard parameters of an ETABS concrete model. The frame geometry is still built by hand; this step covers the definitions under the ETABS *Define* menu.
 
-Code: `etabs_api/model_setup.py`, `etabs_api/ubc97.py`, `etabs_api/load_combinations.py`.
+Code: `etabs_api/workflows/model_setup.py`, `etabs_api/workflows/ubc97.py`, `etabs_api/workflows/load_combinations.py`.
 
-## Running it
+## How to use it
 
-1. Choose the model: the one open in ETABS, or a new blank model (you are asked where to save it).
-2. For an open model, choose whether the definitions go into it or into a copy saved beside it as `<name> - SETUP.EDB`.
-3. Answer the input dialogs. They start from the inputs you used last time.
-4. The inputs are saved beside the model as `<name>.setup.json`. Running the setup again on that model offers to use them without asking again.
+### Before you start
 
-Anything with the same name as a definition the setup makes is overwritten. Everything else in the model is left alone.
+- The project is installed as in the README (`.venv` with the requirements).
+- To set up a model you already have, open it in ETABS and save it. To start a new model, ETABS can be open or closed; it is started if needed.
+
+### 1. Start the script
+
+Open PowerShell (or the VS Code terminal), go to the project folder, and run:
+
+```powershell
+cd "C:\path\to\xlwings_spreadsheet_structural"
+.venv\Scripts\Activate.ps1
+python main.py setup
+```
+
+The second line switches to the project's Python environment. It is needed once per terminal session; `(.venv)` at the start of the prompt shows it is active.
+
+If PowerShell refuses to run `Activate.ps1` because scripts are disabled, skip that line and call the environment's Python directly:
+
+```powershell
+.venv\Scripts\python.exe main.py setup
+```
+
+`python etabs_api/workflows/model_setup.py` does the same. `python main.py --help` lists the other workflows.
+
+Everything after this happens in dialogs. Closing any dialog cancels the run and changes nothing.
+
+### 2. Choose the model
+
+| Choice | What happens |
+|---|---|
+| The model that is open in ETABS | A second dialog asks whether the definitions go **into this model** or **into a copy** saved beside it as `<name> - SETUP.EDB` |
+| A new blank model | You are asked where to save it. A blank model in N-mm is created there |
+
+### 3. Type the inputs
+
+Six dialogs follow. Each box already holds the value you used last time (or the default on the first run). Lists are separated by commas. Press Enter or **OK / Confirm** to go on.
+
+| Dialog | Boxes | Example |
+|---|---|---|
+| Materials | Concrete strengths (ksi); rebar grades (ksi) | `4, 5, 6` and `60` give C04, C05, C06 and G60 |
+| Frame Sections | Concrete and rebar of the sections; then for each kind of section a range as `min, max, step` in mm | Girders G: width `300, 600, 100`, depth `500, 1000, 100`. Leave a range blank to skip that kind |
+| Seismic (UBC 97) | Zone factor Z, soil profile type, source type, distance (km), I, R, Ct, eccentricity ratio | `0.4`, `SD`, `A`, `8`, `1`, `8.5`, `0.03`, `0.05` |
+| Wind (ASCE 7-10) | Wind speed (as typed in ETABS, mph), exposure type, Kzt, gust factor, Kd | `150`, `B`, `1`, `0.85`, `0.85` |
+| Load Patterns | Extra super dead, live and reducible live patterns | `ELEVATOR DEAD, CONCRETE PAD` |
+| Mass Source | A choice: include 20 % of the reducible live load in the seismic mass, or not | |
+
+Notes on the section ranges:
+
+- Girders `G`, beams `B` and footing tie beams `FTB` each take a width range and a depth range. Every width is combined with every depth that keeps the depth at least the width and the width at least 0.3 of the depth.
+- Rectangular columns `CR` take one range for the side. Every pair of sides is made whose shorter side is at least half the longer one, in both orientations (`CR_800X600` and `CR_600X800`).
+- Circular columns `C` take a diameter range.
+- Each section is made once per concrete strength listed in "Concrete of the sections", so a long list multiplies the number of sections.
+
+### 4. Wait for the closing message
+
+A loading window shows the progress. A blank model takes about one to two minutes. The closing message lists how many of each item were defined, the Ca, Cv and Ev used, the response spectrum scale factor, where the model was saved, and anything that failed.
+
+### 5. Continue in ETABS
+
+ETABS has the set-up model open. Build or continue the frame, assign the sections and loads, then run the analysis. Still to do by hand: scaling the response spectrum cases to the static base shear, and the concrete design preferences.
+
+### From your own script
+
+`setup_model` runs the same setup without dialogs:
+
+```python
+from etabs_api.workflows.model_setup import setup_model
+
+result = setup_model(
+    {"seismic": {"soil_type": "SE", "distance_km": 8.9}},   # only what differs from the defaults
+    target="open",        # or "new" with path=r"C:\...\MODEL.EDB"
+    copy_model=True,      # work on "<name> - SETUP.EDB"
+)
+print(result.report())    # what was defined, as Markdown
+```
+
+`apply=False` only describes what would be defined and does not touch ETABS.
+
+### Running it again
+
+The inputs are saved beside the model as `<name>.setup.json`. When you run the script on that model again, it asks whether to **use the saved inputs** or **review and change them**. Run it again after adding stories, so the number of modes and the top story of the lateral loads are updated.
+
+Anything with the same name as a definition the setup makes is overwritten. Everything else in the model is left alone. Deleting the `.setup.json` file makes the script ask everything from the last used values.
 
 ## What is defined
 
@@ -27,6 +105,8 @@ Anything with the same name as a definition the setup makes is overwritten. Ever
 | Wind patterns | `WX`, `WY` as ASCE 7-10 on the diaphragms |
 | Response spectrum | Function `RSUBC97`, 5 % damping |
 | Load cases | `Modal` (eigen, 3 modes per story, at least 12), `RSAX` (U1) and `RSAY` (U2): CQC, SRSS, 5 % eccentricity, scale factor g I / R |
+| Mass source | From the load patterns only: every dead and super dead pattern at 1.0, `LIVENRED` at 1.0, and reducible live patterns at 0.20 when chosen. Element self mass and added mass are off, since `SELFWEIGHT` already carries the weight |
+| P-delta | Iterative, based on loads, tolerance 0.0001: every dead and super dead pattern at 1.0, `LIVENRED` at 1.0, and reducible live patterns at 0.50 (always) |
 | Load combinations | See below |
 
 A new blank model also has the default `Dead` and `Live` patterns of ETABS removed.
@@ -57,8 +137,19 @@ Names are `<set> <number> <expression>`, for example `ULS 107 (1.2 + Ev) DL + f 
 - DL is every dead and super dead pattern, LL every live and reducible live pattern, Lr the roof live pattern.
 - f on live load is 0.5. The redundancy factor is 1.0.
 - Each seismic combination exists for the static cases (`EQ1` to `EQ8`) and for the response spectrum cases (`RSA1` to `RSA8`), with the same number.
-- The vertical effect Ev = 0.5 Ca I D is in the dead load factor: `(1.2 + Ev)` where gravity adds to the earthquake and `(0.9 - Ev)` where it resists it. In the service combinations it is scaled with the earthquake (E / 1.4).
+- The vertical effect Ev = 0.5 Ca I D is in the dead load factor: `(1.2 + Ev)` where gravity adds to the earthquake and `(0.9 - Ev)` where it resists it. In the service combinations it is scaled with the earthquake (E / 1.4), for example `(1.0 + 0.714 Ev)` and `(0.6 - 0.714 Ev)`.
+- Wind is strength-level (ASCE 7-10): 1.0 W in the strength combinations and 0.6 W in the service ones.
+- Only the `ULS` combinations are flagged for concrete design in ETABS.
 
 ## Not covered yet
 
-Mass source, P-delta options, scaling of the response spectrum cases, and the concrete design preferences.
+- Scaling of the response spectrum cases to the static base shear.
+- Concrete design preferences in ETABS (for example the overstrength factor there).
+- "Per Code" seismic patterns in a model that was already open; see Seismic coefficients.
+- Story and grid definition of a new model: it is created blank.
+
+After a new model is set up, check the seismic patterns once the analysis has run: until then ETABS shows placeholder Ca and Cv for "Per Code" patterns.
+
+## Tests
+
+`tests/test_model_setup.py` checks the UBC 97 coefficients against the two office models, the load combinations (factors, names, order of creation, design flags) and the section, pattern and settings rules. It runs without ETABS.

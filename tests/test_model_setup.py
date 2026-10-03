@@ -1,7 +1,7 @@
 """
 tests/test_model_setup.py
 =========================
-Checks for the ETABS model setup: etabs_api/ubc97.py, load_combinations.py and
+Checks for the ETABS model setup: etabs_api/workflows/ubc97.py, load_combinations.py and
 the planning functions of model_setup.py. None of them needs ETABS.
 
 The UBC 97 values are checked against the two office models, whose ETABS
@@ -15,9 +15,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from etabs_api import load_combinations as lc  # noqa: E402
-from etabs_api import model_setup as ms  # noqa: E402
-from etabs_api import ubc97  # noqa: E402
+from etabs_api.workflows import load_combinations as lc  # noqa: E402
+from etabs_api.workflows import model_setup as ms  # noqa: E402
+from etabs_api.workflows import ubc97  # noqa: E402
 
 
 # --------------------------------------------------------------------------
@@ -227,3 +227,81 @@ def test_model_text_is_rewritten_to_per_code_seismic_inputs():
     lines = text.splitlines()
     assert lines[1].endswith('CT 0.02  SOIL "SE"  Z 0.4  SOURCETYPE "A"    SOURCEDIST 8.9  I 1  R 8.5')
     assert "Ca " not in lines[1] and lines[2] == other       # other patterns untouched
+
+
+# --------------------------------------------------------------------------
+# WITHOUT DIALOGS
+# --------------------------------------------------------------------------
+def test_planned_setup_touches_no_etabs_and_reports_the_definitions():
+    result = ms.setup_model(
+        {"seismic": {"soil_type": "SE", "distance_km": 8.9}, "extra_dead": ["ELEVATOR DEAD"]},
+        apply=False,
+    )
+    assert result.log is None and result.path is None
+    report = result.report(heading_level=2)
+    assert "Planned only" in report
+    assert "## Seismic parameters (UBC 97)" in report
+    assert "| Ca | 0.3758 |" in report and "| Cv | 1.2365 |" in report
+    assert "| ELEVATOR DEAD | Super Dead | 0 |" in report
+    assert "| ULS 107 (1.2 + Ev) DL + f LL + 1.0 E | 1.39 | Yes |" in report
+    assert report.count("ULS 107") == 1          # one row for the sixteen directions
+
+
+def test_setup_refuses_invalid_inputs_before_etabs():
+    with pytest.raises(ValueError):
+        ms.setup_model({"seismic": {"soil_type": "SX"}}, apply=False)
+    with pytest.raises(ValueError):
+        ms.setup_model({}, target="new")          # no path given
+
+
+def test_module_runs_as_a_script_without_the_package():
+    """`python etabs_api/workflows/model_setup.py` must find its own package."""
+    import subprocess
+
+    script = Path(ms.__file__)
+    code = (
+        "import runpy, sys; sys.argv = ['x']; "
+        f"m = runpy.run_path(r'{script}', run_name='not_main'); "
+        "print(m['setup_model']({}, apply=False).settings['seismic']['r_factor'])"
+    )
+    done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                          cwd=str(script.parent))
+    assert done.stdout.strip() == "8.5", done.stderr
+
+
+# --------------------------------------------------------------------------
+# MASS SOURCE
+# --------------------------------------------------------------------------
+def test_mass_takes_every_dead_load_and_the_non_reducible_live_load():
+    settings = ms.merge_settings({"extra_dead": ["ELEVATOR DEAD"], "extra_live": ["STAGE"]})
+    mass = dict(ms.mass_source_loads(settings))
+    assert mass["SELFWEIGHT"] == 1.0 and mass["SIDL"] == 1.0 and mass["ELEVATOR DEAD"] == 1.0
+    assert mass["LIVENRED"] == 1.0
+    for name in ("LIVERED", "LIVEROOF", "LIVEMECH", "STAGE", "WX", "EQXPE"):
+        assert name not in mass
+
+
+def test_reducible_live_load_joins_the_mass_at_20_percent_when_chosen():
+    settings = ms.merge_settings({"mass": {"include_reducible_live": True},
+                                  "extra_reducible_live": ["ELEVATOR LIVERED"]})
+    mass = dict(ms.mass_source_loads(settings))
+    assert mass["LIVERED"] == 0.2 and mass["ELEVATOR LIVERED"] == 0.2
+    assert mass["LIVENRED"] == 1.0
+
+
+def test_pdelta_always_takes_half_the_reducible_live_load():
+    """Same dead and non-reducible live loads as the mass, whatever the mass choice was."""
+    for include in (False, True):
+        settings = ms.merge_settings({"mass": {"include_reducible_live": include},
+                                      "extra_reducible_live": ["ELEVATOR LIVERED"]})
+        pdelta = dict(ms.pdelta_loads(settings))
+        assert pdelta["LIVERED"] == 0.5 and pdelta["ELEVATOR LIVERED"] == 0.5
+        assert pdelta["SELFWEIGHT"] == 1.0 and pdelta["LIVENRED"] == 1.0
+        assert "LIVEROOF" not in pdelta and "WX" not in pdelta
+
+
+def test_old_saved_inputs_cannot_bring_back_the_quarter_live_mass():
+    """Inputs saved before LIVENRED became 1.0 still hold 0.25; it must be ignored."""
+    settings = ms.merge_settings({"mass": {"non_reducible_live_factor": 0.25}})
+    assert dict(ms.mass_source_loads(settings))["LIVENRED"] == 1.0
+    assert dict(ms.pdelta_loads(settings))["LIVENRED"] == 1.0

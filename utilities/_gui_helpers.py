@@ -65,6 +65,18 @@ def select_save_path(
     return file_path
 
 
+def select_open_path(title: str, extension: str, description: str) -> str:
+    """Opens a native Windows file dialog for one file of the given extension."""
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+    file_path = filedialog.askopenfilename(
+        title=title, filetypes=[(description, f"*{extension}"), ("All files", "*.*")]
+    )
+    root.destroy()
+    return file_path
+
+
 def select_etabs_file() -> str:
     """Opens a native Windows file dialog to select an ETABS .edb file."""
     root = tk.Tk()
@@ -92,11 +104,8 @@ def select_option(
 
     root = tk.Tk()
     root.title(title)
-
-    width, height = 460, 120 + 28 * len(options)
-    x = (root.winfo_screenwidth() // 2) - (width // 2)
-    y = (root.winfo_screenheight() // 2) - (height // 2)
-    root.geometry(f"{width}x{height}+{x}+{y}")
+    root.withdraw()  # shown once it has been sized to its content
+    width = 460 if max(len(line) for line in prompt.split("\n")) < 80 else 620
     root.resizable(False, False)
     root.attributes("-topmost", True)
 
@@ -115,9 +124,10 @@ def select_option(
     root.protocol("WM_DELETE_WINDOW", close)
     root.bind("<Return>", lambda _event: confirm())  # Enter confirms the selection
 
-    tk.Label(root, text=prompt, font=("Arial", 9, "bold"), wraplength=width - 40).pack(
-        pady=(18, 8)
-    )
+    tk.Label(
+        root, text=prompt, font=("Arial", 9, "bold"), wraplength=width - 40,
+        justify="left" if "\n" in prompt else "center",
+    ).pack(pady=(18, 8), padx=20)
     choice = tk.IntVar(root, value=min(max(default_index, 0), len(options) - 1))
     frame_options = tk.Frame(root)
     frame_options.pack(fill=tk.X, padx=30)
@@ -142,7 +152,15 @@ def select_option(
         fg="white",
         font=("Arial", 9, "bold"),
         command=confirm,
-    ).pack(side=tk.BOTTOM, pady=(0, 15))
+    ).pack(side=tk.BOTTOM, pady=(12, 15))
+
+    # The height follows the prompt, so a long list of lines still fits.
+    root.update_idletasks()
+    height = root.winfo_reqheight()
+    x = (root.winfo_screenwidth() // 2) - (width // 2)
+    y = max((root.winfo_screenheight() // 2) - (height // 2), 0)
+    root.geometry(f"{width}x{height}+{x}+{y}")
+    root.deiconify()
 
     try:
         root.lift()
@@ -167,13 +185,11 @@ def enter_values(
 
     root = tk.Tk()
     root.title(title)
-
-    width, height = 460, 150 + 30 * len(labels)
-    x = (root.winfo_screenwidth() // 2) - (width // 2)
-    y = (root.winfo_screenheight() // 2) - (height // 2)
-    root.geometry(f"{width}x{height}+{x}+{y}")
+    root.withdraw()  # shown once it has been sized to its content
     root.resizable(False, False)
     root.attributes("-topmost", True)
+    # Wide enough to show the longest value in full, and never a cramped box.
+    box_width = max([28] + [len(str(value)) + 4 for value in (defaults or {}).values()])
 
     def close():
         """Tear the window down without raising Tcl errors."""
@@ -190,9 +206,8 @@ def enter_values(
     root.protocol("WM_DELETE_WINDOW", close)
     root.bind("<Return>", lambda _event: confirm())  # Enter confirms the values
 
-    tk.Label(root, text=prompt, font=("Arial", 9, "bold"), wraplength=width - 40).pack(
-        pady=(18, 8)
-    )
+    prompt_label = tk.Label(root, text=prompt, font=("Arial", 9, "bold"), justify="center")
+    prompt_label.pack(pady=(18, 8), padx=30)
     frame_entries = tk.Frame(root)
     frame_entries.pack(fill=tk.X, padx=30)
     frame_entries.columnconfigure(1, weight=1)
@@ -201,7 +216,7 @@ def enter_values(
         tk.Label(frame_entries, text=label, font=("Arial", 9), anchor="w").grid(
             row=row, column=0, sticky="w", pady=3, padx=(0, 12)
         )
-        entry = tk.Entry(frame_entries, font=("Arial", 9))
+        entry = tk.Entry(frame_entries, font=("Arial", 10), width=box_width)
         entry.insert(0, (defaults or {}).get(label, ""))
         entry.grid(row=row, column=1, sticky="ew", pady=3)
         entries[label] = entry
@@ -215,7 +230,18 @@ def enter_values(
         fg="white",
         font=("Arial", 9, "bold"),
         command=confirm,
-    ).pack(side=tk.BOTTOM, pady=(0, 15))
+    ).pack(side=tk.BOTTOM, pady=(18, 15))
+
+    # Size the window to the labels and boxes, wrap the prompt to that width,
+    # then centre it on the screen.
+    root.update_idletasks()
+    prompt_label.config(wraplength=max(frame_entries.winfo_reqwidth(), 360))
+    root.update_idletasks()
+    width, height = root.winfo_reqwidth(), root.winfo_reqheight()
+    x = (root.winfo_screenwidth() // 2) - (width // 2)
+    y = (root.winfo_screenheight() // 2) - (height // 2)
+    root.geometry(f"{width}x{height}+{x}+{y}")
+    root.deiconify()
 
     try:
         root.lift()

@@ -7,11 +7,12 @@ How `spreadsheets/beam_column_designer_aci318.xlsm` works with ETABS and the Pyt
 - `design/beam_designer_aci318.py`: ETABS extraction, beam design, beam schedule DXF.
 - `design/column_designer_aci318.py`: column design, SMRF checks, column schedule DXF.
 - `design/aci318_config.py`: every ACI constant used by both designers, each with its clause. The designers read their factors and limits from here.
-- `etabs_api/`: ETABS connection (`connection.py`), table extraction to Excel (`exporter.py`) and automatic member tagging (`frame_tagger.py`).
+- `etabs_api/core/`: the ETABS connection (`connection.py`) and the other thin wrappers around the ETABS API.
+- `etabs_api/workflows/`: table extraction to Excel (`exporter.py`), automatic member tagging (`frame_tagger.py`) and the other office workflows.
 - `utilities/_gui_helpers.py`: pickers and the loading window.
 - `utilities/_calc_report.py`: the PDF calculation report layout used by both designers.
 
-The workbook macros call the design modules directly. There is no intermediate `main.py` layer.
+The workbook macros call the design modules directly. There is no intermediate `main.py` layer. Defining the materials, sections, loads and combinations of the ETABS model is a separate step, done before this workflow: see [ETABS model setup](etabs_model_setup.md).
 
 ## Buttons and what they run
 
@@ -19,7 +20,7 @@ Run them in this order.
 
 | Step | Macro | Python function |
 |---|---|---|
-| Optional: tag members | `TriggerAutoTagFrames` | `etabs_api.frame_tagger.auto_tag_frames` |
+| Optional: tag members | `TriggerAutoTagFrames` | `etabs_api.workflows.frame_tagger.auto_tag_frames` |
 | 1. Extract from ETABS | `CallExtractForcesPropertiesCustom` | `beam_designer_aci318.extract_forces_properties_from_etabs` |
 | 2. Prepare beam data | `ExtractBeamDesignDataMacro` | `beam_designer_aci318.extract_beam_design_data` |
 | 3. Design beams | `TriggerBeamDesign` | `beam_designer_aci318.run_beam_design_from_excel` |
@@ -55,7 +56,7 @@ The sheet also lists the steps of use under `INSTRUCTIONS OF USE`.
 
 ## Optional: automatic tagging
 
-`AUTO TAG FRAMES` on `OVERWRITES` gives every beam and column in the open ETABS model a unique name: beams as `<level><type>-<number><letter>`, for example `2GX-10B`, and columns as `<level>-<type><number><letter>`, for example `3-C5C`. The extraction only reads named members, so tag the model before step 1.
+`AUTO TAG FRAMES` on `OVERWRITES` (or `python main.py tag` in a terminal) gives every beam and column in the open ETABS model a unique name: beams as `<level><type>-<number><letter>`, for example `2GX-10B`, and columns as `<level>-<type><number><letter>`, for example `3-C5C`. The extraction only reads named members, so tag the model before step 1.
 
 The model is first saved as `<model name> - TAGGED.EDB` in its own folder and the names are changed in that copy. The original file is not changed. ETABS has the tagged copy open afterwards.
 
@@ -239,4 +240,4 @@ In the report, X is the width direction (local 3) and Y the depth direction (loc
 
 ## Tests
 
-`tests/test_beam_designer_aci318.py`, `tests/test_column_designer_aci318.py` and `tests/test_etabs_api_services.py` cover the design engines and the extraction logic against published examples, hand calculations and behaviour rules. They run without Excel or ETABS.
+`tests/test_beam_designer_aci318.py`, `tests/test_column_designer_aci318.py`, `tests/test_etabs_api_services.py`, `tests/test_frame_tagger.py` and `tests/test_calc_report.py` cover the design engines, the extraction logic, the tagging rules and the report text against published examples, hand calculations and behaviour rules. They run without Excel or ETABS.
