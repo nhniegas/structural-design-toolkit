@@ -131,6 +131,7 @@ Names are `<set> <number> <expression>`, for example `ULS 107 (1.2 + Ev) DL + f 
 | `ULS` | Strength. These are the concrete design combinations |
 | `SLS` | Service checks |
 | `SSLC` | Special seismic combinations with Em = 2.8 Eh |
+| `DEF` | Deflection checks, unfactored: `DEF 100 1.0 DL`, `DEF 101 1.0 DL + 1.0 LL`, `DEF 102 1.0 DL + 0.25 LL` (sustained) and `DEF 103 1.0 DL + 1.0 Lr` |
 | `EQ_COMBO_01` to `08`, `RSA_COMBO_01` to `08` | The eight directional combinations: 100 % in one direction with 30 % in the other |
 | `ENVE_...` | Envelopes |
 

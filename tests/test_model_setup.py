@@ -134,7 +134,15 @@ def test_combinations_only_use_what_was_created_before_them():
     for combo in lc.build_combinations(PATTERNS, 0.4):
         assert all(name in seen for name, _ in combo.combos), combo.name
         seen.add(combo.name)
-    assert len(seen) == 148
+    assert len(seen) == 152
+
+
+def test_deflection_combinations_are_unfactored_and_not_designed():
+    combos = _combos()
+    sustained = combos["DEF 102 1.0 DL + 0.25 LL"]
+    assert dict(sustained.cases)["SELFWEIGHT"] == 1.0
+    assert all(f == 0.25 for name, f in sustained.cases if name.startswith("LIVE"))
+    assert not any(c.design for name, c in combos.items() if name.startswith("DEF"))
 
 
 def test_service_seismic_factor_is_one_over_1_4():
@@ -305,3 +313,13 @@ def test_old_saved_inputs_cannot_bring_back_the_quarter_live_mass():
     settings = ms.merge_settings({"mass": {"non_reducible_live_factor": 0.25}})
     assert dict(ms.mass_source_loads(settings))["LIVENRED"] == 1.0
     assert dict(ms.pdelta_loads(settings))["LIVENRED"] == 1.0
+
+
+def test_deflection_combinations_come_from_the_pattern_types():
+    types = {"SELFWEIGHT": 1, "SIDL": 2, "LIVENRED": 3, "LIVERED": 4, "LIVEROOF": 11, "WX": 6}
+    combos = {c.name: dict(c.cases) for c in lc.deflection_combinations(types)}
+    assert combos["DEF 100 1.0 DL"] == {"SELFWEIGHT": 1.0, "SIDL": 1.0}
+    assert combos["DEF 102 1.0 DL + 0.25 LL"]["LIVERED"] == 0.25
+    assert combos["DEF 103 1.0 DL + 1.0 Lr"]["LIVEROOF"] == 1.0
+    assert "LIVENRED" not in combos["DEF 103 1.0 DL + 1.0 Lr"]
+    assert all("WX" not in c for c in combos.values())

@@ -1,49 +1,29 @@
-"""ETABS data extraction and Excel export helpers."""
+"""ETABS data extraction for the beam and column design.
+
+Every table is returned as a DataFrame and kept in ``exporter.tables`` under
+its name (``FACTORED LOADS``, ``SERVICE LOADS``, ``LIVE LOAD REDUCTION``,
+``FRAME DATA``, ``CONNECTIVITY``, ``LOCAL AXES``, ``POINTS``), which the
+design store saves for the beam and column steps.
+"""
 
 from __future__ import annotations
 
 import pandas as pd
-import xlwings as xw
+
+from etabs_api.workflows.analysis_forces import ForceOptions, factored_forces
 
 
 class ETABSDataExporter:
-    """Extract ETABS tables and write them into Excel worksheets."""
+    """Extract the ETABS tables the beam and column design need."""
 
     def __init__(self, etabs_instance):
         self.etabs = etabs_instance
-        # Design forces are needed twice per extraction (member list, then the
-        # force table); each combination is read from ETABS only once.
-        self._design_force_cache: dict[tuple[str, str], pd.DataFrame] = {}
+        self.last_forces = None  # FactoredForces of the last display_factored_loads
+        self.tables: dict[str, pd.DataFrame] = {}
 
-    @staticmethod
-    def _get_sheet(sheet_name: str):
-        """Return a workbook sheet from caller context or the active workbook."""
-        try:
-            return xw.Book.caller().sheets[sheet_name]
-        except Exception:
-            return xw.books.active.sheets[sheet_name]
-
-    @classmethod
-    def _write_dataframe_to_excel(
-        cls,
-        df: pd.DataFrame,
-        sheet_name: str,
-        start_cell: str = "B2",
-        header_color: tuple = (189, 215, 238),
-        clear_sheet: bool = True,
-        autofit: bool = True,
-    ):
-        """Write a DataFrame to Excel and format the header row."""
-        sheet = cls._get_sheet(sheet_name)
-        if clear_sheet:
-            sheet.clear()
-        sheet.range(start_cell).options(index=False).value = df
-        if not df.empty:
-            if header_color:
-                header_range = sheet.range(start_cell).expand("right")
-                header_range.color = header_color
-            if autofit:
-                sheet.range(start_cell).expand().columns.autofit()
+    def _write_dataframe_to_excel(self, df: pd.DataFrame, sheet_name: str, **_) -> None:
+        """Keep a table under its name (the name of its old workbook sheet)."""
+        self.tables[sheet_name] = df
 
     def get_load_combinations(self, place_holder=None) -> list:
         """Return unique load combination names."""
@@ -52,85 +32,20 @@ class ETABSDataExporter:
         ].tolist()
         return list(dict.fromkeys(raw_combos))
 
-    def get_available_members(self, load_combos: list) -> list:
-        """Return all non-numeric member names participating in design forces."""
-        raw_beam_forces = self._read_design_forces(
-            "Design Forces - Beams", load_combos
-        )
-        raw_col_forces = self._read_design_forces(
-            "Design Forces - Columns", load_combos
-        )
-        name_series = [
-            frame["UniqueName"]
-            for frame in (raw_beam_forces, raw_col_forces)
-            if "UniqueName" in frame.columns
-        ]
-        if not name_series:
-            raise ValueError(
-                "ETABS returned no member identifiers from the selected design-force "
-                "combinations."
-            )
-        combined_names = pd.concat(name_series)
-        return [m for m in combined_names.unique().tolist() if not str(m).isnumeric()]
+    def get_available_members(self, load_combos: list | None = None) -> list:
+        """Return every named (non-numeric) beam and column of the model.
 
-    def _read_design_forces(
-        self, table_name: str, load_combinations: list | None
-    ) -> pd.DataFrame:
-        """Read design forces one combination at a time through the ETABS API."""
-        if not load_combinations:
-            return pd.DataFrame()
-        chunks = []
-        for combination in load_combinations:
-            key = (table_name, str(combination))
-            if key not in self._design_force_cache:
-                self._design_force_cache[key] = self.etabs.get_design_forces(
-                    table_name, combination
-                )
-            chunks.append(self._design_force_cache[key])
-        chunks = [chunk for chunk in chunks if not chunk.empty]
-        return pd.concat(chunks, ignore_index=True) if chunks else pd.DataFrame()
-
-    def display_selected_inputs(
-        self,
-        load_combos: list,
-        members: list,
-        sheet_name: str = "OVERWRITES",
-        combo_cell: str = "B6",
-        member_cell: str = "C6",
-    ):
-        """Write the selected load combos and members to Excel."""
-        sheet = self._get_sheet(sheet_name)
-        for cell_ref in [combo_cell, member_cell]:
-            cell = sheet.range(cell_ref)
-            if cell.value is not None:
-                cell.expand("down").clear()
-            else:
-                cell.clear()
-        if load_combos:
-            sheet.range(combo_cell).options(transpose=True).value = load_combos
-        if members:
-            sheet.range(member_cell).options(transpose=True).value = members
-
-    def display_factored_gravity_loads_menu(
-        self,
-        load_combos: list,
-        sheet_name: str = "OVERWRITES",
-        dropdown_cell: str = "F8",
-    ):
-        """Populate a dropdown list with the selected load combinations."""
-        if not load_combos:
-            return
-        sheet = self._get_sheet(sheet_name)
-        target = sheet.range(dropdown_cell)
-        combo_list_str = ",".join(load_combos)
-        try:
-            target.api.Validation.Delete()
-            target.api.Validation.Add(3, 1, 1, combo_list_str)
-            target.value = load_combos[0]
-        except Exception as exc:
-            print(
-                f"Warning: Could not update dropdown menu on {sheet_name}!{dropdown_cell}: {exc}"
-            )
+        ``load_combos`` is accepted only for caller compatibility: the members
+        no longer depend on a design run.
+        """
+        names = []
+        for table_name in ("Beam Object Connectivity", "Column Object Connectivity"):
+            table = self.etabs.get_data(table_name)
+            if isinstance(table, pd.DataFrame) and "UniqueName" in table.columns:
+                names += table["UniqueName"].astype(str).tolist()
+        if not names:
+            raise ValueError("The ETABS model has no beams or columns.")
+        return [m for m in dict.fromkeys(names) if not m.isnumeric()]
 
     def display_factored_loads(
         self,
@@ -139,70 +54,132 @@ class ETABSDataExporter:
         sheet_name: str = "FACTORED LOADS",
         start_cell: str = "B2",
         header_color: tuple = (189, 215, 238),
+        options: ForceOptions | None = None,
     ) -> pd.DataFrame:
-        """Extract and normalize design forces."""
-        beam_forces = self._read_design_forces(
-            "Design Forces - Beams", load_combos_selected
+        """Factored forces from the analysis results, written in kN and kN-m.
+
+        No ETABS design is run: the forces are combined from the load case
+        results (see ``etabs_api.workflows.analysis_forces``), with the live
+        load reduction and pattern live load chosen in ``options``.
+        """
+        result = factored_forces(
+            self.etabs, list(load_combos_selected or []), members_selected, options
         )
-        col_forces = self._read_design_forces(
-            "Design Forces - Columns", load_combos_selected
-        )
-        # ETABS labels beams in a "Beam" column and columns in a "Column" column;
-        # both become one "Label" column so no member loses its label.
-        design_forces = pd.concat(
-            [
-                beam_forces.rename(columns={"Beam": "Label"}),
-                col_forces.rename(columns={"Column": "Label"}),
-            ],
-            ignore_index=True,
-        )
-        if "Combo" in design_forces.columns:
-            # ETABS appends a permutation suffix ("-1", "-2", ...) to every combo
-            # name. The combo keeps its plain name and the suffix moves to its own
-            # column, so the column designer can still check every permutation.
-            combo_parts = (
-                design_forces["Combo"]
-                .astype(str)
-                .str.strip()
-                .str.extract(r"^(.*?)(?:-(\d+))?$")
-            )
-            design_forces["Combo"] = combo_parts[0].str.strip()
-            permutation = pd.to_numeric(combo_parts[1], errors="coerce")
-            if "Permutation" in design_forces.columns:
-                design_forces["Permutation"] = permutation
-            else:
-                design_forces.insert(
-                    design_forces.columns.get_loc("Combo") + 1,
-                    "Permutation",
-                    permutation,
-                )
-        # The connector reads every table in N-mm (see ETABSConnector.extraction_units),
-        # so forces arrive in N and moments in N-mm.
-        numeric_cols = ["Station", "P", "V2", "V3", "T", "M2", "M3"]
-        for col in numeric_cols:
-            if col in design_forces.columns:
-                design_forces[col] = pd.to_numeric(design_forces[col], errors="coerce")
-        force_cols = ["P", "V2", "V3"]
-        moment_cols = ["T", "M2", "M3"]
-        design_forces[force_cols] = design_forces[force_cols] / 1000
-        design_forces[moment_cols] = design_forces[moment_cols] / 1000000
-        design_forces = design_forces[~design_forces["UniqueName"].str.isnumeric()].copy()
-        if members_selected:
-            design_forces = design_forces[
-                design_forces["UniqueName"].isin(members_selected)
-            ].copy()
-        if load_combos_selected:
-            design_forces = design_forces[
-                design_forces["Combo"].isin(load_combos_selected)
-            ].copy()
-        design_forces.drop_duplicates(inplace=True)
+        self.last_forces = result
+        forces = result.table.copy()
+        if forces.empty:
+            raise ValueError("No member forces were found for the chosen combinations.")
+        forces[["P", "V2", "V3"]] = forces[["P", "V2", "V3"]] / 1000
+        forces[["T", "M2", "M3"]] = forces[["T", "M2", "M3"]] / 1000000
         self._write_dataframe_to_excel(
-            df=design_forces,
+            df=forces,
             sheet_name=sheet_name,
             start_cell=start_cell,
             header_color=header_color,
         )
-        return design_forces
+        if result.reductions:
+            self.display_live_load_reduction(result.reductions)
+        return forces
+
+    def display_service_loads(
+        self, members_selected: list | None = None, sheet_name: str = "SERVICE LOADS",
+        start_cell: str = "B2",
+    ) -> pd.DataFrame | None:
+        """Service moments of the beams for the deflection checks, in kN-m.
+
+        Uses the deflection combinations (``DEF 100`` to ``DEF 103``) that are in
+        the model; returns None, writing nothing, when there are none. Each row
+        also has, for the beam's combination, the downward tip deflection (mm)
+        from the rotation of its I end and of its J end, used when the beam is a
+        cantilever supported at that end.
+        """
+        from design.beam_deflection import DEFLECTION_COMBOS
+
+        from etabs_api.workflows.load_combinations import ensure_deflection_combinations
+
+        added = ensure_deflection_combinations(self.etabs.sap_model)
+        if added:
+            print("Deflection combinations added to the model: " + ", ".join(added))
+        combos = self.get_load_combinations()
+        present = [name for name in DEFLECTION_COMBOS if name in combos]
+        if not present:
+            return None
+        beams = self.etabs.get_data("Beam Object Connectivity")
+        beam_names = set(beams["UniqueName"].astype(str))
+        if members_selected:
+            beam_names &= set(map(str, members_selected))
+        result = factored_forces(self.etabs, present, sorted(beam_names))
+        table = result.table
+        table = table[table["UniqueName"].astype(str).isin(beam_names)].copy()
+        if table.empty:
+            return None
+        table["M3"] = table["M3"] / 1e6
+        table["V2"] = table["V2"] / 1e3
+        table = table[["Story", "UniqueName", "Combo", "Station", "M3", "V2"]]
+
+        # downward tip deflection from a rigid rotation of the support joint:
+        # -(R x r)_z = -L (Rx dy - Ry dx), r from the support to the tip
+        points = self.etabs.get_data("Point Object Connectivity")
+        xyz = {str(n): (float(x), float(y)) for n, x, y in zip(
+            points["UniqueName"], pd.to_numeric(points["X"]), pd.to_numeric(points["Y"]))}
+        tables = self.etabs.sap_model.DatabaseTables
+        tables.SetLoadCasesSelectedForDisplay([])
+        tables.SetLoadCombinationsSelectedForDisplay(present)
+        moves = self.etabs._read_database_table("Joint Displacements")
+        moves = moves[moves["OutputCase"].astype(str).isin(present)]
+        rotation = {(str(j), str(c)): (float(rx), float(ry)) for j, c, rx, ry in zip(
+            moves["UniqueName"], moves["OutputCase"], pd.to_numeric(moves["Rx"]),
+            pd.to_numeric(moves["Ry"]))}
+        ends = {str(n): (str(i), str(j)) for n, i, j in zip(
+            beams["UniqueName"], beams["UniquePtI"], beams["UniquePtJ"])}
+
+        def tip(member: str, combo: str, support_at_i: bool) -> float:
+            joint_i, joint_j = ends.get(member, ("", ""))
+            if joint_i not in xyz or joint_j not in xyz:
+                return 0.0
+            root, free = (joint_i, joint_j) if support_at_i else (joint_j, joint_i)
+            dx, dy = xyz[free][0] - xyz[root][0], xyz[free][1] - xyz[root][1]
+            rx, ry = rotation.get((root, combo), (0.0, 0.0))
+            return -(rx * dy - ry * dx)
+
+        keys = table[["UniqueName", "Combo"]].drop_duplicates()
+        tips = {(m, c): (tip(m, c, True), tip(m, c, False))
+                for m, c in zip(keys["UniqueName"].astype(str), keys["Combo"].astype(str))}
+        table["Tip from rotation at I (mm)"] = [
+            tips[(str(m), str(c))][0] for m, c in zip(table["UniqueName"], table["Combo"])]
+        table["Tip from rotation at J (mm)"] = [
+            tips[(str(m), str(c))][1] for m, c in zip(table["UniqueName"], table["Combo"])]
+
+        stories = self.etabs.get_data("Story Definitions")["Story"].astype(str).tolist()
+        order = {name: index for index, name in enumerate(stories)}  # listed top first
+        top_story = min(table["Story"].astype(str), key=lambda s: order.get(s, len(order)))
+        table["Roof level"] = table["Story"].astype(str).eq(top_story)
+
+        self._write_dataframe_to_excel(df=table, sheet_name=sheet_name)
+        return table
+
+    def display_live_load_reduction(
+        self, reductions: dict, sheet_name: str = "LIVE LOAD REDUCTION", start_cell: str = "B2"
+    ) -> pd.DataFrame:
+        """Write the NSCP live load reduction of every member to its own sheet."""
+        table = pd.DataFrame(
+            [
+                {
+                    "UniqueName": member,
+                    "Tributary method": r.method,
+                    "Tributary area (m2)": round(r.area_m2, 2),
+                    "Reducible live (kPa)": round(r.reducible_kpa, 2),
+                    "Area above 4.8 kPa (m2)": round(r.heavy_m2, 2),
+                    "Levels": r.levels,
+                    "Reduction (%)": round(r.percent, 2),
+                    "Governed by": r.limit,
+                    "Factor on reducible live": round(r.factor, 4),
+                }
+                for member, r in reductions.items()
+            ]
+        )
+        self._write_dataframe_to_excel(df=table, sheet_name=sheet_name)
+        return table
 
     def display_frame_data(
         self,
@@ -341,3 +318,24 @@ class ETABSDataExporter:
             header_color=header_color,
         )
         return connectivity
+
+    def display_orientation_data(self) -> None:
+        """Column local axes and joint coordinates (the SMRF joint checks need them)."""
+        self._write_dataframe_to_excel(
+            df=self.etabs.get_data("Frame Assignments - Local Axes"), sheet_name="LOCAL AXES")
+        self._write_dataframe_to_excel(
+            df=self.etabs.get_data("Point Object Connectivity"), sheet_name="POINTS")
+
+    def extract_all(self, load_combos: list, members: list | None,
+                    options: ForceOptions | None) -> list[str]:
+        """Every table of the beam and column design. Returns notes worth printing."""
+        self.display_factored_loads(load_combos, members, options=options)
+        notes = list(self.last_forces.notes)
+        try:
+            self.display_service_loads(members)
+        except (ValueError, KeyError, RuntimeError) as error:
+            notes.append(f"Service loads for the deflection checks were not read: {error}")
+        self.display_frame_data(members_selected=members)
+        self.display_connectivity_data()
+        self.display_orientation_data()
+        return notes

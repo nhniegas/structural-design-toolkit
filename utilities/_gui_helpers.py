@@ -6,6 +6,7 @@ import ctypes
 import subprocess
 import sys
 import time
+import os
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
@@ -19,16 +20,14 @@ except Exception:
         pass
 
 
-def select_output_directory() -> str:
+def select_output_directory(title: str = "Select the output folder") -> str:
     """Opens a native Windows directory dialog to select an output folder."""
     root = tk.Tk()
     root.withdraw()
     root.attributes("-topmost", True)
-    folder_path = filedialog.askdirectory(
-        title="Select Output Folder for DXF Schedules"
-    )
+    folder_path = filedialog.askdirectory(title=title)
     root.destroy()
-    return folder_path
+    return os.path.normpath(folder_path) if folder_path else ""
 
 
 def select_save_file(default_name="Composite_Column_Report") -> str:

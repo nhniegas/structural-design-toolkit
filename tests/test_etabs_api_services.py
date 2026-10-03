@@ -298,6 +298,8 @@ class RecordingEtabs:
             "Material Properties - Rebar Data": pd.DataFrame(
                 {"Material": ["G60", "G40"], "Fy": ["414", "276"]}
             ),
+            "Beam Object Connectivity": pd.DataFrame({"UniqueName": ["GX-1", "17"]}),
+            "Column Object Connectivity": pd.DataFrame({"UniqueName": ["2F-C1"]}),
         }
         return tables[table_name]
 
@@ -328,34 +330,36 @@ def test_frame_data_tables_are_read_once_not_once_per_combination(exporter):
     assert frame_data.loc[0, "fy"] == 414.0
 
 
-def test_design_forces_are_read_one_combination_at_a_time(exporter):
-    exporter.display_factored_loads(load_combos_selected=["ULS 1", "ULS 2"])
-    assert exporter.etabs.force_reads == [
-        ("Design Forces - Beams", "ULS 1"),
-        ("Design Forces - Beams", "ULS 2"),
-        ("Design Forces - Columns", "ULS 1"),
-        ("Design Forces - Columns", "ULS 2"),
-    ]
-
-
-def test_each_combination_is_read_from_etabs_only_once_per_extraction(exporter):
-    """The member list and the force table share the same ETABS reads."""
-    members = exporter.get_available_members(["ULS 1", "ULS 2"])
-    exporter.display_factored_loads(load_combos_selected=["ULS 1", "ULS 2"])
+def test_members_come_from_the_connectivity_tables_without_a_design_run(exporter):
+    members = exporter.get_available_members()
     assert members == ["GX-1", "2F-C1"]
-    assert len(exporter.etabs.force_reads) == 4
+    assert exporter.etabs.force_reads == []
 
 
-def test_factored_loads_split_the_combo_name_from_its_permutation(exporter):
-    """ETABS names rows 'ULS 1-1', 'ULS 1-2': plain name plus a Permutation column."""
-    forces = exporter.display_factored_loads(load_combos_selected=["ULS 1"])
-    assert forces["Combo"].unique().tolist() == ["ULS 1"]
-    assert sorted(forces["Permutation"].unique()) == [1, 2]
+def test_factored_loads_come_from_the_analysis_forces_in_kn(exporter, monkeypatch):
+    from etabs_api.workflows import exporter as exporter_module
+    from etabs_api.workflows.analysis_forces import FactoredForces, ForceOptions
+
+    calls = []
+    table = pd.DataFrame({
+        "Story": ["2F", "2F"], "Label": ["B1", "C1"], "UniqueName": ["GX-1", "2F-C1"],
+        "Combo": ["ULS 1", "ULS 1"], "Permutation": [1, 1], "Station": [0.0, 0.0],
+        "P": [1000.0, -2000.0], "V2": [2000.0, 0.0], "V3": [0.0, 0.0], "T": [0.0, 0.0],
+        "M2": [0.0, 0.0], "M3": [3e6, 4e6],
+    })
+
+    def fake(connector, combos, members, options):
+        calls.append((combos, members, options))
+        return FactoredForces(table)
+
+    monkeypatch.setattr(exporter_module, "factored_forces", fake)
+    options = ForceOptions(reduce_live=False, pattern_factor=0.75)
+    forces = exporter.display_factored_loads(["ULS 1"], ["GX-1", "2F-C1"], options=options)
+    assert calls == [(["ULS 1"], ["GX-1", "2F-C1"], options)]
     assert list(forces.columns[:5]) == ["Story", "Label", "UniqueName", "Combo", "Permutation"]
-    assert sorted(forces["Label"].unique()) == ["B1", "C1"]  # beams and columns keep labels
-    # N -> kN and N-mm -> kN-m
-    assert forces["P"].iloc[0] == 1.0
-    assert forces["M3"].iloc[0] == 3.0
+    assert forces["P"].tolist() == [1.0, -2.0]  # N -> kN
+    assert forces["M3"].tolist() == [3.0, 4.0]  # N-mm -> kN-m
+    assert "FACTORED LOADS" in exporter.written
 
 
 # --------------------------------------------------------------------------

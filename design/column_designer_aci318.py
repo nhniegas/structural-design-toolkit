@@ -1,7 +1,9 @@
-"""ACI 318M-14 reinforced-concrete column design and Excel integration.
+"""ACI 318M-14 reinforced-concrete column design, SMRF checks and schedules.
 
-The engine uses millimetres, MPa, kN, and kN-m at its Excel interface.
-Section-library forces and moments are converted at the calculation boundary.
+The terminal workflow (``xs columns``) is in ``design/concrete_workflow.py``;
+this module designs from tables (``design_columns``) and writes the results
+file, the DXF schedule and the calculation report. Its tables use mm, MPa,
+kN and kN-m; section-library forces are converted at the calculation boundary.
 """
 
 import math
@@ -9,7 +11,6 @@ import os
 import re
 import numpy as np
 import pandas as pd
-import xlwings as xw
 import ezdxf
 from dataclasses import dataclass
 from design.aci318_config import CODE, AciCode
@@ -510,17 +511,11 @@ def _concrete_section_for(geometry) -> ConcreteSection:
     return cached
 
 
-def _read_excel_table(sheet, start_cell: str) -> pd.DataFrame:
-    """Read a headered Excel table and normalize its column names."""
-    frame = (
-        sheet.range(start_cell)
-        .options(pd.DataFrame, header=1, index=False, expand="table")
-        .value
-    )
+def _clean_table(frame: pd.DataFrame | None) -> pd.DataFrame:
+    """A copy of a table with stripped column names (empty when None)."""
     if frame is None:
         return pd.DataFrame()
-    if not isinstance(frame, pd.DataFrame):
-        raise ValueError(f"Expected a tabular dataset at {sheet.name}!{start_cell}.")
+    frame = frame.copy()
     frame.columns = [str(column).strip() for column in frame.columns]
     return frame
 
@@ -1082,23 +1077,6 @@ def _collapse_combo_permutations(
     return load_checks, shear_checks, joint_results
 
 
-def _new_output_sheet(wb, sheet_name: str):
-    """Return or create an output sheet and clear only its prior output table.
-
-    Existing sheet formatting and unrelated cells are preserved.
-    """
-    try:
-        sheet = wb.sheets[sheet_name]
-    except KeyError:
-        sheet = wb.sheets.add(sheet_name)
-    used_last_cell = sheet.used_range.last_cell
-    if used_last_cell.row >= 2 and used_last_cell.column >= 2:
-        sheet.range(
-            (2, 2), (used_last_cell.row, used_last_cell.column)
-        ).clear_contents()
-    return sheet
-
-
 def _build_column_section(
     row: pd.Series,
     n_bars: int,
@@ -1390,26 +1368,47 @@ def _enumerate_column_bar_layouts(
     )
 
 
+# Each member's force table, indexed once by combination: (table, {combo: (I row, J row)}).
+# The table itself is kept so its id stays unique while the entry exists.
+_END_FORCE_INDEX: dict[int, tuple[pd.DataFrame, dict]] = {}
+
+
+def _clear_end_force_index() -> None:
+    _END_FORCE_INDEX.clear()
+
+
+def _end_force_rows(forces: pd.DataFrame) -> dict:
+    entry = _END_FORCE_INDEX.get(id(forces))
+    if entry is not None and entry[0] is forces:
+        return entry[1]
+    stations = pd.to_numeric(forces["Station"], errors="coerce")
+    table = forces.copy()
+    table["Station"] = stations
+    names = table["Combo"].astype(str)
+    index: dict = {}
+    for combo, group in table.groupby(names, sort=False):
+        valid = group.dropna(subset=["Station"])
+        index[combo] = None if valid.empty else (
+            valid.loc[valid["Station"].idxmin()], valid.loc[valid["Station"].idxmax()])
+    _END_FORCE_INDEX[id(forces)] = (forces, index)
+    return index
+
+
 def _column_force_at_end(
     forces: pd.DataFrame, combo: str, at_i_end: bool
 ) -> pd.Series:
     """Select the first/last station for a member and load combination.
 
     ETABS frame stations are treated as increasing from connectivity I to J.
+    The member's table is indexed by combination the first time it is used.
     """
-    combo_forces = forces.loc[forces["Combo"].astype(str).eq(str(combo))].copy()
-    if combo_forces.empty:
+    index = _end_force_rows(forces)
+    if str(combo) not in index:
         raise ValueError(f"No column force stations were found for combo {combo!r}.")
-    combo_forces["Station"] = pd.to_numeric(combo_forces["Station"], errors="coerce")
-    combo_forces = combo_forces.dropna(subset=["Station"])
-    if combo_forces.empty:
+    rows = index[str(combo)]
+    if rows is None:
         raise ValueError(f"Column force stations for combo {combo!r} are not numeric.")
-    index = (
-        combo_forces["Station"].idxmin()
-        if at_i_end
-        else combo_forces["Station"].idxmax()
-    )
-    return combo_forces.loc[index]
+    return (rows[0] if at_i_end else rows[1]).copy()
 
 
 def _evaluate_column_candidate(
@@ -2309,7 +2308,16 @@ def _evaluate_smrf_joints(
         _normalize_object_name(name): rows.copy()
         for name, rows in factored_loads.groupby("UniqueName", dropna=True)
     }
-    all_combos = sorted(factored_loads["Combo"].dropna().astype(str).unique())
+    # The checks vary only with the column axial load, so they run over the
+    # column combinations (with their permutations). Beams may have other
+    # permutations (their force envelope); their bars are used, not their forces.
+    is_column = connectivity["DesignType"].astype(str).str.strip().str.casefold().eq("column")
+    column_names = set(connectivity.loc[is_column, "UniqueName"])
+    column_loads = factored_loads[factored_loads["UniqueName"].isin(column_names)]
+    all_combos = sorted(
+        (column_loads if not column_loads.empty else factored_loads)["Combo"]
+        .dropna().astype(str).unique()
+    )
 
     columns_at_point: dict[str, list[str]] = {}
     beams_at_point: dict[str, list[str]] = {}
@@ -3685,281 +3693,110 @@ COLUMN_REPORT_LABELS = {
 }
 
 
-def _write_consolidated_column_report(
-    sheet, report: pd.DataFrame, groups: list[tuple[str, list[str]]]
-) -> None:
-    """Write the report values in one range transfer, then apply worksheet formatting."""
-    display_names = COLUMN_REPORT_LABELS
-    clean_report = report.rename(
-        columns={
-            name: display_names.get(name, name.replace("_", " "))
-            for name in report.columns
-        }
-    )
-    # ETABS draws a column from its bottom joint (I) to its top joint (J).
-    clean_report["End"] = clean_report["End"].map(
-        lambda end: {"I": "Bottom (I)", "J": "Top (J)"}.get(end, end)
-    )
-    header_row = 9
-    first_col = 2
-    old_last_row = max(sheet.used_range.last_cell.row, header_row + len(clean_report))
-    old_last_col = max(
-        sheet.used_range.last_cell.column,
-        first_col + len(clean_report.columns) - 1,
-    )
-    sheet.range((8, first_col), (8, old_last_col)).api.UnMerge()
-    sheet.range((header_row + 1, first_col), (old_last_row, first_col + 3)).api.UnMerge()
-    sheet.range((8, first_col), (old_last_row, old_last_col)).clear_formats()
-    title_range = sheet.range("B2:H2")
-    title_range.api.UnMerge()
-    title_range.merge()
-    title_range.value = "COLUMN DESIGN - CONSOLIDATED CHECKS"
-    title_range.api.Font.Name = "Calibri"
-    title_range.api.Font.Size = 14
-    title_range.api.Font.Bold = True
-    title_range.api.HorizontalAlignment = -4131
+_COLUMN_GROUP_FILLS = {
+    "COLUMN LABEL / LEVEL": "BDD7EE",
+    "SECTION / LONGITUDINAL REINFORCEMENT": "E2EFDA",
+    "FLEXURE / AXIAL": "E2EFDA",
+    "COLUMN SHEAR": "FFF2CC",
+    "BEAM-COLUMN CAPACITY": "FCE4D6",
+    "JOINT SHEAR": "FCE4D6",
+    "TRANSVERSE REINFORCEMENT DETAILING": "DEEBF7",
+    "DESIGN STATUS": "D9D2E9",
+}
 
-    report_values = [clean_report.columns.tolist()]
-    report_values.extend(
-        clean_report.astype(object)
-        .where(pd.notna(clean_report), None)
-        .values.tolist()
-    )
-    last_row = header_row + len(clean_report)
-    last_col = first_col + len(clean_report.columns) - 1
-    sheet.range(
-        (header_row, first_col), (last_row, last_col)
-    ).value = report_values
-    column_index = first_col
-    group_colors = {
-        "COLUMN LABEL / LEVEL": (189, 215, 238),
-        "SECTION / LONGITUDINAL REINFORCEMENT": (226, 239, 218),
-        "FLEXURE / AXIAL": (226, 239, 218),
-        "COLUMN SHEAR": (255, 242, 204),
-        "BEAM-COLUMN CAPACITY": (252, 228, 214),
-        "JOINT SHEAR": (252, 228, 214),
-        "TRANSVERSE REINFORCEMENT DETAILING": (222, 235, 247),
-        "DESIGN STATUS": (217, 210, 233),
-    }
+
+def column_report_display(report: pd.DataFrame) -> pd.DataFrame:
+    """The report with its readable headers and ends (Bottom (I), Top (J))."""
+    clean = report.rename(columns={
+        name: COLUMN_REPORT_LABELS.get(name, name.replace("_", " ")) for name in report.columns
+    })
+    if "End" in clean.columns:
+        clean["End"] = clean["End"].map(
+            lambda end: {"I": "Bottom (I)", "J": "Top (J)"}.get(end, end))
+    return clean
+
+
+def write_column_results_xlsx(report: pd.DataFrame, groups: list[tuple[str, list[str]]],
+                              path: str) -> str:
+    """The column design report as a formatted Excel file (no Excel needed)."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.utils import get_column_letter
+
+    ordered = [name for _, names in groups for name in names if name in report.columns]
+    clean = column_report_display(report[ordered])
+    book = Workbook()
+    sheet = book.active
+    sheet.title = "COLUMN DESIGN"
+    sheet["A1"] = "COLUMN DESIGN - CONSOLIDATED CHECKS"
+    sheet["A1"].font = Font(size=14, bold=True)
+    thick, thin = Side(style="medium"), Side(style="thin")
+    column = 1
     for label, names in groups:
-        last_col = column_index + len(names) - 1
-        group_range = sheet.range((8, column_index), (8, last_col))
-        group_range.merge()
-        group_range.value = label
-        group_range.color = group_colors.get(label, (189, 215, 238))
-        group_range.api.Font.Bold = True
-        group_range.api.HorizontalAlignment = -4108
-        group_range.api.VerticalAlignment = -4108
-        column_index = last_col + 1
-
-    table = sheet.range((8, first_col), (last_row, last_col))
-    table.api.Font.Name = "Calibri"
-    table.api.Font.Size = 10
-    table.api.Borders.LineStyle = -4142
-    group_header = sheet.range((8, first_col), (8, last_col))
-    group_header.api.Borders(8).LineStyle = 1
-    group_header.api.Borders(8).Weight = 3
-    group_header.api.Borders(9).LineStyle = 1
-    group_header.api.Borders(9).Weight = 3
-
-    leaf_header = sheet.range((header_row, first_col), (header_row, last_col))
-    leaf_header.color = (242, 242, 242)
-    leaf_header.api.Font.Bold = True
-    leaf_header.api.WrapText = True
-    leaf_header.api.HorizontalAlignment = -4108
-    leaf_header.api.Borders(9).LineStyle = 1
-    leaf_header.api.Borders(9).Weight = 2
-    leaf_header.api.Borders(8).LineStyle = 1
-    leaf_header.api.Borders(8).Weight = 2
-
-    body = sheet.range((header_row + 1, first_col), (last_row, last_col))
-    body.number_format = "0.00"
-    body.api.WrapText = False
-    body.api.ShrinkToFit = False  # shrunk text was unreadable; columns are sized instead
-    body.api.VerticalAlignment = -4108
-    body.api.HorizontalAlignment = -4108  # centred under the header
-    body.api.Borders(9).LineStyle = 1
-    body.api.Borders(9).Weight = 2
-    body.api.Font.Size = 9
-    sheet.api.Rows(f"{header_row + 1}:{last_row}").RowHeight = 22
-    if old_last_row > last_row:
-        sheet.api.Rows(f"{last_row + 1}:{old_last_row}").RowHeight = (
-            sheet.api.StandardHeight
-        )
-
-    name_to_col = {
-        name: first_col + index
-        for index, name in enumerate(clean_report.columns)
-    }
-    # Whole numbers are shown without decimals and small ratios with enough digits.
-    whole_number_columns = {
-        "Width (mm)", "Depth (mm)", "Diameter (mm)", "Concrete Cover (mm)",
-        "Longitudinal Bars",
-        "Bars on X Edge", "Bars on Y Edge", "Tie Bar Diameter (mm)",
-        "Tie / Spiral Spacing (mm)", "Tie Legs along X Edge", "Tie Legs along Y Edge",
-        "Added Hoop Legs",
-    }
-    ratio_columns = {
-        "ρ Longitudinal", "ρ Limit", "kᶠ", "kₙ",
-        "Required Aₛₕ/(s b꜀), X", "Provided Aₛₕ/(s b꜀), X",
-        "Required Aₛₕ/(s b꜀), Y", "Provided Aₛₕ/(s b꜀), Y",
-    } | {name for name in clean_report.columns if name.startswith("ρₛ,req")}
-    # Columns whose text is long: left-aligned, with a fixed width.
-    fixed_widths = {"Bar Layout Data (x, y, n)": 18, "Design Status Reason": 60}
-
-    def shown_length(value) -> int:
-        """Length of a cell as Excel will show it."""
-        if value is None or (isinstance(value, float) and math.isnan(value)):
-            return 0
-        if isinstance(value, float):
-            return len(f"{value:.2f}")
-        return len(str(value))
-
-    for name in clean_report.columns:
-        column = name_to_col[name]
-        cells = sheet.range((header_row + 1, column), (last_row, column))
-        if name in whole_number_columns:
-            cells.number_format = "0"
-        elif name in ratio_columns:
-            cells.number_format = "0.0000"
-        longest = max((shown_length(value) for value in clean_report[name]), default=0)
-        width = fixed_widths.get(name, min(max(longest + 3, len(name) // 2 + 3, 10), 60))
-        cells.column_width = width
-        if name in fixed_widths or longest > 40:
-            cells.api.HorizontalAlignment = -4131  # long text reads better from the left
-    leaf_header.row_height = 36
-
-    # Merge repeated hierarchy labels while retaining one value per visible group.
-    hierarchy = ("Column Label", "Unique Name", "Story", "End")
-    data_records = clean_report.to_dict("records")
-    group_keys: dict[str, tuple[str, ...]] = {
-        "Column Label": ("Column Label",),
-        "Unique Name": ("Column Label", "Unique Name"),
-        "Story": ("Column Label", "Unique Name", "Story"),
-        "End": ("Column Label", "Unique Name", "Story", "End"),
-    }
-    for name in hierarchy:
-        column = name_to_col[name]
-        parent_keys = group_keys[name]
-        start = 0
-        while start < len(data_records):
-            key = tuple(data_records[start][field] for field in parent_keys)
-            end = start + 1
-            while end < len(data_records) and tuple(
-                data_records[end][field] for field in parent_keys
-            ) == key:
-                end += 1
-            first_row = header_row + 1 + start
-            final_row = header_row + end
-            if name == "End":
-                end_fill = (
-                    (235, 243, 250)
-                    if str(key[-1]).startswith("Bottom")
-                    else (250, 242, 232)
-                )
-                sheet.range((first_row, column), (final_row, last_col)).color = (
-                    end_fill
-                )
-            if end - start > 1:
-                cell_range = sheet.range((first_row, column), (final_row, column))
-                cell_range.merge()
-                cell_range.api.VerticalAlignment = -4108
-            if name in {"Unique Name", "Story", "End"}:
-                row_border = sheet.range(
-                    (final_row, first_col), (final_row, last_col)
-                ).api.Borders(9)
-                row_border.LineStyle = 1
-                if name == "Unique Name":
-                    row_border.Weight = 3
-                    row_border.Color = 31 + 78 * 256 + 121 * 65536
-                elif name == "Story":
-                    row_border.Weight = 2
-                    row_border.Color = 91 + 155 * 256 + 213 * 65536
-                else:
-                    row_border.Weight = 1
-                    row_border.Color = 191 + 191 * 256 + 191 * 65536
-            start = end
-
-    # Separate ETABS labels clearly and close the report with a strong bottom rule.
-    start = 0
-    while start < len(data_records):
-        end = start + 1
-        while (
-            end < len(data_records)
-            and data_records[end]["Column Label"]
-            == data_records[start]["Column Label"]
-        ):
-            end += 1
-        if end < len(data_records):
-            divider = sheet.range(
-                (header_row + end, first_col),
-                (header_row + end, last_col),
-            ).api.Borders(9)
-            divider.LineStyle = 1
-            divider.Weight = 3
-            divider.Color = 31 + 78 * 256 + 121 * 65536
-        start = end
-
-    label_divider = sheet.range(
-        (8, name_to_col["Column Label"]),
-        (last_row, name_to_col["Column Label"]),
-    ).api.Borders(10)
-    label_divider.LineStyle = 1
-    label_divider.Weight = 3
-    label_divider.Color = 31 + 78 * 256 + 121 * 65536
-
-    # Close the table on its left edge.
-    left_edge = sheet.range((8, first_col), (last_row, first_col)).api.Borders(7)
-    left_edge.LineStyle = 1
-    left_edge.Weight = 3
-    left_edge.Color = 31 + 78 * 256 + 121 * 65536
-
-    # Make the column mark and the member name stand out from the data.
-    for name, fill, font_color, font_size in (
-        ("Column Label", (31, 78, 121), (255, 255, 255), 12),
-        ("Unique Name", (189, 215, 238), (0, 0, 0), 10),
-    ):
-        cells = sheet.range(
-            (header_row + 1, name_to_col[name]), (last_row, name_to_col[name])
-        )
-        cells.color = fill
-        cells.api.Font.Bold = True
-        cells.api.Font.Size = font_size
-        cells.api.Font.Color = font_color[0] + font_color[1] * 256 + font_color[2] * 65536
-        cells.api.HorizontalAlignment = -4108
-        cells.api.VerticalAlignment = -4108
-
-    # Apply a stronger end boundary after each visual data group on the right.
-    group_start = first_col
-    for label, names in groups:
-        group_end = group_start + len(names) - 1
-        divider = sheet.range((8, group_end), (last_row, group_end))
-        divider.api.Borders(10).LineStyle = 1
-        divider.api.Borders(10).Weight = 3
-        divider.api.Borders(10).Color = 31 + 78 * 256 + 121 * 65536
-        group_start = group_end + 1
-
-    closing_bar = sheet.range((last_row, first_col), (last_row, last_col)).api.Borders(9)
-    closing_bar.LineStyle = 1
-    closing_bar.Weight = 3
-    closing_bar.Color = 31 + 78 * 256 + 121 * 65536
+        present = [n for n in names if n in report.columns]
+        if not present:
+            continue
+        last = column + len(present) - 1
+        sheet.merge_cells(start_row=2, start_column=column, end_row=2, end_column=last)
+        cell = sheet.cell(row=2, column=column, value=label)
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal="center")
+        for index in range(column, last + 1):
+            sheet.cell(row=2, column=index).fill = PatternFill(
+                "solid", fgColor=_COLUMN_GROUP_FILLS.get(label, "BDD7EE"))
+            sheet.cell(row=2, column=index).border = Border(top=thick, bottom=thick)
+        column = last + 1
+    for index, name in enumerate(clean.columns, start=1):
+        cell = sheet.cell(row=3, column=index, value=name)
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill("solid", fgColor="F2F2F2")
+        cell.alignment = Alignment(wrap_text=True, vertical="center")
+        cell.border = Border(bottom=thin)
+        sheet.column_dimensions[get_column_letter(index)].width = min(
+            max(12, len(str(name)) * 0.9), 30)
+    values = clean.astype(object).where(pd.notna(clean), None).values.tolist()
+    names = clean["Unique Name"].tolist() if "Unique Name" in clean.columns else []
+    grey = PatternFill("solid", fgColor="F2F2F2")
+    shade, previous = False, None
+    for offset, row in enumerate(values):
+        excel_row = 4 + offset
+        if names and names[offset] != previous:
+            shade, previous = not shade, names[offset]
+            if offset:
+                for index in range(1, len(row) + 1):
+                    cell = sheet.cell(row=excel_row - 1, column=index)
+                    cell.border = Border(bottom=thick)
+        for index, value in enumerate(row, start=1):
+            cell = sheet.cell(row=excel_row, column=index, value=value)
+            if shade:
+                cell.fill = grey
+            text = str(value).upper() if value is not None else ""
+            if text.startswith("FAIL"):
+                cell.font = Font(color="C00000", bold=True)
+    sheet.freeze_panes = "E4"
+    book.save(path)
+    return path
 
 
-def _run_column_design_from_excel(
-    write_joint_sheet: bool = True,
+def design_columns(
+    tables: dict,
+    beam_design: pd.DataFrame,
+    is_smrf: bool,
+    dmain: float,
+    dties: float,
+    cover: float,
     progress=None,
     continuous_vertical_bars: bool = False,
     bottom_story_cover: str = "none",
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Design frame-data columns and run SMRF checks using Excel and ETABS inputs.
+) -> tuple[pd.DataFrame, list, pd.DataFrame]:
+    """Design every column and run the SMRF checks.
 
-    Required Excel tables are read from FRAME DATA!B2, CONNECTIVITY!B2,
-    FACTORED LOADS!B2, and BEAM DESIGN!B8. The SMRF toggle and column bar,
-    tie, and cover inputs are read from OVERWRITES!F3 and I10:I12.
+    ``tables`` holds FRAME DATA, CONNECTIVITY and FACTORED LOADS, and for SMRF
+    LOCAL AXES and POINTS (the column orientation). ``beam_design`` is the beam
+    design result (its bars are used at the joints). Returns the report, its
+    column groups and the joint results.
 
     Args:
-        write_joint_sheet: Retained for existing macro compatibility. Joint checks
-            are now included in the consolidated COLUMN DESIGN output only.
         progress: Optional callable that receives one status text at a time
             (column mark, level, end, load combination and current check) for the
             loading window.
@@ -3968,21 +3805,12 @@ def _run_column_design_from_excel(
             lightest of its own layouts that has at least as many bars as the
             level above and passes every check.
     """
-    try:
-        workbook = xw.Book.caller()
-    except Exception:
-        workbook = xw.books.active
-
-    overwrites = workbook.sheets["OVERWRITES"]
-    frame_data = _read_excel_table(workbook.sheets["FRAME DATA"], "B2")
-    connectivity = _read_excel_table(workbook.sheets["CONNECTIVITY"], "B2")
-    factored_loads = _read_excel_table(workbook.sheets["FACTORED LOADS"], "B2")
-    beam_design = _read_excel_table(workbook.sheets["BEAM DESIGN"], "B8")
-
-    is_smrf = overwrites.range("F3").value is True
-    dmain = _numeric(overwrites.range("I10").value, "I10 (column main bar)", "OVERWRITES")
-    dties = _numeric(overwrites.range("I11").value, "I11 (column tie bar)", "OVERWRITES")
-    cover = _numeric(overwrites.range("I12").value, "I12 (column cover)", "OVERWRITES")
+    _clear_end_force_index()
+    frame_data = _clean_table(tables.get("FRAME DATA"))
+    connectivity = _clean_table(tables.get("CONNECTIVITY"))
+    factored_loads = _clean_table(tables.get("FACTORED LOADS"))
+    beam_design = _clean_table(beam_design)
+    dmain, dties, cover = float(dmain), float(dties), float(cover)
     if min(dmain, dties, cover) <= 0:
         raise ValueError("Column main-bar diameter, tie diameter, and cover must be positive.")
 
@@ -4015,18 +3843,9 @@ def _run_column_design_from_excel(
             )
 
     if is_smrf:
-        from etabs_api import ETABSConnector
-
-        etabs = ETABSConnector()
-        if not etabs.connect():
-            raise RuntimeError("Could not connect to ETABS for column orientation tables.")
-        local_axes = _as_etabs_dataframe(
-            etabs.get_data("Frame Assignments - Local Axes"),
-            "Frame Assignments - Local Axes",
-        )
-        point_table = _as_etabs_dataframe(
-            etabs.get_data("Point Object Connectivity"), "Point Object Connectivity"
-        )
+        local_axes = _as_etabs_dataframe(tables.get("LOCAL AXES"),
+                                         "Frame Assignments - Local Axes")
+        point_table = _as_etabs_dataframe(tables.get("POINTS"), "Point Object Connectivity")
         frame_angles = _extract_frame_angles(local_axes)
         point_coordinates = _extract_point_coordinates(point_table)
     else:
@@ -4995,12 +4814,8 @@ def _run_column_design_from_excel(
             else "N/A - seismic design is off"
         ),
     )
-    if progress is not None:
-        progress("Writing the COLUMN DESIGN report to Excel...")
-    output_sheet = _new_output_sheet(workbook, "COLUMN DESIGN")
-    _write_consolidated_column_report(output_sheet, report, report_groups)
-    workbook.save()
-    return report, joint_results
+    _clear_end_force_index()
+    return report, report_groups, joint_results
 
 
 BOTTOM_COVER_MODES = ("none", "enlarge", "bars")
@@ -5066,27 +4881,21 @@ VERTICAL_BAR_OPTIONS = {
 }
 
 
-def run_column_design_from_excel(
-    write_joint_sheet: bool = True,
+def ask_column_design_options(
     continuous_vertical_bars: bool | None = None,
     bottom_story_cover: str | None = None,
-) -> tuple[pd.DataFrame, pd.DataFrame] | None:
-    """Run the column design workflow while showing its active process in a GUI.
+    normal_cover: float = 40.0,
+) -> tuple[bool, str] | None:
+    """Ask the column design questions that are not answered yet.
 
-    ``continuous_vertical_bars`` and ``bottom_story_cover`` (one of
-    ``BOTTOM_COVER_MODES``) are asked for in dialogs when they are not given.
-    Closing a dialog cancels the run and returns ``None``.
+    Returns ``(continuous_vertical_bars, bottom_story_cover)``, or ``None`` when
+    a dialog is closed. An automatic resize loop asks once and passes the
+    answers to every run.
     """
-    from utilities._gui_helpers import LoadingWindow, select_option
+    from utilities._gui_helpers import select_option
 
     if bottom_story_cover is None:
-        try:
-            workbook = xw.Book.caller()
-        except Exception:
-            workbook = xw.books.active
-        normal = _numeric(
-            workbook.sheets["OVERWRITES"].range("I12").value, "I12 (column cover)", "OVERWRITES"
-        )
+        normal = float(normal_cover)
         bottom = CODE.column_strength.earth_contact_cover
         bottom_story_cover = "none"
         if bottom > normal:
@@ -5126,14 +4935,7 @@ def run_column_design_from_excel(
         if chosen is None:
             return None
         continuous_vertical_bars = VERTICAL_BAR_OPTIONS[chosen]
-
-    with LoadingWindow("Designing columns...") as window:
-        return _run_column_design_from_excel(
-            write_joint_sheet,
-            progress=window.update,
-            continuous_vertical_bars=continuous_vertical_bars,
-            bottom_story_cover=bottom_story_cover,
-        )
+    return continuous_vertical_bars, bottom_story_cover
 
 
 def _column_story_sort_key(story: object) -> tuple[int, str]:
@@ -6246,102 +6048,59 @@ def generate_dxf_column_schedule(
     return
 
 
-def _read_column_report_sheet(sheet) -> pd.DataFrame:
-    """Read the COLUMN DESIGN report back, with its worksheet header names.
-
-    Label, name, story and end are merged cells on the sheet; they are filled
-    down so every row carries them.
-    """
-    used_last_row = sheet.used_range.last_cell.row
-    header_values = sheet.range((9, 2), (9, sheet.used_range.last_cell.column)).value
-    last_column = max(
-        (index + 2 for index, value in enumerate(header_values) if value is not None),
-        default=0,
-    )
-    if last_column == 0 or used_last_row < 10:
-        return pd.DataFrame()
-    headers = sheet.range((9, 2), (9, last_column)).value
-    values = sheet.range((10, 2), (used_last_row, last_column)).options(ndim=2).value
-    report = pd.DataFrame(values, columns=headers).dropna(how="all")
-    identifiers = ("Column Label", "Unique Name", "Story", "End")
-    if any(name not in report.columns for name in identifiers):
-        return pd.DataFrame()
-    for column in identifiers:
-        report[column] = report[column].ffill()
-    return report.dropna(subset=["Unique Name"])
-
-
 INNER_TIE_STYLE_LABELS = {
     "Crossties (one tie with a hook at each end)": "crossties",
     "Closed inner hoops (each enclosing two bar positions)": "hoops",
 }
 
 
-def export_column_cad_drawings(
-    output_directory: str | None = None, inner_tie_style: str | None = None
-) -> list[str]:
-    """Export one stacked all-story column schedule DXF.
+def ask_inner_tie_style() -> str | None:
+    """Ask whether interior ties are drawn as crossties or closed inner hoops."""
+    from utilities._gui_helpers import select_option
 
-    Both arguments are asked for in a dialog when they are not given:
-    the output folder, and whether interior ties are drawn as crossties or as
-    closed inner hoops.
-    """
-    from utilities._gui_helpers import (
-        LoadingWindow,
-        select_option,
-        select_output_directory,
+    chosen = select_option(
+        "Column Schedule - Interior Ties",
+        "How should the interior ties be drawn?",
+        list(INNER_TIE_STYLE_LABELS),
     )
+    return None if chosen is None else INNER_TIE_STYLE_LABELS[chosen]
 
-    destination = output_directory or select_output_directory()
-    if not destination:
-        return []
+
+def export_column_cad_drawings(
+    report: pd.DataFrame,
+    output_directory: str,
+    main_bar_diameter: float,
+    cover: float,
+    is_smrf: bool,
+    inner_tie_style: str,
+    connectivity: pd.DataFrame,
+) -> list[str]:
+    """Export one stacked all-story column schedule DXF from the design report."""
+    destination = output_directory
     if not os.path.isdir(destination):
         raise NotADirectoryError(f"DXF output directory does not exist: {destination}")
-    if inner_tie_style is None:
-        chosen = select_option(
-            "Column Schedule - Interior Ties",
-            "How should the interior ties be drawn?",
-            list(INNER_TIE_STYLE_LABELS),
-        )
-        if chosen is None:
-            return []  # dialog closed without confirming
-        inner_tie_style = INNER_TIE_STYLE_LABELS[chosen]
     if inner_tie_style not in INNER_TIE_STYLES:
         raise ValueError(f"inner_tie_style must be one of {INNER_TIE_STYLES}.")
 
-    try:
-        workbook = xw.Book.caller()
-    except Exception:
-        workbook = xw.books.active
-    report = _read_column_report_sheet(workbook.sheets["COLUMN DESIGN"])
+    report = column_report_display(report)
     if not report.empty:
         report = report.drop_duplicates(subset=["Unique Name"], keep="first")
     if report.empty:
-        raise ValueError("COLUMN DESIGN contains no designed columns to export.")
-
-    overwrite_sheet = workbook.sheets["OVERWRITES"]
-    main_bar_diameter = _numeric(
-        overwrite_sheet.range("I10").value, "I10 (column main bar)", "OVERWRITES"
-    )
-    cover = _numeric(
-        overwrite_sheet.range("I12").value, "I12 (column cover)", "OVERWRITES"
-    )
-    is_smrf = overwrite_sheet.range("F3").value is True
+        raise ValueError("There are no designed columns to export.")
     os.makedirs(destination, exist_ok=True)
     output_path = os.path.join(destination, "Column_Schedule.dxf")
-    with LoadingWindow("Generating DXF column schedules and reinforced sections..."):
-        generate_dxf_column_schedule(
-            report,
-            output_path,
-            main_bar_diameter,
-            cover,
-            is_smrf,
-            inner_tie_style,
-            story_order=_story_order_from_stacks(
-                _read_excel_table(workbook.sheets["CONNECTIVITY"], "B2"),
-                dict(zip(report["Unique Name"].astype(str), report["Story"].astype(str))),
-            ),
-        )
+    generate_dxf_column_schedule(
+        report,
+        output_path,
+        main_bar_diameter,
+        cover,
+        is_smrf,
+        inner_tie_style,
+        story_order=_story_order_from_stacks(
+            _clean_table(connectivity),
+            dict(zip(report["Unique Name"].astype(str), report["Story"].astype(str))),
+        ),
+    )
     return [output_path]
 
 
@@ -6561,43 +6320,18 @@ def build_column_calc_report(report: pd.DataFrame, filepath: str, information: l
     )
 
 
-def export_column_calculations(filepath: str | None = None) -> str | None:
-    """Triggered by the EXPORT CALC button: save the column calculation PDF."""
-    from utilities._gui_helpers import LoadingWindow, select_save_file, show_warning
-
-    try:
-        workbook = xw.Book.caller()
-    except Exception:
-        workbook = xw.books.active
-    report = _read_column_report_sheet(workbook.sheets["COLUMN DESIGN"])
-    if report.empty:
-        show_warning("Design the columns first: COLUMN DESIGN has no design results.")
-        return None
-    # Back to the internal field names and end letters used by the design.
-    internal = {label: field for field, label in COLUMN_REPORT_LABELS.items()}
-    report = report.rename(columns={name: internal.get(name, name) for name in report.columns})
-    report["End"] = report["End"].map(
-        lambda end: {"Bottom (I)": "I", "Top (J)": "J"}.get(end, end)
-    )
-
-    filepath = filepath or select_save_file(default_name="Column_Design_Calculations")
-    if not filepath:
-        return None  # User canceled the save dialog
-
-    overwrites = workbook.sheets["OVERWRITES"]
+def export_column_pdf(report: pd.DataFrame, path: str, is_smrf: bool, dmain: float,
+                      dties: float, cover: float) -> str | None:
+    """The column calculation report (PDF); None when LaTeX fails."""
     information = [
         ("Design code", "ACI 318M-14"),
-        ("Seismic design (SMRF)", "Yes" if overwrites.range("F3").value is True else "No"),
-        ("Vertical bar diameter (mm)", number(overwrites.range("I10").value, 0)),
-        ("Tie bar diameter (mm)", number(overwrites.range("I11").value, 0)),
-        ("Concrete cover (mm)", number(overwrites.range("I12").value, 0)),
+        ("Seismic design (SMRF)", "Yes" if is_smrf else "No"),
+        ("Vertical bar diameter (mm)", number(dmain, 0)),
+        ("Tie bar diameter (mm)", number(dties, 0)),
+        ("Concrete cover (mm)", number(cover, 0)),
         ("Values shown", "Governing load combination at each end of each column"),
     ]
-    with LoadingWindow("Writing the column calculation report..."):
-        saved = build_column_calc_report(report, filepath, information)
-    if saved is None:
-        show_warning("The PDF could not be written. Check that LaTeX (pdflatex) is installed.")
-    return saved
+    return build_column_calc_report(report, path, information)
 
 
 if __name__ == "__main__":

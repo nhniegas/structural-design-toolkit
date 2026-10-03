@@ -27,14 +27,14 @@ jobs:
         with:
           python-version: "3.14"
 
-      # Zip of the committed workbooks + Python source (git archive skips caches and ignored files).
-      - name: Package workbooks and source
+      # Zip of the committed Python source and docs (git archive skips caches and ignored files).
+      - name: Package the source
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
-          $wanted = 'main.py', 'requirements.txt', 'README.md', 'design', 'etabs_api', 'utilities', 'spreadsheets', 'doc'
+          $wanted = 'main.py', 'pyproject.toml', 'requirements.txt', 'README.md', 'design', 'etabs_api', 'utilities', 'doc'
           $paths = $wanted | Where-Object { git ls-files -- $_ }
-          git archive --format=zip --output "dist/structural-spreadsheets-${{ github.ref_name }}.zip" HEAD @paths
+          git archive --format=zip --output "dist/structural-toolkit-${{ github.ref_name }}.zip" HEAD @paths
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       # Standalone geotech tool (same build as geotech/build_exe.bat). Skipped if the script is not committed.

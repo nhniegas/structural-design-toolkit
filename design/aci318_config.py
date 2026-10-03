@@ -12,7 +12,7 @@ WHY A PYTHON MODULE (instead of JSON / YAML / Excel)?
 
 WHAT DOES NOT BELONG HERE
     Project inputs that change from job to job (bar sizes, cover, fc', fy, SMRF
-    toggle) stay in the Excel ``OVERWRITES`` sheet or in the ETABS model.
+    toggle) are asked by ``xs beams`` / ``xs columns`` or come from the ETABS model.
 
 UNITS: N, mm, MPa unless a field name says otherwise.
 """

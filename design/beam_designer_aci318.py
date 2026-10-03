@@ -1,8 +1,8 @@
-"""Beam design and ETABS/Excel integration for ACI 318M-14 workflows.
+"""Beam design for ACI 318M-14: flexure, shear, torsion, SMRF, detailing and schedules.
 
-Contains beam flexure, shear, torsion, seismic, detailing, and schedule design,
-plus the beam-specific ETABS extraction and Excel workflows. Wind and composite
-column routines are intentionally excluded.
+The terminal workflow (``xs beams``) is in ``design/concrete_workflow.py``;
+this module designs from tables (``design_beams``) and writes the results
+file, the DXF schedules and the calculation report.
 """
 
 import math
@@ -13,10 +13,14 @@ from typing import Dict, List
 
 import ezdxf
 import pandas as pd
-import xlwings as xw
 
 from design.aci318_config import CODE, AciCode
-from etabs_api import ETABSConnector, ETABSDataExporter
+from design.beam_deflection import (
+    DEFLECTION_COLUMNS,
+    LIMIT_DAMAGED,
+    LIMIT_NOT_DAMAGED,
+    add_deflection_columns,
+)
 from utilities._calc_report import (
     MemberReport,
     ReportTable,
@@ -24,27 +28,6 @@ from utilities._calc_report import (
     build_calc_report,
     number,
 )
-from utilities._gui_helpers import (
-    DualListboxSelector,
-    LoadingWindow,
-    select_output_directory,
-    select_save_file,
-    show_warning,
-)
-
-
-def _clear_table_area(sheet, start_cell: str) -> None:
-    """Clear from ``start_cell`` to the end of the sheet's used range.
-
-    A previous run can be longer than the next one. Clearing only the block that
-    touches ``start_cell`` would leave those older rows behind, below the table.
-    """
-    start = sheet.range(start_cell)
-    last = sheet.used_range.last_cell
-    if last.row >= start.row and last.column >= start.column:
-        sheet.range((start.row, start.column), (last.row, last.column)).clear()
-    else:
-        start.clear()
 
 
 GRAVITY_BEAM_STATUS = "Beam-Framed / Floating"  # neither end is on a column or wall
@@ -1203,8 +1186,18 @@ def execute_beam_design(
     gravity_combo_name: str,
     Pu_axial_load: float = 50.0,
     code: AciCode = CODE,
+    progress=None,
 ) -> pd.DataFrame:
-    """Executes the full beam design pipeline and returns the results DataFrame."""
+    """Executes the full beam design pipeline and returns the results DataFrame.
+
+    ``progress`` (optional) receives one status text at a time: the beam, its
+    level, the load combination and the check being performed.
+    """
+
+    def report(member, story, combo, check) -> None:
+        if progress is not None:
+            progress(f"Beam {member}  |  Level {story}\nCombo: {combo}\nCheck: {check}")
+
     detailing = code.beam_detailing
     seismic_cfg = code.beam_seismic
 
@@ -1237,6 +1230,8 @@ def execute_beam_design(
             combos = df_forces_beam["Combo"].unique()
 
             for combo in combos:
+                report(u_name, prop_row.get("Story", "-"), combo,
+                       "Demands: Mu, Vu and Tu at the supports and midspan")
                 df_combo = df_forces_beam[df_forces_beam["Combo"] == combo]
 
                 df_left_m = df_combo[df_combo["Station"] <= m_left_boundary]
@@ -1357,8 +1352,14 @@ def execute_beam_design(
         smrf_flexure_check = "N/A"
         smrf_rho_check = "N/A"
 
+        story = b_row.get("Story", "-")
+        moments = df_b[["Mu_left", "Mu_mid", "Mu_right"]].max(axis=1)
+        governing = df_b.loc[moments.idxmax(), "Combo"] if len(df_b) else "-"
         while True:
             # --- STEP 3A: Flexure Design ---
+            report(unique_name, story,
+                   f"envelope of {df_b['Combo'].nunique()} (largest moment: {governing})",
+                   "Flexure at the left support, midspan and right support")
             flex_eng_left, flex_eng_mid, flex_eng_right = (
                 BeamFlexureDesign(
                     b_width, b_height, fc_val, fy_val, fyt_val, d_m, d_s, c_cover,
@@ -1484,6 +1485,9 @@ def execute_beam_design(
             }
 
             # --- STEP 3B: Seismic & Shear Design ---
+            if seismic_here:
+                report(unique_name, story, gravity_combo_name or "-",
+                       "SMRF moment strength ratios and probable-moment shear")
             seismic_checker = BeamSeismicDesign(
                 flex_engines, span_ln, Pu_axial_load, seismic_here, code
             )
@@ -1563,6 +1567,8 @@ def execute_beam_design(
                     ("Interior Web (Gov. 2h)", Vu_M, df_c_top["Tu_mid_2h"], "M"),
                     ("Right Support (d_eff)", Vu_R, df_c_top["Tu_right"], "R"),
                 ]:
+                    report(unique_name, story, combo_name,
+                           f"Shear and torsion, {zone_name.split(' (')[0].lower()}")
                     # Use the shallower face-specific effective depth as the conservative transverse-design depth.
                     d_eff_z = get_location_effective_depth(zone_name, flex_engines)
                     n_legs = min_legs
@@ -1864,6 +1870,7 @@ _BEAM_RESULT_LABELS = {
     "Vc_zero_right": "Concrete shear suppressed (right)",
     "Anchorage_Check": "Stirrup anchorage check",
     "Alternating_Tie_Check": "Alternating tie check",
+    **DEFLECTION_COLUMNS,
     "Design_Status": "Design status",
 }
 
@@ -1885,408 +1892,175 @@ def restore_beam_result_labels(df: pd.DataFrame) -> pd.DataFrame:
     return df.rename(columns=mapping)
 
 
-def extract_forces_properties_from_etabs():
-    """Triggers the full workflow to extract design forces and section properties
-    from ETABS, process materials/dimensions, and export results to Excel.
+def _beam_sort_key(name) -> tuple:
+    """Floor, type (BX, BY, GX, GY), number and suffix of a beam mark."""
+    name_str = str(name).upper()
+    priority = next((i for i, t in enumerate(("BX", "BY", "GX", "GY"), start=1)
+                     if t in name_str), 5)
+    match = re.search(r"^(.*?)(BX|BY|GX|GY)-(\d+)(.*)$", name_str)
+    if match:
+        return (match.group(1), priority, int(match.group(3)), match.group(4))
+    return (name_str, priority, 0, "")
+
+
+BEAM_BAR_INPUTS = ("dm", "ds", "dw", "fyw", "cc")  # main, stirrup, web bar, web fy, cover
+
+
+def prepare_beam_table(frame_df: pd.DataFrame, conn_df: pd.DataFrame,
+                       bars: dict) -> pd.DataFrame:
+    """The beams of FRAME DATA with their support status and the bar inputs.
+
+    ``bars`` has dm (main bar), ds (stirrup), dw (web bar) in mm, fyw (web bar
+    yield strength, MPa) and cc (cover, mm). One row per beam, sorted by floor,
+    type and mark.
     """
-    etabs_instance = ETABSConnector()
+    frame_df = frame_df.copy()
+    conn_df = conn_df.copy()
+    frame_df.columns = [str(c).strip() for c in frame_df.columns]
+    conn_df.columns = [str(c).strip() for c in conn_df.columns]
+    support_df = identify_cantilever_beams(frame_df, conn_df)
+    beam_df = frame_df.merge(support_df, on="UniqueName", how="left")
+    if "DesignType" in beam_df.columns:
+        beam_df = beam_df[beam_df["DesignType"] == "Beam"].copy()
+    beam_df = beam_df.drop_duplicates(subset=["UniqueName"], keep="first")
+    cols = [c for c in beam_df.columns if c != "SupportStatus"]
+    if "SectProp" in cols:
+        cols.insert(cols.index("SectProp") + 1, "SupportStatus")
+    beam_df = beam_df[cols]
+    for key in BEAM_BAR_INPUTS:
+        beam_df[key] = float(bars[key])
+    beam_df["_sort_key"] = beam_df["UniqueName"].apply(_beam_sort_key)
+    return beam_df.sort_values("_sort_key").drop(columns="_sort_key").reset_index(drop=True)
 
-    etabs_instance.connect()
-    # tabs_instance.open_model(file_path)
-    # etabs_instance.run_analysis()
 
-    # Instantiate exporter passing the connected etabs_instance
-    exporter = ETABSDataExporter(etabs_instance)
+DEFLECTION_LIMIT_OPTIONS = {
+    f"Yes: L/{LIMIT_DAMAGED} after partitions are installed": LIMIT_DAMAGED,
+    f"No: L/{LIMIT_NOT_DAMAGED}": LIMIT_NOT_DAMAGED,
+}
 
-    # 1. Load Combination Selection
+
+def _deflection_settings_path() -> str:
+    return os.path.join(os.path.expanduser("~"), ".xlwings_structural", "beam_deflection.json")
+
+
+def ask_deflection_limit() -> int | None:
+    """Ask the long-term deflection limit (ACI Table 24.2.2); remembered for next time."""
+    import json
+
+    from utilities._gui_helpers import select_option
+
+    path = _deflection_settings_path()
     try:
-        load_combos_filtered = exporter.get_load_combinations(None)
-        load_combos_selected = DualListboxSelector(
-            "Select Load Combinations", load_combos_filtered
-        ).show()
-    except Exception as e:
-        # Captures the actual error generated by Python or ETABS and displays it
-        show_warning(title="ETABS API Error", message=f"An error occurred: {str(e)}")
-        return
-
-    etabs_instance.clear_load_combinations(load_combos_filtered)
-    etabs_instance.set_load_combinations(load_combos_selected)
-
-    with LoadingWindow("Running Concrete Design..."):
-        etabs_instance.run_concrete_design()
-
-    # 2. Member Selection
-    with LoadingWindow("Extracting Members..."):
-        members = exporter.get_available_members(load_combos_selected)
-
-    def member_sort_key(name):
-        """Sort a member name by floor prefix, beam family, and original mark."""
-        name_upper = str(name).upper()
-
-        # 1. Assign type priority
-        if "BX" in name_upper:
-            type_priority = 1
-        elif "BY" in name_upper:
-            type_priority = 2
-        elif "GX" in name_upper:
-            type_priority = 3
-        elif "GY" in name_upper:
-            type_priority = 4
-        else:
-            type_priority = 5
-
-        # 2. Extract the floor prefix (everything before BX, BY, GX, or GY)
-        match = re.search(r"^(.*?)(BX|BY|GX|GY)", name_upper)
-        floor_prefix = match.group(1) if match else name_upper
-
-        # 3. Sort by Floor first, then Type, then Name Alphabetically
-        return (floor_prefix, type_priority, name)
-
-    # Apply the custom sort to the extracted members
-    sorted_members = sorted(members, key=member_sort_key)
-
-    # Pass the cleanly sorted list to your UI
-    members_selected = DualListboxSelector(
-        "Select Members to Design", sorted_members
-    ).show()
-
-    with LoadingWindow("Extracting Data..."):
-        # 3. Export Operations
-        exporter.display_selected_inputs(
-            load_combos=load_combos_selected,
-            members=members_selected,
-            sheet_name="OVERWRITES",
-            combo_cell="B6",
-            member_cell="C6",
-        )
-
-        # Populate Factored Gravity Load dropdown menu
-        exporter.display_factored_gravity_loads_menu(
-            load_combos=load_combos_selected,
-            sheet_name="OVERWRITES",
-            dropdown_cell="F4",  # Cell coordinate containing '*default'
-        )
-
-        exporter.display_factored_loads(
-            load_combos_selected=load_combos_selected,
-            members_selected=members_selected,
-            sheet_name="FACTORED LOADS",
-            start_cell="B2",
-        )
-
-        exporter.display_frame_data(
-            members_selected=members_selected,
-            sheet_name="FRAME DATA",
-            start_cell="B2",
-            load_combos_selected=load_combos_selected,
-        )
-
-        exporter.display_connectivity_data(
-            sheet_name="CONNECTIVITY",
-            start_cell="B2",
-            load_combos_selected=load_combos_selected,
-        )
+        with open(path, encoding="utf-8") as handle:
+            last = int(json.load(handle).get("long_limit_divisor", LIMIT_DAMAGED))
+    except (OSError, ValueError):
+        last = LIMIT_DAMAGED
+    chosen = select_option(
+        "Beam Design - Deflection",
+        "Do the beams support partitions or finishes likely to be damaged by deflection?",
+        list(DEFLECTION_LIMIT_OPTIONS),
+        default_index=0 if last == LIMIT_DAMAGED else 1,
+    )
+    if chosen is None:
+        return None
+    divisor = DEFLECTION_LIMIT_OPTIONS[chosen]
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump({"long_limit_divisor": divisor}, handle)
+    return divisor
 
 
-def extract_beam_design_data(
-    frame_sheet_name: str = "FRAME DATA",
-    frame_cell_ref: str = "B2",
-    conn_sheet_name: str = "CONNECTIVITY",
-    conn_cell_ref: str = "B2",
-    overwrites_sheet_name: str = "OVERWRITES",
-    dl_cell: str = "I4",  # Main Bar Ø (mm)
-    ds_cell: str = "I5",  # Stirrups Bar Diameter Ø (mm)
-    dw_cell: str = "I6",  # Web Bar Diameter Ø (mm)
-    fyw_cell: str = "I7",  # Web Bar, Fyw (Mpa)
-    cc_cell: str = "I8",  # Concrete Cover (mm)
-    output_sheet_name: str = "BEAM DESIGN",
-    output_cell_ref: str = "B8",
-    clear_start_cell: str = "B8",
-    header_color: tuple = (189, 215, 238),
-) -> pd.DataFrame:
-    """Processes full frame and connectivity data to identify support conditions,
-    filters the final table to display ONLY 'Beam' members, logically sorts them,
-    removes duplicates, and exports to Excel.
+def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict,
+                 long_limit_divisor: int = LIMIT_DAMAGED, progress=None) -> pd.DataFrame:
+    """Design every beam from the extracted tables; deflection when service loads exist.
+
+    ``tables`` holds FACTORED LOADS, FRAME DATA, CONNECTIVITY and (optional)
+    SERVICE LOADS. Returns the results, two rows (TOP, BOTTOM) per beam.
     """
-    with LoadingWindow("Extracting Beam Design Data..."):
-        try:
-            wb = xw.Book.caller()
-        except Exception:
-            wb = xw.books.active
-
-        # 1. Read input DataFrames from Excel
-        frame_sheet = wb.sheets[frame_sheet_name]
-        conn_sheet = wb.sheets[conn_sheet_name]
-        overwrites_sheet = wb.sheets[overwrites_sheet_name]
-
-        frame_df = (
-            frame_sheet.range(frame_cell_ref)
-            .options(pd.DataFrame, expand="table", index=False)
-            .value
-        )
-        conn_df = (
-            conn_sheet.range(conn_cell_ref)
-            .options(pd.DataFrame, expand="table", index=False)
-            .value
-        )
-
-        # Clean column headers
-        frame_df.columns = [str(c).strip() for c in frame_df.columns]
-        conn_df.columns = [str(c).strip() for c in conn_df.columns]
-
-        # 2. Get support status using ALL frame and connectivity data
-        support_df = identify_cantilever_beams(frame_df, conn_df)
-
-        # 3. Merge SupportStatus onto full frame_df
-        beam_df = frame_df.merge(support_df, on="UniqueName", how="left")
-
-        # 4. Filter to display ONLY 'Beam' DesignType members and REMOVE DUPLICATES
-        if "DesignType" in beam_df.columns:
-            beam_df = beam_df[beam_df["DesignType"] == "Beam"].copy()
-
-        # --- NEW: Drop duplicate stations/segments, keeping only one row per beam ---
-        if "UniqueName" in beam_df.columns:
-            beam_df = beam_df.drop_duplicates(subset=["UniqueName"], keep="first")
-        # ----------------------------------------------------------------------------
-
-        # 5. Reorder SupportStatus right after SectProp
-        cols = list(beam_df.columns)
-        if "SupportStatus" in cols:
-            cols.remove("SupportStatus")
-        if "SectProp" in cols:
-            sect_idx = cols.index("SectProp")
-            cols.insert(sect_idx + 1, "SupportStatus")
-        beam_df = beam_df[cols]
-
-        # 6. Append reinforcement overwrite values from OVERWRITES sheet
-        beam_df["fyw"] = overwrites_sheet.range(fyw_cell).value
-        beam_df["dm"] = overwrites_sheet.range(dl_cell).value
-        beam_df["ds"] = overwrites_sheet.range(ds_cell).value
-        beam_df["dw"] = overwrites_sheet.range(dw_cell).value
-        beam_df["cc"] = overwrites_sheet.range(cc_cell).value
-
-        # 6.5. Sort the DataFrame logically: Floor -> Type (BX,BY,GX,GY) -> Number -> Suffix
-        if "UniqueName" in beam_df.columns:
-
-            def extract_sort_key(name):
-                """Create a floor/type/numeric-mark/suffix key for a beam name."""
-                name_str = str(name).upper()
-
-                # Assign type priority
-                if "BX" in name_str:
-                    prio = 1
-                elif "BY" in name_str:
-                    prio = 2
-                elif "GX" in name_str:
-                    prio = 3
-                elif "GY" in name_str:
-                    prio = 4
-                else:
-                    prio = 5
-
-                # Regex to split e.g., "PD2BX-44A" into ("PD2", "BX", "44", "A")
-                match = re.search(r"^(.*?)(BX|BY|GX|GY)-(\d+)(.*)$", name_str)
-                if match:
-                    floor = match.group(1)
-                    num = int(
-                        match.group(3)
-                    )  # Converts string '7' to integer 7 so it sorts before 44
-                    suffix = match.group(4)
-                    return (floor, prio, num, suffix)
-
-                # Fallback for unrecognized naming formats
-                return (name_str, prio, 0, "")
-
-            # Apply the sorting logic via a temporary column, then drop it
-            beam_df["_sort_key"] = beam_df["UniqueName"].apply(extract_sort_key)
-            beam_df = (
-                beam_df.sort_values(by="_sort_key")
-                .drop(columns=["_sort_key"])
-                .reset_index(drop=True)
-            )
-
-        # 7. Clear target area starting from clear_start_cell
-        beam_sheet = wb.sheets[output_sheet_name]
-        _clear_table_area(beam_sheet, clear_start_cell)
-
-        # 8. Write filtered DataFrame at output_cell_ref and apply header fill
-        beam_sheet.range(output_cell_ref).options(index=False).value = beam_df
-
-        header_range = beam_sheet.range(output_cell_ref).expand("right")
-        header_range.color = header_color
-
-        print(
-            f"Beam design data successfully exported to {output_sheet_name}!{output_cell_ref}"
-        )
-        return beam_df
+    beam_props = prepare_beam_table(tables["FRAME DATA"], tables["CONNECTIVITY"], bars)
+    results = execute_beam_design(
+        df_beam_props=beam_props,
+        df_frame_forces=tables["FACTORED LOADS"],
+        enable_seismic_design=smrf,
+        gravity_combo_name=gravity_combo,
+        progress=progress,
+    )
+    service = tables.get("SERVICE LOADS")
+    if service is not None and len(service) and not results.empty:
+        results = add_deflection_columns(results, service, long_limit_divisor,
+                                         tables["CONNECTIVITY"], progress=progress)
+    return sort_beam_rows(results)
 
 
-def run_beam_design_from_excel():
-    """Triggered by the DESIGN REINFORCEMENTS button in Excel or IDE."""
-    with LoadingWindow("Designing Reinforcements..."):
-        # 1. Connect to Excel (Handles both VBA button clicks and IDE testing)
-        try:
-            wb = xw.Book.caller()
-        except Exception:
-            # Fallback for IDE testing: connects to the currently active Excel window
-            wb = xw.books.active
+_BEAM_GROUP_FILLS = ("BDD7EE", "E2EFDA", "FFF2CC", "FCE4D6", "DEEBF7")
 
-        # 2. Assign Sheets
-        sht_ow = wb.sheets["OVERWRITES"]
-        sht_loads = wb.sheets["FACTORED LOADS"]
-        sht_design = wb.sheets["BEAM DESIGN"]
 
-        # 3. Read Parameters (Assuming linked checkbox is F3 and combo is F4)
-        enable_seismic_design = sht_ow.range("F3").value is True
-        gravity_combo_name = sht_ow.range("F4").value
+def write_beam_results_xlsx(results: pd.DataFrame, path: str) -> str:
+    """The beam design results as a formatted Excel file (no Excel needed)."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Border, Font, PatternFill, Side
+    from openpyxl.utils import get_column_letter
 
-        # 4. Extract DataFrames
-        # expand='table' pulls the contiguous data block starting at A1 (adjusted below based on your setup)
-        df_frame_forces = (
-            sht_loads.range("B2")
-            .options(pd.DataFrame, header=1, index=False, expand="table")
-            .value
-        )
-        df_beam_props = (
-            sht_design.range("B8")
-            .options(pd.DataFrame, header=1, index=False, expand="table")
-            .value
-        )
+    table = display_beam_result_labels(results)
+    cols = table.columns.tolist()
+    starts = [0]
+    for label in ("n₍left, 1₎", "Side bars / face (governing)", "Stirrup legs",
+                  "Stirrup anchorage check"):
+        starts.append(cols.index(label) if label in cols else len(cols))
+    book = Workbook()
+    sheet = book.active
+    sheet.title = "BEAM DESIGN"
+    sheet.append(cols)
+    for row in table.astype(object).where(pd.notna(table), None).itertuples(index=False):
+        sheet.append(list(row))
+    thin, thick = Side(style="thin"), Side(style="medium")
+    for index, name in enumerate(cols, start=1):
+        group = max(g for g, start in enumerate(starts) if index - 1 >= start)
+        cell = sheet.cell(row=1, column=index)
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill("solid", fgColor=_BEAM_GROUP_FILLS[min(group, 4)])
+        cell.border = Border(top=thick, bottom=thick)
+        width = max(len(str(name)), *(len(str(v)) for v in table.iloc[:, index - 1]
+                                      .head(200).tolist())) if len(table) else len(str(name))
+        sheet.column_dimensions[get_column_letter(index)].width = min(max(width + 2, 8), 45)
+    grey = PatternFill("solid", fgColor="F2F2F2")
+    for first in range(2, len(table) + 2, 2):  # two rows per beam: TOP and BOTTOM
+        for row in (first, first + 1):
+            if row > len(table) + 1:
+                continue
+            for column in range(1, len(cols) + 1):
+                cell = sheet.cell(row=row, column=column)
+                if (first // 2) % 2 == 1:
+                    cell.fill = grey
+                if row == first + 1:
+                    cell.border = Border(bottom=thin)
+    sheet.freeze_panes = "C2"
+    book.save(path)
+    return path
 
-        # 5. Execute the Design Engine
-        df_beam_design_results = execute_beam_design(
-            df_beam_props=df_beam_props,
-            df_frame_forces=df_frame_forces,
-            enable_seismic_design=enable_seismic_design,
-            gravity_combo_name=gravity_combo_name,
-        )
 
-        df_beam_design_results = sort_beam_rows(df_beam_design_results)
-
-        df_excel = display_beam_result_labels(df_beam_design_results)
-
-        # 6. Paste Results Back to Excel (Starting at B8), replacing any older table
-        _clear_table_area(sht_design, "B8")
-        sht_design.range("B8").options(index=False).value = df_excel
-
-        # 7. Apply Advanced Visual Formatting (Shifted to B8)
-        cols = df_excel.columns.tolist()
-        num_rows = len(df_beam_design_results)
-        num_cols = len(cols)
-
-        if num_rows > 0:
-            start_row = 8
-            start_col = 2  # Column B
-
-            # Dynamically find 0-based column offsets for all categories
-            idx_main = cols.index("n₍left, 1₎") if "n₍left, 1₎" in cols else num_cols
-            idx_web = (
-                cols.index("Side bars / face (governing)")
-                if "Side bars / face (governing)" in cols
-                else num_cols
-            )
-            idx_stirrups = (
-                cols.index("Stirrup legs") if "Stirrup legs" in cols else num_cols
-            )
-            idx_check = (
-                cols.index("Stirrup anchorage check")
-                if "Stirrup anchorage check" in cols
-                else num_cols
-            )
-
-            rng_all = sht_design.range(
-                (start_row, start_col), (start_row + num_rows, start_col + num_cols - 1)
-            )
-
-            # 1. CLEAR ALL BORDERS: -4142 is xlNone (Removes intermediate vertical/horizontal lines)
-            rng_all.api.Borders.LineStyle = -4142
-
-            # --- A. Format Headers (Row 8) ---
-            header_rng = sht_design.range(
-                (start_row, start_col), (start_row, start_col + num_cols - 1)
-            )
-            header_rng.font.bold = True
-
-            # Bottom Border (xlEdgeBottom = 9)
-            header_rng.api.Borders(9).LineStyle = 1
-            header_rng.api.Borders(9).Weight = 3
-
-            # Top Border (xlEdgeTop = 8)
-            header_rng.api.Borders(8).LineStyle = 1
-            header_rng.api.Borders(8).Weight = 3
-
-            # Group 1: Properties & Forces (Light Blue)
-            if idx_main > 0:
-                sht_design.range(
-                    (start_row, start_col), (start_row, start_col + idx_main - 1)
-                ).color = (189, 215, 238)
-            # Group 2: Main Bars (Light Green)
-            if idx_web > idx_main:
-                sht_design.range(
-                    (start_row, start_col + idx_main),
-                    (start_row, start_col + idx_web - 1),
-                ).color = (226, 239, 218)
-            # Group 3: Web Reinforcement (Light Yellow)
-            if idx_stirrups > idx_web:
-                sht_design.range(
-                    (start_row, start_col + idx_web),
-                    (start_row, start_col + idx_stirrups - 1),
-                ).color = (255, 242, 204)
-            # Group 4: Stirrups / Shear (Light Orange)
-            if idx_check > idx_stirrups:
-                sht_design.range(
-                    (start_row, start_col + idx_stirrups),
-                    (start_row, start_col + idx_check - 1),
-                ).color = (252, 228, 214)
-            # Group 5: Post-Checks (Light Purple/Gray)
-            if num_cols > idx_check:
-                sht_design.range(
-                    (start_row, start_col + idx_check),
-                    (start_row, start_col + num_cols - 1),
-                ).color = (222, 235, 247)
-
-            # --- B. Alternate Row Colors & Horizontal Beam Separators ---
-            # Step by 2 to grab both TOP and BOTTOM rows for a single beam at once
-            for i in range(0, num_rows, 2):
-                row_block = sht_design.range(
-                    (start_row + i + 1, start_col),
-                    (start_row + i + 2, start_col + num_cols - 1),
-                )
-
-                # Apply Alternating Fill
-                if (i // 2) % 2 == 0:
-                    row_block.color = (242, 242, 242)  # Light Gray
-                else:
-                    row_block.color = (255, 255, 255)  # White
-
-                # Add border ONLY to the bottom of the 2-row block (Separates beams, ignores top/bot inside)
-                row_block.api.Borders(9).LineStyle = 1  # xlEdgeBottom
-                row_block.api.Borders(9).Weight = 2  # xlThin
-
-            # --- C. Thick Vertical Section Grouping Borders ---
-            def set_thick_right_border(col_offset):
-                """Draw a category separator after the specified zero-based output-column offset."""
-                if 0 < col_offset < num_cols:
-                    target_col = start_col + col_offset - 1
-                    sht_design.range(
-                        (start_row, target_col), (start_row + num_rows, target_col)
-                    ).api.Borders(
-                        10
-                    ).LineStyle = 1  # 10 = xlEdgeRight
-                    sht_design.range(
-                        (start_row, target_col), (start_row + num_rows, target_col)
-                    ).api.Borders(
-                        10
-                    ).Weight = 3  # Medium/Thick Line
-
-            # This keeps the thick vertical lines organizing the main categories,
-            # while standard vertical gridlines remain hidden.
-            set_thick_right_border(idx_main)
-            set_thick_right_border(idx_web)
-            set_thick_right_border(idx_stirrups)
-            set_thick_right_border(idx_check)
-
-        sht_design.autofit()
+def export_beam_dxf(results: pd.DataFrame, output_dir: str) -> list[str]:
+    """One girder and one gravity beam schedule DXF per story."""
+    written = []
+    if results.empty:
+        return written
+    if "SupportStatus" in results.columns:
+        gravity = results["SupportStatus"].map(is_gravity_beam)
+    else:
+        gravity = pd.Series(False, index=results.index)
+    for story in results["Story"].unique():
+        on_story = results["Story"] == story
+        for label, rows in (
+            ("Girder", results[on_story & ~gravity]),
+            ("Beam", results[on_story & gravity]),
+        ):
+            if rows.empty:
+                continue
+            path = os.path.join(output_dir, f"{story}_{label}_Schedule.dxf")
+            generate_dxf_beam_schedule(story_name=f"{story} {label.upper()}S",
+                                       df_story=rows, output_filepath=path)
+            written.append(path)
+    return written
 
 
 def generate_dxf_beam_schedule(
@@ -2588,51 +2362,6 @@ def generate_dxf_beam_schedule(
     doc.saveas(output_filepath)
 
 
-def export_cad_drawings():
-    """Triggered by the EXPORT CAD DRAWINGS button in Excel."""
-    output_dir = select_output_directory()
-    if not output_dir:
-        return  # User canceled folder selection
-
-    try:
-        wb = xw.Book.caller()
-    except Exception:
-        wb = xw.books.active
-
-    sht_design = wb.sheets["BEAM DESIGN"]
-
-    df_results = (
-        sht_design.range("B8")
-        .options(pd.DataFrame, header=1, index=False, expand="table")
-        .value
-    )
-    df_results = restore_beam_result_labels(df_results)
-
-    if df_results.empty:
-        return
-
-    # One schedule of girders and one of gravity beams for each story.
-    if "SupportStatus" in df_results.columns:
-        gravity = df_results["SupportStatus"].map(is_gravity_beam)
-    else:
-        gravity = pd.Series(False, index=df_results.index)
-    for story in df_results["Story"].unique():
-        on_story = df_results["Story"] == story
-        for label, rows in (
-            ("Girder", df_results[on_story & ~gravity]),
-            ("Beam", df_results[on_story & gravity]),
-        ):
-            if rows.empty:
-                continue
-            generate_dxf_beam_schedule(
-                story_name=f"{story} {label.upper()}S",
-                df_story=rows,
-                output_filepath=os.path.join(
-                    output_dir, f"{story}_{label}_Schedule.dxf"
-                ),
-            )
-
-
 # =============================================================================
 # CALCULATION REPORT (PDF)
 # =============================================================================
@@ -2873,40 +2602,13 @@ def build_beam_calc_report(
     )
 
 
-def export_beam_calculations(filepath: str | None = None) -> str | None:
-    """Triggered by the EXPORT CALC button: save the beam calculation PDF."""
-    try:
-        wb = xw.Book.caller()
-    except Exception:
-        wb = xw.books.active
-
-    df_results = (
-        wb.sheets["BEAM DESIGN"]
-        .range("B8")
-        .options(pd.DataFrame, header=1, index=False, expand="table")
-        .value
-    )
-    df_results = restore_beam_result_labels(df_results)
-    if df_results.empty or "Design_Status" not in df_results.columns:
-        show_warning("Design the beams first: BEAM DESIGN has no design results.")
-        return None
-
-    filepath = filepath or select_save_file(default_name="Beam_Design_Calculations")
-    if not filepath:
-        return None  # User canceled the save dialog
-
-    overwrites = wb.sheets["OVERWRITES"]
-    with LoadingWindow("Writing the beam calculation report..."):
-        saved = build_beam_calc_report(
-            df_results,
-            filepath,
-            seismic=overwrites.range("F3").value is True,
-            gravity_combo=overwrites.range("F4").value,
-        )
-    if saved is None:
-        show_warning("The PDF could not be written. Check that LaTeX (pdflatex) is installed.")
-    return saved
+def export_beam_pdf(results: pd.DataFrame, path: str, seismic: bool,
+                    gravity_combo: str | None) -> str | None:
+    """The beam calculation report (PDF); None when LaTeX fails."""
+    return build_beam_calc_report(results, path, seismic=seismic, gravity_combo=gravity_combo)
 
 
 if __name__ == "__main__":
-    extract_forces_properties_from_etabs()
+    from design.concrete_workflow import run_beams
+
+    run_beams()

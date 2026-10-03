@@ -7,6 +7,7 @@ form ``<set> <number> <expression>``, for example
 * ULS   strength combinations; these are the concrete design combinations
 * SLS   service combinations
 * SSLC  special seismic combinations with the amplified force Em
+* DEF   deflection: DL, DL + LL, DL + 0.25 LL (sustained) and DL + Lr
 
 Seismic combinations exist twice, once on the static cases (``EQ1`` to
 ``EQ8``) and once on the response spectrum cases (``RSA1`` to ``RSA8``). The
@@ -143,6 +144,12 @@ def build_combinations(
     seismic("SLS", 113, "(1.0 + 0.714 Ev) DL + 1.0 LL + 0.714",
             gravity(1.0 + e * ev, 1.0), e * rho, "SLS")
 
+    # ---- deflection (unfactored, no live load reduction) ----
+    add("DEF 100 1.0 DL", gravity(1.0))
+    add("DEF 101 1.0 DL + 1.0 LL", gravity(1.0, 1.0))
+    add("DEF 102 1.0 DL + 0.25 LL", gravity(1.0, 0.25))
+    add("DEF 103 1.0 DL + 1.0 Lr", gravity(1.0, 0.0, 1.0))
+
     # ---- special seismic: Em = omega0 Eh on the envelope of the directions ----
     for label in ("EQ", "RSA"):
         for number, expression, cases, sign in (
@@ -169,3 +176,53 @@ def build_combinations(
     envelope("ENVE_SSLC_EQ", "SSLC_EQ")
     envelope("ENVE_SSLC_RSA", "SSLC_RSA")
     return out
+
+
+# ETABS load pattern types (eLoadPatternType) of DL, LL and Lr
+_DEAD_PATTERN_TYPES = (1, 2)
+_LIVE_PATTERN_TYPES = (3, 4)
+_ROOF_PATTERN_TYPES = (11,)
+
+
+def deflection_combinations(pattern_types: dict[str, int]) -> list[Combination]:
+    """The four deflection combinations from the pattern types of a model."""
+    names = {
+        "Dead": [p for p, t in pattern_types.items() if t in _DEAD_PATTERN_TYPES],
+        "Live": [p for p, t in pattern_types.items() if t in _LIVE_PATTERN_TYPES],
+        "Roof": [p for p, t in pattern_types.items() if t in _ROOF_PATTERN_TYPES],
+    }
+
+    def items(live: float = 0.0, roof: float = 0.0):
+        out = [(p, 1.0) for p in names["Dead"]]
+        out += [(p, live) for p in names["Live"] if live]
+        out += [(p, roof) for p in names["Roof"] if roof]
+        return out
+
+    return [
+        Combination("DEF 100 1.0 DL", cases=items()),
+        Combination("DEF 101 1.0 DL + 1.0 LL", cases=items(1.0)),
+        Combination("DEF 102 1.0 DL + 0.25 LL", cases=items(0.25)),
+        Combination("DEF 103 1.0 DL + 1.0 Lr", cases=items(roof=1.0)),
+    ]
+
+
+def ensure_deflection_combinations(model) -> list[str]:
+    """Add the deflection combinations a model does not have yet. Returns those added.
+
+    Adding combinations keeps the analysis results.
+    """
+    patterns = model.LoadPatterns
+    names = [str(n) for n in patterns.GetNameList(0, [])[1]]
+    types = {n: int(patterns.GetLoadType(n)[0]) for n in names}
+    cases = {str(n) for n in model.LoadCases.GetNameList(0, [])[1]}
+    existing = {str(n) for n in model.RespCombo.GetNameList(0, [])[1]}
+    added = []
+    for combo in deflection_combinations(types):
+        if combo.name in existing:
+            continue
+        model.RespCombo.Add(combo.name, 0)
+        for case, factor in combo.cases:
+            if case in cases:
+                model.RespCombo.SetCaseList(combo.name, 0, case, factor)
+        added.append(combo.name)
+    return added
