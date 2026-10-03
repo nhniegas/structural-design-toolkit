@@ -1,13 +1,13 @@
-# XLWings Structural Design Toolkit
+# Structural Design Toolkit
 
-Structural design calculations. The ACI concrete beam and column design runs from an Excel workbook through `xlwings`: each button runs a Python design module that reads the inputs from the sheet and writes the results back. The composite column, steel section and wind checks, and the ETABS workflows, run from the terminal with input dialogs. Reports can be exported as PDF and reinforcement schedules as DXF.
+Structural design calculations and ETABS automation, run from the terminal with input dialogs. No spreadsheet is needed: results are saved as Excel files, calculation reports as PDF and reinforcement schedules as DXF.
 
 ## What is in it
 
 | Run from | Design module (`design/`) | What it does |
 |---|---|---|
-| `spreadsheets/beam_column_designer_aci318.xlsm` | `beam_designer_aci318.py` | ACI 318M-14 beam flexure, shear, torsion and SMRF checks from ETABS forces; girder and beam schedule DXF; PDF calculation report |
-| `spreadsheets/beam_column_designer_aci318.xlsm` | `column_designer_aci318.py` | ACI 318M-14 column P-M, shear, confinement, strong-column and joint-shear checks; column schedule DXF; PDF calculation report |
+| `xs beams` | `beam_designer_aci318.py` | ACI 318M-14 beam flexure, shear, torsion and SMRF checks from ETABS forces; girder and beam schedule DXF; PDF calculation report |
+| `xs columns` | `column_designer_aci318.py` | ACI 318M-14 column P-M, shear, confinement, strong-column and joint-shear checks; column schedule DXF; PDF calculation report |
 | `python main.py composite` | `composite_column_designer_aiscDG06.py` | AISC Design Guide 6 rectangular filled composite column; printout and/or PDF report |
 | `python main.py steel` | `general_steel_section_designer_aisc360.py` | AISC 360-22 wide-flange capacity checks; printout and/or PDF report |
 | `python main.py wind` | `wind_calculator_directional_asce7.py` | ASCE 7 directional procedure (MWFRS) wind pressures; printout and/or PDF report |
@@ -17,22 +17,28 @@ Supporting code:
 - `design/aci318_config.py`: every ACI 318M-14 constant used by the beam and column designers, with its clause.
 - `etabs_api/core/`: the ETABS connection and thin wrappers for tables, geometry, assignments, loads, properties, results and stories.
 - `etabs_api/workflows/`: automation built on the office conventions, listed below.
-- `etabs_api/workflows/exporter.py`: ETABS tables to the beam and column workbook.
-- `etabs_api/workflows/frame_tagger.py`: automatic unique names for beams and columns (`AUTO TAG FRAMES` button).
+- `design/concrete_workflow.py`: the `xs beams`, `xs deflection` and `xs columns` commands and the design data stored between them.
+- `etabs_api/workflows/exporter.py`: the ETABS tables the beam and column design need.
+- `etabs_api/workflows/frame_tagger.py`: automatic unique names for beams and columns (`xs tag`).
 - `etabs_api/workflows/grid_column_model.py`: stories, grids, columns and walls of an ETABS model from a DXF of framing plans.
+- `etabs_api/workflows/analysis_forces.py`: factored forces from the analysis results (combinations, spectrum and wind permutations, NSCP live load reduction, pattern live load).
+- `etabs_api/workflows/design_loop.py`, `sections.py`: the analysis and design loop with member resizing.
+- `etabs_api/workflows/tributary.py`: geometric tributary areas for the live load reduction.
+- `design/beam_deflection.py`: beam deflection checks (ACI 318M-14 24.2).
+- `etabs_api/workflows/model_analysis.py`: analysis run, response spectrum scaling, period, modal mass and weight checks.
 - `etabs_api/workflows/model_setup.py`, `ubc97.py`, `load_combinations.py`: definition of materials, sections, loads and NSCP 2015 combinations in an ETABS model.
 - `utilities/design_cli.py`: the terminal workflow shared by the composite, steel and wind checks (input dialog, then printout, PDF or both).
 - `utilities/_gui_helpers.py`: file pickers, list pickers, choice and text-entry dialogs, and the loading window.
 - `utilities/_calc_report.py`: layout of the beam and column PDF calculation reports.
 - `geotech/logspiral_passive.py`: standalone log-spiral passive earth pressure calculator (run in a terminal).
 - `main.qmd`: Quarto template for written reports.
-- `main.py`: terminal entry point for the ETABS workflows (`setup`, `grids`, `tag`) and the design checks (`composite`, `steel`, `wind`). No workbook calls it.
+- `main.py`: terminal entry point of every command (`xs --help` lists them).
 
 ## Requirements
 
-- Windows; Microsoft Excel desktop and the xlwings add-in for the concrete beam and column workbook
+- Windows (ETABS and its COM API)
 - Python 3.10 or newer (developed on 3.14)
-- ETABS, for the beam and column workbook and the model setup (developed on ETABS 22)
+- ETABS, for the ETABS workflows and the beam and column design (developed on ETABS 22)
 - A LaTeX distribution such as MiKTeX, for PDF reports
 - Quarto, only to render `main.qmd`
 
@@ -44,12 +50,10 @@ cd xlwings_spreadsheet_structural
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
-xlwings addin install
+python -m pip install -e .
 ```
 
-In Excel, open the xlwings ribbon and set **Interpreter** to `.venv\Scripts\python.exe` in this folder.
-
-Keep the folder layout as it is. The macros find the Python code relative to the workbook (`spreadsheets\..`), so the project folder can be moved or renamed, but the workbooks must stay in `spreadsheets/` next to `design/`.
+The last line installs the `xs` command (see below).
 
 If ETABS is not installed at `C:\Program Files\Computers and Structures\ETABS 22\ETABS.exe`, set the `ETABS_PROGRAM_PATH` environment variable to your `ETABS.exe`. It is only used when no ETABS session is already open.
 
@@ -57,7 +61,7 @@ If ETABS is not installed at `C:\Program Files\Computers and Structures\ETABS 22
 
 Each guide in `doc/` covers one tool: how to run it, its inputs, what it writes, and the limits of the calculation.
 
-- [Concrete beam and column workflow](doc/concrete_beam_column_excel_guide.md)
+- [Concrete beam and column workflow](doc/concrete_beam_column_design.md)
 - [Steel and composite modules](doc/steel_design_documentation.md)
 - [Wind load calculator](doc/wind_calculator_asce7_documentation.md)
 
@@ -70,6 +74,11 @@ From the project folder, with the environment active:
 python main.py setup     # materials, sections, loads, spectrum, cases and combinations
 python main.py grids     # stories, grids, columns and walls from a DXF of framing plans
 python main.py tag       # unique names for every beam and column, in a tagged copy
+python main.py analyze   # run, scale the response spectrum, check periods, modal mass and weight
+python main.py beams     # extract the forces and design the beams; results, calcs and schedules
+python main.py deflection  # only the beam deflections (bars of the last beam design)
+python main.py columns   # design the columns from the stored beam step
+python main.py design    # analysis and beam/column design loop that resizes members until they pass
 python main.py composite # rectangular filled composite column, AISC DG6
 python main.py steel     # wide-flange steel member, AISC 360-22
 python main.py wind      # MWFRS wind pressures, ASCE 7 directional procedure
@@ -103,12 +112,21 @@ function xs { & "C:\path\to\xlwings_spreadsheet_structural\.venv\Scripts\xs.exe"
 
 ## Setting up an ETABS model
 
-
 This defines the materials, frame sections, load patterns, UBC 97 response spectrum, load cases and NSCP 2015 load combinations of an ETABS model from a few dialogs. See [ETABS model setup](doc/etabs_model_setup.md).
 
 ## Building grids, columns and walls from a DXF
 
 `python main.py grids`. It reads framing plans drawn in one DXF file and creates the stories, grid lines, columns and walls in ETABS; run again on a revised drawing, it updates the model. See [Grids, columns and walls from a DXF](doc/etabs_grid_column_model.md).
+
+## Running and checking the analysis
+
+`xs analyze` (or `python main.py analyze`) runs the analysis, scales the response spectrum cases to 100 % of the static base shear, and checks the periods against UBC 97 Method A, the modal participating mass and the seismic weight. See [ETABS analysis checks](doc/etabs_analysis.md).
+
+`xs design` runs the analysis and the beam and column design again and again on a copy of the model, resizing the members until they pass (deflection included). See [Design loop](doc/etabs_design_loop.md).
+
+## Beam and column design
+
+`xs beams`, then `xs columns` (and `xs deflection` for the deflections alone). The design forces come from the analysis results, not from ETABS concrete design. Each command saves its results (`.xlsx`), calculation report (`.pdf`) and schedules (`.dxf`) in the folder you choose. See [Concrete beam and column design](doc/concrete_beam_column_design.md).
 
 ## Tests
 
@@ -117,7 +135,7 @@ python -m pip install -r .github/requirements-ci.txt
 python -m pytest tests
 ```
 
-The tests need neither Excel nor ETABS. GitHub Actions runs them on every push to `main` (`.github/workflows/ci.yml`). Pushing a tag such as `v1.0.0` builds a release package (`.github/workflows/release.yml`).
+The tests need no ETABS. GitHub Actions runs them on every push to `main` (`.github/workflows/ci.yml`). Pushing a tag such as `v1.0.0` builds a release package (`.github/workflows/release.yml`).
 
 ## Engineering use
 

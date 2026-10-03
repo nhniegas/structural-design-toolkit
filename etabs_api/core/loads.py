@@ -57,3 +57,12 @@ class Loads:
         ensure_success(result, "FrameObj.SetLoadDistributed")
         return name
 
+
+    def assign_area_uniform_load(self, name: str, load_pattern: str, value: float,
+                                 direction: int = 10, replace: bool = True):
+        """Assign a uniform load to an area object; direction 10 is gravity (value downward)."""
+        result = self.connector.sap_model.AreaObj.SetLoadUniform(
+            name, load_pattern, value, direction, replace, "Global", 0
+        )
+        ensure_success(result, "AreaObj.SetLoadUniform")
+        return name

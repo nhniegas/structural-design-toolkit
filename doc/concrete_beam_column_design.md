@@ -1,0 +1,309 @@
+# Concrete Beam and Column Design
+
+Beam and column design of an ETABS model from the terminal, ACI 318M-14. No spreadsheet is used: the commands ask their inputs in dialogs and save the results (`.xlsx`), the calculation reports (`.pdf`) and the schedules (`.dxf`) in the folder you choose.
+
+## How to use it
+
+Open the model in ETABS (saved, analysed or not), then from the project folder:
+
+```powershell
+xs beams      # extract, design the beams, save the beam outputs
+xs deflection # only the deflections of the beams (bars of the last xs beams)
+xs columns    # design the columns from the stored beam step, save the column outputs
+```
+
+(or `python main.py beams` / `python main.py columns`). Design the beams first: the SMRF joint checks of the columns use the designed beam bars.
+
+**`xs beams` asks:**
+
+| Question | Notes |
+|---|---|
+| Seismic combinations | Static (EQ), response spectrum (RSA) or both. Gravity and wind `ULS` combinations are always included |
+| Live load reduction, tributary method, pattern live load | See [Extraction](#extraction) |
+| SMRF (seismic) design | One setting for the beams and the columns. Gravity beams (on other beams only) are designed for gravity in any case |
+| Gravity combination for the beam seismic shear | Only with SMRF; the combinations without seismic or wind terms are offered |
+| Beam bars and cover | Main bar, stirrup and web bar (mm), web bar fy (MPa), cover (mm) |
+| Deflection limit | Partitions likely to be damaged (L/480) or not (L/240) |
+| Output folder | For the results, the calculations and the schedules |
+
+**`xs deflection`** checks only the deflections, apart from the strength design: it takes the bars of the last `xs beams` of the model, reads the service moments again from ETABS (so a re-analysed model is checked with its current moments), asks the limit (L/480 or L/240) and the folder, and saves `<model> - Deflection.xlsx` with one row per beam: section, Ie, λΔ, the three deflections, their limits, the governing ratio and the check. It stops with a message when the model has no beam design yet (the cracked stiffness needs the bars).
+
+**`xs columns` asks:** column main bar, tie and cover; the bottom-story cover; the vertical bars carried down; how interior ties are drawn; the output folder.
+
+Answers are remembered and offered again next time. Every named member (not a number) is designed.
+
+**Files in the output folder:**
+
+| File | From |
+|---|---|
+| `<model> - Beam Design.xlsx` | The beam results, two rows (top, bottom) per beam |
+| `<model> - Beam Calculations.pdf` | Beam calculation report |
+| `<model> - Deflection.xlsx` | `xs deflection`: the deflection checks, one row per beam |
+| `<Story>_Girder_Schedule.dxf`, `<Story>_Beam_Schedule.dxf` | Beam schedules |
+| `<model> - Column Design.xlsx` | The column report, one row per column, end and combination |
+| `<model> - Column Calculations.pdf` | Column calculation report |
+| `Column_Schedule.dxf` | Column schedule with the reinforced sections |
+
+**Between the two steps** everything is kept next to the model in `<model> - design data.pkl`: the extracted tables (forces, service loads, frame data, connectivity, live load reduction, column orientation), the inputs and the results. It is internal (binary, for speed). `xs columns` finds it from the model open in ETABS and stops with "No beam design for <model>. Run xs beams first." when there is none. When the model file was saved after the beam step, it warns that the stored forces may be out of date and lets you stop or continue.
+
+## How the pieces fit
+
+- `design/concrete_workflow.py`: the commands, the dialogs and the store.
+- `design/beam_designer_aci318.py`: beam design (`design_beams`), results file, beam schedule DXF and calculation report.
+- `design/beam_deflection.py`: deflection checks.
+- `design/column_designer_aci318.py`: column design and SMRF checks (`design_columns`), results file, column schedule DXF and calculation report.
+- `design/aci318_config.py`: every ACI constant used by both designers, each with its clause.
+- `etabs_api/workflows/exporter.py`, `analysis_forces.py`, `tributary.py`: the extraction and the factored forces from the analysis results.
+- `utilities/_gui_helpers.py`: dialogs and the loading window; `utilities/_calc_report.py`: the PDF layout.
+
+Defining the materials, sections, loads and combinations of the ETABS model is a separate step, done before: see [ETABS model setup](etabs_model_setup.md). To size the members automatically, see the [design loop](etabs_design_loop.md).
+
+## Optional: automatic tagging
+
+`xs tag` (or `python main.py tag`) gives every beam and column in the open ETABS model a unique name: beams as `<level><type>-<number><letter>`, for example `2GX-10B`, and columns as `<level>-<type><number><letter>`, for example `3-C5C`. The extraction only reads named members, so tag the model before `xs beams`.
+
+The model is first saved as `<model name> - TAGGED.EDB` in its own folder and the names are changed in that copy. The original file is not changed. ETABS has the tagged copy open afterwards.
+
+| Part | Rule |
+|---|---|
+| Level | A story named as a number and `F` drops the `F` (`2F` gives `2`). For every other story a dialog asks for the prefix; a level left blank is skipped |
+| Type | `G` if at least one end is on a column, otherwise `B`. `X` if the member is within 45 degrees of the global X axis, otherwise `Y`. Columns are `C`; planted columns are `PC` |
+| Beam line | Members that share a joint continue one line while the bend is 45 degrees or less; the straightest pair is joined. A line keeps its number across an opening when the next member is straight ahead of it |
+| Beam number | Counted per level and per type. X lines top to bottom, Y lines left to right, by the start of the line |
+| Letter | Along the line, left to right for X and bottom to top for Y: none, `A`, `B`, ... without `I` and `O`, then `AA`, `AB`, ... |
+| Column number and letter | Counted once over the combined plan of all levels, so a column keeps them on every level. A row is the columns along one X girder line; rows run top to bottom and letters left to right. A column takes the level of its upper joint |
+
+A planted column is a stack that does not reach a supported joint. Planted columns are tagged `PC` by the same rule as `C`, with their own numbers starting at 1 (`PD2-PC1`, `PD2-PC1A`). In the column schedule the mark drops the level, so `2-C5A` is `C5A` and `PD2-PC1A` is `PC1A`. A stack with no column on a tagged level is not counted. A new name already used by a member that is not being tagged is skipped and counted in the closing message.
+
+## Extraction
+
+`xs beams` attaches to the model open in ETABS and reads every table the design needs.
+
+ETABS concrete design is **not** run. The design forces are built from the analysis results of each load case (`etabs_api/workflows/analysis_forces.py`), so every number can be traced. The analysis is run first if any case needed has no results.
+
+The two questions:
+
+| Question | Yes means |
+|---|---|
+| Reduce the reducible live load (NSCP 2015 205.5)? | Each member's reducible live load (patterns of type Reducible Live) is multiplied by its own factor. A further question chooses the tributary area method. See below |
+| Include pattern live load on the beams (ACI 318-14 6.4.2)? | Each beam span is also designed with its live load as a simple span (the largest sagging moment) and with fixed ends (the largest hogging moment), times the factor you type (default 0.75). A released end stays pinned. Cantilevers are left as analysed. Columns are not patterned |
+
+What is read:
+
+- **Element forces** (`Element Forces - Beams`, `Element Forces - Columns`) for the load cases in the chosen combinations. The stations are those ETABS reports: they start and end at the faces of the end offsets.
+- **Load Combination Definitions**: each combination is expanded to its load cases with their factors, including combinations used inside combinations. Envelope combinations cannot be picked: they are not one set of forces.
+- **Everything else** (frame assignments, section definitions, reinforcing, material properties, connectivity) is read once.
+
+The combination of the case results reproduces the ETABS combination results exactly; this was checked on the test model for gravity, wind, static seismic and response spectrum combinations.
+
+Members with a purely numeric ETABS name are skipped; only named members are designed.
+
+Units: every table is read in N and mm, whatever units the model was created in and whatever the ETABS window displays. If the model's API units differ, the extraction switches them to N-mm for each read and restores them afterwards. Forces are then written to Excel in kN and kN-m, dimensions in mm, strengths in MPa.
+
+### Load-combination permutations
+
+One combination can stand for several sets of forces. `FACTORED LOADS` stores the combination name in `Combo` and the set number in `Permutation`.
+
+| Source | Columns | Beams |
+|---|---|---|
+| Response spectrum case in the combination | 8 permutations: + and - of the spectrum part on P, M2 and M3 (V2 follows M3, V3 follows M2, T follows P) | 2: the maximum and the minimum of every force |
+| Load case with several steps (the ASCE 7 wind cases: one step per wind load case) | One permutation per step (12 for `WX`) | 2: maximum and minimum |
+| Pattern live load (when chosen) | none | 2: maximum and minimum over the analysed and patterned live load |
+| Otherwise | 1 | 1 |
+
+- **Beams** take the envelope of all rows of a combination, so the maximum and minimum rows carry everything.
+- **Columns** are checked against every permutation separately. The report and the loading window show only the plain combination name. For flexure and axial load each report row shows the governing permutation (a failing one if there is one, otherwise the highest utilization). Shear and joint values are the worst across the permutations.
+
+### Live load reduction (NSCP 2015 205.5)
+
+R = 0.86 (A - 14) percent, A the tributary area in m2, and at most:
+
+- 40 % for beams and for columns that receive load from one level only, 60 % for other columns;
+- 23.1 (1 + D/L) %, with D and L the member's dead and live load from the analysis;
+- none for a member supporting reducible live load above 4.8 kPa (more than 0.5 m2 of such floor), except 20 % for columns receiving load from more than one level.
+
+Only the patterns of type Reducible Live are reduced.
+
+**Tributary area.** When reduction is chosen, a third question asks how to find A:
+
+| Method | What A is | Use |
+|---|---|---|
+| Geometric (default) | The floor closer to the member than to its neighbours (the halfway lines): for a column, the floor nearest it at each level, summed over the floors it supports; for a beam, the floor nearest it, plus half of every beam that frames into it away from a column. Sampled on a 200 mm grid from the floor objects | The NSCP definition, and the method of ETABS's own live load reduction. Depends on the plan only, so it does not change when members are resized |
+| Analysis load share | The load the member takes from a 1 kPa load on every floor, in m2. The first extraction adds the load pattern `TRIBUTARY UNIT` (type Other: in no combination and not in the mass source) | Follows the real load path: continuity, frame action and stiffness. It differs from the geometric area, larger at some interior members and smaller, even near zero, at members that the frame unloads |
+
+On the test model the two agree within about 10 % at most columns; the largest differences were an interior column at 98 m2 geometric against 66 m2 load share, and a corner column at 5.9 m2 geometric against 1.0 m2 load share (the neighbouring spans lift it).
+
+**Floor loads.** The reducible live intensity of each floor is the sum of its uniform loads on Reducible Live patterns, from load sets (`Shell Uniform Load Sets`) and from loads assigned directly by pattern (`Area Load Assignments - Uniform`). The intensity listed for a member is the average over its tributary area. Reducible live load on a frame (a line load) is not part of any floor and is not seen.
+
+**Warning.** When a load set or a floor puts more than 4.8 kPa on a Reducible Live pattern, the extraction prints it: NSCP allows no reduction above 4.8 kPa, so the load probably belongs on a non-reducible live pattern.
+
+The table `LIVE LOAD REDUCTION` (in the store) lists per member the method, the tributary area, the reducible live intensity, the area above 4.8 kPa, the number of levels, the reduction, which limit governs and the factor applied.
+
+## Beam design
+
+The beams of `FRAME DATA` are classified as supported both ends, cantilever, or beam-framed from `CONNECTIVITY`, and get the bar sizes you typed.
+
+Each beam is designed at the left support, midspan and right support:
+
+- flexure by strain compatibility, including compression steel, minimum steel and crack-control spacing
+- shear and torsion, with combined transverse steel and longitudinal torsion steel
+- SMRF checks when SMRF is on: reinforcement ratio, moment-strength ratios, probable-moment design shear, hoop spacing
+- bar layering (up to three layers), stirrup legs and anchorage of the legs
+
+With SMRF on, the moment-strength ratios of ACI 18.6.3.2 are enforced, not only checked: bars are added until the positive strength at each support face is at least half the negative strength there, and every section has at least a quarter of the largest support strength, top and bottom. The result is in `SMRF moment strength ratio check`; `SMRF steel ratio check` reports the 2.5 % limit. Cantilevers are left out of this step.
+
+The seismic design shear is reported at each end as `Vₑ, left` and `Vₑ, right`: the gravity shear from the gravity combination you chose plus the sway shear from the probable moments (`Vₛway,max`).
+
+A gravity beam, one with neither end on a column or wall (`Beam-Framed / Floating` in `SupportStatus`), is not part of the moment frame. It is designed for gravity only even when SMRF is on: no probable-moment shear, no seismic hoop spacing, no strength-ratio or 2.5 % checks.
+
+
+### Deflection (ACI 318M-14 24.2)
+
+The beam design also checks deflection; `xs beams` asks once whether the beams support partitions or finishes likely to be damaged (L/480, or L/240 when not; remembered for next time).
+
+`SERVICE LOADS` holds, for every beam, M3 and V2 at the stations of the deflection combinations `DEF 100 1.0 DL`, `DEF 101 1.0 DL + 1.0 LL`, `DEF 102 1.0 DL + 0.25 LL` and `DEF 103 1.0 DL + 1.0 Lr` (no live load reduction, no pattern live load). The extraction adds these combinations to a model that does not have them; adding combinations keeps the analysis results. Each row also has the downward tip deflection caused by the rotation of the beam's I end and of its J end, used for cantilevers, and whether the beam is on the roof level (the topmost story with beams).
+
+For each beam, after its bars are chosen:
+
+1. In each zone (left end, midspan, right end): Ec = 4700 √f'c, Ig = b h³/12, fr = 0.62 √f'c, Mcr = fr Ig / (h/2), and Icr of the cracked transformed section with the zone's bars; the tension face follows the sign of the moment.
+2. Ie (Eq. 24.2.3.5a) at Ma = the largest `DEF 101` moment of the zone. The same Ie is used for every load: cracked under the full service load, the beam stays cracked.
+3. The curvature M / (Ec Ie) is integrated twice along the span, with zero deflection at the supports.
+4. λΔ = 2.0 / (1 + 50 ρ'), with ρ' the compression steel at midspan (at the support of a cantilever).
+
+| Check | Deflection | Limit |
+|---|---|---|
+| Immediate live load | Δ(DL + LL) - Δ(DL) | L/360 |
+| Immediate roof live load (roof level) | Δ(DL + Lr) - Δ(DL) | L/180 |
+| After partitions are installed | λΔ Δ(DL + 0.25 LL) + Δ(DL + LL) - Δ(DL + 0.25 LL) | L/480 or L/240 |
+
+**Spans, not segments.** ETABS splits a beam line wherever another member frames into it. The segments of one tagged line (`2GX-1`, `2GX-1A`, `2GX-1B`, ...) that meet at a joint without a column are checked together as one span, and L is the whole span. A span end is supported by a column, a wall or a member the line ends on; it is free (a cantilever tip) only when nothing else connects there. A cantilever span is fixed at its support, and the deflection from the rotation of that support (from the analysis) is added.
+
+The results file has Ie of each zone, λΔ, the three deflections, their limits, the governing ratio and `Deflection check`. A beam that fails the deflection and nothing else gets `FAILED: DEFLECTION (ACI 24.2.2)`.
+
+The beam schedules are two files per story: `<Story>_Girder_Schedule.dxf` for the members on columns (including cantilevers) and `<Story>_Beam_Schedule.dxf` for the gravity beams. A file is left out when a story has no member of that kind.
+
+## Column design
+
+For each column the designer:
+
+1. lists the bar layouts that fit the section, including bundled bars, in increasing order of steel. A square column only gets layouts with the same bars on all four faces
+2. picks the first layout that passes axial and flexure for every load set and both ends, and the transverse detailing rules
+3. with SMRF on, checks strong column-weak beam and joint shear at each joint, and moves a column to a heavier layout if the 6/5 ratio is not met
+4. checks column shear in both directions, using the larger of the analysis shear and the capacity-design shear from probable moments
+
+### Cover on the bottom-most story
+
+`xs columns` first asks whether the columns of the bottom-most story get 75 mm concrete cover (`earth_contact_cover` in the configuration). The bottom-most story is read from how the columns stand on each other in `CONNECTIVITY`. If yes, a second dialog asks how:
+
+| Choice | Result |
+|---|---|
+| Enlarge the section | Every face moves out by the extra cover (75 minus the column cover), so each dimension grows by twice that: 800 x 600 with 40 mm cover becomes 870 x 670. The bars keep their position |
+| Keep the section size | The bars move inward to the 75 mm cover |
+
+The cover used is reported in `Concrete Cover (mm)` and drawn in the schedule. The ETABS forces are not changed by an enlarged section.
+
+### Vertical bars from level to level
+
+It then asks how to treat the vertical bars between levels:
+
+| Choice | Result |
+|---|---|
+| No - design every level on its own | Every column gets the lightest layout that passes |
+| Yes - lower levels use at least the bars of the level above | Working from the top level down, a column gets at least as many vertical bars as the column standing on it. A heavier level higher up therefore sets the minimum for every level below it |
+
+Columns are stacked by their shared joints in `CONNECTIVITY`. A column that is changed gets the first passing layout with at least the required number of bars, and every check is run again on it. The `Vertical Bar Continuity` column of the report states what was changed. Closing the dialog cancels the design.
+
+SMRF design reads column local axes and joint coordinates from ETABS, so ETABS must be open with the model.
+
+The column results file has one row per column, end and combination, with the top end (`Top (J)`) listed before the bottom end (`Bottom (I)`), grouped as identification, section and bars, flexure and axial, shear, beam-column capacity, joint shear, transverse detailing and overall status. Statuses are `PASS`, `FAIL`, `ERROR` or `BLOCKED` (a check that could not run because data for a framing member is missing); the reason is in the last column.
+
+Values that depend on direction are reported for each section axis, X along the width and Y along the depth:
+
+- `Bars on X Edge` and `Bars on Y Edge`: bars on one face, corner bars counted on both
+- `Tie Legs along X Edge` and `Tie Legs along Y Edge`, each with its own alternate-bar support check. Shear along the width is resisted by the legs counted along the Y edge, and the reverse
+- strong column-weak beam: beam bars, column strength, beam strength and ratio for the beams framing in along X and along Y. Each axis shows the case with the lowest ratio
+- joint shear: demand, capacity and utilization along X and along Y. Each axis shows the case with the highest utilization
+
+A cell without a value states the reason, for example that no beam frames in along that axis.
+
+The loading window shows the column mark, level, end, load combination and current check while the design runs.
+
+Units inside the column designer are N, mm and MPa. ETABS reports compression as negative; the designer converts to compression-positive once, when the forces are read.
+
+## Column schedule
+
+Asks for the output folder and for the interior tie style, then writes `Column_Schedule.dxf` with one cell per column mark and story: the section drawn to scale with bars, hoops and interior ties, and rows for size, vertical bars, joint ties, confinement ties and general ties. Bars are written as `18-25mmØ` and ties as `12mmØ @ 100mm`. Joint and confinement ties are shown at 100 mm and general ties at 150 mm (set in the configuration); the confinement row shows the designed spacing instead when the design needs less than 100 mm. Circular columns are drawn with a circular outline and spiral.
+
+The drawing uses the exact bar layout the design selected. The report stores it in the `Bar Layout Data (x, y, n)` column as `x,y,count` per bar position (mm from the bottom-left corner of the section; from the centre for circular columns). A report written before that column existed is drawn from the bundle summary instead, which cannot always tell two similar layouts apart, so run the column design again before exporting.
+
+Interior tie style:
+
+| Choice | What is drawn |
+|---|---|
+| Crossties | One tie per pair of opposite face bars, with a 135-degree hook at each end |
+| Closed inner hoops | Closed hoops, each enclosing two neighbouring bar positions on opposite faces. An odd position left over keeps a crosstie |
+
+### Bundled bars
+
+A layout position holds one to four bars. The position is the bar that sits against the tie; the others are placed so the bars touch:
+
+| Bars | At a corner | On a face |
+|---|---|---|
+| 2 | Second bar on the diagonal, toward the core | Second bar directly behind the first, toward the core |
+| 3 | L-shape: one bar along each face | Two along the face, the third behind the bar on the tie's shaft side |
+| 4 | 2 x 2 square | 2 x 2 square |
+
+On a circular column, bundles follow the face rules with "toward the core" meaning toward the centre, except that the third bar of a 3-bar bundle sits centred behind the other two, forming a triangle.
+
+Hooks at bundles:
+
+- **One bar, or a corner pair on the diagonal:** the normal 135-degree bend around the bar.
+- **Bundle of three or four, or a second bar stacked behind the bar a hoop closes on:** no bend around the first bar. The tie turns with a sharp corner, runs flat past two bars, then bends 45 degrees toward the core. The hook extension leaves the bundle diagonally into the core, 135 degrees from the leg the tie arrived on, and clears every bar of the bundle.
+
+Where bar positions are closer than about 110 mm, a hook extension leaving a corner bundle can reach the bundle at the next position. The drawing shows that overlap as it is; check such sections for congestion.
+
+The design calculation places each bundle as one equivalent bar at the layout position. The drawn bars are offset from that point by up to one bar diameter, which changes the capacity only slightly and is not fed back into the design.
+
+## Calculation reports (PDF)
+
+`xs beams` and `xs columns` write an A4 PDF from the design results to the output folder. The report is one column wide and starts with the design basis and a summary table of all members; each member then has its own section of value tables. Equations are not written out.
+
+Beam report, per beam:
+
+- section and materials
+- flexure at the left support, midspan and right support, top and bottom: Mu, bars per layer, As, d, a, strain, phi, Mn, phi Mn and Mu / phi Mn
+- shear and torsion per zone: Vu, Ve, design Vu, Tu, d, Vc, legs, spacing, Vs, phi Vn, Vu / phi Vn, At/s and Al
+- with SMRF on: nominal moment strengths at each location and the seismic design shear
+- detailing and design status
+
+The design results hold the bars, legs and spacings; depths, strengths and ratios in the report are worked out again from them with the same design classes.
+
+Column report, per column: section and vertical bars, then the governing combination at each end for axial load and flexure, column shear, strong column-weak beam (per axis), then joint shear per axis (it does not depend on the load combination, so none is named), the transverse reinforcement values and the design status.
+
+The reports need a LaTeX install with `pdflatex` (MiKTeX or TeX Live), like the wind and composite reports.
+
+## Column local axes
+
+ETABS places the section depth (`t3`, `Depth` in `FRAME DATA`) along local axis 2 and the width (`t2`, `Width`) along local axis 3. The column designer follows that:
+
+| ETABS force | Acts on the section as |
+|---|---|
+| M3 | bending with the depth as the lever |
+| M2 | bending with the width as the lever |
+| V2 | shear along the depth, resisted by the tie legs counted along the X edge |
+| V3 | shear along the width, resisted by the tie legs counted along the Y edge |
+
+In the report, X is the width direction (local 3) and Y the depth direction (local 2).
+
+## Limitations
+
+- The biaxial check compares the resultant of M2 and M3 with the section capacity at that moment direction. It is not a full interaction surface.
+- Slenderness (second-order moment magnification) is not calculated; the ETABS forces must already include second-order effects.
+- Joint checks ignore slab reinforcement. Beams use local-axis angle 0 unless ETABS supplies one.
+- Crosstie spacing uses an assumed `hx` from the configuration, not the drawn layout.
+- Beam design assumes rectangular sections and uses one bar diameter per beam.
+- SMRF confinement, joint classification and anchorage details need an independent check against ACI 318M-14 Chapter 18 before use.
+
+## Tests
+
+`tests/test_beam_designer_aci318.py`, `tests/test_column_designer_aci318.py`, `tests/test_etabs_api_services.py`, `tests/test_frame_tagger.py` and `tests/test_calc_report.py` cover the design engines, the extraction logic, the tagging rules and the report text against published examples, hand calculations and behaviour rules. They run without Excel or ETABS.

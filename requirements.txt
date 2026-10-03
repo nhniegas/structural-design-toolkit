@@ -1,6 +1,6 @@
-# Excel integration and data handling
-xlwings
+# Data handling and ETABS (COM)
 pandas
+openpyxl  # the design results files (.xlsx), written without Excel
 numpy
 comtypes
 

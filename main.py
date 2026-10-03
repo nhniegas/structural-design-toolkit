@@ -7,6 +7,17 @@
                              a DXF of framing plans  (etabs_api/workflows/grid_column_model.py)
     python main.py tag       give every beam and column of the open model its unique
                              name, in a tagged copy  (etabs_api/workflows/frame_tagger.py)
+    python main.py analyze   run the analysis, scale the response spectrum to the static
+                             base shear, check periods, modal mass and weight
+                             (etabs_api/workflows/model_analysis.py)
+    python main.py beams     extract the forces and design the beams; save the results,
+                             calculations and schedules (design/concrete_workflow.py)
+    python main.py deflection  check only the deflection of the beams (bars of the last
+                             beam design, service moments read again from ETABS)
+    python main.py columns   design the columns from the stored beam step; save the
+                             results, calculations and schedule
+    python main.py design    analysis and beam/column design loop that resizes the
+                             members until they pass (etabs_api/workflows/design_loop.py)
     python main.py composite rectangular filled composite column, AISC DG6
                              (design/composite_column_designer_aiscDG06.py)
     python main.py steel     wide-flange member, AISC 360-22
@@ -47,6 +58,36 @@ def _tag():
     return auto_tag_frames()
 
 
+def _analyze():
+    from etabs_api.workflows.model_analysis import run_model_analysis
+
+    return run_model_analysis()
+
+
+def _beams():
+    from design.concrete_workflow import run_beams
+
+    return run_beams()
+
+
+def _deflection():
+    from design.concrete_workflow import run_deflection
+
+    return run_deflection()
+
+
+def _columns():
+    from design.concrete_workflow import run_columns
+
+    return run_columns()
+
+
+def _design():
+    from etabs_api.workflows.design_loop import run_design_cli
+
+    return run_design_cli()
+
+
 def _composite():
     from design.composite_column_designer_aiscDG06 import run
 
@@ -69,6 +110,11 @@ COMMANDS = {
     "setup": (_setup, "define materials, sections, loads, spectrum, cases and combinations"),
     "grids": (_grids, "build or update stories, grids, columns and walls from a DXF"),
     "tag": (_tag, "give every beam and column of the open model its unique name"),
+    "analyze": (_analyze, "run, scale the response spectrum, check periods, mass and weight"),
+    "beams": (_beams, "extract the forces and design the beams (ACI 318M-14)"),
+    "deflection": (_deflection, "check only the beam deflections (bars of the last beam design)"),
+    "columns": (_columns, "design the columns from the stored beam step"),
+    "design": (_design, "analysis and design loop that resizes beams and columns"),
     "composite": (_composite, "check a rectangular filled composite column (AISC DG6)"),
     "steel": (_steel, "check a wide-flange steel member (AISC 360-22)"),
     "wind": (_wind, "MWFRS wind pressures by the ASCE 7 directional procedure"),

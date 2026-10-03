@@ -709,32 +709,6 @@ class _FakeRange:
         self.sheet.cleared.append((self.first, self.last))
 
 
-class _FakeSheet:
-    """Just enough of an xlwings sheet for ``_clear_table_area``."""
-
-    def __init__(self, last_cell):
-        self.cleared = []
-        self.used_range = type("Used", (), {"last_cell": _FakeRange(self, last_cell)})()
-
-    def range(self, first, last=None):
-        if isinstance(first, str):  # only "B8" is used here
-            first = (8, 2)
-        return _FakeRange(self, first, last)
-
-
-def test_clearing_reaches_the_end_of_the_used_range():
-    """BEHAVIOUR: rows left by a longer, older run are cleared too."""
-    sheet = _FakeSheet(last_cell=(3812, 48))
-    beam._clear_table_area(sheet, "B8")
-    assert sheet.cleared == [((8, 2), (3812, 48))]
-
-
-def test_clearing_an_empty_sheet_only_touches_the_start_cell():
-    sheet = _FakeSheet(last_cell=(1, 1))
-    beam._clear_table_area(sheet, "B8")
-    assert sheet.cleared == [((8, 2), (8, 2))]
-
-
 # --------------------------------------------------------------------------
 # SMRF MOMENT STRENGTH RATIOS ARE ENFORCED, DESIGN SHEAR IS REPORTED
 # --------------------------------------------------------------------------
@@ -847,19 +821,6 @@ def test_schedules_are_written_per_story_for_girders_and_for_gravity_beams(tmp_p
     girder = _design("Supported Both Ends", False)
     gravity = _design(beam.GRAVITY_BEAM_STATUS, False).assign(UniqueName="B2")
     results = pd.concat([girder, gravity], ignore_index=True)
-
-    class _Range:
-        def options(self, *args, **kwargs):
-            return self
-        value = beam.display_beam_result_labels(results)
-
-    class _Sheet:
-        def range(self, address):
-            return _Range()
-
-    book = types.SimpleNamespace(sheets={"BEAM DESIGN": _Sheet()})
-    monkeypatch.setattr(beam, "select_output_directory", lambda: str(tmp_path))
-    monkeypatch.setattr(beam.xw.Book, "caller", staticmethod(lambda: book), raising=False)
     written = []
     monkeypatch.setattr(
         beam, "generate_dxf_beam_schedule",
@@ -867,5 +828,37 @@ def test_schedules_are_written_per_story_for_girders_and_for_gravity_beams(tmp_p
             (Path(output_filepath).name, sorted(df_story["UniqueName"].unique()))
         ),
     )
-    beam.export_cad_drawings()
+    paths = beam.export_beam_dxf(results, str(tmp_path))
+    assert len(paths) == 2
     assert written == [("L2_Girder_Schedule.dxf", ["B1"]), ("L2_Beam_Schedule.dxf", ["B2"])]
+
+
+def test_the_beam_table_gets_support_status_and_bar_inputs():
+    frame = pd.DataFrame({
+        "Story": ["2F", "2F", "2F"], "UniqueName": ["2GX-2", "2GX-1", "2-C1"],
+        "SectProp": ["G", "G", "C"], "DesignType": ["Beam", "Beam", "Column"],
+        "Width": [300, 300, 400], "Depth": [500, 500, 400],
+    })
+    conn = pd.DataFrame({
+        "UniqueName": ["2GX-2", "2GX-1", "2-C1"], "DesignType": ["Beam", "Beam", "Column"],
+        "UniquePtI": ["a", "b", "z"], "UniquePtJ": ["b", "c", "a"],
+    })
+    bars = {"dm": 20, "ds": 10, "dw": 12, "fyw": 275, "cc": 40}
+    table = beam.prepare_beam_table(frame, conn, bars)
+    assert table["UniqueName"].tolist() == ["2GX-1", "2GX-2"]  # beams only, sorted
+    assert table.loc[table.UniqueName == "2GX-2", "SupportStatus"].item().startswith(
+        "Cantilever")
+    assert table["cc"].tolist() == [40.0, 40.0]
+    assert table.columns.tolist().index("SupportStatus") == \
+        table.columns.tolist().index("SectProp") + 1
+
+
+def test_beam_results_are_saved_as_a_formatted_workbook(tmp_path):
+    from openpyxl import load_workbook
+
+    results = _design("Supported Both Ends", False)
+    path = beam.write_beam_results_xlsx(results, str(tmp_path / "beams.xlsx"))
+    sheet = load_workbook(path).active
+    assert sheet.title == "BEAM DESIGN"
+    assert sheet.cell(row=1, column=1).font.bold
+    assert sheet.max_row == len(results) + 1
