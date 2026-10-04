@@ -35,6 +35,8 @@ import pandas as pd
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from utilities.latex_help import missing_pdf_reason  # noqa: E402
+
 STORE_SUFFIX = " - design data.pkl"
 # Columns that hold names: kept as text (everything else that looks like a
 # number becomes one, as the old workbook did).
@@ -331,7 +333,7 @@ def run_beams() -> DesignStore | None:
         summary.note(note)
     summary.file("Results", xlsx)
     summary.file("Schedules", ", ".join(os.path.basename(p) for p in dxf))
-    summary.file("Calculations", pdf or "not written (check LaTeX)")
+    summary.file("Calculations", pdf or missing_pdf_reason())
     summary.file("Design data", store.path)
     summary.show(os.path.join(folder, f"{stem} - Beam Design summary.txt"), popup=True)
     return store
@@ -730,7 +732,7 @@ def run_columns() -> DesignStore | None:
         summary.note(f"{walls} wall panels are in the model: walls are not designed.")
     summary.file("Results", xlsx)
     summary.file("Schedule", ", ".join(os.path.basename(p) for p in dxf))
-    summary.file("Calculations", pdf or "not written (check LaTeX)")
+    summary.file("Calculations", pdf or missing_pdf_reason())
     summary.show(os.path.join(folder, f"{stem} - Column Design summary.txt"), popup=True)
     return store
 

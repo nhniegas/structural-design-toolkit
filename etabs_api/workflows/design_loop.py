@@ -1359,6 +1359,7 @@ def save_final_design(bench: Workbench, summary: dict, working: str, folder: str
         write_column_results_xlsx,
     )
     from design.concrete_workflow import DesignStore
+    from utilities.latex_help import missing_pdf_reason
 
     settings = bench.settings
     stem = os.path.splitext(os.path.basename(working))[0]
@@ -1382,8 +1383,9 @@ def save_final_design(bench: Workbench, summary: dict, working: str, folder: str
         say("Saving the beams 2 of 3: schedules (.dxf)")
         export_beam_dxf(beams, folder)
         say("Saving the beams 3 of 3: calculation report (.pdf, LaTeX)")
-        export_beam_pdf(beams, os.path.join(folder, f"{stem} - Beam Calculations.pdf"),
-                        settings.smrf, settings.gravity_combo)
+        if not export_beam_pdf(beams, os.path.join(folder, f"{stem} - Beam Calculations.pdf"),
+                               settings.smrf, settings.gravity_combo):
+            bench.log("Beam calculation report " + missing_pdf_reason())
     if columns is not None and len(columns) and store.column_groups:
         bars = settings.column_bars
         say("Saving the columns 1 of 3: results workbook (.xlsx)")
@@ -1393,8 +1395,10 @@ def save_final_design(bench: Workbench, summary: dict, working: str, folder: str
         export_column_cad_drawings(columns, folder, bars["dmain"], bars["cover"], settings.smrf,
                                    settings.inner_tie_style, bench.tables["CONNECTIVITY"])
         say("Saving the columns 3 of 3: calculation report (.pdf, LaTeX)")
-        export_column_pdf(columns, os.path.join(folder, f"{stem} - Column Calculations.pdf"),
-                          settings.smrf, bars["dmain"], bars["dties"], bars["cover"])
+        if not export_column_pdf(
+                columns, os.path.join(folder, f"{stem} - Column Calculations.pdf"),
+                settings.smrf, bars["dmain"], bars["dties"], bars["cover"]):
+            bench.log("Column calculation report " + missing_pdf_reason())
 
 
 if __name__ == "__main__":

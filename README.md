@@ -46,7 +46,15 @@ Supporting code:
 3. Double-click `sdt.exe`. A terminal opens with the menu of commands: type a number or a name, and the menu comes back when the command ends.
 4. Run `doctor` first. It checks that ETABS, the dialogs and LaTeX are in place on your machine.
 
-Windows may warn that the program is from an unknown publisher (it is not signed): choose **More info**, then **Run anyway**. ETABS must be installed for the ETABS commands, and a LaTeX distribution such as MiKTeX for the PDF reports; without LaTeX the results and schedules are still written.
+Windows may warn that the program is from an unknown publisher (it is not signed): choose **More info**, then **Run anyway**. ETABS must be installed for the ETABS commands.
+
+LaTeX is not part of the download. The PDF calculation reports need it; without it the results and schedules are still written, and the command says how to get it. Install MiKTeX once, from a terminal:
+
+```powershell
+winget install MiKTeX.MiKTeX
+```
+
+Then open a new terminal. On the first report MiKTeX asks to install the packages it lacks: allow it.
 
 From a terminal the program takes the same commands as below, for example `sdt.exe beams`.
 
@@ -57,7 +65,7 @@ For running from the source code:
 - Windows (ETABS and its COM API)
 - Python 3.10 or newer (developed on 3.14)
 - ETABS, for the ETABS workflows and the beam and column design (developed on ETABS 22)
-- A LaTeX distribution such as MiKTeX, for PDF reports
+- A LaTeX distribution such as MiKTeX, for PDF reports (`winget install MiKTeX.MiKTeX`)
 - Quarto, only to render `main.qmd`
 
 ## Setup

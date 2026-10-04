@@ -346,7 +346,7 @@ The design results hold the bars, legs and spacings; depths, strengths and ratio
 
 Column report, per column: section and vertical bars, then the governing combination at each end for axial load and flexure, slenderness about each axis (lu, k, k lu/r, the limit, Cm, Pc and the largest δns), column shear, strong column-weak beam (per axis), then joint shear per axis (it does not depend on the load combination, so none is named), the transverse reinforcement values and the design status. Each column ends with a 3D figure of its layout's design interaction surface, with every combination at both ends, the hull vertices and the governing demand. The strong column-weak beam check is not drawn there: it uses the nominal surface and belongs to the joint, not to one column. The caption under the figure gives its lowest ratio along X and Y and the result.
 
-The reports need a LaTeX install with `pdflatex` (MiKTeX or TeX Live), like the wind and composite reports.
+The reports need a LaTeX install with `pdflatex` (MiKTeX or TeX Live), like the wind and composite reports. It is not part of the toolkit or of the packaged program. When it is missing, the results and schedules are still written and the summary gives the command to install it (`winget install MiKTeX.MiKTeX`); `sdt doctor` shows whether it is found.
 
 ## Column local axes
 

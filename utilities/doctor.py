@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import os
 import platform
-import shutil
 import sys
 import time
 
@@ -142,12 +141,14 @@ def check_running_etabs() -> Check:
 
 
 def check_latex() -> Check:
-    path = shutil.which("pdflatex")
+    from utilities.latex_help import INSTALL_HINT, latex_path
+
+    path = latex_path()
     if path:
         return OK, "LaTeX (PDF reports)", path
     return WARN, "LaTeX (PDF reports)", (
         "pdflatex was not found: results and schedules are still written, the PDF "
-        "calculation reports are not. Install MiKTeX or TinyTeX")
+        "calculation reports are not. " + INSTALL_HINT)
 
 
 def run_doctor(version: str = "") -> list[Check]:
