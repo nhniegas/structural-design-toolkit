@@ -1,0 +1,196 @@
+SPECTRUM SCALE FACTORS BEFORE AND AFTER sdt analyze
+====================================================
+
+RESULT: the suspected bug is confirmed.
+With kN-m as the units the API works in, sdt analyze wrote 1153.7235 as the scale
+factor of every response spectrum case. In kN-m that is 1153.72 m/s2, 1000 times
+g I / R (1.1537 m/s2). The RSA base shear became 541,024 kN against a static base
+shear of 682 kN (793 x), the scaling step left it alone (scale up only), and
+sdt analyze reported no warning. With N-mm units the same model gives 1153.72
+mm/s2, then scales RSAX x 1.261 and RSAY x 1.228 to reach 100 % of the static shear.
+
+IMPORTANT, about 'a model in kN-m units'
+----------------------------------------
+The only model on this machine has N-mm as its database units (it was made by
+sdt setup). I could not make a copy whose database units are kN-m: ETABS fixes
+them when the model is created, and the .$et text file is always written in the
+database units. What was done instead: SapModel.SetPresentUnits(6) (kN-m) on the
+copy before running the command. Present units are what the API reads and writes
+in, so this reproduces what the code sees on a kN-m model, but it is not a model
+created in kN-m. Two things seen while doing it:
+  - Present units belong to the ETABS session, not to the file. A new ETABS that
+    opens the copy saved with kN-m present units reports N-mm again (the database
+    units). Opening another model in the same session keeps the kN-m.
+  - So the value sdt writes is interpreted in whatever units the session is in at
+    that moment. A model created in kN-m opens with kN-m present units, and so
+    would hit this every time.
+Not checked: whether the units box at the bottom right of the ETABS window is the
+same setting as the API's present units (the runs had no one at the screen).
+
+Scale factors are listed three ways: as the API returns them in the present units,
+and converted by ETABS to N-mm and to kN-m. I and R are in the pattern table.
+
+########## kN-m run ##########
+
+===== BEFORE sdt analyze - kN-m copy  (2026-10-04 23:48:44) =====
+Model file: C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\kNm\sample-kNm.EDB
+ETABS version: ['22.6.0', 0.0]
+Present units (what the API reads and writes in): 6 = kN-m
+Database units: 9 = N-mm
+Model locked (has results): False
+
+UBC 97 seismic load patterns (table 'Load Pattern Definitions - Auto Seismic - UBC 97'):
+      Name IsAuto     CoeffOpt   Ca    Cv I   R   Ct BotStory TopStory
+     EQXNE     No User Defined 0.44 0.768 1 8.5 0.03       GF       RD
+     EQXPE     No User Defined 0.44 0.768 1 8.5 0.03       GF       RD
+     EQXSD     No User Defined 0.44 0.768 1 8.5 0.03       GF       RD
+EQXSD(1/2)    Yes User Defined 0.44 0.768 1 8.5 0.03       GF       RD
+EQXSD(2/2)    Yes User Defined 0.44 0.768 1 8.5 0.03       GF       RD
+     EQYNE     No User Defined 0.44 0.768 1 8.5 0.03       GF       RD
+     EQYPE     No User Defined 0.44 0.768 1 8.5 0.03       GF       RD
+     EQYSD     No User Defined 0.44 0.768 1 8.5 0.03       GF       RD
+EQYSD(1/2)    Yes User Defined 0.44 0.768 1 8.5 0.03       GF       RD
+EQYSD(2/2)    Yes User Defined 0.44 0.768 1 8.5 0.03       GF       RD
+
+Response spectrum cases: scale factor of each load, read in three unit systems
+  case     dir  function            present        in N-mm        in kN-m
+  RSAX     U1   RSUBC97              1.5931      1593.1382       1.593138
+  RSAY     U2   RSUBC97              1.5594      1559.4113       1.559411
+  RSAXD    U1   RSUBC97              1.1659      1165.8580       1.165858
+  RSAYD    U2   RSUBC97              1.1684      1168.4113       1.168411
+
+What sdt writes on reset (base_spectrum_scale = 9806.65 I / R): 1153.7235   (as a kN-m value it should be 1.153724)
+
+Base reactions: the model has no analysis results (not locked).
+
+===== AFTER sdt analyze - kN-m copy  (2026-10-04 23:49:50) =====
+Model file: C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\kNm\sample-kNm.$et
+ETABS version: ['22.6.0', 0.0]
+Present units (what the API reads and writes in): 6 = kN-m
+Database units: 9 = N-mm
+Model locked (has results): True
+
+UBC 97 seismic load patterns (table 'Load Pattern Definitions - Auto Seismic - UBC 97'):
+      Name IsAuto     CoeffOpt   Ca    Cv I   R   Ct BotStory TopStory
+     EQXNE     No User Defined 0.44 0.768 1 8.5 0.03       GF       RD
+     EQXPE     No User Defined 0.44 0.768 1 8.5 0.03       GF       RD
+     EQXSD     No User Defined 0.44 0.768 1 8.5 0.03       GF       RD
+EQXSD(1/2)    Yes User Defined 0.44 0.768 1 8.5 0.03       GF       RD
+EQXSD(2/2)    Yes User Defined 0.44 0.768 1 8.5 0.03       GF       RD
+     EQYNE     No User Defined 0.44 0.768 1 8.5 0.03       GF       RD
+     EQYPE     No User Defined 0.44 0.768 1 8.5 0.03       GF       RD
+     EQYSD     No User Defined 0.44 0.768 1 8.5 0.03       GF       RD
+EQYSD(1/2)    Yes User Defined 0.44 0.768 1 8.5 0.03       GF       RD
+EQYSD(2/2)    Yes User Defined 0.44 0.768 1 8.5 0.03       GF       RD
+
+Response spectrum cases: scale factor of each load, read in three unit systems
+  case     dir  function            present        in N-mm        in kN-m
+  RSAX     U1   RSUBC97           1153.7235   1153723.5294    1153.723529
+  RSAY     U2   RSUBC97           1153.7235   1153723.5294    1153.723529
+  RSAXD    U1   RSUBC97           1153.7235   1153723.5294    1153.723529
+  RSAYD    U2   RSUBC97           1153.7235   1153723.5294    1153.723529
+
+What sdt writes on reset (base_spectrum_scale = 9806.65 I / R): 1153.7235   (as a kN-m value it should be 1.153724)
+
+Base reactions (table 'Base Reactions'), kN:
+                  FX        FY   FZ
+OutputCase                         
+EQXNE         -682.2       0.0  0.0
+EQXPE         -682.2       0.0  0.0
+EQXSD         -545.6       0.0  0.0
+EQYNE            0.0    -682.2  0.0
+EQYPE            0.0    -682.2  0.0
+EQYSD            0.0    -566.2  0.0
+RSAX        541024.2    4004.7  0.0
+RSAXD       541024.2    4004.7  0.0
+RSAY          4004.7  555749.6  0.0
+RSAYD         4004.7  555749.6  0.0
+
+Ratio of the spectrum base shear to the static base shear:
+  RSAX / EQXPE (FX): 793.038
+  RSAY / EQYPE (FY): 814.622
+  RSAXD / EQXSD (FX): 991.533
+  RSAYD / EQYSD (FY): 981.510
+
+
+########## N-mm run (control), same model, fresh copy ##########
+
+===== BEFORE sdt analyze - N-mm copy (control)  (2026-10-04 23:51:29) =====
+Model file: C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\Nmm\sample-Nmm.$et
+ETABS version: ['22.6.0', 0.0]
+Present units (what the API reads and writes in): 9 = N-mm
+Database units: 9 = N-mm
+Model locked (has results): False
+
+UBC 97 seismic load patterns (table 'Load Pattern Definitions - Auto Seismic - UBC 97'):
+      Name IsAuto     CoeffOpt   Ca    Cv I   R   Ct BotStory TopStory
+     EQXNE     No User Defined 0.44 0.768 1 8.5 0.03       GF       RD
+     EQXPE     No User Defined 0.44 0.768 1 8.5 0.03       GF       RD
+     EQXSD     No User Defined 0.44 0.768 1 8.5 0.03       GF       RD
+EQXSD(1/2)    Yes User Defined 0.44 0.768 1 8.5 0.03       GF       RD
+EQXSD(2/2)    Yes User Defined 0.44 0.768 1 8.5 0.03       GF       RD
+     EQYNE     No User Defined 0.44 0.768 1 8.5 0.03       GF       RD
+     EQYPE     No User Defined 0.44 0.768 1 8.5 0.03       GF       RD
+     EQYSD     No User Defined 0.44 0.768 1 8.5 0.03       GF       RD
+EQYSD(1/2)    Yes User Defined 0.44 0.768 1 8.5 0.03       GF       RD
+EQYSD(2/2)    Yes User Defined 0.44 0.768 1 8.5 0.03       GF       RD
+
+Response spectrum cases: scale factor of each load, read in three unit systems
+  case     dir  function            present        in N-mm        in kN-m
+  RSAX     U1   RSUBC97           1593.1382      1593.1382       1.593138
+  RSAY     U2   RSUBC97           1559.4113      1559.4113       1.559411
+  RSAXD    U1   RSUBC97           1165.8580      1165.8580       1.165858
+  RSAYD    U2   RSUBC97           1168.4113      1168.4113       1.168411
+
+What sdt writes on reset (base_spectrum_scale = 9806.65 I / R): 1153.7235   (as a kN-m value it should be 1.153724)
+
+Base reactions: the model has no analysis results (not locked).
+
+===== AFTER sdt analyze - N-mm copy (control)  (2026-10-04 23:51:47) =====
+Model file: C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\Nmm\sample-Nmm.$et
+ETABS version: ['22.6.0', 0.0]
+Present units (what the API reads and writes in): 9 = N-mm
+Database units: 9 = N-mm
+Model locked (has results): True
+
+UBC 97 seismic load patterns (table 'Load Pattern Definitions - Auto Seismic - UBC 97'):
+      Name IsAuto     CoeffOpt   Ca    Cv I   R   Ct BotStory TopStory
+     EQXNE     No User Defined 0.44 0.768 1 8.5 0.03       GF       RD
+     EQXPE     No User Defined 0.44 0.768 1 8.5 0.03       GF       RD
+     EQXSD     No User Defined 0.44 0.768 1 8.5 0.03       GF       RD
+EQXSD(1/2)    Yes User Defined 0.44 0.768 1 8.5 0.03       GF       RD
+EQXSD(2/2)    Yes User Defined 0.44 0.768 1 8.5 0.03       GF       RD
+     EQYNE     No User Defined 0.44 0.768 1 8.5 0.03       GF       RD
+     EQYPE     No User Defined 0.44 0.768 1 8.5 0.03       GF       RD
+     EQYSD     No User Defined 0.44 0.768 1 8.5 0.03       GF       RD
+EQYSD(1/2)    Yes User Defined 0.44 0.768 1 8.5 0.03       GF       RD
+EQYSD(2/2)    Yes User Defined 0.44 0.768 1 8.5 0.03       GF       RD
+
+Response spectrum cases: scale factor of each load, read in three unit systems
+  case     dir  function            present        in N-mm        in kN-m
+  RSAX     U1   RSUBC97           1454.8155      1454.8155       1.454815
+  RSAY     U2   RSUBC97           1416.2679      1416.2679       1.416268
+  RSAXD    U1   RSUBC97           1163.5757      1163.5757       1.163576
+  RSAYD    U2   RSUBC97           1175.4583      1175.4583       1.175458
+
+What sdt writes on reset (base_spectrum_scale = 9806.65 I / R): 1153.7235   (as a kN-m value it should be 1.153724)
+
+Base reactions (table 'Base Reactions'), kN:
+               FX     FY   FZ
+OutputCase                   
+EQXNE      -682.2    0.0  0.0
+EQXPE      -682.2    0.0  0.0
+EQXSD      -545.6    0.0  0.0
+EQYNE         0.0 -682.2  0.0
+EQYPE         0.0 -682.2  0.0
+EQYSD         0.0 -566.2  0.0
+RSAX        682.2    5.0  0.0
+RSAXD       545.6    4.0  0.0
+RSAY          4.9  682.2  0.0
+RSAYD         4.1  566.2  0.0
+
+Ratio of the spectrum base shear to the static base shear:
+  RSAX / EQXPE (FX): 1.000
+  RSAY / EQYPE (FY): 1.000
+  RSAXD / EQXSD (FX): 1.000
+  RSAYD / EQYSD (FY): 1.000

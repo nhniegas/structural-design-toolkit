@@ -1,0 +1,15 @@
+ETABS version (from the API, SapModel.GetVersion): ETABS Ultimate 22.6.0, 64-bit
+Command: sdt doctor   (the real sdt.exe of the editable install; a scratch copy of
+the model was open in ETABS at the time)
+
+[  OK] Toolkit: version 0.1.1, Python 3.14.6: C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\.venv\Scripts\python.exe
+[  OK] Saved answers: C:\Users\Nhel Harold Niegas\.structural_design_toolkit
+[  OK] Commands: all 14 modules load
+[  OK] Dialogs: tkinter opens a window
+[  OK] Progress window: starts and closes
+[  OK] ETABS program: C:\Program Files\Computers and Structures\ETABS 22\ETABS.exe
+[  OK] ETABS API: loaded; interface files in C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\.venv\Lib\site-packages\comtypes\gen
+[  OK] Open ETABS model: C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\kNm\sample-kNm.EDB
+[  OK] LaTeX (PDF reports): C:\Program Files\MiKTeX\miktex\bin\x64\pdflatex.EXE
+
+Everything the toolkit needs is in place.

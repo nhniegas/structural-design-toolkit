@@ -1,0 +1,123 @@
+Command: sdt columns on the same copy, right after sdt beams. Every dialog answer
+is the default.
+Result: 47 columns, 13 passing, 34 failing (12 column shear at the footing-level
+story, 22 joint shear), 12 slender. 42 s. Workbook: 08_columns.xlsx.
+See 09_notes.txt for what the failures are.
+
+How this was run
+----------------
+Machine: Windows 11, ETABS Ultimate 22.6.0 (64-bit), toolkit 0.1.1 from the
+main checkout (same code as this branch: the branch adds only this folder).
+Run by a Claude Code session on Nhel's PC, on 2026-10-04 23:47 to 2026-10-05.
+
+The commands are the real ones (main.main([command])) in a private ETABS
+instance. Their dialogs were answered by a script instead of by hand: each
+dialog is printed below with its options, its default and the answer given
+("[default]" = the default was accepted). "[PROGRESS WINDOW]" lines are what
+the loading window showed; "[SUMMARY WINDOW]" is the text of the summary window.
+The toolkit's remembered answers (~/.structural_design_toolkit) were not
+used, so every default shown is the built-in one.
+
+Model: a copy of a 3-storey concrete SMRF test model built with sdt setup and
+sdt grids (base at -1.0 m, GF at 0, 2F 4.5 m, 3F 8.0 m, RD 11.5 m; 149 tagged
+beams and columns). Every run used its own scratch copy.
+
+$ sdt columns     (toolkit 0.1.1, model sample-design.$et, present units N-mm, started 00:04:41)
+
+[DIALOG 00:04:42] values: Column Design
+    | Column bars and cover.
+    Column main bar (mm) = 25   [default]
+    Column tie (mm) = 12   [default]
+    Column cover (mm) = 40   [default]
+
+[DIALOG 00:04:42] choice: Column Design - Bottom Story Cover
+    | Use 75 mm concrete cover for the columns of the bottom-most story?
+              1. Yes - use 75 mm cover on the bottom-most story
+    (default) 2. No - keep 40 mm cover on every story
+    -> No - keep 40 mm cover on every story   [default]
+
+[DIALOG 00:04:42] choice: Column Design - Vertical Bars
+    | Carry the larger number of vertical bars of an upper level down to the levels below it?
+    (default) 1. Yes - lower levels use at least the bars of the level above
+              2. No - design every level on its own
+    -> Yes - lower levels use at least the bars of the level above   [default]
+
+[DIALOG 00:04:42] choice: Column Design - Topmost Level
+    | Run the strong column - weak beam (BCC) and joint shear checks at the joints on top of the columns (roof level)? No column stands above these joints, so one column alone must be 1.2 times stronger than the beams and the check often fails.
+    (default) 1. Yes - check them (ACI 18.7.3, 18.8)
+              2. No - leave them out at the topmost level
+    -> Yes - check them (ACI 18.7.3, 18.8)   [default]
+
+[DIALOG 00:04:42] choice: Column Design - Foundation Level
+    | Run the BCC, joint shear and probable-moment shear (Ve) checks on the columns of the bottom-most story (foundation to ground level)? These columns are short, so Ve = sum of Mpr / clear height becomes very large and a larger section does not help: the probable moment grows with the section.
+    (default) 1. Yes - check them (ACI 18.7.3, 18.7.6, 18.8)
+              2. No - leave them out; design these columns for the analysis shear
+    -> Yes - check them (ACI 18.7.3, 18.7.6, 18.8)   [default]
+
+[DIALOG 00:04:42] choice: Column Schedule - Interior Ties
+    | How should the interior ties be drawn?
+    (default) 1. Crossties (one tie with a hook at each end)
+              2. Closed inner hoops (each enclosing two bar positions)
+    -> Crossties (one tie with a hook at each end)   [default]
+
+[DIALOG 00:04:42] folder picker: Folder for the column results, calculations and schedule
+    | 
+    -> C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\design\results
+
+[PROGRESS WINDOW 00:04:42] Column design
+    [00:04:45] Column C3  |  Level RD  |  End I and J / Combo: ULS 100 1.4 DL / Check: Flexure and axial (P-M)
+    [00:04:45] Column C3  |  Level RD  |  End I and J / Check: Transverse detailing
+    [00:04:45] Column C2  |  Level RD  |  End I and J / Combo: ULS 100 1.4 DL / Check: Flexure and axial (P-M)
+    ... 56,235 more per-member progress lines like the three above (one per member, combination and check) left out ...
+    [00:04:52] Saving 1 of 3: the results workbook (.xlsx)
+    [00:04:58] Saving 2 of 3: the column schedule (.dxf)
+    [00:05:00] Saving 3 of 3: the calculation report (.pdf, LaTeX)
+[PROGRESS WINDOW closed after 41 s]
+
+========================================================================
+SUMMARY - sdt columns
+========================================================================
+Model: sample-design.EDB
+Columns designed     47
+Combinations         25
+Passing              13
+Failing              34
+Slender columns      12 (member effects, ACI 6.6.4.5; sway effects from the ETABS P-delta analysis)
+Read from the model  25 strength combinations (ULS names); deflection combinations (DEF names)
+
+Needs attention (2):
+  - Column shear: GF-C1, GF-C1A, GF-C1B, GF-C1C, GF-C2, GF-C2A, GF-C2B, GF-C2C, GF-C3, GF-C3A, GF-C3B, GF-C3C
+  - Joint shear: 2-C1A, 2-C1B, 2-C2, 2-C2C, 2-C3A, 2-C3B, 3-C1A, 3-C1B, 3-C2, 3-C2A, 3-C2B, 3-C2C, ... (22 in all)
+
+Files:
+  Results       C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\design\results\sample-design - Column Design.xlsx
+  Schedule      Column_Schedule.dxf
+  Calculations  C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\design\results\sample-design - Column Calculations.pdf
+========================================================================
+Summary saved: C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\design\results\sample-design - Column Design summary.txt
+
+[SUMMARY WINDOW 00:05:23] Summary - sdt columns
+
+========================================================================
+SUMMARY - sdt columns
+========================================================================
+Model: sample-design.EDB
+Columns designed     47
+Combinations         25
+Passing              13
+Failing              34
+Slender columns      12 (member effects, ACI 6.6.4.5; sway effects from the ETABS P-delta analysis)
+Read from the model  25 strength combinations (ULS names); deflection combinations (DEF names)
+
+Needs attention (2):
+  - Column shear: GF-C1, GF-C1A, GF-C1B, GF-C1C, GF-C2, GF-C2A, GF-C2B, GF-C2C, GF-C3, GF-C3A, GF-C3B, GF-C3C
+  - Joint shear: 2-C1A, 2-C1B, 2-C2, 2-C2C, 2-C3A, 2-C3B, 3-C1A, 3-C1B, 3-C2, 3-C2A, 3-C2B, 3-C2C, ... (22 in all)
+
+Files:
+  Results       C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\design\results\sample-design - Column Design.xlsx
+  Schedule      Column_Schedule.dxf
+  Calculations  C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\design\results\sample-design - Column Calculations.pdf
+========================================================================
+Summary saved: C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\design\results\sample-design - Column Design summary.txt
+
+[sdt columns ended 00:05:23 after 42 s, exit 0]

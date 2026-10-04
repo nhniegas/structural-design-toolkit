@@ -1,0 +1,119 @@
+Command: sdt analyze on the copy with kN-m present units (see 02_spectrum.txt).
+Note the scaling lines: RSAX 541,024 kN against static 682 kN, factor x 1.0000,
+and no warning about it.
+
+How this was run
+----------------
+Machine: Windows 11, ETABS Ultimate 22.6.0 (64-bit), toolkit 0.1.1 from the
+main checkout (same code as this branch: the branch adds only this folder).
+Run by a Claude Code session on Nhel's PC, on 2026-10-04 23:47 to 2026-10-05.
+
+The commands are the real ones (main.main([command])) in a private ETABS
+instance. Their dialogs were answered by a script instead of by hand: each
+dialog is printed below with its options, its default and the answer given
+("[default]" = the default was accepted). "[PROGRESS WINDOW]" lines are what
+the loading window showed; "[SUMMARY WINDOW]" is the text of the summary window.
+The toolkit's remembered answers (~/.structural_design_toolkit) were not
+used, so every default shown is the built-in one.
+
+Model: a copy of a 3-storey concrete SMRF test model built with sdt setup and
+sdt grids (base at -1.0 m, GF at 0, 2F 4.5 m, 3F 8.0 m, RD 11.5 m; 149 tagged
+beams and columns). Every run used its own scratch copy.
+
+$ sdt analyze     (toolkit 0.1.1, model sample-kNm.EDB, present units kN-m, started 23:48:53)
+
+[DIALOG 23:48:53] choice: Analysis
+    | The response spectrum cases are scaled in the model. Which model?
+    (default) 1. This model
+              2. A copy saved beside it
+    -> This model   [default]
+
+[DIALOG 23:48:53] values: Analysis
+    | For the Method A period check (UBC 97).
+    Seismic zone factor Z = 0.4   [default]
+    Ct (ft units, 0.030 for concrete frames) = 0.03   [default]
+
+[PROGRESS WINDOW 23:48:53] Analysis
+    [23:48:53] Putting the response spectrum cases back to g I / R
+    [23:48:53] Running every load case
+    [23:49:05] Comparing the spectrum and static base shears
+    [23:49:05] Reading the modal periods and participating mass
+    [23:49:05] Reading the seismic weight and the base reactions
+[PROGRESS WINDOW closed after 13 s]
+
+========================================================================
+ETABS ANALYSIS
+========================================================================
+Model: C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\kNm\sample-kNm.EDB
+
+--- Response spectrum scaled to 100 % of the static base shear (drift cases: of the drift patterns) ---
+X: static EQXPE 682.2 kN | RSAX 541,024.2 kN -> 541,024.2 kN (scale factor x 1.0000)
+X: static EQXSD 545.6 kN | RSAXD 541,024.2 kN -> 541,024.2 kN (scale factor x 1.0000)
+Y: static EQYPE 682.2 kN | RSAY 555,749.6 kN -> 555,749.6 kN (scale factor x 1.0000)
+Y: static EQYSD 566.2 kN | RSAYD 555,749.6 kN -> 555,749.6 kN (scale factor x 1.0000)
+
+--- Periods ---
+Governing modal period X: 0.873 s
+Governing modal period Y: 0.841 s
+Height above the ground hn = 11.50 m (ground level at elevation 0 m)
+Method A, T_A = Ct hn^(3/4): 0.457 s; Method B cap 1.3 T_A = 0.594 s
+ Mode  Period           UX       UY           RZ  SumUX    SumUY  SumRZ
+    1   0.873 8.786000e-01 0.000016 1.200000e-03 0.8786 0.000016 0.0012
+    2   0.841 8.290000e-07 0.870700 9.800000e-03 0.8786 0.870700 0.0110
+    3   0.696 1.200000e-03 0.009300 8.589000e-01 0.8798 0.879900 0.8699
+    4   0.211 4.400000e-02 0.004500 9.868000e-07 0.9238 0.884400 0.8699
+    5   0.207 4.300000e-03 0.043400 2.340000e-06 0.9281 0.927800 0.8699
+    6   0.179 1.153000e-06 0.000001 4.540000e-02 0.9281 0.927800 0.9153
+    7   0.090 1.220000e-02 0.000100 2.000000e-04 0.9403 0.927900 0.9155
+    8   0.089 1.000000e-04 0.012200 4.000000e-04 0.9404 0.940100 0.9159
+    9   0.079 1.000000e-04 0.000100 1.270000e-02 0.9405 0.940200 0.9286
+   10   0.028 0.000000e+00 0.013600 1.900000e-03 0.9405 0.953800 0.9305
+   11   0.027 1.500000e-03 0.000000 8.900000e-03 0.9420 0.953800 0.9394
+   12   0.026 2.340000e-02 0.000000 3.000000e-04 0.9654 0.953800 0.9397
+
+--- Modal participating mass ---
+Sum X: 96.5 %
+Sum Y: 95.4 %
+
+--- Weight ---
+Seismic weight from the mass source: 5,917.2 kN
+Base reaction of the same loads:     5,917.2 kN
+Story  Weight (kN)
+   RD       1529.9
+   3F       1806.7
+   2F       1935.1
+   GF        591.5
+ Base         54.0
+
+--- Warnings ---
+Modal period X 0.873 s is above 1.3 T_A = 0.594 s: the static base shear uses the capped period.
+Modal period Y 0.841 s is above 1.3 T_A = 0.594 s: the static base shear uses the capped period.
+========================================================================
+Saved: C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\kNm\sample-kNm.EDB
+
+[SUMMARY WINDOW 23:49:06] Summary - sdt analyze
+
+========================================================================
+SUMMARY - sdt analyze
+========================================================================
+Model: sample-kNm.EDB
+RSAX to EQXPE   541,024 kN (x 1.000)
+RSAXD to EQXSD  541,024 kN (x 1.000)
+RSAY to EQYPE   555,750 kN (x 1.000)
+RSAYD to EQYSD  555,750 kN (x 1.000)
+Period X        0.873 s
+Period Y        0.841 s
+Method A        T_A 0.457 s, hn 11.50 m above the ground; cap 0.594 s
+Modal mass X    96.5 %
+Modal mass Y    95.4 %
+Seismic weight  5,917 kN
+
+Needs attention (2):
+  - Modal period X 0.873 s is above 1.3 T_A = 0.594 s: the static base shear uses the capped period.
+  - Modal period Y 0.841 s is above 1.3 T_A = 0.594 s: the static base shear uses the capped period.
+
+Files:
+  Model (saved with its results)  C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\kNm\sample-kNm.EDB
+========================================================================
+
+[sdt analyze ended 23:49:06 after 14 s, exit 0]

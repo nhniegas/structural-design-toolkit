@@ -1,0 +1,24 @@
+ANYTHING THAT CRASHED
+=====================
+No sdt command crashed or raised an exception in these runs. Every command ended
+with exit 0, and ETABS showed no message box (a watchdog was listening for them).
+
+Recorded for completeness:
+
+1. ETABS writes this to the terminal each time a model without results is opened
+   through the API (OpenFile returns 0 and everything works):
+       Cannot open file
+       BufferFileIn::BufferFileIn():
+       fileName = ...\sample-kNm.Y_
+   A user running sdt from a terminal would see these lines. They were taken out of
+   the output files here.
+
+2. Problems of the test procedure, not of the toolkit:
+   - The first N-mm control run was done in the same ETABS session as the kN-m run.
+     The session kept kN-m as its present units when the next model was opened, so
+     that "control" also got the 1000 x scale. It was thrown away; ETABS was
+     restarted, a fresh copy was opened with SetPresentUnits(9) and the control was
+     run again. That is the run in 04 and 05b. It is also how the "present units
+     belong to the session" note in 02 was found.
+   - No .EDB of the user was touched. Every run used a copy under
+     edb/test edb/cloud-request/ (not in git).

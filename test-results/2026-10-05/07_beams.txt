@@ -1,0 +1,162 @@
+Command: sdt beams on an analysed copy (N-mm present units, sdt analyze run just
+before on the same copy; the model is tagged). Every dialog answer is the default.
+Result: 102 beams, 25 combinations, 102 passing, deflection 0 failing. 21 s.
+Workbook: 07_beams.xlsx. The schedules (.dxf) and the PDF report were written too
+(the PDF compiled with MiKTeX); they are not in this folder.
+
+How this was run
+----------------
+Machine: Windows 11, ETABS Ultimate 22.6.0 (64-bit), toolkit 0.1.1 from the
+main checkout (same code as this branch: the branch adds only this folder).
+Run by a Claude Code session on Nhel's PC, on 2026-10-04 23:47 to 2026-10-05.
+
+The commands are the real ones (main.main([command])) in a private ETABS
+instance. Their dialogs were answered by a script instead of by hand: each
+dialog is printed below with its options, its default and the answer given
+("[default]" = the default was accepted). "[PROGRESS WINDOW]" lines are what
+the loading window showed; "[SUMMARY WINDOW]" is the text of the summary window.
+The toolkit's remembered answers (~/.structural_design_toolkit) were not
+used, so every default shown is the built-in one.
+
+Model: a copy of a 3-storey concrete SMRF test model built with sdt setup and
+sdt grids (base at -1.0 m, GF at 0, 2F 4.5 m, 3F 8.0 m, RD 11.5 m; 149 tagged
+beams and columns). Every run used its own scratch copy.
+
+$ sdt beams     (toolkit 0.1.1, model sample-design.$et, present units N-mm, started 00:04:19)
+
+[DIALOG 00:04:19] choice: Beam Design
+    | Seismic combinations to design for (gravity and wind ULS combinations are always included):
+              1. Static (EQ)
+    (default) 2. Response spectrum (RSA)
+              3. Both
+    -> Response spectrum (RSA)   [default]
+
+[DIALOG 00:04:19] choice: Factored Forces
+    | Reduce the reducible live load?
+    (default) 1. Yes
+              2. No
+    -> Yes   [default]
+
+[DIALOG 00:04:19] choice: Factored Forces
+    | Live load reduction rule:
+    | 
+    | NSCP 2015 205.5: R = r (A - 14) %, r = 0.86 per m2 (the metric form of UBC's 0.08 per ft2), at most 40 % (one level) / 60 % and 23.1 (1 + D/L) %.
+    | 
+    | ASCE 7-10 4.7 (NSCP 205.6 alternate, and NSCP 405.2.3): L = Lo (0.25 + 4.57 / sqrt(KLL AT)), KLL 4 for columns and 2 for beams, when KLL AT is at least 37.16 m2; L at least 0.50 Lo (one level) / 0.40 Lo.
+    | 
+    | Both: no reduction above 4.8 kPa, except 20 % for members supporting more than one floor.
+    (default) 1. NSCP 2015 205.5
+              2. ASCE 7-10 4.7
+    -> NSCP 2015 205.5   [default]
+
+[DIALOG 00:04:19] choice: Factored Forces
+    | Tributary area for the live load reduction:
+    (default) 1. Geometric: halfway lines (as ETABS)
+              2. Analysis load share: 1 kPa on every floor, as the frame carries it
+    -> Geometric: halfway lines (as ETABS)   [default]
+
+[DIALOG 00:04:19] choice: Factored Forces
+    | Include pattern live load on the beams (ACI 318-14 6.4.2)?
+    | 
+    | Each span is also designed for its live load as a simple span (largest sagging) and with fixed ends (largest hogging), times the factor.
+    (default) 1. Yes
+              2. No
+    -> Yes   [default]
+
+[DIALOG 00:04:19] values: Factored Forces
+    | Pattern live load factor.
+    Factor on the live load = 0.75   [default]
+
+[DIALOG 00:04:19] choice: Beam Design
+    | SMRF (seismic) design? Gravity beams (on other beams only) are designed for gravity in any case.
+    (default) 1. Yes
+              2. No
+    -> Yes   [default]
+
+[DIALOG 00:04:19] choice: Beam Design
+    | Gravity combination for the beam seismic shear:
+    (default) 1. ULS 100 1.4 DL
+              2. ULS 101 1.2 DL + 1.6 LL + 0.5 Lr
+              3. ULS 102 1.2 DL + 1.6 Lr + f LL
+    -> ULS 100 1.4 DL   [default]
+
+[DIALOG 00:04:19] values: Beam Design
+    | Beam bars and cover.
+    Beam main bar (mm) = 28   [default]
+    Beam stirrup (mm) = 12   [default]
+    Beam web (side) bar (mm) = 12   [default]
+    Web bar fy (MPa) = 414   [default]
+    Beam cover (mm) = 40   [default]
+
+[DIALOG 00:04:19] choice: Beam Design - Cover against Earth
+    | Do the beams of any floor level need 75 mm cover (cast against or exposed to earth, such as footing tie beams and ground beams)? The other beams keep 40 mm.
+    (default) 1. No - 40 mm cover on every level
+              2. Yes - choose the levels with 75 mm cover
+    -> No - 40 mm cover on every level   [default]
+
+[DIALOG 00:04:19] choice: Beam Design - Deflection
+    | Do the beams support partitions or finishes likely to be damaged by deflection?
+    (default) 1. Yes: L/480 after partitions are installed
+              2. No: L/240
+    -> Yes: L/480 after partitions are installed   [default]
+
+[DIALOG 00:04:19] folder picker: Folder for the beam results, calculations and schedules
+    | 
+    -> C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\design\results
+
+[PROGRESS WINDOW 00:04:19] Beam design
+    [00:04:20] Reading the analysis results and building the factored forces
+    [00:04:26] Beam 2BY-1  |  Level 2F / Combo: ULS 100 1.4 DL / Check: Demands: Mu, Vu and Tu at the supports and midspan
+    [00:04:26] Beam 2BY-1  |  Level 2F / Combo: ULS 101 1.2 DL + 1.6 LL + 0.5 Lr / Check: Demands: Mu, Vu and Tu at the supports and midspan
+    [00:04:26] Beam 2BY-1  |  Level 2F / Combo: ULS 102 1.2 DL + 1.6 Lr + f LL / Check: Demands: Mu, Vu and Tu at the supports and midspan
+    ... 18,270 more per-member progress lines like the three above (one per member, combination and check) left out ...
+    [00:04:34] Saving 1 of 3: the results workbook (.xlsx)
+    [00:04:35] Saving 2 of 3: the beam schedules (.dxf)
+    [00:04:36] Saving 3 of 3: the calculation report (.pdf, LaTeX)
+[PROGRESS WINDOW closed after 20 s]
+
+========================================================================
+SUMMARY - sdt beams
+========================================================================
+Model: sample-design.EDB
+Beams designed       102
+Combinations         25
+Passing              102
+Failing              0
+Deflection           0 failing of 102
+Read from the model  25 strength combinations (ULS names); deflection combinations (DEF names)
+
+Nothing needs attention.
+
+Files:
+  Results       C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\design\results\sample-design - Beam Design.xlsx
+  Schedules     2F_Girder_Schedule.dxf, 2F_Beam_Schedule.dxf, 3F_Girder_Schedule.dxf, 3F_Beam_Schedule.dxf, GF_Girder_Schedule.dxf, RD_Girder_Schedule.dxf, RD_Beam_Schedule.dxf
+  Calculations  C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\design\results\sample-design - Beam Calculations.pdf
+  Design data   C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\design\sample-design - design data.pkl
+========================================================================
+Summary saved: C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\design\results\sample-design - Beam Design summary.txt
+
+[SUMMARY WINDOW 00:04:39] Summary - sdt beams
+
+========================================================================
+SUMMARY - sdt beams
+========================================================================
+Model: sample-design.EDB
+Beams designed       102
+Combinations         25
+Passing              102
+Failing              0
+Deflection           0 failing of 102
+Read from the model  25 strength combinations (ULS names); deflection combinations (DEF names)
+
+Nothing needs attention.
+
+Files:
+  Results       C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\design\results\sample-design - Beam Design.xlsx
+  Schedules     2F_Girder_Schedule.dxf, 2F_Beam_Schedule.dxf, 3F_Girder_Schedule.dxf, 3F_Beam_Schedule.dxf, GF_Girder_Schedule.dxf, RD_Girder_Schedule.dxf, RD_Beam_Schedule.dxf
+  Calculations  C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\design\results\sample-design - Beam Calculations.pdf
+  Design data   C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\design\sample-design - design data.pkl
+========================================================================
+Summary saved: C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\design\results\sample-design - Beam Design summary.txt
+
+[sdt beams ended 00:04:39 after 21 s, exit 0]

@@ -1,0 +1,116 @@
+NOTES ON THE RUNS
+=================
+
+How this was run
+----------------
+Machine: Windows 11, ETABS Ultimate 22.6.0 (64-bit), toolkit 0.1.1 from the
+main checkout (same code as this branch: the branch adds only this folder).
+Run by a Claude Code session on Nhel's PC, on 2026-10-04 23:47 to 2026-10-05.
+
+The commands are the real ones (main.main([command])) in a private ETABS
+instance. Their dialogs were answered by a script instead of by hand: each
+dialog is printed below with its options, its default and the answer given
+("[default]" = the default was accepted). "[PROGRESS WINDOW]" lines are what
+the loading window showed; "[SUMMARY WINDOW]" is the text of the summary window.
+The toolkit's remembered answers (~/.structural_design_toolkit) were not
+used, so every default shown is the built-in one.
+
+Model: a copy of a 3-storey concrete SMRF test model built with sdt setup and
+sdt grids (base at -1.0 m, GF at 0, 2F 4.5 m, 3F 8.0 m, RD 11.5 m; 149 tagged
+beams and columns). Every run used its own scratch copy.
+
+
+1. Dialog choices
+-----------------
+Every dialog was answered with its default. The full list, with the options of
+each dialog, is at the top of each output file. In short:
+
+sdt analyze   Which model: "This model" (default; it was already a scratch copy)
+              Z = 0.4, Ct = 0.03 (defaults read from the model's UBC 97 patterns)
+sdt check     Wind drift limit h / 400
+sdt drift     Diaphragm centre of mass; "Static: EQXSD / EQYSD"; h / 400; Continue
+sdt beams     Seismic combinations: "Response spectrum (RSA)" (default, 2nd of 3)
+              Reduce the live load: Yes; rule: NSCP 2015 205.5; tributary area:
+              geometric; pattern live load: Yes, factor 0.75
+              SMRF design: Yes
+              Gravity combination for the seismic shear: "ULS 100 1.4 DL"
+              Bars: main 28, stirrup 12, web 12, web fy 414, cover 40
+              Earth cover: No; deflection: L/480; output folder: a scratch folder
+sdt columns   Bars: main 25, tie 12, cover 40; 75 mm bottom cover: No (default is
+              the 2nd option); carry bars down: Yes; check the topmost joints: Yes;
+              check the foundation level: Yes; ties: crossties
+
+2. The questions in the request
+-------------------------------
+- Seismic gravity combination for beam shear, the default: "ULS 100 1.4 DL". It is
+  simply the first of the list (ULS 100, ULS 101 1.2 DL + 1.6 LL + 0.5 Lr, ULS 102
+  1.2 DL + 1.6 Lr + f LL). For the seismic shear 1.2 D + 1.0 L (ACI 18.6.5.1) one
+  would expect a combination with live load, so the first-of-the-list default is
+  worth a look.
+- Deflection combinations suggested first: NOT OBSERVED. This model has the four
+  DEF combinations of sdt setup, so the dialog that offers them never opened ("Read
+  from the model: ... deflection combinations (DEF names)"). It needs a model that
+  was not made by sdt setup; there is none on this machine.
+- Columns failing only "Joint shear" with a low shear ratio: 22 columns fail joint
+  shear only, with column shear ratios of 0.34 to 0.77. But here it is NOT the
+  20 db joint dimension rule: the joint shear capacity itself is exceeded.
+  The SMRF column dimension check is PASS on the rows looked at. Examples:
+      3-C1A (600x600), top: demand X 1109 kN, Y 2218 kN; capacity 1339 kN;
+                            ratio X 0.83, Y 1.66; column shear ratio 0.63
+      2-C2  (600x600), top: demand X 2265 kN, Y 1133 kN; capacity 1929 kN;
+                            ratio X 1.17, Y 0.59; column shear ratio 0.34
+  All 22 have a ratio of 1.17 or 1.66 in one direction. In each, that direction has
+  two beams framing in (4D28 top and bottom each) and the demand is exactly twice
+  the one-beam direction.
+
+3. Things that look wrong, slow or confusing
+--------------------------------------------
+a. (the main one) Spectrum scale 1000 x too large with kN-m present units, with no
+   warning from sdt analyze and an [OK] from sdt check: 02, 03, 05.
+b. sdt check in kN-m: hn = 0.0 m, T_A 0.003 s, four period-cap FAILs: 05.
+c. sdt drift gives drifts 1.22 x larger in kN-m than in N-mm on the same model
+   (ratio 5.5 / 4.5, elevation of 2F above the base over its story height): 06.
+d. The 12 columns of the footing-level story (Base -1.0 m to GF, 1.0 m story, clear
+   height lu = 500 mm) all fail column shear with the default "check the foundation
+   level: Yes". The probable shear Ve = sum of Mpr / lu is enormous against the
+   analysis shear:
+      GF-C1  (600x600): analysis Vu 4.7 kN, Ve 8,974 kN, phi Vn 835 kN, ratio 10.7
+      GF-C2A (600x800): analysis Vu 4.9 kN, Ve 3,918 kN, phi Vn 1,114 kN, ratio 3.4
+   The dialog does say these columns are short, but a user who accepts the defaults
+   gets 12 failures that no section can fix. GF-C1 is 3 x worse than the others
+   (ratio 10.7 against about 3); not investigated.
+e. The "Design Status Reason" of a joint shear failure is just "FAIL". A column
+   shear failure reads "FAIL; FAIL: column shear strength". The joint shear reason
+   seems to be missing its text.
+f. In the column workbook the joint columns "Beam Bars at Joint, X" list girders
+   named GY (3GY-2A) and "... Y" list girders named GX (3GX-1, 3GX-1A). It may be
+   the naming convention (a GX girder spans in Y?), but it reads as swapped.
+g. sdt beams and sdt columns print their summary in the terminal and then show the
+   same text in the summary window; analyze, check and drift only show the window.
+h. After an analysis ETABS reports the model file as "<name>.$et", and sdt check
+   prints "Model: sample-kNm.$et" in its report and summary. Cosmetic.
+i. WX and WY give exactly the same drift at every level in sdt drift and sdt check
+   (0.00152 / 0.00152, h/767 / h/767). Worth confirming the two wind patterns act
+   in different directions.
+j. Nothing was slow. See the timings.
+
+4. Timings (this PC, ETABS 22.6.0)
+----------------------------------
+sdt doctor                     a few seconds (not timed)
+sdt analyze, kN-m copy         14 s (one analysis; no second pass, the scale was not changed)
+sdt analyze, N-mm copy         16 s (two analyses)
+sdt check                      3 s
+sdt drift                      27 s (kN-m), 25 s (N-mm); three analyses and a restore
+sdt beams                      21 s (102 beams, 25 combinations; includes the PDF)
+sdt columns                    42 s (47 columns; 23 s of it is the PDF report, 9.4 MB)
+
+5. Not done
+-----------
+- A model created in kN-m (database units): see the note in 02_spectrum.txt.
+- A model with a real basement: only a footing level 1.0 m below GF was available.
+- A model not made by sdt setup (for the deflection and strength combination
+  dialogs), and an untagged model.
+- sdt design (the loop) was not asked for and was not run.
+- Nobody looked at the screen: the real dialogs, the loading window and the summary
+  window were replaced by the script, so their layout was not checked. sdt doctor
+  did open the real dialog and loading window and reported both OK.

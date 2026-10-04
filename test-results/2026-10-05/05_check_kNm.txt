@@ -1,0 +1,174 @@
+Command: sdt check on the kN-m copy, right after the sdt analyze of 03.
+RESULT: the suspected story-elevation units issue is confirmed. 'Height above the
+ground hn = 0.0 m', T_A 0.003 s, and the four period-cap lines FAIL. The N-mm
+control (05b_check_Nmm.txt) gives hn = 11.5 m, T_A 0.457 s and no FAIL.
+Also here: the RSA lines read '[  OK] RSAX: base shear 541,024 kN = 79304 % of the
+static 682 kN', so the check passes a spectrum 793 times the static shear.
+The two RSAXD / RSAYD drift FAILs come from that oversized spectrum (03).
+
+How this was run
+----------------
+Machine: Windows 11, ETABS Ultimate 22.6.0 (64-bit), toolkit 0.1.1 from the
+main checkout (same code as this branch: the branch adds only this folder).
+Run by a Claude Code session on Nhel's PC, on 2026-10-04 23:47 to 2026-10-05.
+
+The commands are the real ones (main.main([command])) in a private ETABS
+instance. Their dialogs were answered by a script instead of by hand: each
+dialog is printed below with its options, its default and the answer given
+("[default]" = the default was accepted). "[PROGRESS WINDOW]" lines are what
+the loading window showed; "[SUMMARY WINDOW]" is the text of the summary window.
+The toolkit's remembered answers (~/.structural_design_toolkit) were not
+used, so every default shown is the built-in one.
+
+Model: a copy of a 3-storey concrete SMRF test model built with sdt setup and
+sdt grids (base at -1.0 m, GF at 0, 2F 4.5 m, 3F 8.0 m, RD 11.5 m; 149 tagged
+beams and columns). Every run used its own scratch copy.
+
+$ sdt check     (toolkit 0.1.1, model sample-kNm.$et, present units kN-m, started 23:49:52)
+
+[DIALOG 23:49:52] values: Model Check
+    | Story drift limit under the wind combinations (NSCP 207 sets none; seismic drift follows NSCP 208.6.5).
+    Wind drift limit: h / = 400   [default]
+
+[PROGRESS WINDOW 23:49:52] Checking the model
+    [23:49:52] Reading the model (nothing is changed)
+    [23:49:52] Reading the load patterns and stories
+    [23:49:52] Reading table 1 of 26 / Frame Assignments - Section Properties
+    [23:49:52] Reading table 2 of 26 / Frame Assignments - Property Modifiers
+    [23:49:53] Reading table 3 of 26 / Frame Assignments - End Length Offsets
+    [23:49:53] Reading table 4 of 26 / Floor Object Connectivity
+    [23:49:53] Reading table 5 of 26 / Area Assignments - Summary
+    [23:49:53] Reading table 6 of 26 / Point Object Connectivity
+    [23:49:53] Reading table 7 of 26 / Column Object Connectivity
+    [23:49:53] Reading table 8 of 26 / Beam Object Connectivity
+    [23:49:53] Reading table 9 of 26 / Joint Assignments - Restraints
+    [23:49:53] Reading table 10 of 26 / Area Load Assignments - Uniform
+    [23:49:53] Reading table 15 of 26 / Joint Loads Assignments - Force
+    [23:49:53] Reading table 16 of 26 / Load Pattern Definitions - Auto Seismic - UBC 97
+    [23:49:53] Reading table 17 of 26 / Load Pattern Definitions - Auto Wind - ASCE 7-10
+    [23:49:53] Reading table 18 of 26 / Functions - Response Spectrum - UBC 97
+    [23:49:53] Reading table 19 of 26 / Load Case Definitions - Response Spectrum
+    [23:49:54] Reading table 20 of 26 / Load Case Definitions - Linear Static
+    [23:49:54] Reading table 21 of 26 / Load Case Definitions - Summary
+    [23:49:54] Reading table 22 of 26 / Load Combination Definitions
+    [23:49:54] Reading table 23 of 26 / P-Delta Option Definition
+    [23:49:54] Reading table 24 of 26 / Mass Source Definition
+    [23:49:54] Reading table 25 of 26 / Material Properties - Concrete Data
+    [23:49:54] Reading table 26 of 26 / Material Properties - Rebar Data
+    [23:49:54] Reading the section property modifiers
+    [23:49:54] Analysis results: base shears
+    [23:49:54] Analysis results: modal periods and mass
+    [23:49:54] Analysis results: story weights
+    [23:49:54] Analysis results: story drifts
+    [23:49:55] Running the checks
+[PROGRESS WINDOW closed after 3 s]
+
+================================================================================================
+MODEL CHECK
+================================================================================================
+Model: C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\kNm\sample-kNm.$et
+Analysis results: yes
+
+--- Model ---
+[  OK] Every beam and column is tagged.   (sdt tag)
+[  OK] Every frame uses a setup section (G_, B_, FTB_, CR_, C_).
+[  OK] All 3 floors have a diaphragm.   (NSCP 208.5.1.3)
+[  OK] All floors have a slab section.
+[INFO] Column bases at z = -1000: 0 fixed, 12 pinned, 0 without supports - confirm the support assumption matches the footing design
+[  OK] No beam has a free end.
+
+--- Loads ---
+[INFO] Gravity patterns with no loads: EXTERIOR WALLS (super dead), LIVENRED (live), LIVEROOF (roof live) - confirm intended   (NSCP 205)
+[INFO] No roof live load is assigned (the Lr combinations and the roof deflection check see none) - confirm intended   (NSCP 205.4 Table 205-3)
+[  OK] Self weight only on SELFWEIGHT.
+[  OK] No reducible live load above 4.8 kPa.   (NSCP 205.5)
+
+--- Seismic ---
+[  OK] Every seismic pattern covers GF to RD.   (NSCP 208.5.2.3)
+[  OK] Accidental eccentricity 0.05 on every pattern.   (NSCP 208.5.1.3)
+[INFO] Ca, Cv are user defined: ETABS keeps no zone, soil or source with them, so zone 4 is assumed for the period cap and the 0.8 Z Nv I / R minimum is not checked   (NSCP Table 208-3)
+[  OK] Ca, Cv user defined [(0.44, 0.768)], equal to the spectrum RSUBC97   (NSCP Tables 208-7, 208-8)
+[INFO] Importance factor I = 1 - Table 208-1 by occupancy category   (NSCP Table 208-1)
+[  OK] R = 8.5: special moment frame (or dual system with special walls) (Omega0 2.8); the SMRF limits of 418 below apply   (NSCP Table 208-11A)
+[INFO] Ct = 0.03 (ft units) = 0.0731 in m: concrete moment frames   (NSCP 208.5.2.2 Eq. 208-12)
+[INFO] Period: Program Calculated (Program Calculated = Method B, capped at 1.3 T_A in zone 4, 1.4 T_A in zone 2)   (NSCP 208.5.2.2)
+[  OK] Response spectrum cases have accidental eccentricity.   (NSCP 208.5.3.5.6)
+[INFO] Height above the ground hn = 0.0 m (static procedure allowed if regular; irregular over 5 stories or 20 m needs the dynamic procedure)   (NSCP 208.4.8)
+[  OK] W used by the static patterns 5,272 kN = the stories above GF.   (NSCP 208.5.2.1, 208.6.1)
+[  OK] EQXNE: V/W 0.1294 at T 0.594 s   (NSCP 208.5.2.1 Eq. 208-8 to 208-11)
+[FAIL] EQXNE: T 0.594 s, T_A 0.003 s, cap 0.003 s   (NSCP 208.5.2.2)
+[  OK] EQXPE: V/W 0.1294 at T 0.594 s   (NSCP 208.5.2.1 Eq. 208-8 to 208-11)
+[FAIL] EQXPE: T 0.594 s, T_A 0.003 s, cap 0.003 s   (NSCP 208.5.2.2)
+[  OK] EQXSD(1/2): V/W 0.1035 at T 0.873 s (drift: no lower limit)   (NSCP 208.6.5.2)
+[  OK] EQXSD(2/2): V/W 0.1035 at T 0.873 s (drift: no lower limit)   (NSCP 208.6.5.2)
+[  OK] EQYNE: V/W 0.1294 at T 0.594 s   (NSCP 208.5.2.1 Eq. 208-8 to 208-11)
+[FAIL] EQYNE: T 0.594 s, T_A 0.003 s, cap 0.003 s   (NSCP 208.5.2.2)
+[  OK] EQYPE: V/W 0.1294 at T 0.594 s   (NSCP 208.5.2.1 Eq. 208-8 to 208-11)
+[FAIL] EQYPE: T 0.594 s, T_A 0.003 s, cap 0.003 s   (NSCP 208.5.2.2)
+[  OK] EQYSD(1/2): V/W 0.1074 at T 0.841 s (drift: no lower limit)   (NSCP 208.6.5.2)
+[  OK] EQYSD(2/2): V/W 0.1074 at T 0.841 s (drift: no lower limit)   (NSCP 208.6.5.2)
+[  OK] RSAX: base shear 541,024 kN = 79304 % of the static 682 kN   (NSCP 208.5.3.5.4)
+[  OK] RSAXD: base shear 541,024 kN = 99153 % of the static 546 kN   (NSCP 208.5.3.5.4)
+[  OK] RSAY: base shear 555,750 kN = 81462 % of the static 682 kN   (NSCP 208.5.3.5.4)
+[  OK] RSAYD: base shear 555,750 kN = 98151 % of the static 566 kN   (NSCP 208.5.3.5.4)
+[  OK] Modal mass UX: 96.5 %   (NSCP 208.5.3.5.2)
+[  OK] Modal mass UY: 95.4 %   (NSCP 208.5.3.5.2)
+[  OK] EQXSD: drift 0.00279 at 2F, Delta_M = 0.7 R x = 0.0166 (limit 0.020, T 0.87 s; DRIFT 101 (1.2 + Ev) DL + f LL - 1.0 EQXSD)   (NSCP 208.6.4.1, 208.6.5.1)
+[  OK] EQYSD: drift 0.00301 at 2F, Delta_M = 0.7 R x = 0.0179 (limit 0.020, T 0.84 s; DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 EQYSD)   (NSCP 208.6.4.1, 208.6.5.1)
+[FAIL] RSAXD: drift 2.67781 at 2F, Delta_M = 0.7 R x = 15.9330 (limit 0.020, T 0.87 s; DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 RSAXD)   (NSCP 208.6.4.1, 208.6.5.1)
+[FAIL] RSAYD: drift 3.00439 at 2F, Delta_M = 0.7 R x = 17.8761 (limit 0.020, T 0.87 s; DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 RSAYD)   (NSCP 208.6.4.1, 208.6.5.1)
+
+--- Wind ---
+[  OK] Every wind pattern covers GF to RD.   (NSCP 207)
+[  OK] WX: drift 0.00130 = h/767 at GF (limit h/400; WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WX)   (NSCP 203.3 combinations; limit: project (NSCP 207 sets none))
+[  OK] WY: drift 0.00130 = h/767 at GF (limit h/400; WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WY)   (NSCP 203.3 combinations; limit: project (NSCP 207 sets none))
+[INFO] WX: speed 150 (mph = 241 km/h), exposure B, Kzt 1, G 0.85, Kd 0.85 - confirm against the site's wind zone   (NSCP 207.5 Fig. 207A.5-1)
+[INFO] WY: speed 150 (mph = 241 km/h), exposure B, Kzt 1, G 0.85, Kd 0.85 - confirm against the site's wind zone   (NSCP 207.5 Fig. 207A.5-1)
+
+--- Combinations ---
+[  OK] 41 ULS strength combinations.   (NSCP 203.3)
+[  OK] 4 deflection combinations.
+[  OK] Every combination refers to existing cases.
+[  OK] Seismic strength combinations carry Ev: 1.420 D and 0.680 D.   (NSCP 208.6.1, 203.3.1)
+
+--- Analysis ---
+[  OK] Every linear static case uses preset P-Delta.
+[  OK] P-delta: Iterative Based on Loads   (NSCP 208.6.3)
+[  OK] Mass source: EXTERIOR WALLS, LIVENRED, SELFWEIGHT, SIDL (W: all dead load, 25 % of storage live, partitions at least 0.5 kPa)   (NSCP 208.6.1)
+[  OK] Effective I: beams 0.35, columns 0.7.   (NSCP 208.6.2 item 1, 406.6.3.1.1)
+[INFO] Rigid end zone factor: 0.5 (0.5 is common for SMRF)   (NSCP 406.6.2.3(b))
+
+--- SMRF ---
+[  OK] Girder widths at least the smaller of 0.3h and 250 mm.   (NSCP 418.6.2.1(b))
+[  OK] Girder spans at least 4d.   (NSCP 418.6.2.1(a))
+[  OK] Column sides at least 300 mm.   (NSCP 418.7.2.1(a))
+[  OK] Column side ratio at least 0.4.   (NSCP 418.7.2.1(b))
+[  OK] Concrete of the frames at least 21 MPa.   (NSCP 418.2.5.1, Table 419.2.1.1)
+[  OK] Rebar of the frames at most 420 MPa (A706, or A615 with the 420.2.2.5 supplements).   (NSCP 418.2.6.1, 420.2.2.5)
+
+Summary: 6 FAIL, 11 INFO, 46 OK
+================================================================================================
+
+[SUMMARY WINDOW 23:49:55] Summary - sdt check
+
+========================================================================
+SUMMARY - sdt check
+========================================================================
+Model: sample-kNm.$et
+OK    46
+INFO  11
+WARN  0
+FAIL  6
+
+Needs attention (6):
+  - Seismic: EQXNE: T 0.594 s, T_A 0.003 s, cap 0.003 s
+  - Seismic: EQXPE: T 0.594 s, T_A 0.003 s, cap 0.003 s
+  - Seismic: EQYNE: T 0.594 s, T_A 0.003 s, cap 0.003 s
+  - Seismic: EQYPE: T 0.594 s, T_A 0.003 s, cap 0.003 s
+  - Seismic: RSAXD: drift 2.67781 at 2F, Delta_M = 0.7 R x = 15.9330 (limit 0.020, T 0.87 s; DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 RSAXD)
+  - Seismic: RSAYD: drift 3.00439 at 2F, Delta_M = 0.7 R x = 17.8761 (limit 0.020, T 0.87 s; DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 RSAYD)
+
+Note: The model was not changed.
+========================================================================
+
+[sdt check ended 23:49:55 after 3 s, exit 0]
