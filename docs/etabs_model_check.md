@@ -1,6 +1,6 @@
-# Model check (`xs check`)
+# Model check (`sdt check`)
 
-`xs check` (or `python main.py check`) reads the model open in ETABS and prints a list of checks in the terminal. It doesn't change the model.
+`sdt check` (or `python main.py check`) reads the model open in ETABS and prints a list of checks in the terminal. It doesn't change the model.
 
 ```
 [FAIL] Story range should be GF to RD: EQXPE 3F-RD   (NSCP 208.5.2.3)
@@ -14,7 +14,7 @@ Each line has a status:
 | INFO | A value for you to confirm, such as the importance factor or the support type. |
 | WARN | Probably missing or unusual. |
 | FAIL | Wrong against the code. |
-| N/A | Needs analysis results. Run `xs analyze` first. |
+| N/A | Needs analysis results. Run `sdt analyze` first. |
 
 ## Basis: NSCP 2015 through UBC 97
 
@@ -24,16 +24,16 @@ ETABS has no NSCP seismic code, so the model uses the UBC 97 auto-seismic patter
 - Tables 208-4 to 208-8 hold Na, Nv, Ca and Cv. For Z 0.2 and 0.4 these are the same values as the UBC tables.
 - Table 208-11A gives R for concrete systems.
 
-`xs check` reads the UBC 97 inputs and holds them to the NSCP tables. It checks every pattern, including Ca, Cv, the period or coefficient typed in by hand. With results, it recomputes the NSCP base shear coefficient from the period and weight ETABS used, so an edited static pattern is checked too.
+`sdt check` reads the UBC 97 inputs and holds them to the NSCP tables. It checks every pattern, including Ca, Cv, the period or coefficient typed in by hand. With results, it recomputes the NSCP base shear coefficient from the period and weight ETABS used, so an edited static pattern is checked too.
 
 Every limit and table value comes from `design/code_config.py`: `NSCP` for chapter 2, and `CODE` (ACI 318M-14 = NSCP chapter 4) for the member limits. To change a value, change it there.
 
-**Drift.** NSCP 208.6.4.1 computes drift with the 203.3 combinations, so the check reads the story drifts of the `DRIFT` and `WDRIFT` combinations that `xs setup` creates. For each drift case it reports the worst combination:
+**Drift.** NSCP 208.6.4.1 computes drift with the 203.3 combinations, so the check reads the story drifts of the `DRIFT` and `WDRIFT` combinations that `sdt setup` creates. For each drift case it reports the worst combination:
 
-- **Seismic:** `EQXSD` and `EQYSD`, the drift patterns with the period not capped; and `RSAXD` and `RSAYD`, the spectrum drift cases that `xs analyze` scales to those patterns. Each is amplified to ΔM = 0.7 R ΔS and checked against 0.025h or 0.020h.
+- **Seismic:** `EQXSD` and `EQYSD`, the drift patterns with the period not capped; and `RSAXD` and `RSAYD`, the spectrum drift cases that `sdt analyze` scales to those patterns. Each is amplified to ΔM = 0.7 R ΔS and checked against 0.025h or 0.020h.
 - **Wind:** `WX` and `WY` are checked against the limit typed in the dialog (h/400 by default). NSCP sets no wind drift limit.
 
-Every story is included, those below the ground level too. A model set up before the drift combinations existed is checked on the cases alone, with a warning to run `xs setup`.
+Every story is included, those below the ground level too. A model set up before the drift combinations existed is checked on the cases alone, with a warning to run `sdt setup`.
 
 ## What is checked
 

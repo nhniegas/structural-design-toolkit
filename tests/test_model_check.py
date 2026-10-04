@@ -1,4 +1,4 @@
-"""Tests for the model check (``xs check``) on synthetic model data, no ETABS."""
+"""Tests for the model check (``sdt check``) on synthetic model data, no ETABS."""
 
 import pandas as pd
 import pytest

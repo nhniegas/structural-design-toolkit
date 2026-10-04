@@ -304,9 +304,22 @@ class TestLimitsAndSpacing:
         assert engine.solve_max_spacing()["max_tie_spacing_mm"] == 85.0
 
     def test_minimum_tie_diameter_depends_on_bar_size(self):
-        """ACI 25.7.2.2: 9.5 mm ties up to 32 mm bars, 12.7 mm ties above."""
-        assert col._minimum_tie_diameter(build_rect_column(dmain=25.0)) == 9.5
-        assert col._minimum_tie_diameter(build_rect_column(dmain=36.0)) == 12.7
+        """NSCP 425.7.2.2: 10 mm ties up to 32 mm bars, 12 mm ties above and for bundles."""
+        assert col._minimum_tie_diameter(build_rect_column(dmain=25.0)) == 10.0
+        assert col._minimum_tie_diameter(build_rect_column(dmain=36.0)) == 12.0
+        bundled = [(62.5, 62.5, 2), (437.5, 62.5, 2), (62.5, 437.5, 2), (437.5, 437.5, 2)]
+        assert col._minimum_tie_diameter(build_rect_column(dmain=25.0), bundled) == 12.0
+
+    def test_confinement_uses_the_core_to_the_outside_of_the_hoops(self):
+        """HAND CALC (ACI 18.7.5.4): 500 x 500, cover 40, fc' 28, fyt 415, Pu low.
+        bc = 500 - 2 x 40 = 420 mm, Ach = 420^2.
+        (a) 0.3 (250000/176400 - 1) 28/415 = 0.0844;  (b) 0.09 x 28/415 = 0.00607.
+        """
+        engine = build_rect_column(width=500, height=500, fc=28.0, fy=415.0, is_smrf=True)
+        result = col._smrf_transverse_design(engine, 12, 1.0e5, 100.0)
+        assert result["Core_Dimension_mm"] == "420.0 x 420.0"
+        assert result["Confinement_18_7_5_a"] == pytest.approx(
+            0.3 * (250000 / 420**2 - 1) * 28 / 415, rel=1e-6)
 
     def test_bar_count_respects_150mm_spacing(self):
         """Project rule: no gap between bars larger than 150 mm (centre to centre)."""
@@ -507,6 +520,42 @@ class TestColumnShear:
         return col._column_shear_checks(
             frame_row(), forces if forces is not None else force_table(),
             engine, n_bars, spacing, legs, is_smrf, bundle_layout=layout)
+
+    def test_ordinary_column_uses_the_analysis_shear(self):
+        """Capacity design (Mpr / lu) is for special moment frames only (ACI 18.7.6.1)."""
+        rows, _ = self._run(is_smrf=False)
+        assert all(r["Capacity_Based_Ve_kN"] == 0.0 for r in rows)
+        assert all(r["Design_Shear_kN"] == pytest.approx(r["Analysis_Shear_kN"]) for r in rows)
+
+    def test_axial_tension_lowers_vc(self):
+        """HAND CALC (ACI 22.5.7.1): Nu = -500 kN: Vc = 0.17 (1 - 500e3/(3.5 x 250000))
+        sqrt(28) x 500 x 437.5 = 84.4 kN."""
+        forces = force_table(combos={"T": (-500.0, 40.0, 0.0, 0.0, 50.0)})
+        rows, _ = self._run(is_smrf=False, forces=forces)
+        expected = 0.17 * (1 - 500e3 / (3.5 * 250000)) * math.sqrt(28) * 500 * 437.5 / 1000
+        assert rows[0]["Vc_kN"] == pytest.approx(expected, rel=1e-6)
+
+    def test_shear_beyond_the_vs_limit_fails_instead_of_adding_legs(self):
+        """Vs <= 0.66 sqrt(fc') b d (ACI 22.5.1.2): 0.75 x 0.66 x sqrt(28) x 500 x 437.5
+        = 573 kN of steel at most, plus Vc. 2000 kN cannot be carried."""
+        forces = force_table(combos={"BIG": (1500.0, 2000.0, 0.0, 0.0, 120.0)})
+        rows, _ = self._run(is_smrf=False, forces=forces)
+        v2 = [r for r in rows if r["Shear_Direction"] == "V2"]
+        assert all(r["Shear_Check"].startswith("FAIL") for r in v2)
+        assert all(r["Shear_Spacing_Limit_mm"] == pytest.approx(437.5 / 4) for r in v2)
+
+    def test_smrf_ve_is_capped_by_the_beams(self):
+        """ACI 18.7.6.1.1: Ve need not exceed the shear from the beams' Mpr at the joints."""
+        engine = build_rect_column(is_smrf=True)
+        layout = col._enumerate_column_bar_layouts(engine, 40)[3]
+        n_bars = sum(c for *_, c in layout)
+        limits = {("V2", "I"): 100.0, ("V2", "J"): 100.0}
+        rows, _ = col._column_shear_checks(
+            frame_row(), force_table(), engine, n_bars, 100.0, 2, True, bundle_layout=layout,
+            clear_height=2500.0, beam_moment_limits=limits)
+        v2 = [r for r in rows if r["Shear_Direction"] == "V2"]
+        assert v2[0]["Capacity_Based_Ve_kN"] == pytest.approx(200.0 / 2.5)
+        assert v2[0]["Clear_Height_mm"] == 2500.0
 
     def test_ordinary_column_concrete_shear_hand_calc(self):
         """HAND CALC (ACI 22.5.6.1): Vc = 0.17 (1 + Nu/14Ag) sqrt(fc') b d.
@@ -742,7 +791,7 @@ class TestGeometryHelpers:
 # ==========================================================================
 # 10. DXF TIE DRAWING - THE OVERLAP RULES
 # ==========================================================================
-def _tie_bars_for(width=500.0, depth=500.0, n_bars=24, dmain=25.0, dties=10.0, cover=40.0):
+def _tie_bars_for(width=600.0, depth=600.0, n_bars=24, dmain=25.0, dties=10.0, cover=40.0):
     """Hoop + crossties drawn at 1:1 for a rectangular column."""
     engine = build_rect_column(width, depth, dmain=dmain, dties=dties, cover=cover, is_smrf=True)
     layout = next(l for l in col._enumerate_column_bar_layouts(engine, 200)
@@ -1527,3 +1576,53 @@ def test_circular_smrf_spiral_detailing_passes():
     passes, _, _ = col._column_transverse_candidate_passes(
         pd.Series({"UniqueName": "C1C"}), pd.DataFrame(), engine, layout, 2.0e6, True)
     assert passes is True
+
+
+def test_column_bars_keep_40mm_and_1_5db_clear():
+    """NSCP 425.2.3: clear spacing >= max(40 mm, 1.5 db, 4/3 aggregate).
+
+    HAND CALC: 500 x 500, cover 40, ties 10, bars 25: bar centres span
+    500 - 2 x 62.5 = 375 mm. 7 bars a face (6 gaps) are 62.5 mm apart: 37.5 mm
+    clear < 40 mm, not allowed. 6 bars a face (5 gaps): 75 - 25 = 50 mm, allowed.
+    """
+    engine = build_rect_column(500.0, 500.0, dmain=25.0, dties=10.0, cover=40.0)
+    single = [sum(c for *_, c in lay) for lay in col._enumerate_column_bar_layouts(engine, 200)
+              if all(c == 1 for *_, c in lay)]
+    assert 20 in single and 24 not in single
+    # 36 mm bars: 1.5 db = 54 mm governs over 40 mm
+    assert float(col._column_clear_spacing(36.0, 20.0)) == pytest.approx(54.0)
+    assert float(col._column_clear_spacing(20.0, 20.0)) == pytest.approx(40.0)
+
+
+# ==========================================================================
+# JOINT DIMENSIONS (ACI 18.8.2.3 / 18.8.2.4) AND THE TOP-JOINT EXEMPTION (18.7.3.1)
+# ==========================================================================
+def test_beam_bars_through_a_joint_need_a_column_of_20_db():
+    """500 mm column: 25 mm beam bars need 500 mm (passes), 28 mm bars 560 mm (fails)."""
+    model = build_joint_model()
+    ok = col._evaluate_smrf_joints(**model)
+    assert (ok["Joint_Dimension_Check"] == "PASS").all()
+    model["beam_design"] = model["beam_design"].assign(dm=28.0)
+    big = col._evaluate_smrf_joints(**model)
+    assert big["Joint_Shear_Check"].str.contains("18.8.2.3").all()
+    assert (big["Joint_Shear_Utilization"] >= 560 / 500 - 1e-9).all()
+
+
+def _top_joint_model(axial_kN):
+    """The joint of build_joint_model with the column above removed."""
+    model = build_joint_model()
+    model["connectivity"] = model["connectivity"][model["connectivity"]["UniqueName"] != "C2"]
+    loads = model["factored_loads"]
+    loads = loads[loads["UniqueName"] != "C2"].copy()
+    loads.loc[loads["UniqueName"] == "C1", "P"] = axial_kN
+    model["factored_loads"] = loads
+    return model
+
+
+def test_strong_column_rule_is_waived_at_a_lightly_loaded_top_joint():
+    """0.1 Ag fc' = 0.1 x 500 x 500 x 28 = 700 kN."""
+    light = col._evaluate_smrf_joints(**_top_joint_model(400.0))
+    assert light["Strong_Column_Check"].str.contains("18.7.3.1").all()
+    assert light["Column_Beam_Ratio"].isna().all()
+    heavy = col._evaluate_smrf_joints(**_top_joint_model(900.0))
+    assert heavy["Strong_Column_Check"].isin(["PASS", "FAIL"]).all()

@@ -58,7 +58,7 @@ MODAL_CASE = "Modal"
 MODES_PER_STORY = 3
 MINIMUM_MODES = 12  # a blank model has one story; three modes would be too few
 # Frame sections carry no stiffness modifiers (all 1.0): the cracked-section
-# modifiers are assigned to the frames in ETABS; xs check and xs drift judge them.
+# modifiers are assigned to the frames in ETABS; sdt check and sdt drift judge them.
 SECTION_MODIFIERS = [1.0] * 8  # area, shear 2, shear 3, torsion, I22, I33, mass, weight
 BEAM_COVER = 60.0  # mm, to the bar centre, top and bottom
 COLUMN_COVER = 40.0  # mm
@@ -223,7 +223,7 @@ def area_concrete_ksi(settings: dict, kind: str) -> float:
 def area_section_definitions(settings: dict) -> list[dict]:
     """Slab and wall sections: ``S_<t>_<concrete>`` and ``SW_<t>_<concrete>_<rebar>``.
 
-    The wall name is the one ``xs grids`` gives its walls, so they share it.
+    The wall name is the one ``sdt grids`` gives its walls, so they share it.
     """
     slab_concrete = grade_name("C", area_concrete_ksi(settings, "slabs"))
     wall_concrete = grade_name("C", area_concrete_ksi(settings, "walls"))
@@ -337,7 +337,9 @@ def settings_path(model_path: str) -> str:
 
 def defaults_path() -> str:
     """Last used settings, offered as the starting point of a new model."""
-    return os.path.join(os.path.expanduser("~"), ".xlwings_structural", "model_setup.json")
+    from utilities.user_settings import settings_path as user_settings_path
+
+    return user_settings_path("model_setup.json")
 
 
 def load_settings(path: str) -> dict | None:
@@ -926,7 +928,7 @@ class SetupResult:
                              f"{depths[0]} to {depths[-1]}"])
         out += table(["Kind", "Prefix", "Sections", "Width (mm)", "Depth (mm)"], rows)
         out += ["", "The sections carry no stiffness modifiers: assign the cracked-section "
-                "modifiers to the frames in ETABS (xs check and xs drift check them).", ""]
+                "modifiers to the frames in ETABS (sdt check and sdt drift check them).", ""]
         areas = area_section_definitions(settings)
         if areas:
             out += [f"{h} Slab and wall sections", ""]

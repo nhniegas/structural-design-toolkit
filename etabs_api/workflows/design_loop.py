@@ -26,8 +26,9 @@ Rules (agreed with the office):
   limit.
 * Columns: joint shear or beam-column strength failing in one direction grows
   the side along that direction; flexure, axial load, bar limits, shear and
-  the SMRF dimension grow to the next square size. A column is never smaller
-  than the column above it.
+  the SMRF dimension go straight to the first larger square size that passes
+  on the forces of the current analysis (``column_sizer``), and the next
+  analysis confirms it. A column is never smaller than the column above it.
 * Downsizing: a member whose ratios are all below the threshold goes one
   size smaller; the next analysis confirms it. A member that grew in this
   run is never made smaller again. Beams never go below the ACI 318-14
@@ -61,7 +62,7 @@ from etabs_api.workflows.sections import (  # noqa: E402
 )
 
 DEPTH_FAILURES = ("MAX BARS", "SMRF STEEL RATIO", "SMRF MOMENT", "DEFLECTION")
-WIDTH_FAILURES = ("SHEAR SPACING",)
+WIDTH_FAILURES = ("SHEAR SPACING", "SHEAR STRENGTH")
 BCC_REQUIRED = 1.2
 SMRF_RHO_LIMIT = 0.025
 COLUMN_RHO_LIMIT = 0.06
@@ -90,6 +91,7 @@ class LoopSettings:
     max_inner: int = 10
     zone_factor: float = 0.4
     ct: float = 0.03
+    size_on_forces: bool = True  # failing columns jump to the first passing size
 
 
 @dataclass
@@ -277,10 +279,33 @@ def column_comfortable(rows: pd.DataFrame, ratio: float) -> bool:
     return "FAIL" not in status
 
 
+MAX_SIZE_JUMP = 12  # sizes tried above the current one when sizing on the current forces
+
+
+def growth_sizes(section: Section, settings: LoopSettings, count: int = MAX_SIZE_JUMP
+                 ) -> list[Section]:
+    """The next ``count`` "square" sizes above ``section``, smallest first."""
+    out: list[Section] = []
+    current = section
+    while len(out) < count:
+        current = grow_column(current, "square", settings.ranges, settings.limits)
+        if current is None:
+            break
+        out.append(current)
+    return out
+
+
 def column_actions(report: pd.DataFrame, sections: dict[str, Section], angles: dict[str, float],
                    above: dict[str, str], grown: set[str], settings: LoopSettings,
-                   allow_shrink: bool = True) -> dict[str, tuple[Section, str]]:
-    """New sizes for the columns, then lower columns at least the size of the one above."""
+                   allow_shrink: bool = True, sizer=None) -> dict[str, tuple[Section, str]]:
+    """New sizes for the columns, then lower columns at least the size of the one above.
+
+    ``sizer(member, sizes)`` (optional) returns the index of the first size of
+    ``sizes`` that passes the member checks on the forces of the current analysis,
+    or None. With it, a column that fails flexure, axial load, the steel limit or
+    shear goes straight to that size in one iteration instead of one size per
+    analysis; the next analysis then only confirms it.
+    """
     out: dict[str, tuple[Section, str]] = {}
     for name, rows in report.groupby(report["UniqueName"].astype(str)):
         section = sections.get(name)
@@ -291,6 +316,16 @@ def column_actions(report: pd.DataFrame, sections: dict[str, Section], angles: d
             if "square" in needs or needs == {"X", "Y"}:
                 new = grow_column(section, "square", settings.ranges, settings.limits)
                 reason = "grow (" + ", ".join(sorted(needs)) + ")"
+                if sizer is not None and "square" in needs and new is not None:
+                    sizes = growth_sizes(section, settings)
+                    index = sizer(name, sizes)
+                    if index is not None:
+                        new = sizes[index]
+                        reason += f"; {new.width}x{new.depth} is the first size that passes " \
+                                  "on the current forces"
+                    elif sizes:
+                        new = sizes[-1]
+                        reason += "; no size within the limits passes on the current forces"
             else:
                 axis = next(iter(needs))
                 depth_x = depth_along_x(angles.get(name, 0.0))
@@ -399,7 +434,7 @@ class Workbench:
     def _spectrum_loads(self) -> dict[str, tuple]:
         """The spectrum loads, with every scale factor at its base value g I / R (from the
         model's seismic patterns), so each iteration scales from the unscaled spectrum
-        and not from factors an earlier xs analyze left in the model."""
+        and not from factors an earlier sdt analyze left in the model."""
         from etabs_api.core.helpers import as_list
         from etabs_api.workflows.model_analysis import spectrum_cases
 
@@ -482,6 +517,39 @@ class Workbench:
             bottom_story_cover=self.settings.bottom_cover)
         return report
 
+    def column_sizer(self):
+        """``sizer`` for column_actions: the member checks of each trial size on the
+        forces of the last analysis (column_size_passes), without ETABS."""
+        from design.column_designer_aci318 import column_size_passes
+
+        frame = self.tables.get("FRAME DATA")
+        loads = self.tables.get("FACTORED LOADS")
+        if frame is None or loads is None or frame.empty or loads.empty:
+            return None
+        rows = {str(name): row for name, row in zip(frame["UniqueName"].astype(str),
+                                                     (r for _, r in frame.iterrows()))}
+        forces = {str(name): group for name, group in loads.groupby(
+            loads["UniqueName"].astype(str))}
+        bars = self.settings.column_bars
+
+        def sizer(member: str, sizes: list[Section]) -> int | None:
+            if member not in rows or member not in forces:
+                return None
+            for index, size in enumerate(sizes):
+                row = rows[member].copy()
+                if size.circular:
+                    row["Diameter"] = float(size.depth)
+                else:
+                    row["Width"], row["Depth"] = float(size.width), float(size.depth)
+                self.show("Column sizing on the current forces", f"{member}: {size.name}")
+                passes, _ = column_size_passes(row, forces[member], bars["dmain"],
+                                               bars["dties"], bars["cover"], self.settings.smrf)
+                if passes:
+                    return index
+            return None
+
+        return sizer
+
     def apply(self, actions: dict[str, tuple[Section, str]], current: dict[str, Section],
               grown: set[str]) -> list[Change]:
         from etabs_api.workflows.sections import assign_section, ensure_section
@@ -536,8 +604,9 @@ def run_design_loop(bench: Workbench) -> dict:
                                allow_shrink)
         if columns:
             _, column_names = bench.members()
+            sizer = bench.column_sizer() if settings.size_on_forces else None
             actions.update(column_actions(column_report, sections, bench.angles(column_names),
-                                          bench.above(), grown, settings, allow_shrink))
+                                          bench.above(), grown, settings, allow_shrink, sizer))
         failing = beam_table.groupby("UniqueName")["Design_Status"].apply(
             lambda s: any(v != "OK" for v in s.astype(str))).sum()
         summary = f"beams failing {failing} of {beam_table['UniqueName'].nunique()}"
@@ -595,10 +664,14 @@ LOOP_FIELDS = {
     "Beam line shares one size when lengths differ by at most (%)": ("span_similarity", 30),
     "Rounds (beams, columns, final check) at most": ("max_rounds", 5),
 }
+
+
 def _saved(name: str) -> dict:
     import json
 
-    path = os.path.join(os.path.expanduser("~"), ".xlwings_structural", f"{name}.json")
+    from utilities.user_settings import settings_path as user_settings_path
+
+    path = user_settings_path(f"{name}.json")
     try:
         with open(path, encoding="utf-8") as handle:
             return json.load(handle)
@@ -609,7 +682,9 @@ def _saved(name: str) -> dict:
 def _save(name: str, values: dict) -> None:
     import json
 
-    path = os.path.join(os.path.expanduser("~"), ".xlwings_structural", f"{name}.json")
+    from utilities.user_settings import settings_path as user_settings_path
+
+    path = user_settings_path(f"{name}.json")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as handle:
         json.dump(values, handle, indent=2)
@@ -664,7 +739,7 @@ def _ask_ranges(families: set[str], settings: dict, title: str) -> bool:
 
 
 def final_drift_check(bench: Workbench, options, folder: str, stem: str) -> dict:
-    """Drift of the final sizes (xs drift), saved to ``<stem> - Drift.txt``.
+    """Drift of the final sizes (sdt drift), saved to ``<stem> - Drift.txt``.
 
     The sections are not resized for drift: a failure is reported, and the
     model is to be reconfigured (stiffer members, walls) and designed again.
@@ -681,7 +756,7 @@ def final_drift_check(bench: Workbench, options, folder: str, stem: str) -> dict
     bench.log(report.text())
     if failed:
         bench.log(f"DRIFT FAILS ({len(failed)} checks). The sections were not resized for drift: "
-                  "reconfigure the model (larger columns or beams, walls) and run xs design "
+                  "reconfigure the model (larger columns or beams, walls) and run sdt design "
                   "again.")
         for level, finding in failed:
             bench.log(f"  {level}: {finding.text}")
@@ -721,7 +796,7 @@ def run_design_cli() -> dict | None:
         show_warning("Save the ETABS model first: it has no file yet.", title=title)
         return None
 
-    # combinations, forces and the design inputs (as in xs beams and xs columns)
+    # combinations, forces and the design inputs (as in sdt beams and sdt columns)
     from design.concrete_workflow import (
         BEAM_FIELDS,
         COLUMN_FIELDS,
@@ -845,12 +920,12 @@ def run_design_cli() -> dict | None:
     print(f"Working copy: {working}\nLog: {log_path}\nOutputs: {folder}")
     if summary["drift"]["failed"]:
         print("DRIFT FAILS: the sections were not resized for drift. Reconfigure the model "
-              f"for drift and run xs design again. See {summary['drift']['path']}")
+              f"for drift and run sdt design again. See {summary['drift']['path']}")
     return summary
 
 
 def save_final_design(bench: Workbench, summary: dict, working: str, folder: str) -> None:
-    """Store the final design for xs columns and write the result files."""
+    """Store the final design for sdt columns and write the result files."""
     say = bench.progress
     from design.beam_designer_aci318 import (
         export_beam_dxf,
@@ -874,7 +949,7 @@ def save_final_design(bench: Workbench, summary: dict, working: str, folder: str
     })
     store.beam_results, store.column_report = beams, columns
     store.column_groups = getattr(bench, "column_groups", None)
-    say("Saving the design data for xs columns")
+    say("Saving the design data for sdt columns")
     store.save()
     if beams is not None and len(beams):
         say("Saving the beams 1 of 3: results workbook (.xlsx)")
