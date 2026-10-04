@@ -1,0 +1,72 @@
+sdt beams on a copy where three beams were renamed to numbers (2BY-1, 2BY-1A, 2BY-2
+to 901, 902, 903), then sdt analyze.
+RESULT, run 1 (as asked: Stop at the readiness dialog): the dialog lists what was
+found and 'names: 3 of 149 beams and columns still have their ETABS number'. Options
+Continue / Stop; the default is Continue. Stop ends the command with nothing written.
+RESULT, run 2 (added: Continue, to see the next dialog, then its window closed without
+choosing so that nothing was tagged): the untagged dialog offers
+    1. Tag them now, in this model (sdt tag)            <- default
+    2. Design them as they are, with their ETABS numbers
+    3. Leave the unnamed members out
+So the default changes the model: it tags in place.
+
+--- renaming ---
+Model: C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\r2-untagged\r2-untagged.$et
+149 frames; renaming ['2BY-1', '2BY-1A', '2BY-2']
+ChangeName '2BY-1' -> '901': return 0
+ChangeName '2BY-1A' -> '902': return 0
+ChangeName '2BY-2' -> '903': return 0
+Save: 0
+
+How this was run
+----------------
+Same PC and method as 2026-10-05/: ETABS Ultimate 22.6.0, toolkit 0.1.1 (main
+checkout), the real commands in a private ETABS, dialogs answered by a script.
+Each dialog is printed with its options, its default and the answer given:
+"[default]" = default accepted, "[chosen for this test]" = the answer this
+request asked for. Run on 2026-10-05, 00:15 to 00:21. Every item used a fresh
+copy of the same 3-storey test model, opened with N-mm present units.
+
+########## run 1: Stop at the readiness dialog ##########
+$ sdt beams     (toolkit 0.1.1, model r2-untagged.$et, present units N-mm, started 00:20:56)
+
+[DIALOG 00:20:57] choice: Beam Design
+    | Before sdt beams starts on this model:
+    | 
+    | Found:
+    |   - 41 strength combinations named ULS
+    |   - the four deflection combinations
+    | 
+    | Missing (asked next, then saved with the model):
+    |   - names: 3 of 149 beams and columns still have their ETABS number. You choose to tag them, design them as they are, or leave them out
+    (default) 1. Continue
+              2. Stop
+    -> Stop   [chosen for this test]
+
+[sdt beams ended 00:20:57 after 1 s, exit 0]
+
+
+########## run 2: Continue, then close the untagged dialog ##########
+$ sdt beams     (toolkit 0.1.1, model r2-untagged.$et, present units N-mm, started 00:20:58)
+
+[DIALOG 00:20:59] choice: Beam Design
+    | Before sdt beams starts on this model:
+    | 
+    | Found:
+    |   - 41 strength combinations named ULS
+    |   - the four deflection combinations
+    | 
+    | Missing (asked next, then saved with the model):
+    |   - names: 3 of 149 beams and columns still have their ETABS number. You choose to tag them, design them as they are, or leave them out
+    (default) 1. Continue
+              2. Stop
+    -> Continue   [default]
+
+[DIALOG 00:20:59] choice: Beam Design
+    | 3 of 149 beams and columns still have the number ETABS gave them. Tagging gives each its level, type and number (2GX-1, 3-C5), which the schedules use. Without tags the design still runs: beam lines are then found from the geometry.
+    (default) 1. Tag them now, in this model (sdt tag)
+              2. Design them as they are, with their ETABS numbers
+              3. Leave the unnamed members out
+    -> (window closed without choosing)   [done on purpose for this test]
+
+[sdt beams ended 00:20:59 after 1 s, exit 0]

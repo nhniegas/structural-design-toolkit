@@ -1,0 +1,583 @@
+ETABS 'Story Drifts' TABLE
+==========================
+Read from the copy of A0 after sdt drift had restored it: the model as it is, which is
+the strength level (its own modifiers are beams 0.35, columns 0.70; sdt drift reported
+'As modelled: beams I 0.35, columns I 0.70'). Load cases EQXSD, EQYSD, WX, WY and every
+DRIFT / WDRIFT combination. The last table is the centre of mass displacements that
+sdt drift reads (mm).
+The comparison of the three sources is in notes.txt, section A.
+
+Model: C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\r2-drift\r2-drift.EDB
+Model has results (locked): True
+Drift combinations in the model: ['DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 EQXSD', 'DRIFT 101 (1.2 + Ev) DL + f LL - 1.0 EQXSD', 'DRIFT 102 (0.9 - Ev) DL + 1.0 EQXSD', 'DRIFT 103 (0.9 - Ev) DL - 1.0 EQXSD', 'DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 EQYSD', 'DRIFT 101 (1.2 + Ev) DL + f LL - 1.0 EQYSD', 'DRIFT 102 (0.9 - Ev) DL + 1.0 EQYSD', 'DRIFT 103 (0.9 - Ev) DL - 1.0 EQYSD', 'DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 RSAXD', 'DRIFT 102 (0.9 - Ev) DL + 1.0 RSAXD', 'DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 RSAYD', 'DRIFT 102 (0.9 - Ev) DL + 1.0 RSAYD', 'WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WX', 'WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WX', 'WDRIFT 102 0.9 DL + 1.0 WX', 'WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WY', 'WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WY', 'WDRIFT 102 0.9 DL + 1.0 WY']
+
+--- Frame property modifiers in effect (model_check.effective_modifiers is not printed here; sdt drift reported beams 0.35, columns 0.70 as modelled) ---
+(empty)
+
+--- ETABS table 'Story Drifts' for the load cases EQXSD, EQYSD, WX, WY and the DRIFT / WDRIFT combinations ---
+Story                                 OutputCase    CaseType     StepType StepNumber Direction    Drift Label     X     Y     Z
+   RD                                         WX   LinStatic Step By Step          1         X 0.000242     7 12000     0 11500
+   RD                                         WX   LinStatic Step By Step          2         Y 0.000479    12 18000 10000 11500
+   RD                                         WX   LinStatic Step By Step          3         X   0.0002     7 12000     0 11500
+   RD                                         WX   LinStatic Step By Step          4         X 0.000198    12 18000 10000 11500
+   RD                                         WX   LinStatic Step By Step          5         Y 0.000486    12 18000 10000 11500
+   RD                                         WX   LinStatic Step By Step          6         Y  0.00045     3     0 10000 11500
+   RD                                         WX   LinStatic Step By Step          7         X  0.00019    12 18000 10000 11500
+   RD                                         WX   LinStatic Step By Step          7         Y 0.000313    12 18000 10000 11500
+   RD                                         WX   LinStatic Step By Step          8         X 0.000212     7 12000     0 11500
+   RD                                         WX   LinStatic Step By Step          8         Y 0.000358    12 18000 10000 11500
+   RD                                         WX   LinStatic Step By Step          9         X 0.000193     7 12000     0 11500
+   RD                                         WX   LinStatic Step By Step          9         Y 0.000321     3     0 10000 11500
+   RD                                         WX   LinStatic Step By Step         10         X   0.0002    12 18000 10000 11500
+   RD                                         WX   LinStatic Step By Step         10         Y 0.000344    12 18000 10000 11500
+   RD                                         WX   LinStatic Step By Step         11         X 0.000227     7 12000     0 11500
+   RD                                         WX   LinStatic Step By Step         11         Y 0.000393    12 18000 10000 11500
+   RD                                         WX   LinStatic Step By Step         12         X 0.000213    12 18000 10000 11500
+   RD                                         WX   LinStatic Step By Step         12         Y 0.000363     3     0 10000 11500
+   RD                                         WY   LinStatic Step By Step          1         X 0.000242     7 12000     0 11500
+   RD                                         WY   LinStatic Step By Step          2         Y 0.000479    12 18000 10000 11500
+   RD                                         WY   LinStatic Step By Step          3         X   0.0002     7 12000     0 11500
+   RD                                         WY   LinStatic Step By Step          4         X 0.000198    12 18000 10000 11500
+   RD                                         WY   LinStatic Step By Step          5         Y 0.000486    12 18000 10000 11500
+   RD                                         WY   LinStatic Step By Step          6         Y  0.00045     3     0 10000 11500
+   RD                                         WY   LinStatic Step By Step          7         X  0.00019    12 18000 10000 11500
+   RD                                         WY   LinStatic Step By Step          7         Y 0.000313    12 18000 10000 11500
+   RD                                         WY   LinStatic Step By Step          8         X 0.000212     7 12000     0 11500
+   RD                                         WY   LinStatic Step By Step          8         Y 0.000358    12 18000 10000 11500
+   RD                                         WY   LinStatic Step By Step          9         X 0.000193     7 12000     0 11500
+   RD                                         WY   LinStatic Step By Step          9         Y 0.000321     3     0 10000 11500
+   RD                                         WY   LinStatic Step By Step         10         X   0.0002    12 18000 10000 11500
+   RD                                         WY   LinStatic Step By Step         10         Y 0.000344    12 18000 10000 11500
+   RD                                         WY   LinStatic Step By Step         11         X 0.000227     7 12000     0 11500
+   RD                                         WY   LinStatic Step By Step         11         Y 0.000393    12 18000 10000 11500
+   RD                                         WY   LinStatic Step By Step         12         X 0.000213    12 18000 10000 11500
+   RD                                         WY   LinStatic Step By Step         12         Y 0.000363     3     0 10000 11500
+   RD                                      EQXSD   LinStatic Step By Step          1         X 0.001461    12 18000 10000 11500
+   RD                                      EQXSD   LinStatic Step By Step          2         X 0.001438     7 12000     0 11500
+   RD                                      EQYSD   LinStatic Step By Step          1         Y 0.001519    12 18000 10000 11500
+   RD                                      EQYSD   LinStatic Step By Step          2         Y 0.001527     3     0 10000 11500
+   RD DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 EQXSD Combination          Max       None         X 0.001485     7 12000     0 11500
+   RD DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 EQXSD Combination          Min       None         X 0.001431    11 18000  5000 11500
+   RD DRIFT 101 (1.2 + Ev) DL + f LL - 1.0 EQXSD Combination          Max       None         X 0.001366    11 18000  5000 11500
+   RD DRIFT 101 (1.2 + Ev) DL + f LL - 1.0 EQXSD Combination          Min       None         X 0.001442    12 18000 10000 11500
+   RD        DRIFT 102 (0.9 - Ev) DL + 1.0 EQXSD Combination          Max       None         X 0.001468    12 18000 10000 11500
+   RD        DRIFT 102 (0.9 - Ev) DL + 1.0 EQXSD Combination          Min       None         X 0.001412    11 18000  5000 11500
+   RD        DRIFT 103 (0.9 - Ev) DL - 1.0 EQXSD Combination          Max       None         X 0.001385    11 18000  5000 11500
+   RD        DRIFT 103 (0.9 - Ev) DL - 1.0 EQXSD Combination          Min       None         X 0.001453    12 18000 10000 11500
+   RD DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 EQYSD Combination          Max       None         Y 0.001551    12 18000 10000 11500
+   RD DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 EQYSD Combination          Min       None         Y  0.00131     6  6000 10000 11500
+   RD DRIFT 101 (1.2 + Ev) DL + f LL - 1.0 EQYSD Combination          Max       None         Y 0.001312     6  6000 10000 11500
+   RD DRIFT 101 (1.2 + Ev) DL + f LL - 1.0 EQYSD Combination          Min       None         Y 0.001545     3     0 10000 11500
+   RD        DRIFT 102 (0.9 - Ev) DL + 1.0 EQYSD Combination          Max       None         Y 0.001533    12 18000 10000 11500
+   RD        DRIFT 102 (0.9 - Ev) DL + 1.0 EQYSD Combination          Min       None         Y  0.00131     6  6000 10000 11500
+   RD        DRIFT 103 (0.9 - Ev) DL - 1.0 EQYSD Combination          Max       None         Y 0.001311     6  6000 10000 11500
+   RD        DRIFT 103 (0.9 - Ev) DL - 1.0 EQYSD Combination          Min       None         Y 0.001535     3     0 10000 11500
+   RD DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 RSAXD Combination          Max       None         X 0.001305    12 18000 10000 11500
+   RD DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 RSAXD Combination          Min       None         X 0.001268    12 18000 10000 11500
+   RD        DRIFT 102 (0.9 - Ev) DL + 1.0 RSAXD Combination          Max       None         X 0.001295    12 18000 10000 11500
+   RD        DRIFT 102 (0.9 - Ev) DL + 1.0 RSAXD Combination          Min       None         X 0.001279    12 18000 10000 11500
+   RD DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 RSAYD Combination          Max       None         X 0.000225     7 12000     0 11500
+   RD DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 RSAYD Combination          Max       None         Y 0.001382     3     0 10000 11500
+   RD DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 RSAYD Combination          Min       None         Y 0.001417     3     0 10000 11500
+   RD        DRIFT 102 (0.9 - Ev) DL + 1.0 RSAYD Combination          Max       None         Y 0.001392     3     0 10000 11500
+   RD        DRIFT 102 (0.9 - Ev) DL + 1.0 RSAYD Combination          Min       None         Y 0.001407     3     0 10000 11500
+   RD        WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WX Combination          Max       None         X 0.000156     7 12000     0 11500
+   RD        WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WX Combination          Max       None         Y 0.000268    12 18000 10000 11500
+   RD        WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WX Combination          Min       None         Y 0.000174     3     0 10000 11500
+   RD WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WX Combination          Max       None         X 0.000282     7 12000     0 11500
+   RD WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WX Combination          Max       None         Y 0.000514    12 18000 10000 11500
+   RD WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WX Combination          Min       None         Y 0.000336     3     0 10000 11500
+   RD                 WDRIFT 102 0.9 DL + 1.0 WX Combination          Max       None         X 0.000268     7 12000     0 11500
+   RD                 WDRIFT 102 0.9 DL + 1.0 WX Combination          Max       None         Y 0.000504    12 18000 10000 11500
+   RD                 WDRIFT 102 0.9 DL + 1.0 WX Combination          Min       None         Y 0.000331     3     0 10000 11500
+   RD        WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WY Combination          Max       None         X 0.000156     7 12000     0 11500
+   RD        WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WY Combination          Max       None         Y 0.000268    12 18000 10000 11500
+   RD        WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WY Combination          Min       None         Y 0.000174     3     0 10000 11500
+   RD WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WY Combination          Max       None         X 0.000282     7 12000     0 11500
+   RD WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WY Combination          Max       None         Y 0.000514    12 18000 10000 11500
+   RD WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WY Combination          Min       None         Y 0.000336     3     0 10000 11500
+   RD                 WDRIFT 102 0.9 DL + 1.0 WY Combination          Max       None         X 0.000268     7 12000     0 11500
+   RD                 WDRIFT 102 0.9 DL + 1.0 WY Combination          Max       None         Y 0.000504    12 18000 10000 11500
+   RD                 WDRIFT 102 0.9 DL + 1.0 WY Combination          Min       None         Y 0.000331     3     0 10000 11500
+   3F                                         WX   LinStatic Step By Step          1         X 0.000421    10 18000     0  8000
+   3F                                         WX   LinStatic Step By Step          2         Y   0.0008    10 18000     0  8000
+   3F                                         WX   LinStatic Step By Step          3         X 0.000348    10 18000     0  8000
+   3F                                         WX   LinStatic Step By Step          4         X 0.000347    12 18000 10000  8000
+   3F                                         WX   LinStatic Step By Step          5         Y 0.000816    10 18000     0  8000
+   3F                                         WX   LinStatic Step By Step          6         Y 0.000815     3     0 10000  8000
+   3F                                         WX   LinStatic Step By Step          7         X 0.000317    10 18000     0  8000
+   3F                                         WX   LinStatic Step By Step          7         Y 0.000522     3     0 10000  8000
+   3F                                         WX   LinStatic Step By Step          8         X 0.000363    10 18000     0  8000
+   3F                                         WX   LinStatic Step By Step          8         Y 0.000601    10 18000     0  8000
+   3F                                         WX   LinStatic Step By Step          9         X 0.000341    10 18000     0  8000
+   3F                                         WX   LinStatic Step By Step          9         Y 0.000576     3     0 10000  8000
+   3F                                         WX   LinStatic Step By Step         10         X 0.000339    12 18000 10000  8000
+   3F                                         WX   LinStatic Step By Step         10         Y 0.000575    10 18000     0  8000
+   3F                                         WX   LinStatic Step By Step         11         X 0.000391    10 18000     0  8000
+   3F                                         WX   LinStatic Step By Step         11         Y 0.000664    10 18000     0  8000
+   3F                                         WX   LinStatic Step By Step         12         X 0.000388    12 18000 10000  8000
+   3F                                         WX   LinStatic Step By Step         12         Y  0.00066     3     0 10000  8000
+   3F                                         WY   LinStatic Step By Step          1         X 0.000421    10 18000     0  8000
+   3F                                         WY   LinStatic Step By Step          2         Y   0.0008    10 18000     0  8000
+   3F                                         WY   LinStatic Step By Step          3         X 0.000348    10 18000     0  8000
+   3F                                         WY   LinStatic Step By Step          4         X 0.000347    12 18000 10000  8000
+   3F                                         WY   LinStatic Step By Step          5         Y 0.000816    10 18000     0  8000
+   3F                                         WY   LinStatic Step By Step          6         Y 0.000815     3     0 10000  8000
+   3F                                         WY   LinStatic Step By Step          7         X 0.000317    10 18000     0  8000
+   3F                                         WY   LinStatic Step By Step          7         Y 0.000522     3     0 10000  8000
+   3F                                         WY   LinStatic Step By Step          8         X 0.000363    10 18000     0  8000
+   3F                                         WY   LinStatic Step By Step          8         Y 0.000601    10 18000     0  8000
+   3F                                         WY   LinStatic Step By Step          9         X 0.000341    10 18000     0  8000
+   3F                                         WY   LinStatic Step By Step          9         Y 0.000576     3     0 10000  8000
+   3F                                         WY   LinStatic Step By Step         10         X 0.000339    12 18000 10000  8000
+   3F                                         WY   LinStatic Step By Step         10         Y 0.000575    10 18000     0  8000
+   3F                                         WY   LinStatic Step By Step         11         X 0.000391    10 18000     0  8000
+   3F                                         WY   LinStatic Step By Step         11         Y 0.000664    10 18000     0  8000
+   3F                                         WY   LinStatic Step By Step         12         X 0.000388    12 18000 10000  8000
+   3F                                         WY   LinStatic Step By Step         12         Y  0.00066     3     0 10000  8000
+   3F                                      EQXSD   LinStatic Step By Step          1         X 0.002045    12 18000 10000  8000
+   3F                                      EQXSD   LinStatic Step By Step          2         X 0.002003    10 18000     0  8000
+   3F                                      EQYSD   LinStatic Step By Step          1         Y 0.002009    10 18000     0  8000
+   3F                                      EQYSD   LinStatic Step By Step          2         Y 0.002174     3     0 10000  8000
+   3F DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 EQXSD Combination          Max       None         X 0.002039    12 18000 10000  8000
+   3F DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 EQXSD Combination          Min       None         X 0.001952    11 18000  5000  8000
+   3F DRIFT 101 (1.2 + Ev) DL + f LL - 1.0 EQXSD Combination          Max       None         X  0.00196    11 18000  5000  8000
+   3F DRIFT 101 (1.2 + Ev) DL + f LL - 1.0 EQXSD Combination          Min       None         X  0.00205    12 18000 10000  8000
+   3F        DRIFT 102 (0.9 - Ev) DL + 1.0 EQXSD Combination          Max       None         X 0.002042    12 18000 10000  8000
+   3F        DRIFT 102 (0.9 - Ev) DL + 1.0 EQXSD Combination          Min       None         X 0.001954    11 18000  5000  8000
+   3F        DRIFT 103 (0.9 - Ev) DL - 1.0 EQXSD Combination          Max       None         X 0.001958    11 18000  5000  8000
+   3F        DRIFT 103 (0.9 - Ev) DL - 1.0 EQXSD Combination          Min       None         X 0.002047    12 18000 10000  8000
+   3F DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 EQYSD Combination          Max       None         Y 0.002175     3     0 10000  8000
+   3F DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 EQYSD Combination          Min       None         Y 0.001822     6  6000 10000  8000
+   3F DRIFT 101 (1.2 + Ev) DL + f LL - 1.0 EQYSD Combination          Max       None         Y 0.001816     6  6000 10000  8000
+   3F DRIFT 101 (1.2 + Ev) DL + f LL - 1.0 EQYSD Combination          Min       None         Y 0.002174     3     0 10000  8000
+   3F        DRIFT 102 (0.9 - Ev) DL + 1.0 EQYSD Combination          Max       None         Y 0.002175     3     0 10000  8000
+   3F        DRIFT 102 (0.9 - Ev) DL + 1.0 EQYSD Combination          Min       None         Y 0.001821     6  6000 10000  8000
+   3F        DRIFT 103 (0.9 - Ev) DL - 1.0 EQYSD Combination          Max       None         Y 0.001818     6  6000 10000  8000
+   3F        DRIFT 103 (0.9 - Ev) DL - 1.0 EQYSD Combination          Min       None         Y 0.002174     3     0 10000  8000
+   3F DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 RSAXD Combination          Max       None         X 0.001904    12 18000 10000  8000
+   3F DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 RSAXD Combination          Min       None         X 0.001916    12 18000 10000  8000
+   3F        DRIFT 102 (0.9 - Ev) DL + 1.0 RSAXD Combination          Max       None         X 0.001908    12 18000 10000  8000
+   3F        DRIFT 102 (0.9 - Ev) DL + 1.0 RSAXD Combination          Min       None         X 0.001913    12 18000 10000  8000
+   3F DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 RSAYD Combination          Max       None         Y 0.002117     3     0 10000  8000
+   3F DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 RSAYD Combination          Min       None         Y 0.002115     3     0 10000  8000
+   3F        DRIFT 102 (0.9 - Ev) DL + 1.0 RSAYD Combination          Max       None         Y 0.002117     3     0 10000  8000
+   3F        DRIFT 102 (0.9 - Ev) DL + 1.0 RSAYD Combination          Min       None         Y 0.002116     3     0 10000  8000
+   3F        WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WX Combination          Max       None         X 0.000209    10 18000     0  8000
+   3F        WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WX Combination          Max       None         Y 0.000415    10 18000     0  8000
+   3F        WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WX Combination          Min       None         X  6.5E-05    12 18000 10000  8000
+   3F        WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WX Combination          Min       None         Y 0.000287     3     0 10000  8000
+   3F WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WX Combination          Max       None         X  0.00042    10 18000     0  8000
+   3F WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WX Combination          Max       None         Y 0.000823    10 18000     0  8000
+   3F WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WX Combination          Min       None         X 0.000126    12 18000 10000  8000
+   3F WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WX Combination          Min       None         Y 0.000575     3     0 10000  8000
+   3F                 WDRIFT 102 0.9 DL + 1.0 WX Combination          Max       None         X  0.00042    10 18000     0  8000
+   3F                 WDRIFT 102 0.9 DL + 1.0 WX Combination          Max       None         Y 0.000821    10 18000     0  8000
+   3F                 WDRIFT 102 0.9 DL + 1.0 WX Combination          Min       None         X 0.000124    12 18000 10000  8000
+   3F                 WDRIFT 102 0.9 DL + 1.0 WX Combination          Min       None         Y 0.000575     3     0 10000  8000
+   3F        WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WY Combination          Max       None         X 0.000209    10 18000     0  8000
+   3F        WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WY Combination          Max       None         Y 0.000415    10 18000     0  8000
+   3F        WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WY Combination          Min       None         X  6.5E-05    12 18000 10000  8000
+   3F        WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WY Combination          Min       None         Y 0.000287     3     0 10000  8000
+   3F WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WY Combination          Max       None         X  0.00042    10 18000     0  8000
+   3F WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WY Combination          Max       None         Y 0.000823    10 18000     0  8000
+   3F WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WY Combination          Min       None         X 0.000126    12 18000 10000  8000
+   3F WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WY Combination          Min       None         Y 0.000575     3     0 10000  8000
+   3F                 WDRIFT 102 0.9 DL + 1.0 WY Combination          Max       None         X  0.00042    10 18000     0  8000
+   3F                 WDRIFT 102 0.9 DL + 1.0 WY Combination          Max       None         Y 0.000821    10 18000     0  8000
+   3F                 WDRIFT 102 0.9 DL + 1.0 WY Combination          Min       None         X 0.000124    12 18000 10000  8000
+   3F                 WDRIFT 102 0.9 DL + 1.0 WY Combination          Min       None         Y 0.000575     3     0 10000  8000
+   2F                                         WX   LinStatic Step By Step          1         X 0.000645     4  6000     0  4500
+   2F                                         WX   LinStatic Step By Step          2         Y  0.00126     2     0  5000  4500
+   2F                                         WX   LinStatic Step By Step          3         X 0.000536     4  6000     0  4500
+   2F                                         WX   LinStatic Step By Step          4         X 0.000535     6  6000 10000  4500
+   2F                                         WX   LinStatic Step By Step          5         Y  0.00127    11 18000  5000  4500
+   2F                                         WX   LinStatic Step By Step          6         Y 0.001302     2     0  5000  4500
+   2F                                         WX   LinStatic Step By Step          7         X  0.00049     7 12000     0  4500
+   2F                                         WX   LinStatic Step By Step          7         Y  0.00082     2     0  5000  4500
+   2F                                         WX   LinStatic Step By Step          8         X 0.000563     6  6000 10000  4500
+   2F                                         WX   LinStatic Step By Step          8         Y 0.000944     2     0  5000  4500
+   2F                                         WX   LinStatic Step By Step          9         X 0.000535     4  6000     0  4500
+   2F                                         WX   LinStatic Step By Step          9         Y 0.000919     2     0  5000  4500
+   2F                                         WX   LinStatic Step By Step         10         X 0.000524     6  6000 10000  4500
+   2F                                         WX   LinStatic Step By Step         10         Y 0.000896    11 18000  5000  4500
+   2F                                         WX   LinStatic Step By Step         11         X 0.000606     4  6000     0  4500
+   2F                                         WX   LinStatic Step By Step         11         Y 0.001035    11 18000  5000  4500
+   2F                                         WX   LinStatic Step By Step         12         X 0.000614     6  6000 10000  4500
+   2F                                         WX   LinStatic Step By Step         12         Y 0.001059     2     0  5000  4500
+   2F                                         WY   LinStatic Step By Step          1         X 0.000645     4  6000     0  4500
+   2F                                         WY   LinStatic Step By Step          2         Y  0.00126     2     0  5000  4500
+   2F                                         WY   LinStatic Step By Step          3         X 0.000536     4  6000     0  4500
+   2F                                         WY   LinStatic Step By Step          4         X 0.000535     6  6000 10000  4500
+   2F                                         WY   LinStatic Step By Step          5         Y  0.00127    11 18000  5000  4500
+   2F                                         WY   LinStatic Step By Step          6         Y 0.001302     2     0  5000  4500
+   2F                                         WY   LinStatic Step By Step          7         X  0.00049     7 12000     0  4500
+   2F                                         WY   LinStatic Step By Step          7         Y  0.00082     2     0  5000  4500
+   2F                                         WY   LinStatic Step By Step          8         X 0.000563     6  6000 10000  4500
+   2F                                         WY   LinStatic Step By Step          8         Y 0.000944     2     0  5000  4500
+   2F                                         WY   LinStatic Step By Step          9         X 0.000535     4  6000     0  4500
+   2F                                         WY   LinStatic Step By Step          9         Y 0.000919     2     0  5000  4500
+   2F                                         WY   LinStatic Step By Step         10         X 0.000524     6  6000 10000  4500
+   2F                                         WY   LinStatic Step By Step         10         Y 0.000896    11 18000  5000  4500
+   2F                                         WY   LinStatic Step By Step         11         X 0.000606     4  6000     0  4500
+   2F                                         WY   LinStatic Step By Step         11         Y 0.001035    11 18000  5000  4500
+   2F                                         WY   LinStatic Step By Step         12         X 0.000614     6  6000 10000  4500
+   2F                                         WY   LinStatic Step By Step         12         Y 0.001059     2     0  5000  4500
+   2F                                      EQXSD   LinStatic Step By Step          1         X 0.002779     6  6000 10000  4500
+   2F                                      EQXSD   LinStatic Step By Step          2         X 0.002722     7 12000     0  4500
+   2F                                      EQYSD   LinStatic Step By Step          1         Y 0.002742    11 18000  5000  4500
+   2F                                      EQYSD   LinStatic Step By Step          2         Y 0.003012     2     0  5000  4500
+   2F DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 EQXSD Combination          Max       None         X 0.002775     6  6000 10000  4500
+   2F DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 EQXSD Combination          Min       None         X 0.002644     2     0  5000  4500
+   2F DRIFT 101 (1.2 + Ev) DL + f LL - 1.0 EQXSD Combination          Max       None         X 0.002656    11 18000  5000  4500
+   2F DRIFT 101 (1.2 + Ev) DL + f LL - 1.0 EQXSD Combination          Min       None         X 0.002785     9 12000 10000  4500
+   2F        DRIFT 102 (0.9 - Ev) DL + 1.0 EQXSD Combination          Max       None         X 0.002777     6  6000 10000  4500
+   2F        DRIFT 102 (0.9 - Ev) DL + 1.0 EQXSD Combination          Min       None         X  0.00264     2     0  5000  4500
+   2F        DRIFT 103 (0.9 - Ev) DL - 1.0 EQXSD Combination          Max       None         X 0.002647    11 18000  5000  4500
+   2F        DRIFT 103 (0.9 - Ev) DL - 1.0 EQXSD Combination          Min       None         X 0.002782     9 12000 10000  4500
+   2F DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 EQYSD Combination          Max       None         Y 0.003012     2     0  5000  4500
+   2F DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 EQYSD Combination          Min       None         Y 0.002485     5  6000  5000  4500
+   2F DRIFT 101 (1.2 + Ev) DL + f LL - 1.0 EQYSD Combination          Max       None         Y 0.002482     5  6000  5000  4500
+   2F DRIFT 101 (1.2 + Ev) DL + f LL - 1.0 EQYSD Combination          Min       None         Y 0.003011     2     0  5000  4500
+   2F        DRIFT 102 (0.9 - Ev) DL + 1.0 EQYSD Combination          Max       None         Y 0.003012     2     0  5000  4500
+   2F        DRIFT 102 (0.9 - Ev) DL + 1.0 EQYSD Combination          Min       None         Y 0.002485     5  6000  5000  4500
+   2F        DRIFT 103 (0.9 - Ev) DL - 1.0 EQYSD Combination          Max       None         Y 0.002483     5  6000  5000  4500
+   2F        DRIFT 103 (0.9 - Ev) DL - 1.0 EQYSD Combination          Min       None         Y 0.003012     2     0  5000  4500
+   2F DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 RSAXD Combination          Max       None         X 0.002697     6  6000 10000  4500
+   2F DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 RSAXD Combination          Min       None         X 0.002707     9 12000 10000  4500
+   2F        DRIFT 102 (0.9 - Ev) DL + 1.0 RSAXD Combination          Max       None         X 0.002699     6  6000 10000  4500
+   2F        DRIFT 102 (0.9 - Ev) DL + 1.0 RSAXD Combination          Min       None         X 0.002703     9 12000 10000  4500
+   2F DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 RSAYD Combination          Max       None         Y 0.003061     2     0  5000  4500
+   2F DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 RSAYD Combination          Min       None         Y 0.003061     2     0  5000  4500
+   2F        DRIFT 102 (0.9 - Ev) DL + 1.0 RSAYD Combination          Max       None         Y 0.003061     2     0  5000  4500
+   2F        DRIFT 102 (0.9 - Ev) DL + 1.0 RSAYD Combination          Min       None         Y 0.003061     2     0  5000  4500
+   2F        WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WX Combination          Max       None         X 0.000324     2     0  5000  4500
+   2F        WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WX Combination          Max       None         Y 0.000651     2     0  5000  4500
+   2F        WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WX Combination          Min       None         X 0.000105    10 18000     0  4500
+   2F        WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WX Combination          Min       None         Y  0.00046     2     0  5000  4500
+   2F WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WX Combination          Max       None         X 0.000645     1     0     0  4500
+   2F WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WX Combination          Max       None         Y 0.001302     2     0  5000  4500
+   2F WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WX Combination          Min       None         X 0.000207    10 18000     0  4500
+   2F WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WX Combination          Min       None         Y 0.000919     2     0  5000  4500
+   2F                 WDRIFT 102 0.9 DL + 1.0 WX Combination          Max       None         X 0.000644     1     0     0  4500
+   2F                 WDRIFT 102 0.9 DL + 1.0 WX Combination          Max       None         Y 0.001302     2     0  5000  4500
+   2F                 WDRIFT 102 0.9 DL + 1.0 WX Combination          Min       None         X 0.000206    10 18000     0  4500
+   2F                 WDRIFT 102 0.9 DL + 1.0 WX Combination          Min       None         Y 0.000919     2     0  5000  4500
+   2F        WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WY Combination          Max       None         X 0.000324     2     0  5000  4500
+   2F        WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WY Combination          Max       None         Y 0.000651     2     0  5000  4500
+   2F        WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WY Combination          Min       None         X 0.000105    10 18000     0  4500
+   2F        WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WY Combination          Min       None         Y  0.00046     2     0  5000  4500
+   2F WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WY Combination          Max       None         X 0.000645     1     0     0  4500
+   2F WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WY Combination          Max       None         Y 0.001302     2     0  5000  4500
+   2F WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WY Combination          Min       None         X 0.000207    10 18000     0  4500
+   2F WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WY Combination          Min       None         Y 0.000919     2     0  5000  4500
+   2F                 WDRIFT 102 0.9 DL + 1.0 WY Combination          Max       None         X 0.000644     1     0     0  4500
+   2F                 WDRIFT 102 0.9 DL + 1.0 WY Combination          Max       None         Y 0.001302     2     0  5000  4500
+   2F                 WDRIFT 102 0.9 DL + 1.0 WY Combination          Min       None         X 0.000206    10 18000     0  4500
+   2F                 WDRIFT 102 0.9 DL + 1.0 WY Combination          Min       None         Y 0.000919     2     0  5000  4500
+   GF                                         WX   LinStatic Step By Step          1         X 0.000663     5  6000  5000     0
+   GF                                         WX   LinStatic Step By Step          2         Y 0.001266     8 12000  5000     0
+   GF                                         WX   LinStatic Step By Step          3         X 0.000541    10 18000     0     0
+   GF                                         WX   LinStatic Step By Step          4         X 0.000541    12 18000 10000     0
+   GF                                         WX   LinStatic Step By Step          5         Y 0.001272    12 18000 10000     0
+   GF                                         WX   LinStatic Step By Step          6         Y 0.001305     1     0     0     0
+   GF                                         WX   LinStatic Step By Step          7         X 0.000498     5  6000  5000     0
+   GF                                         WX   LinStatic Step By Step          7         Y 0.000822     8 12000  5000     0
+   GF                                         WX   LinStatic Step By Step          8         X 0.000574     5  6000  5000     0
+   GF                                         WX   LinStatic Step By Step          8         Y  0.00095     8 12000  5000     0
+   GF                                         WX   LinStatic Step By Step          9         X 0.000544    10 18000     0     0
+   GF                                         WX   LinStatic Step By Step          9         Y 0.000922     1     0     0     0
+   GF                                         WX   LinStatic Step By Step         10         X 0.000533    12 18000 10000     0
+   GF                                         WX   LinStatic Step By Step         10         Y 0.000898    12 18000 10000     0
+   GF                                         WX   LinStatic Step By Step         11         X 0.000615    10 18000     0     0
+   GF                                         WX   LinStatic Step By Step         11         Y 0.001038    12 18000 10000     0
+   GF                                         WX   LinStatic Step By Step         12         X 0.000626    12 18000 10000     0
+   GF                                         WX   LinStatic Step By Step         12         Y 0.001063     1     0     0     0
+   GF                                         WY   LinStatic Step By Step          1         X 0.000663     5  6000  5000     0
+   GF                                         WY   LinStatic Step By Step          2         Y 0.001266     8 12000  5000     0
+   GF                                         WY   LinStatic Step By Step          3         X 0.000541    10 18000     0     0
+   GF                                         WY   LinStatic Step By Step          4         X 0.000541    12 18000 10000     0
+   GF                                         WY   LinStatic Step By Step          5         Y 0.001272    12 18000 10000     0
+   GF                                         WY   LinStatic Step By Step          6         Y 0.001305     1     0     0     0
+   GF                                         WY   LinStatic Step By Step          7         X 0.000498     5  6000  5000     0
+   GF                                         WY   LinStatic Step By Step          7         Y 0.000822     8 12000  5000     0
+   GF                                         WY   LinStatic Step By Step          8         X 0.000574     5  6000  5000     0
+   GF                                         WY   LinStatic Step By Step          8         Y  0.00095     8 12000  5000     0
+   GF                                         WY   LinStatic Step By Step          9         X 0.000544    10 18000     0     0
+   GF                                         WY   LinStatic Step By Step          9         Y 0.000922     1     0     0     0
+   GF                                         WY   LinStatic Step By Step         10         X 0.000533    12 18000 10000     0
+   GF                                         WY   LinStatic Step By Step         10         Y 0.000898    12 18000 10000     0
+   GF                                         WY   LinStatic Step By Step         11         X 0.000615    10 18000     0     0
+   GF                                         WY   LinStatic Step By Step         11         Y 0.001038    12 18000 10000     0
+   GF                                         WY   LinStatic Step By Step         12         X 0.000626    12 18000 10000     0
+   GF                                         WY   LinStatic Step By Step         12         Y 0.001063     1     0     0     0
+   GF                                      EQXSD   LinStatic Step By Step          1         X 0.002744    12 18000 10000     0
+   GF                                      EQXSD   LinStatic Step By Step          2         X 0.002679     1     0     0     0
+   GF                                      EQYSD   LinStatic Step By Step          1         Y 0.002676    12 18000 10000     0
+   GF                                      EQYSD   LinStatic Step By Step          2         Y 0.002939     1     0     0     0
+   GF DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 EQXSD Combination          Max       None         X 0.002763    12 18000 10000     0
+   GF DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 EQXSD Combination          Min       None         X 0.002709    11 18000  5000     0
+   GF DRIFT 101 (1.2 + Ev) DL + f LL - 1.0 EQXSD Combination          Max       None         X 0.002721     2     0  5000     0
+   GF DRIFT 101 (1.2 + Ev) DL + f LL - 1.0 EQXSD Combination          Min       None         X 0.002761     3     0 10000     0
+   GF        DRIFT 102 (0.9 - Ev) DL + 1.0 EQXSD Combination          Max       None         X 0.002751    12 18000 10000     0
+   GF        DRIFT 102 (0.9 - Ev) DL + 1.0 EQXSD Combination          Min       None         X 0.002678    11 18000  5000     0
+   GF        DRIFT 103 (0.9 - Ev) DL - 1.0 EQXSD Combination          Max       None         X 0.002691     2     0  5000     0
+   GF        DRIFT 103 (0.9 - Ev) DL - 1.0 EQXSD Combination          Min       None         X 0.002747     3     0 10000     0
+   GF DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 EQYSD Combination          Max       None         Y 0.002938     3     0 10000     0
+   GF DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 EQYSD Combination          Min       None         Y 0.002451     6  6000 10000     0
+   GF DRIFT 101 (1.2 + Ev) DL + f LL - 1.0 EQYSD Combination          Max       None         Y 0.002449     4  6000     0     0
+   GF DRIFT 101 (1.2 + Ev) DL + f LL - 1.0 EQYSD Combination          Min       None         Y 0.002941     1     0     0     0
+   GF        DRIFT 102 (0.9 - Ev) DL + 1.0 EQYSD Combination          Max       None         Y 0.002939     1     0     0     0
+   GF        DRIFT 102 (0.9 - Ev) DL + 1.0 EQYSD Combination          Min       None         Y 0.002447     6  6000 10000     0
+   GF        DRIFT 103 (0.9 - Ev) DL - 1.0 EQYSD Combination          Max       None         Y 0.002446     4  6000     0     0
+   GF        DRIFT 103 (0.9 - Ev) DL - 1.0 EQYSD Combination          Min       None         Y 0.002939     1     0     0     0
+   GF DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 RSAXD Combination          Max       None         X  0.00271    12 18000 10000     0
+   GF DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 RSAXD Combination          Min       None         X 0.002709     3     0 10000     0
+   GF        DRIFT 102 (0.9 - Ev) DL + 1.0 RSAXD Combination          Max       None         X 0.002699    12 18000 10000     0
+   GF        DRIFT 102 (0.9 - Ev) DL + 1.0 RSAXD Combination          Min       None         X 0.002694     3     0 10000     0
+   GF DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 RSAYD Combination          Max       None         Y 0.003016     3     0 10000     0
+   GF DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 RSAYD Combination          Min       None         Y 0.003019     1     0     0     0
+   GF        DRIFT 102 (0.9 - Ev) DL + 1.0 RSAYD Combination          Max       None         Y 0.003017     1     0     0     0
+   GF        DRIFT 102 (0.9 - Ev) DL + 1.0 RSAYD Combination          Min       None         Y 0.003018     1     0     0     0
+   GF        WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WX Combination          Max       None         X 0.000368    11 18000  5000     0
+   GF        WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WX Combination          Max       None         Y 0.000652     1     0     0     0
+   GF        WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WX Combination          Min       None         Y 0.000462     1     0     0     0
+   GF WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WX Combination          Max       None         X 0.000705    11 18000  5000     0
+   GF WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WX Combination          Max       None         Y 0.001304     3     0 10000     0
+   GF WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WX Combination          Min       None         X 0.000233     1     0     0     0
+   GF WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WX Combination          Min       None         Y 0.000923     1     0     0     0
+   GF                 WDRIFT 102 0.9 DL + 1.0 WX Combination          Max       None         X 0.000688    11 18000  5000     0
+   GF                 WDRIFT 102 0.9 DL + 1.0 WX Combination          Max       None         Y 0.001304     1     0     0     0
+   GF                 WDRIFT 102 0.9 DL + 1.0 WX Combination          Min       None         X 0.000225     1     0     0     0
+   GF                 WDRIFT 102 0.9 DL + 1.0 WX Combination          Min       None         Y 0.000922     1     0     0     0
+   GF        WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WY Combination          Max       None         X 0.000368    11 18000  5000     0
+   GF        WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WY Combination          Max       None         Y 0.000652     1     0     0     0
+   GF        WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WY Combination          Min       None         Y 0.000462     1     0     0     0
+   GF WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WY Combination          Max       None         X 0.000705    11 18000  5000     0
+   GF WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WY Combination          Max       None         Y 0.001304     3     0 10000     0
+   GF WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WY Combination          Min       None         X 0.000233     1     0     0     0
+   GF WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WY Combination          Min       None         Y 0.000923     1     0     0     0
+   GF                 WDRIFT 102 0.9 DL + 1.0 WY Combination          Max       None         X 0.000688    11 18000  5000     0
+   GF                 WDRIFT 102 0.9 DL + 1.0 WY Combination          Max       None         Y 0.001304     1     0     0     0
+   GF                 WDRIFT 102 0.9 DL + 1.0 WY Combination          Min       None         X 0.000225     1     0     0     0
+   GF                 WDRIFT 102 0.9 DL + 1.0 WY Combination          Min       None         Y 0.000922     1     0     0     0
+
+--- Largest ETABS story drift of each case / combination ---
+                                OutputCase Story Direction    Drift
+DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 EQXSD    2F         X 0.002775
+DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 EQYSD    2F         Y 0.003012
+DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 RSAXD    GF         X 0.002710
+DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 RSAYD    2F         Y 0.003061
+DRIFT 101 (1.2 + Ev) DL + f LL - 1.0 EQXSD    2F         X 0.002785
+DRIFT 101 (1.2 + Ev) DL + f LL - 1.0 EQYSD    2F         Y 0.003011
+       DRIFT 102 (0.9 - Ev) DL + 1.0 EQXSD    2F         X 0.002777
+       DRIFT 102 (0.9 - Ev) DL + 1.0 EQYSD    2F         Y 0.003012
+       DRIFT 102 (0.9 - Ev) DL + 1.0 RSAXD    2F         X 0.002703
+       DRIFT 102 (0.9 - Ev) DL + 1.0 RSAYD    2F         Y 0.003061
+       DRIFT 103 (0.9 - Ev) DL - 1.0 EQXSD    2F         X 0.002782
+       DRIFT 103 (0.9 - Ev) DL - 1.0 EQYSD    2F         Y 0.003012
+                                     EQXSD    2F         X 0.002779
+                                     EQYSD    2F         Y 0.003012
+       WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WX    GF         Y 0.000652
+       WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WY    GF         Y 0.000652
+WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WX    GF         Y 0.001304
+WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WY    GF         Y 0.001304
+                WDRIFT 102 0.9 DL + 1.0 WX    GF         Y 0.001304
+                WDRIFT 102 0.9 DL + 1.0 WY    GF         Y 0.001304
+                                        WX    GF         Y 0.001305
+                                        WY    GF         Y 0.001305
+
+--- ETABS table 'Diaphragm Center Of Mass Displacements' (what sdt drift reads at the centre of mass) ---
+Story Diaphragm                                 OutputCase     StepType         UX      UY         RZ Point       X       Y     Z
+   RD        D1                                         WX Step By Step      5.854  -0.015      2E-06   104 8452.02  5302.5 11500
+   RD        D1                                         WX Step By Step     -0.025  11.235     -3E-06   104 8452.02  5302.5 11500
+   RD        D1                                         WX Step By Step      4.364  -0.064    9.5E-05   104 8452.02  5302.5 11500
+   RD        D1                                         WX Step By Step      4.416   0.042   -9.2E-05   104 8452.02  5302.5 11500
+   RD        D1                                         WX Step By Step     -0.116    8.23   0.000346   104 8452.02  5302.5 11500
+   RD        D1                                         WX Step By Step      0.078   8.624   -0.00035   104 8452.02  5302.5 11500
+   RD        D1                                         WX Step By Step      4.407  -7.321      3E-06   104 8452.02  5302.5 11500
+   RD        D1                                         WX Step By Step      5.042   8.414 -1.609E-07   104 8452.02  5302.5 11500
+   RD        D1                                         WX Step By Step      3.225  -5.663   0.000299   104 8452.02  5302.5 11500
+   RD        D1                                         WX Step By Step      3.391  -5.328  -0.000294   104 8452.02  5302.5 11500
+   RD        D1                                         WX Step By Step       3.69   6.123   0.000342   104 8452.02  5302.5 11500
+   RD        D1                                         WX Step By Step       3.88    6.51  -0.000342   104 8452.02  5302.5 11500
+   RD        D1                                         WY Step By Step      5.854  -0.015      2E-06   104 8452.02  5302.5 11500
+   RD        D1                                         WY Step By Step     -0.025  11.235     -3E-06   104 8452.02  5302.5 11500
+   RD        D1                                         WY Step By Step      4.364  -0.064    9.5E-05   104 8452.02  5302.5 11500
+   RD        D1                                         WY Step By Step      4.416   0.042   -9.2E-05   104 8452.02  5302.5 11500
+   RD        D1                                         WY Step By Step     -0.116    8.23   0.000346   104 8452.02  5302.5 11500
+   RD        D1                                         WY Step By Step      0.078   8.624   -0.00035   104 8452.02  5302.5 11500
+   RD        D1                                         WY Step By Step      4.407  -7.321      3E-06   104 8452.02  5302.5 11500
+   RD        D1                                         WY Step By Step      5.042   8.414 -1.609E-07   104 8452.02  5302.5 11500
+   RD        D1                                         WY Step By Step      3.225  -5.663   0.000299   104 8452.02  5302.5 11500
+   RD        D1                                         WY Step By Step      3.391  -5.328  -0.000294   104 8452.02  5302.5 11500
+   RD        D1                                         WY Step By Step       3.69   6.123   0.000342   104 8452.02  5302.5 11500
+   RD        D1                                         WY Step By Step       3.88    6.51  -0.000342   104 8452.02  5302.5 11500
+   RD        D1                                      EQXSD Step By Step     26.351   0.042  -0.000242   104 8452.02  5302.5 11500
+   RD        D1                                      EQXSD Step By Step     26.252  -0.154   0.000131   104 8452.02  5302.5 11500
+   RD        D1                                      EQYSD Step By Step     -0.146  25.133   0.000231   104 8452.02  5302.5 11500
+   RD        D1                                      EQYSD Step By Step       0.04    25.5  -0.000465   104 8452.02  5302.5 11500
+   RD        D1 DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 EQXSD          Max     26.428   0.089   0.000143   104 8452.02  5302.5 11500
+   RD        D1 DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 EQXSD          Min     26.329  -0.107  -0.000229   104 8452.02  5302.5 11500
+   RD        D1 DRIFT 101 (1.2 + Ev) DL + f LL - 1.0 EQXSD          Max    -26.175   0.201   0.000254   104 8452.02  5302.5 11500
+   RD        D1 DRIFT 101 (1.2 + Ev) DL + f LL - 1.0 EQXSD          Min    -26.275   0.005  -0.000118   104 8452.02  5302.5 11500
+   RD        D1        DRIFT 102 (0.9 - Ev) DL + 1.0 EQXSD          Max     26.384   0.062   0.000136   104 8452.02  5302.5 11500
+   RD        D1        DRIFT 102 (0.9 - Ev) DL + 1.0 EQXSD          Min     26.284  -0.134  -0.000236   104 8452.02  5302.5 11500
+   RD        D1        DRIFT 103 (0.9 - Ev) DL - 1.0 EQXSD          Max     -26.22   0.174   0.000247   104 8452.02  5302.5 11500
+   RD        D1        DRIFT 103 (0.9 - Ev) DL - 1.0 EQXSD          Min    -26.319  -0.022  -0.000125   104 8452.02  5302.5 11500
+   RD        D1 DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 EQYSD          Max      0.116  25.547   0.000244   104 8452.02  5302.5 11500
+   RD        D1 DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 EQYSD          Min     -0.069  25.181  -0.000452   104 8452.02  5302.5 11500
+   RD        D1 DRIFT 101 (1.2 + Ev) DL + f LL - 1.0 EQYSD          Max      0.222 -25.086   0.000477   104 8452.02  5302.5 11500
+   RD        D1 DRIFT 101 (1.2 + Ev) DL + f LL - 1.0 EQYSD          Min      0.037 -25.453  -0.000218   104 8452.02  5302.5 11500
+   RD        D1        DRIFT 102 (0.9 - Ev) DL + 1.0 EQYSD          Max      0.072   25.52   0.000236   104 8452.02  5302.5 11500
+   RD        D1        DRIFT 102 (0.9 - Ev) DL + 1.0 EQYSD          Min     -0.114  25.154  -0.000459   104 8452.02  5302.5 11500
+   RD        D1        DRIFT 103 (0.9 - Ev) DL - 1.0 EQYSD          Max      0.178 -25.113    0.00047   104 8452.02  5302.5 11500
+   RD        D1        DRIFT 103 (0.9 - Ev) DL - 1.0 EQYSD          Min     -0.008  -25.48  -0.000226   104 8452.02  5302.5 11500
+   RD        D1 DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 RSAXD          Max     24.727   0.236   0.000334   104 8452.02  5302.5 11500
+   RD        D1 DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 RSAXD          Min    -24.574  -0.142  -0.000309   104 8452.02  5302.5 11500
+   RD        D1        DRIFT 102 (0.9 - Ev) DL + 1.0 RSAXD          Max     24.683   0.209   0.000327   104 8452.02  5302.5 11500
+   RD        D1        DRIFT 102 (0.9 - Ev) DL + 1.0 RSAXD          Min    -24.619  -0.169  -0.000316   104 8452.02  5302.5 11500
+   RD        D1 DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 RSAYD          Max      0.241  23.989    0.00073   104 8452.02  5302.5 11500
+   RD        D1 DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 RSAYD          Min     -0.088 -23.895  -0.000705   104 8452.02  5302.5 11500
+   RD        D1        DRIFT 102 (0.9 - Ev) DL + 1.0 RSAYD          Max      0.196  23.962   0.000723   104 8452.02  5302.5 11500
+   RD        D1        DRIFT 102 (0.9 - Ev) DL + 1.0 RSAYD          Min     -0.132 -23.922  -0.000712   104 8452.02  5302.5 11500
+   RD        D1        WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WX          Max      2.984   5.653   0.000183   104 8452.02  5302.5 11500
+   RD        D1        WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WX          Min     -0.001  -3.625  -0.000165   104 8452.02  5302.5 11500
+   RD        D1 WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WX          Max       5.92  11.276   0.000357   104 8452.02  5302.5 11500
+   RD        D1 WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WX          Min      -0.05   -7.28  -0.000339   104 8452.02  5302.5 11500
+   RD        D1                 WDRIFT 102 0.9 DL + 1.0 WX          Max      5.896  11.262   0.000353   104 8452.02  5302.5 11500
+   RD        D1                 WDRIFT 102 0.9 DL + 1.0 WX          Min     -0.073  -7.294  -0.000343   104 8452.02  5302.5 11500
+   RD        D1        WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WY          Max      2.984   5.653   0.000183   104 8452.02  5302.5 11500
+   RD        D1        WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WY          Min     -0.001  -3.625  -0.000165   104 8452.02  5302.5 11500
+   RD        D1 WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WY          Max       5.92  11.276   0.000357   104 8452.02  5302.5 11500
+   RD        D1 WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WY          Min      -0.05   -7.28  -0.000339   104 8452.02  5302.5 11500
+   RD        D1                 WDRIFT 102 0.9 DL + 1.0 WY          Max      5.896  11.262   0.000353   104 8452.02  5302.5 11500
+   RD        D1                 WDRIFT 102 0.9 DL + 1.0 WY          Min     -0.073  -7.294  -0.000343   104 8452.02  5302.5 11500
+   3F        D1                                         WX Step By Step      5.011  -0.004      1E-06   106 8958.03 5033.88  8000
+   3F        D1                                         WX Step By Step     -0.007   9.623     -1E-05   106 8958.03 5033.88  8000
+   3F        D1                                         WX Step By Step      3.757  -0.011    8.1E-05   106 8958.03 5033.88  8000
+   3F        D1                                         WX Step By Step       3.76   0.006   -7.9E-05   106 8958.03 5033.88  8000
+   3F        D1                                         WX Step By Step      -0.01   7.185   0.000293   106 8958.03 5033.88  8000
+   3F        D1                                         WX Step By Step     -0.001    7.25  -0.000308   106 8958.03 5033.88  8000
+   3F        D1                                         WX Step By Step      3.763   -6.26      7E-06   106 8958.03 5033.88  8000
+   3F        D1                                         WX Step By Step      4.329   7.214     -6E-06   106 8958.03 5033.88  8000
+   3F        D1                                         WX Step By Step      2.821  -4.727   0.000261   106 8958.03 5033.88  8000
+   3F        D1                                         WX Step By Step      2.829  -4.672   -0.00025   106 8958.03 5033.88  8000
+   3F        D1                                         WX Step By Step      3.245   5.384    0.00029   106 8958.03 5033.88  8000
+   3F        D1                                         WX Step By Step      3.254   5.447    -0.0003   106 8958.03 5033.88  8000
+   3F        D1                                         WY Step By Step      5.011  -0.004      1E-06   106 8958.03 5033.88  8000
+   3F        D1                                         WY Step By Step     -0.007   9.623     -1E-05   106 8958.03 5033.88  8000
+   3F        D1                                         WY Step By Step      3.757  -0.011    8.1E-05   106 8958.03 5033.88  8000
+   3F        D1                                         WY Step By Step       3.76   0.006   -7.9E-05   106 8958.03 5033.88  8000
+   3F        D1                                         WY Step By Step      -0.01   7.185   0.000293   106 8958.03 5033.88  8000
+   3F        D1                                         WY Step By Step     -0.001    7.25  -0.000308   106 8958.03 5033.88  8000
+   3F        D1                                         WY Step By Step      3.763   -6.26      7E-06   106 8958.03 5033.88  8000
+   3F        D1                                         WY Step By Step      4.329   7.214     -6E-06   106 8958.03 5033.88  8000
+   3F        D1                                         WY Step By Step      2.821  -4.727   0.000261   106 8958.03 5033.88  8000
+   3F        D1                                         WY Step By Step      2.829  -4.672   -0.00025   106 8958.03 5033.88  8000
+   3F        D1                                         WY Step By Step      3.245   5.384    0.00029   106 8958.03 5033.88  8000
+   3F        D1                                         WY Step By Step      3.254   5.447    -0.0003   106 8958.03 5033.88  8000
+   3F        D1                                      EQXSD Step By Step      21.39  -0.003  -0.000198   106 8958.03 5033.88  8000
+   3F        D1                                      EQXSD Step By Step     21.385  -0.032   0.000105   106 8958.03 5033.88  8000
+   3F        D1                                      EQYSD Step By Step     -0.027  20.483    0.00017   106 8958.03 5033.88  8000
+   3F        D1                                      EQYSD Step By Step     -0.018  20.538  -0.000396   106 8958.03 5033.88  8000
+   3F        D1 DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 EQXSD          Max     21.357   0.025   0.000108   106 8958.03 5033.88  8000
+   3F        D1 DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 EQXSD          Min     21.352  -0.005  -0.000195   106 8958.03 5033.88  8000
+   3F        D1 DRIFT 101 (1.2 + Ev) DL + f LL - 1.0 EQXSD          Max    -21.418   0.059   0.000201   106 8958.03 5033.88  8000
+   3F        D1 DRIFT 101 (1.2 + Ev) DL + f LL - 1.0 EQXSD          Min    -21.424    0.03  -0.000102   106 8958.03 5033.88  8000
+   3F        D1        DRIFT 102 (0.9 - Ev) DL + 1.0 EQXSD          Max     21.375   0.009   0.000106   106 8958.03 5033.88  8000
+   3F        D1        DRIFT 102 (0.9 - Ev) DL + 1.0 EQXSD          Min      21.37   -0.02  -0.000197   106 8958.03 5033.88  8000
+   3F        D1        DRIFT 103 (0.9 - Ev) DL - 1.0 EQXSD          Max      -21.4   0.044   0.000199   106 8958.03 5033.88  8000
+   3F        D1        DRIFT 103 (0.9 - Ev) DL - 1.0 EQXSD          Min    -21.405   0.014  -0.000104   106 8958.03 5033.88  8000
+   3F        D1 DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 EQYSD          Max     -0.051  20.566   0.000173   106 8958.03 5033.88  8000
+   3F        D1 DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 EQYSD          Min     -0.061  20.511  -0.000393   106 8958.03 5033.88  8000
+   3F        D1 DRIFT 101 (1.2 + Ev) DL + f LL - 1.0 EQYSD          Max     -0.006 -20.456   0.000398   106 8958.03 5033.88  8000
+   3F        D1 DRIFT 101 (1.2 + Ev) DL + f LL - 1.0 EQYSD          Min     -0.016 -20.511  -0.000168   106 8958.03 5033.88  8000
+   3F        D1        DRIFT 102 (0.9 - Ev) DL + 1.0 EQYSD          Max     -0.032   20.55   0.000172   106 8958.03 5033.88  8000
+   3F        D1        DRIFT 102 (0.9 - Ev) DL + 1.0 EQYSD          Min     -0.042  20.495  -0.000394   106 8958.03 5033.88  8000
+   3F        D1        DRIFT 103 (0.9 - Ev) DL - 1.0 EQYSD          Max      0.012 -20.471   0.000397   106 8958.03 5033.88  8000
+   3F        D1        DRIFT 103 (0.9 - Ev) DL - 1.0 EQYSD          Min      0.003 -20.526  -0.000169   106 8958.03 5033.88  8000
+   3F        D1 DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 RSAXD          Max     20.309   0.139   0.000269   106 8958.03 5033.88  8000
+   3F        D1 DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 RSAXD          Min    -20.376  -0.084  -0.000264   106 8958.03 5033.88  8000
+   3F        D1        DRIFT 102 (0.9 - Ev) DL + 1.0 RSAXD          Max     20.328   0.124   0.000268   106 8958.03 5033.88  8000
+   3F        D1        DRIFT 102 (0.9 - Ev) DL + 1.0 RSAXD          Min    -20.358    -0.1  -0.000265   106 8958.03 5033.88  8000
+   3F        D1 DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 RSAYD          Max      0.079  19.595   0.000608   106 8958.03 5033.88  8000
+   3F        D1 DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 RSAYD          Min     -0.145  -19.54  -0.000603   106 8958.03 5033.88  8000
+   3F        D1        DRIFT 102 (0.9 - Ev) DL + 1.0 RSAYD          Max      0.097  19.579   0.000607   106 8958.03 5033.88  8000
+   3F        D1        DRIFT 102 (0.9 - Ev) DL + 1.0 RSAYD          Min     -0.127 -19.555  -0.000604   106 8958.03 5033.88  8000
+   3F        D1        WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WX          Max      2.479   4.833   0.000149   106 8958.03 5033.88  8000
+   3F        D1        WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WX          Min     -0.031  -3.109  -0.000152   106 8958.03 5033.88  8000
+   3F        D1 WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WX          Max      4.983   9.647   0.000295   106 8958.03 5033.88  8000
+   3F        D1 WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WX          Min     -0.039  -6.237  -0.000305   106 8958.03 5033.88  8000
+   3F        D1                 WDRIFT 102 0.9 DL + 1.0 WX          Max      4.991   9.639   0.000295   106 8958.03 5033.88  8000
+   3F        D1                 WDRIFT 102 0.9 DL + 1.0 WX          Min      -0.03  -6.245  -0.000306   106 8958.03 5033.88  8000
+   3F        D1        WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WY          Max      2.479   4.833   0.000149   106 8958.03 5033.88  8000
+   3F        D1        WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WY          Min     -0.031  -3.109  -0.000152   106 8958.03 5033.88  8000
+   3F        D1 WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WY          Max      4.983   9.647   0.000295   106 8958.03 5033.88  8000
+   3F        D1 WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WY          Min     -0.039  -6.237  -0.000305   106 8958.03 5033.88  8000
+   3F        D1                 WDRIFT 102 0.9 DL + 1.0 WY          Max      4.991   9.639   0.000295   106 8958.03 5033.88  8000
+   3F        D1                 WDRIFT 102 0.9 DL + 1.0 WY          Min      -0.03  -6.245  -0.000306   106 8958.03 5033.88  8000
+   2F        D1                                         WX Step By Step       3.54  -0.001      1E-06   114 9008.61 5004.91  4500
+   2F        D1                                         WX Step By Step     -0.003   6.826     -1E-05   114 9008.61 5004.91  4500
+   2F        D1                                         WX Step By Step      2.655  -0.006    5.8E-05   114 9008.61 5004.91  4500
+   2F        D1                                         WX Step By Step      2.654   0.004   -5.7E-05   114 9008.61 5004.91  4500
+   2F        D1                                         WX Step By Step     -0.001   5.101   0.000209   114 9008.61 5004.91  4500
+   2F        D1                                         WX Step By Step     -0.004   5.138  -0.000224   114 9008.61 5004.91  4500
+   2F        D1                                         WX Step By Step      2.657  -4.437      7E-06   114 9008.61 5004.91  4500
+   2F        D1                                         WX Step By Step      3.061   5.118     -7E-06   114 9008.61 5004.91  4500
+   2F        D1                                         WX Step By Step      1.996  -3.346   0.000189   114 9008.61 5004.91  4500
+   2F        D1                                         WX Step By Step      1.993  -3.315  -0.000179   114 9008.61 5004.91  4500
+   2F        D1                                         WX Step By Step        2.3   3.824   0.000207   114 9008.61 5004.91  4500
+   2F        D1                                         WX Step By Step      2.296    3.86  -0.000218   114 9008.61 5004.91  4500
+   2F        D1                                         WY Step By Step       3.54  -0.001      1E-06   114 9008.61 5004.91  4500
+   2F        D1                                         WY Step By Step     -0.003   6.826     -1E-05   114 9008.61 5004.91  4500
+   2F        D1                                         WY Step By Step      2.655  -0.006    5.8E-05   114 9008.61 5004.91  4500
+   2F        D1                                         WY Step By Step      2.654   0.004   -5.7E-05   114 9008.61 5004.91  4500
+   2F        D1                                         WY Step By Step     -0.001   5.101   0.000209   114 9008.61 5004.91  4500
+   2F        D1                                         WY Step By Step     -0.004   5.138  -0.000224   114 9008.61 5004.91  4500
+   2F        D1                                         WY Step By Step      2.657  -4.437      7E-06   114 9008.61 5004.91  4500
+   2F        D1                                         WY Step By Step      3.061   5.118     -7E-06   114 9008.61 5004.91  4500
+   2F        D1                                         WY Step By Step      1.996  -3.346   0.000189   114 9008.61 5004.91  4500
+   2F        D1                                         WY Step By Step      1.993  -3.315  -0.000179   114 9008.61 5004.91  4500
+   2F        D1                                         WY Step By Step        2.3   3.824   0.000207   114 9008.61 5004.91  4500
+   2F        D1                                         WY Step By Step      2.296    3.86  -0.000218   114 9008.61 5004.91  4500
+   2F        D1                                      EQXSD Step By Step     14.538   0.002  -0.000136   114 9008.61 5004.91  4500
+   2F        D1                                      EQXSD Step By Step     14.539  -0.014    7.3E-05   114 9008.61 5004.91  4500
+   2F        D1                                      EQYSD Step By Step     -0.009  13.958   0.000115   114 9008.61 5004.91  4500
+   2F        D1                                      EQYSD Step By Step     -0.012  13.987  -0.000276   114 9008.61 5004.91  4500
+   2F        D1 DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 EQXSD          Max      14.52   0.013    7.4E-05   114 9008.61 5004.91  4500
+   2F        D1 DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 EQXSD          Min     14.518  -0.002  -0.000135   114 9008.61 5004.91  4500
+   2F        D1 DRIFT 101 (1.2 + Ev) DL + f LL - 1.0 EQXSD          Max    -14.558   0.025   0.000138   114 9008.61 5004.91  4500
+   2F        D1 DRIFT 101 (1.2 + Ev) DL + f LL - 1.0 EQXSD          Min    -14.559    0.01   -7.2E-05   114 9008.61 5004.91  4500
+   2F        D1        DRIFT 102 (0.9 - Ev) DL + 1.0 EQXSD          Max     14.531   0.007    7.3E-05   114 9008.61 5004.91  4500
+   2F        D1        DRIFT 102 (0.9 - Ev) DL + 1.0 EQXSD          Min     14.529  -0.009  -0.000136   114 9008.61 5004.91  4500
+   2F        D1        DRIFT 103 (0.9 - Ev) DL - 1.0 EQXSD          Max    -14.547   0.019   0.000137   114 9008.61 5004.91  4500
+   2F        D1        DRIFT 103 (0.9 - Ev) DL - 1.0 EQXSD          Min    -14.548   0.003   -7.2E-05   114 9008.61 5004.91  4500
+   2F        D1 DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 EQYSD          Max     -0.029  13.999   0.000116   114 9008.61 5004.91  4500
+   2F        D1 DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 EQYSD          Min     -0.031   13.97  -0.000274   114 9008.61 5004.91  4500
+   2F        D1 DRIFT 101 (1.2 + Ev) DL + f LL - 1.0 EQYSD          Max     -0.008 -13.947   0.000277   114 9008.61 5004.91  4500
+   2F        D1 DRIFT 101 (1.2 + Ev) DL + f LL - 1.0 EQYSD          Min     -0.011 -13.976  -0.000114   114 9008.61 5004.91  4500
+   2F        D1        DRIFT 102 (0.9 - Ev) DL + 1.0 EQYSD          Max     -0.018  13.992   0.000116   114 9008.61 5004.91  4500
+   2F        D1        DRIFT 102 (0.9 - Ev) DL + 1.0 EQYSD          Min      -0.02  13.963  -0.000275   114 9008.61 5004.91  4500
+   2F        D1        DRIFT 103 (0.9 - Ev) DL - 1.0 EQYSD          Max      0.003 -13.953   0.000276   114 9008.61 5004.91  4500
+   2F        D1        DRIFT 103 (0.9 - Ev) DL - 1.0 EQYSD          Min -0.0001754 -13.982  -0.000114   114 9008.61 5004.91  4500
+   2F        D1 DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 RSAXD          Max      13.99   0.091   0.000188   114 9008.61 5004.91  4500
+   2F        D1 DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 RSAXD          Min     -14.03  -0.068  -0.000185   114 9008.61 5004.91  4500
+   2F        D1        DRIFT 102 (0.9 - Ev) DL + 1.0 RSAXD          Max     14.001   0.084   0.000187   114 9008.61 5004.91  4500
+   2F        D1        DRIFT 102 (0.9 - Ev) DL + 1.0 RSAXD          Min    -14.019  -0.074  -0.000186   114 9008.61 5004.91  4500
+   2F        D1 DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 RSAYD          Max      0.064  13.516   0.000428   114 9008.61 5004.91  4500
+   2F        D1 DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 RSAYD          Min     -0.104 -13.493  -0.000425   114 9008.61 5004.91  4500
+   2F        D1        DRIFT 102 (0.9 - Ev) DL + 1.0 RSAYD          Max      0.075   13.51   0.000427   114 9008.61 5004.91  4500
+   2F        D1        DRIFT 102 (0.9 - Ev) DL + 1.0 RSAYD          Min     -0.093 -13.499  -0.000426   114 9008.61 5004.91  4500
+   2F        D1        WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WX          Max      1.754   3.422   0.000105   114 9008.61 5004.91  4500
+   2F        D1        WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WX          Min     -0.018   -2.21  -0.000111   114 9008.61 5004.91  4500
+   2F        D1 WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WX          Max      3.523   6.836    0.00021   114 9008.61 5004.91  4500
+   2F        D1 WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WX          Min     -0.021  -4.427  -0.000223   114 9008.61 5004.91  4500
+   2F        D1                 WDRIFT 102 0.9 DL + 1.0 WX          Max      3.528   6.833   0.000209   114 9008.61 5004.91  4500
+   2F        D1                 WDRIFT 102 0.9 DL + 1.0 WX          Min     -0.016   -4.43  -0.000223   114 9008.61 5004.91  4500
+   2F        D1        WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WY          Max      1.754   3.422   0.000105   114 9008.61 5004.91  4500
+   2F        D1        WDRIFT 100 1.2 DL + 1.6 Lr + 0.5 WY          Min     -0.018   -2.21  -0.000111   114 9008.61 5004.91  4500
+   2F        D1 WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WY          Max      3.523   6.836    0.00021   114 9008.61 5004.91  4500
+   2F        D1 WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WY          Min     -0.021  -4.427  -0.000223   114 9008.61 5004.91  4500
+   2F        D1                 WDRIFT 102 0.9 DL + 1.0 WY          Max      3.528   6.833   0.000209   114 9008.61 5004.91  4500
+   2F        D1                 WDRIFT 102 0.9 DL + 1.0 WY          Min     -0.016   -4.43  -0.000223   114 9008.61 5004.91  4500

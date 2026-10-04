@@ -1,0 +1,62 @@
+DIAPHRAGMS
+==========
+RESULT: GF has no diaphragm. Only 2F, 3F and RD have one (D1, rigid), assigned through
+their floor objects. Base and GF joints read 'From Shell Object' and no floor is at GF,
+so they belong to no diaphragm. 'Mass Summary by Diaphragm' and 'Diaphragm Center Of
+Mass Displacements' list 2F, 3F and RD only.
+(Four diaphragm result tables could not be read without a case selection; they are
+not needed here. The centre of mass displacements are in A2.)
+
+Model: C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\r2-drift\r2-drift.EDB
+Present units: 9 | tables below are read by the toolkit's table reader (N-mm)
+Stories: ['Base', 'GF', '2F', '3F', 'RD'] elevations: [-1000.0, 0.0, 4500.0, 8000.0, 11500.0]
+ETABS tables with 'Diaphragm' in the name: ['Area Assignments - Diaphragms', 'Diaphragm Accelerations', 'Diaphragm Center Of Mass Displacements', 'Diaphragm Definitions', 'Diaphragm Forces', 'Diaphragm Max Over Avg Drifts', 'Joint Assignments - Diaphragms', 'Mass Summary by Diaphragm']
+
+--- Area Assignments - Diaphragms ---
+Story Label UniqueName Diaphragm
+   RD    F2          3        D1
+   3F    F1          2        D1
+   2F    F1          1        D1
+
+--- Diaphragm Accelerations --- not read: DatabaseTables.GetTableForDisplayArray('Diaphragm Accelerations') failed with ETABS return code 1.
+
+--- Diaphragm Center Of Mass Displacements --- not read: DatabaseTables.GetTableForDisplayArray('Diaphragm Center Of Mass Displacements') failed with ETABS return code 1.
+
+--- Diaphragm Definitions ---
+Name Rigidity                                 GUID
+  D1    Rigid bf88f909-5995-432c-93ad-abc23d871ff3
+
+--- Diaphragm Forces --- not read: DatabaseTables.GetTableForDisplayArray('Diaphragm Forces') failed with ETABS return code 1.
+
+--- Diaphragm Max Over Avg Drifts --- not read: DatabaseTables.GetTableForDisplayArray('Diaphragm Max Over Avg Drifts') failed with ETABS return code 1.
+
+--- Joint Assignments - Diaphragms: 187 rows; count per story ---
+Story  Diaphragm        
+2F     D1                   25
+       From Shell Object    30
+3F     D1                   25
+       From Shell Object    30
+Base   From Shell Object    12
+GF     From Shell Object    12
+RD     D1                   25
+       From Shell Object    28
+rows at GF: 12
+Story Label UniqueName         Diaphragm
+   GF     1          2 From Shell Object
+   GF     2          4 From Shell Object
+   GF     3          6 From Shell Object
+   GF     4          8 From Shell Object
+   GF     5         10 From Shell Object
+   GF     6         12 From Shell Object
+   GF     7         14 From Shell Object
+   GF     8         16 From Shell Object
+   GF     9         18 From Shell Object
+   GF    10         20 From Shell Object
+   GF    11         22 From Shell Object
+   GF    12         24 From Shell Object
+
+--- Mass Summary by Diaphragm ---
+Story Diaphragm    MassX    MassY        MMI      XM      YM
+   RD        D1 156.0024 156.0024 6613429452 8452.02  5302.5
+   3F        D1 184.2368 184.2368 8564189223 8958.03 5033.88
+   2F        D1 197.3226 197.3226 9349778728 9008.61 5004.91

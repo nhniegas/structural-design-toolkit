@@ -1,0 +1,112 @@
+sdt drift on a fresh N-mm copy, 'Outer four corners' instead of the centre of mass.
+RESULT: EQXSD 0.00278 and EQYSD 0.00301 at 2F, wind 0.00130 at GF: the same as the
+ETABS Story Drifts table (0.002785, 0.003012, 0.001304).
+
+How this was run
+----------------
+Same PC and method as 2026-10-05/: ETABS Ultimate 22.6.0, toolkit 0.1.1 (main
+checkout), the real commands in a private ETABS, dialogs answered by a script.
+Each dialog is printed with its options, its default and the answer given:
+"[default]" = default accepted, "[chosen for this test]" = the answer this
+request asked for. Run on 2026-10-05, 00:15 to 00:21. Every item used a fresh
+copy of the same 3-storey test model, opened with N-mm present units.
+
+$ sdt drift     (toolkit 0.1.1, model r2-corners.$et, present units N-mm, started 00:17:14)
+
+[DIALOG 00:17:14] choice: Story Drift
+    | Where should the drift be read?
+    (default) 1. Diaphragm centre of mass
+              2. Outer four corners (extreme column joints of each story)
+    -> Outer four corners (extreme column joints of each story)   [chosen for this test]
+
+[DIALOG 00:17:14] choice: Story Drift
+    | Seismic drift combinations to check (NSCP 208.6.4.1):
+    (default) 1. Static: EQXSD / EQYSD (period not capped)
+              2. Response spectrum: RSAXD / RSAYD (scaled to the drift patterns)
+              3. Both
+    -> Static: EQXSD / EQYSD (period not capped)   [default]
+
+[DIALOG 00:17:14] values: Story Drift
+    | Story drift limit under the wind combinations (NSCP 207 sets none; seismic drift follows NSCP 208.6.5).
+    Wind drift limit: h / = 400   [default]
+
+[DIALOG 00:17:14] choice: Story Drift
+    | sdt drift works on this model (no copy). It unlocks it, sets the drift stiffness of every beam and column and analyses it for each level:
+    | 
+    |   As modelled: your modifiers
+    |   Strength level: beams 0.35, columns 0.70
+    |   Service level (1.4 x): beams 0.49, columns 0.98
+    | 
+    | Then it puts your modifiers and response spectrum scale factors back and analyses it again, so it is left as it was for the strength design. Continue?
+    (default) 1. Continue
+              2. Cancel
+    -> Continue   [default]
+
+[PROGRESS WINDOW 00:17:14] Story drift
+    [00:17:14] As modelled: your modifiers
+    [00:17:14] As modelled: running the analysis
+    [00:17:22] As modelled: reading the drift
+    [00:17:23] Strength level: setting beams I 0.35, columns I 0.70
+    [00:17:23] Strength level: running the analysis
+    [00:17:31] Strength level: reading the drift
+    [00:17:31] Service level (1.4 x): setting beams I 0.49, columns I 0.98
+    [00:17:32] Service level (1.4 x): running the analysis
+    [00:17:39] Service level (1.4 x): reading the drift
+    [00:17:39] Restoring the strength modifiers and spectrum scale factors
+[PROGRESS WINDOW closed after 27 s]
+
+================================================================================================
+STORY DRIFT (NSCP 208.6.4, 208.6.5)
+================================================================================================
+Model: C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\r2-corners\r2-corners.$et
+Drift read at the outer four column joints of each story; DRIFT combinations (203.3, rho 1.0) on the static drift patterns (EQXSD, EQYSD); WDRIFT combinations, wind limit h/400
+
+--- Your modifiers (frame x section, as ETABS uses them) ---
+[  OK] Effective I: beams 0.35, columns 0.7.   (NSCP 208.6.2 item 1, 406.6.3.1.1)
+
+--- As modelled: beams I 0.35, columns I 0.70 (your frame modifiers) ---
+Drift pattern periods: EQXSD 0.873 s, EQYSD 0.841 s
+[  OK] EQXSD: drift 0.00278 at 2F (joint 59), Delta_M = 0.7 R x = 0.0166 (limit 0.020, T 0.87 s; DRIFT 101 (1.2 + Ev) DL + f LL - 1.0 EQXSD)   (NSCP 208.6.4.1, 208.6.5.1)
+[  OK] EQYSD: drift 0.00301 at 2F (joint 47), Delta_M = 0.7 R x = 0.0179 (limit 0.020, T 0.84 s; DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 EQYSD)   (NSCP 208.6.4.1, 208.6.5.1)
+[  OK] WX: drift 0.00130 = h/767 at GF (joint 6) (limit h/400; WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WX)   (NSCP 203.3 combinations; limit: project (NSCP 207 sets none))
+[  OK] WY: drift 0.00130 = h/767 at GF (joint 6) (limit h/400; WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WY)   (NSCP 203.3 combinations; limit: project (NSCP 207 sets none))
+
+--- Strength level: beams I 0.35, columns I 0.70 (ACI 6.6.3.1.1, NSCP 406.6.3.1.1) ---
+Drift pattern periods: EQXSD 0.873 s, EQYSD 0.841 s
+[  OK] EQXSD: drift 0.00278 at 2F (joint 59), Delta_M = 0.7 R x = 0.0166 (limit 0.020, T 0.87 s; DRIFT 101 (1.2 + Ev) DL + f LL - 1.0 EQXSD)   (NSCP 208.6.4.1, 208.6.5.1)
+[  OK] EQYSD: drift 0.00301 at 2F (joint 47), Delta_M = 0.7 R x = 0.0179 (limit 0.020, T 0.84 s; DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 EQYSD)   (NSCP 208.6.4.1, 208.6.5.1)
+[  OK] WX: drift 0.00130 = h/767 at GF (joint 6) (limit h/400; WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WX)   (NSCP 203.3 combinations; limit: project (NSCP 207 sets none))
+[  OK] WY: drift 0.00130 = h/767 at GF (joint 6) (limit h/400; WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WY)   (NSCP 203.3 combinations; limit: project (NSCP 207 sets none))
+
+--- Service level (1.4 x): beams I 0.49, columns I 0.98 (ACI 6.6.3.2.2, NSCP 406.6.3.2.2) ---
+Drift pattern periods: EQXSD 0.737 s, EQYSD 0.712 s
+[  OK] EQXSD: drift 0.00235 at 2F (joint 59), Delta_M = 0.7 R x = 0.0140 (limit 0.020, T 0.74 s; DRIFT 101 (1.2 + Ev) DL + f LL - 1.0 EQXSD)   (NSCP 208.6.4.1, 208.6.5.1)
+[  OK] EQYSD: drift 0.00254 at 2F (joint 47), Delta_M = 0.7 R x = 0.0151 (limit 0.020, T 0.71 s; DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 EQYSD)   (NSCP 208.6.4.1, 208.6.5.1)
+[  OK] WX: drift 0.00094 = h/1,068 at GF (joint 6) (limit h/400; WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WX)   (NSCP 203.3 combinations; limit: project (NSCP 207 sets none))
+[  OK] WY: drift 0.00094 = h/1,068 at GF (joint 6) (limit h/400; WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WY)   (NSCP 203.3 combinations; limit: project (NSCP 207 sets none))
+
+Model restored to its strength modifiers and spectrum scale factors.
+================================================================================================
+Saved: C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\r2-corners\r2-corners - Drift.txt
+
+[SUMMARY WINDOW 00:17:41] Summary - sdt drift
+
+========================================================================
+SUMMARY - sdt drift
+========================================================================
+Model: r2-corners.EDB
+Drift read at          outer four corners
+Seismic combinations   static
+Wind limit             h / 400
+As modelled            4 checks, 0 failing
+Strength level         4 checks, 0 failing
+Service level (1.4 x)  4 checks, 0 failing
+Model restored         yes (it had no results before)
+
+Nothing needs attention.
+
+Files:
+  Report  C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\r2-corners\r2-corners - Drift.txt
+========================================================================
+
+[sdt drift ended 00:17:41 after 27 s, exit 0]

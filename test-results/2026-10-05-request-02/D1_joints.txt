@@ -1,0 +1,186 @@
+JOINTS OF 3-C1A AND 2-C2 (copied from 2026-10-05/08_columns.xlsx and 07_beams.xlsx)
+==================================================================================
+The column workbook has no column for the joint width, Aj, the coefficient or the
+number of confined faces: only the demand, 'phi Joint Shear Capacity' and the ratio,
+per direction. What can be worked back from them is in notes.txt, section D.
+In the beam rows the bar counts are per layer (1 and 2 = top layers, 3 = bottom).
+
+================ 3-C1A: 50 rows; 8 rows carry a joint shear result ================
+
+  -- Top (J), ULS 101 1.2 DL + 1.6 LL + 0.5 Lr --
+  [SECTION / LONGITUDINAL REINFORCEMENT]
+    Section: CR_600X600_C04_G60
+    Shape: Rectangular
+    Width (mm): 600
+    Depth (mm): 600
+    Diameter (mm): N/A - rectangular column
+    Concrete Cover (mm): 40
+    f′c (MPa): 27.59
+    fᵧ (MPa): 413.69
+    fᵧₜ (MPa): 413.69
+  [BEAM-COLUMN CAPACITY]
+    Column Bars Contributing at Joint: RD-C1A (I): 12 bars D25; 12 single bars; 3-C1A (J): 16 bars D25; 16 single bars
+    Beam Bars at Joint, X: 3GY-2A (J): top 4D28, bottom 4D28
+    ΣMₙ,Column X (kN·m): 1346.8
+    ΣMₙ,Beam X (kN·m): 400.46
+    ΣMₙ,Column / ΣMₙ,Beam, X: 3.36
+    Beam Bars at Joint, Y: 3GX-1 (J): top 4D28, bottom 4D28; 3GX-1A (I): top 4D28, bottom 4D28
+    ΣMₙ,Column Y (kN·m): 1346.8
+    ΣMₙ,Beam Y (kN·m): 800.92
+    ΣMₙ,Column / ΣMₙ,Beam, Y: 1.68
+    BCC Check: PASS
+  [JOINT SHEAR]
+    Joint Shear Demand X (kN): 1109.19
+    ϕ Joint Shear Capacity X (kN): 1339.42
+    Joint Shear Utilization X: 0.83
+    Joint Shear Demand Y (kN): 2218.38
+    ϕ Joint Shear Capacity Y (kN): 1339.42
+    Joint Shear Utilization Y: 1.66
+    Joint Shear Check: FAIL
+  [TRANSVERSE REINFORCEMENT DETAILING]
+    SMRF Column Dimension Check: PASS
+  [DESIGN STATUS]
+    Overall Design Status: FAIL
+    Design Status Reason: FAIL
+
+  -- Bottom (I), ULS 101 1.2 DL + 1.6 LL + 0.5 Lr --
+  [SECTION / LONGITUDINAL REINFORCEMENT]
+    Section: CR_600X600_C04_G60
+    Shape: Rectangular
+    Width (mm): 600
+    Depth (mm): 600
+    Diameter (mm): N/A - rectangular column
+    Concrete Cover (mm): 40
+    f′c (MPa): 27.59
+    fᵧ (MPa): 413.69
+    fᵧₜ (MPa): 413.69
+  [BEAM-COLUMN CAPACITY]
+    Column Bars Contributing at Joint: 3-C1A (I): 16 bars D25; 16 single bars; 2-C1A (J): 16 bars D25; 16 single bars
+    Beam Bars at Joint, X: 2GY-2A (J): top 4D28, bottom 4D28
+    ΣMₙ,Column X (kN·m): 1741.24
+    ΣMₙ,Beam X (kN·m): 400.46
+    ΣMₙ,Column / ΣMₙ,Beam, X: 4.35
+    Beam Bars at Joint, Y: 2GX-1 (J): top 4D28, bottom 4D28; 2GX-1A (I): top 4D28, bottom 4D28
+    ΣMₙ,Column Y (kN·m): 1741.24
+    ΣMₙ,Beam Y (kN·m): 800.92
+    ΣMₙ,Column / ΣMₙ,Beam, Y: 2.17
+    BCC Check: PASS
+  [JOINT SHEAR]
+    Joint Shear Demand X (kN): 1132.68
+    ϕ Joint Shear Capacity X (kN): 1928.76
+    Joint Shear Utilization X: 0.59
+    Joint Shear Demand Y (kN): 2265.37
+    ϕ Joint Shear Capacity Y (kN): 1928.76
+    Joint Shear Utilization Y: 1.17
+    Joint Shear Check: FAIL
+  [TRANSVERSE REINFORCEMENT DETAILING]
+    SMRF Column Dimension Check: PASS
+  [DESIGN STATUS]
+    Overall Design Status: FAIL
+    Design Status Reason: FAIL
+
+  Beams named at the joints of 3-C1A: ['2GX-1', '2GX-1A', '2GY-2A', '3GX-1', '3GX-1A', '3GY-2A']
+  Their rows in 07_beams.xlsx:
+Story UniqueName          SectProp  Width  Depth                 Combo   Face     Lₙ  Mᵤ, left  Mᵤ, mid  Mᵤ, right  n₍left, 1₎  n₍left, 2₎  n₍left, 3₎  n₍mid, 1₎  n₍mid, 2₎  n₍mid, 3₎  n₍right, 1₎  n₍right, 2₎  n₍right, 3₎  Stirrup legs  TopCover  BotCover  Vₑ, left (kN)  Vₑ, right (kN) SMRF moment strength ratio check SMRF steel ratio check Design status
+   2F      2GX-1 G_500X500_C04_G60    500    500 ENVELOPE (ALL COMBOS)    TOP 4800.0    195.36    30.82     197.88           4           0           0          4          0          0            4            0            0             3        60        60         269.09          271.08                             PASS                   PASS            OK
+   2F      2GX-1 G_500X500_C04_G60    500    500 ENVELOPE (ALL COMBOS) BOTTOM 4800.0     94.62    89.76      88.54           0           0           4          0          0          4            0            0            4             3        60        60         269.09          271.08                             PASS                   PASS            OK
+   2F     2GX-1A G_500X500_C04_G60    500    500 ENVELOPE (ALL COMBOS)    TOP 4800.0    194.02    28.66     193.20           4           0           0          4          0          0            4            0            0             3        60        60         270.21          269.96                             PASS                   PASS            OK
+   2F     2GX-1A G_500X500_C04_G60    500    500 ENVELOPE (ALL COMBOS) BOTTOM 4800.0     85.99    83.80      86.24           0           0           4          0          0          4            0            0            4             3        60        60         270.21          269.96                             PASS                   PASS            OK
+   2F     2GY-2A G_500X500_C04_G60    500    500 ENVELOPE (ALL COMBOS)    TOP 3700.0    169.34    39.68     169.74           4           0           0          4          0          0            4            0            0             3        60        60         304.37          303.39                             PASS                   PASS            OK
+   2F     2GY-2A G_500X500_C04_G60    500    500 ENVELOPE (ALL COMBOS) BOTTOM 3700.0    119.82    65.26     123.61           0           0           4          0          0          4            0            0            4             3        60        60         304.37          303.39                             PASS                   PASS            OK
+   3F      3GX-1 G_500X500_C04_G60    500    500 ENVELOPE (ALL COMBOS)    TOP 4800.0    161.80    17.39     161.23           4           0           0          4          0          0            4            0            0             3        60        60         269.88          270.29                             PASS                   PASS            OK
+   3F      3GX-1 G_500X500_C04_G60    500    500 ENVELOPE (ALL COMBOS) BOTTOM 4800.0     64.20    73.88      61.88           0           0           4          0          0          4            0            0            4             3        60        60         269.88          270.29                             PASS                   PASS            OK
+   3F     3GX-1A G_500X500_C04_G60    500    500 ENVELOPE (ALL COMBOS)    TOP 4800.0    160.00    16.27     160.65           4           0           0          4          0          0            4            0            0             3        60        60         269.98          270.19                             PASS                   PASS            OK
+   3F     3GX-1A G_500X500_C04_G60    500    500 ENVELOPE (ALL COMBOS) BOTTOM 4800.0     61.62    71.63      61.31           0           0           4          0          0          4            0            0            4             3        60        60         269.98          270.19                             PASS                   PASS            OK
+   3F     3GY-2A G_500X500_C04_G60    500    500 ENVELOPE (ALL COMBOS)    TOP 3700.0    128.13    25.87     130.82           4           0           0          4          0          0            4            0            0             3        60        60         303.62          304.14                             PASS                   PASS            OK
+   3F     3GY-2A G_500X500_C04_G60    500    500 ENVELOPE (ALL COMBOS) BOTTOM 3700.0     80.68    50.03      81.34           0           0           4          0          0          4            0            0            4             3        60        60         303.62          304.14                             PASS                   PASS            OK
+
+================ 2-C2: 50 rows; 9 rows carry a joint shear result ================
+
+  -- Top (J), ULS 101 1.2 DL + 1.6 LL + 0.5 Lr --
+  [SECTION / LONGITUDINAL REINFORCEMENT]
+    Section: CR_600X600_C04_G60
+    Shape: Rectangular
+    Width (mm): 600
+    Depth (mm): 600
+    Diameter (mm): N/A - rectangular column
+    Concrete Cover (mm): 40
+    f′c (MPa): 27.59
+    fᵧ (MPa): 413.69
+    fᵧₜ (MPa): 413.69
+  [BEAM-COLUMN CAPACITY]
+    Column Bars Contributing at Joint: 3-C2 (I): 16 bars D25; 16 single bars; 2-C2 (J): 16 bars D25; 16 single bars
+    Beam Bars at Joint, X: 2GY-1 (J): top 4D28, bottom 4D28; 2GY-1A (I): top 4D28, bottom 4D28
+    ΣMₙ,Column X (kN·m): 1732.75
+    ΣMₙ,Beam X (kN·m): 800.92
+    ΣMₙ,Column / ΣMₙ,Beam, X: 2.16
+    Beam Bars at Joint, Y: 2GX-2 (I): top 4D28, bottom 4D28
+    ΣMₙ,Column Y (kN·m): 1732.75
+    ΣMₙ,Beam Y (kN·m): 400.46
+    ΣMₙ,Column / ΣMₙ,Beam, Y: 4.33
+    BCC Check: PASS
+  [JOINT SHEAR]
+    Joint Shear Demand X (kN): 2265.37
+    ϕ Joint Shear Capacity X (kN): 1928.76
+    Joint Shear Utilization X: 1.17
+    Joint Shear Demand Y (kN): 1132.68
+    ϕ Joint Shear Capacity Y (kN): 1928.76
+    Joint Shear Utilization Y: 0.59
+    Joint Shear Check: FAIL
+  [TRANSVERSE REINFORCEMENT DETAILING]
+    SMRF Column Dimension Check: PASS
+  [DESIGN STATUS]
+    Overall Design Status: FAIL
+    Design Status Reason: FAIL
+
+  -- Bottom (I), ULS 101 1.2 DL + 1.6 LL + 0.5 Lr --
+  [SECTION / LONGITUDINAL REINFORCEMENT]
+    Section: CR_600X600_C04_G60
+    Shape: Rectangular
+    Width (mm): 600
+    Depth (mm): 600
+    Diameter (mm): N/A - rectangular column
+    Concrete Cover (mm): 40
+    f′c (MPa): 27.59
+    fᵧ (MPa): 413.69
+    fᵧₜ (MPa): 413.69
+  [BEAM-COLUMN CAPACITY]
+    Column Bars Contributing at Joint: 2-C2 (I): 16 bars D25; 16 single bars; GF-C2 (J): 16 bars D25; 16 single bars
+    Beam Bars at Joint, X: GFGY-1 (J): top 2D28, bottom 2D28; GFGY-1A (I): top 2D28, bottom 2D28
+    ΣMₙ,Column X (kN·m): 1784.38
+    ΣMₙ,Beam X (kN·m): 405.51
+    ΣMₙ,Column / ΣMₙ,Beam, X: 4.4
+    Beam Bars at Joint, Y: GFGX-2 (I): top 2D28, bottom 2D28
+    ΣMₙ,Column Y (kN·m): 1784.38
+    ΣMₙ,Beam Y (kN·m): 202.75
+    ΣMₙ,Column / ΣMₙ,Beam, Y: 8.8
+    BCC Check: PASS
+  [JOINT SHEAR]
+    Joint Shear Demand X (kN): 1051.82
+    ϕ Joint Shear Capacity X (kN): 1928.76
+    Joint Shear Utilization X: 0.55
+    Joint Shear Demand Y (kN): 525.91
+    ϕ Joint Shear Capacity Y (kN): 1607.3
+    Joint Shear Utilization Y: 0.33
+    Joint Shear Check: PASS
+  [TRANSVERSE REINFORCEMENT DETAILING]
+    SMRF Column Dimension Check: PASS
+  [DESIGN STATUS]
+    Overall Design Status: PASS
+    Design Status Reason: All applicable checks passed.
+
+  Beams named at the joints of 2-C2: ['2GX-2', '2GY-1', '2GY-1A', 'GFGX-2', 'GFGY-1', 'GFGY-1A']
+  Their rows in 07_beams.xlsx:
+Story UniqueName            SectProp  Width  Depth                 Combo   Face     Lₙ  Mᵤ, left  Mᵤ, mid  Mᵤ, right  n₍left, 1₎  n₍left, 2₎  n₍left, 3₎  n₍mid, 1₎  n₍mid, 2₎  n₍mid, 3₎  n₍right, 1₎  n₍right, 2₎  n₍right, 3₎  Stirrup legs  TopCover  BotCover  Vₑ, left (kN)  Vₑ, right (kN) SMRF moment strength ratio check SMRF steel ratio check Design status
+   2F      2GX-2   G_500X500_C04_G60    500    500 ENVELOPE (ALL COMBOS)    TOP 4600.0    238.68    19.84     244.41           4           0           0          4          0          0            4            0            0             3        60        60         321.73          327.34                             PASS                   PASS            OK
+   2F      2GX-2   G_500X500_C04_G60    500    500 ENVELOPE (ALL COMBOS) BOTTOM 4600.0     98.39   120.48      92.05           0           0           4          0          0          4            0            0            4             3        60        60         321.73          327.34                             PASS                   PASS            OK
+   2F      2GY-1   G_500X500_C04_G60    500    500 ENVELOPE (ALL COMBOS)    TOP 3800.0    179.33    49.40     173.60           4           0           0          4          0          0            4            0            0             3        60        60         284.75          284.92                             PASS                   PASS            OK
+   2F      2GY-1   G_500X500_C04_G60    500    500 ENVELOPE (ALL COMBOS) BOTTOM 3800.0    146.67    66.29     140.41           0           0           4          0          0          4            0            0            4             3        60        60         284.75          284.92                             PASS                   PASS            OK
+   2F     2GY-1A   G_500X500_C04_G60    500    500 ENVELOPE (ALL COMBOS)    TOP 3800.0    172.99    48.97     178.59           4           0           0          4          0          0            4            0            0             3        60        60         284.86          284.81                             PASS                   PASS            OK
+   2F     2GY-1A   G_500X500_C04_G60    500    500 ENVELOPE (ALL COMBOS) BOTTOM 3800.0    140.04    65.82     145.72           0           0           4          0          0          4            0            0            4             3        60        60         284.86          284.81                             PASS                   PASS            OK
+   GF     GFGX-2 FTB_300X500_C04_G60    300    500 ENVELOPE (ALL COMBOS)    TOP 4600.0    104.26    41.03      99.96           2           0           0          2          0          0            2            0            0             2        60        60         121.20          120.30                             PASS                   PASS            OK
+   GF     GFGX-2 FTB_300X500_C04_G60    300    500 ENVELOPE (ALL COMBOS) BOTTOM 4600.0     85.79    44.40      85.27           0           0           2          0          0          2            0            0            2             2        60        60         121.20          120.30                             PASS                   PASS            OK
+   GF     GFGY-1 FTB_300X500_C04_G60    300    500 ENVELOPE (ALL COMBOS)    TOP 3800.0    129.21    39.37     127.63           2           0           0          2          0          0            2            0            0             2        60        60         141.24          141.12                             PASS                   PASS            OK
+   GF     GFGY-1 FTB_300X500_C04_G60    300    500 ENVELOPE (ALL COMBOS) BOTTOM 3800.0    117.86    44.17     116.74           0           0           2          0          0          2            0            0            2             2        60        60         141.24          141.12                             PASS                   PASS            OK
+   GF    GFGY-1A FTB_300X500_C04_G60    300    500 ENVELOPE (ALL COMBOS)    TOP 3800.0    127.57    39.23     128.88           2           0           0          2          0          0            2            0            0             2        60        60         141.15          141.21                             PASS                   PASS            OK
+   GF    GFGY-1A FTB_300X500_C04_G60    300    500 ENVELOPE (ALL COMBOS) BOTTOM 3800.0    116.58    44.08     117.65           0           0           2          0          0          2            0            0            2             2        60        60         141.15          141.21                             PASS                   PASS            OK

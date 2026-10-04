@@ -1,0 +1,117 @@
+sdt columns on a fresh copy (after sdt analyze and sdt beams with the defaults),
+answering 'Column Design - Foundation Level': 'No - leave them out; design these
+columns for the analysis shear'.
+RESULT: the 12 GF column shear failures go away. 25 pass, 22 fail (was 13 and 34).
+The 22 joint shear failures are unchanged. The summary adds the note 'BCC, joint shear
+and the probable-moment shear Ve were not checked at the foundation level (your
+choice): those columns use the analysis shear.'
+
+How this was run
+----------------
+Same PC and method as 2026-10-05/: ETABS Ultimate 22.6.0, toolkit 0.1.1 (main
+checkout), the real commands in a private ETABS, dialogs answered by a script.
+Each dialog is printed with its options, its default and the answer given:
+"[default]" = default accepted, "[chosen for this test]" = the answer this
+request asked for. Run on 2026-10-05, 00:15 to 00:21. Every item used a fresh
+copy of the same 3-storey test model, opened with N-mm present units.
+
+$ sdt columns     (toolkit 0.1.1, model r2-c2.$et, present units N-mm, started 00:18:22)
+
+[DIALOG 00:18:23] values: Column Design
+    | Column bars and cover.
+    Column main bar (mm) = 25   [default]
+    Column tie (mm) = 12   [default]
+    Column cover (mm) = 40   [default]
+
+[DIALOG 00:18:23] choice: Column Design - Bottom Story Cover
+    | Use 75 mm concrete cover for the columns of the bottom-most story?
+              1. Yes - use 75 mm cover on the bottom-most story
+    (default) 2. No - keep 40 mm cover on every story
+    -> No - keep 40 mm cover on every story   [default]
+
+[DIALOG 00:18:23] choice: Column Design - Vertical Bars
+    | Carry the larger number of vertical bars of an upper level down to the levels below it?
+    (default) 1. Yes - lower levels use at least the bars of the level above
+              2. No - design every level on its own
+    -> Yes - lower levels use at least the bars of the level above   [default]
+
+[DIALOG 00:18:23] choice: Column Design - Topmost Level
+    | Run the strong column - weak beam (BCC) and joint shear checks at the joints on top of the columns (roof level)? No column stands above these joints, so one column alone must be 1.2 times stronger than the beams and the check often fails.
+    (default) 1. Yes - check them (ACI 18.7.3, 18.8)
+              2. No - leave them out at the topmost level
+    -> Yes - check them (ACI 18.7.3, 18.8)   [default]
+
+[DIALOG 00:18:23] choice: Column Design - Foundation Level
+    | Run the BCC, joint shear and probable-moment shear (Ve) checks on the columns of the bottom-most story (foundation to ground level)? These columns are short, so Ve = sum of Mpr / clear height becomes very large and a larger section does not help: the probable moment grows with the section.
+    (default) 1. Yes - check them (ACI 18.7.3, 18.7.6, 18.8)
+              2. No - leave them out; design these columns for the analysis shear
+    -> No - leave them out; design these columns for the analysis shear   [chosen for this test]
+
+[DIALOG 00:18:23] choice: Column Schedule - Interior Ties
+    | How should the interior ties be drawn?
+    (default) 1. Crossties (one tie with a hook at each end)
+              2. Closed inner hoops (each enclosing two bar positions)
+    -> Crossties (one tie with a hook at each end)   [default]
+
+[DIALOG 00:18:23] folder picker: Folder for the column results, calculations and schedule
+    | 
+    -> C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\r2-c2\results
+
+[PROGRESS WINDOW 00:18:23] Column design
+    [00:18:27] Column C3  |  Level RD  |  End I and J / Combo: ULS 100 1.4 DL / Check: Flexure and axial (P-M)
+    [00:18:27] Column C3  |  Level RD  |  End I and J / Check: Transverse detailing
+    ... 37,560 more per-member progress lines left out ...
+    [00:18:37] Saving 1 of 3: the results workbook (.xlsx)
+    [00:18:46] Saving 2 of 3: the column schedule (.dxf)
+    [00:18:47] Saving 3 of 3: the calculation report (.pdf, LaTeX)
+[PROGRESS WINDOW closed after 52 s]
+
+========================================================================
+SUMMARY - sdt columns
+========================================================================
+Model: r2-c2.EDB
+Columns designed     47
+Combinations         25
+Passing              25
+Failing              22
+Slender columns      12 (member effects, ACI 6.6.4.5; sway effects from the ETABS P-delta analysis)
+Read from the model  25 strength combinations (ULS names); deflection combinations (DEF names)
+
+Needs attention (1):
+  - Joint shear: 2-C1A, 2-C1B, 2-C2, 2-C2C, 2-C3A, 2-C3B, 3-C1A, 3-C1B, 3-C2, 3-C2A, 3-C2B, 3-C2C, ... (22 in all)
+
+Note: BCC, joint shear and the probable-moment shear Ve were not checked at the foundation level (your choice): those columns use the analysis shear.
+
+Files:
+  Results       C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\r2-c2\results\r2-c2 - Column Design.xlsx
+  Schedule      Column_Schedule.dxf
+  Calculations  C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\r2-c2\results\r2-c2 - Column Calculations.pdf
+========================================================================
+Summary saved: C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\r2-c2\results\r2-c2 - Column Design summary.txt
+
+[SUMMARY WINDOW 00:19:16] Summary - sdt columns
+
+========================================================================
+SUMMARY - sdt columns
+========================================================================
+Model: r2-c2.EDB
+Columns designed     47
+Combinations         25
+Passing              25
+Failing              22
+Slender columns      12 (member effects, ACI 6.6.4.5; sway effects from the ETABS P-delta analysis)
+Read from the model  25 strength combinations (ULS names); deflection combinations (DEF names)
+
+Needs attention (1):
+  - Joint shear: 2-C1A, 2-C1B, 2-C2, 2-C2C, 2-C3A, 2-C3B, 3-C1A, 3-C1B, 3-C2, 3-C2A, 3-C2B, 3-C2C, ... (22 in all)
+
+Note: BCC, joint shear and the probable-moment shear Ve were not checked at the foundation level (your choice): those columns use the analysis shear.
+
+Files:
+  Results       C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\r2-c2\results\r2-c2 - Column Design.xlsx
+  Schedule      Column_Schedule.dxf
+  Calculations  C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\r2-c2\results\r2-c2 - Column Calculations.pdf
+========================================================================
+Summary saved: C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\r2-c2\results\r2-c2 - Column Design summary.txt
+
+[sdt columns ended 00:19:16 after 54 s, exit 0]

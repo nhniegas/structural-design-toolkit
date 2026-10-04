@@ -1,0 +1,213 @@
+sdt beams on a fresh analysed copy, 'Cover against Earth': Yes, level GF (the footing
+tie beams). Everything else default.
+RESULT: NO CRASH. 102 beams, all pass, summary line '75 mm cover on GF'.
+But this model cannot reach the crash of the simulation: its narrowest beams are
+300 mm wide (the B_300X500 beams and the FTB_300X500 tie beams); it has no 250 mm
+beam. The tie beams got 2D28 top and 2D28 bottom with 2 stirrup legs, the same bars as
+with 40 mm cover; the stirrup spacing changed from 100 / 150 mm to 75 / 100 mm.
+Seen in the workbook: the columns TopCover and BotCover read 60 in both runs; only
+'cc' changes from 40 to 75.
+
+--- tie beams with and without the earth cover ---
+=== 75 mm cover on GF (this run): 102 beams, status {'OK': 204}; narrowest width 300 mm ===
+cc / TopCover / BotCover by story:
+       cc     TopCover     BotCover     Width     
+      min max      min max      min max   min  max
+Story                                             
+2F     40  40       60  60       60  60   300  500
+3F     40  40       60  60       60  60   300  500
+GF     75  75       60  60       60  60   300  300
+RD     40  40       60  60       60  60   300  500
+
+GF tie beams (FTB 300x500), first 6 beams:
+Story UniqueName            SectProp  Width  Depth  TopCover  BotCover  cc   Face  Mᵤ, left  Mᵤ, mid  Mᵤ, right  n₍left, 1₎  n₍left, 2₎  n₍left, 3₎  n₍mid, 1₎  n₍mid, 2₎  n₍mid, 3₎  n₍right, 1₎  n₍right, 2₎  n₍right, 3₎  Stirrup legs  s₂H (mm)  sₘᵢd (mm) Design status
+   GF     GFGX-1 FTB_300X500_C04_G60    300    500        60        60  75    TOP    107.49    42.24     105.64           2           0           0          2          0          0            2            0            0             2        75        100            OK
+   GF     GFGX-1 FTB_300X500_C04_G60    300    500        60        60  75 BOTTOM     89.59    46.29      89.24           0           0           2          0          0          2            0            0            2             2        75        100            OK
+   GF    GFGX-1A FTB_300X500_C04_G60    300    500        60        60  75    TOP    105.45    41.23     105.33           2           0           0          2          0          0            2            0            0             2        75        100            OK
+   GF    GFGX-1A FTB_300X500_C04_G60    300    500        60        60  75 BOTTOM     88.30    45.67      88.37           0           0           2          0          0          2            0            0            2             2        75        100            OK
+   GF    GFGX-1B FTB_300X500_C04_G60    300    500        60        60  75    TOP    106.67    42.11     107.22           2           0           0          2          0          0            2            0            0             2        75        100            OK
+   GF    GFGX-1B FTB_300X500_C04_G60    300    500        60        60  75 BOTTOM     90.26    46.48      90.17           0           0           2          0          0          2            0            0            2             2        75        100            OK
+   GF     GFGX-2 FTB_300X500_C04_G60    300    500        60        60  75    TOP    104.26    41.03      99.96           2           0           0          2          0          0            2            0            0             2        75        100            OK
+   GF     GFGX-2 FTB_300X500_C04_G60    300    500        60        60  75 BOTTOM     85.79    44.40      85.27           0           0           2          0          0          2            0            0            2             2        75        100            OK
+   GF    GFGX-2A FTB_300X500_C04_G60    300    500        60        60  75    TOP    100.32    40.22     102.14           2           0           0          2          0          0            2            0            0             2        75        100            OK
+   GF    GFGX-2A FTB_300X500_C04_G60    300    500        60        60  75 BOTTOM     84.49    44.38      85.35           0           0           2          0          0          2            0            0            2             2        75        100            OK
+   GF    GFGX-2B FTB_300X500_C04_G60    300    500        60        60  75    TOP     99.85    39.57     102.21           2           0           0          2          0          0            2            0            0             2        75        100            OK
+   GF    GFGX-2B FTB_300X500_C04_G60    300    500        60        60  75 BOTTOM     83.87    43.61      83.40           0           0           2          0          0          2            0            0            2             2        75        100            OK
+
+=== 40 mm cover everywhere (run of 2026-10-05, 07_beams.xlsx): 102 beams, status {'OK': 204}; narrowest width 300 mm ===
+cc / TopCover / BotCover by story:
+       cc     TopCover     BotCover     Width     
+      min max      min max      min max   min  max
+Story                                             
+2F     40  40       60  60       60  60   300  500
+3F     40  40       60  60       60  60   300  500
+GF     40  40       60  60       60  60   300  300
+RD     40  40       60  60       60  60   300  500
+
+GF tie beams (FTB 300x500), first 6 beams:
+Story UniqueName            SectProp  Width  Depth  TopCover  BotCover  cc   Face  Mᵤ, left  Mᵤ, mid  Mᵤ, right  n₍left, 1₎  n₍left, 2₎  n₍left, 3₎  n₍mid, 1₎  n₍mid, 2₎  n₍mid, 3₎  n₍right, 1₎  n₍right, 2₎  n₍right, 3₎  Stirrup legs  s₂H (mm)  sₘᵢd (mm) Design status
+   GF     GFGX-1 FTB_300X500_C04_G60    300    500        60        60  40    TOP    107.49    42.24     105.64           2           0           0          2          0          0            2            0            0             2       100        150            OK
+   GF     GFGX-1 FTB_300X500_C04_G60    300    500        60        60  40 BOTTOM     89.59    46.29      89.24           0           0           2          0          0          2            0            0            2             2       100        150            OK
+   GF    GFGX-1A FTB_300X500_C04_G60    300    500        60        60  40    TOP    105.45    41.23     105.33           2           0           0          2          0          0            2            0            0             2       100        150            OK
+   GF    GFGX-1A FTB_300X500_C04_G60    300    500        60        60  40 BOTTOM     88.30    45.67      88.37           0           0           2          0          0          2            0            0            2             2       100        150            OK
+   GF    GFGX-1B FTB_300X500_C04_G60    300    500        60        60  40    TOP    106.67    42.11     107.22           2           0           0          2          0          0            2            0            0             2       100        150            OK
+   GF    GFGX-1B FTB_300X500_C04_G60    300    500        60        60  40 BOTTOM     90.26    46.48      90.17           0           0           2          0          0          2            0            0            2             2       100        150            OK
+   GF     GFGX-2 FTB_300X500_C04_G60    300    500        60        60  40    TOP    104.26    41.03      99.96           2           0           0          2          0          0            2            0            0             2       100        150            OK
+   GF     GFGX-2 FTB_300X500_C04_G60    300    500        60        60  40 BOTTOM     85.79    44.40      85.27           0           0           2          0          0          2            0            0            2             2       100        150            OK
+   GF    GFGX-2A FTB_300X500_C04_G60    300    500        60        60  40    TOP    100.32    40.22     102.14           2           0           0          2          0          0            2            0            0             2       100        150            OK
+   GF    GFGX-2A FTB_300X500_C04_G60    300    500        60        60  40 BOTTOM     84.49    44.38      85.35           0           0           2          0          0          2            0            0            2             2       100        150            OK
+   GF    GFGX-2B FTB_300X500_C04_G60    300    500        60        60  40    TOP     99.85    39.57     102.21           2           0           0          2          0          0            2            0            0             2       100        150            OK
+   GF    GFGX-2B FTB_300X500_C04_G60    300    500        60        60  40 BOTTOM     83.87    43.61      83.40           0           0           2          0          0          2            0            0            2             2       100        150            OK
+
+How this was run
+----------------
+Same PC and method as 2026-10-05/: ETABS Ultimate 22.6.0, toolkit 0.1.1 (main
+checkout), the real commands in a private ETABS, dialogs answered by a script.
+Each dialog is printed with its options, its default and the answer given:
+"[default]" = default accepted, "[chosen for this test]" = the answer this
+request asked for. Run on 2026-10-05, 00:15 to 00:21. Every item used a fresh
+copy of the same 3-storey test model, opened with N-mm present units.
+
+$ sdt beams     (toolkit 0.1.1, model r2-earth.$et, present units N-mm, started 00:20:14)
+
+[DIALOG 00:20:15] choice: Beam Design
+    | Seismic combinations to design for (gravity and wind ULS combinations are always included):
+              1. Static (EQ)
+    (default) 2. Response spectrum (RSA)
+              3. Both
+    -> Response spectrum (RSA)   [default]
+
+[DIALOG 00:20:15] choice: Factored Forces
+    | Reduce the reducible live load?
+    (default) 1. Yes
+              2. No
+    -> Yes   [default]
+
+[DIALOG 00:20:15] choice: Factored Forces
+    | Live load reduction rule:
+    | 
+    | NSCP 2015 205.5: R = r (A - 14) %, r = 0.86 per m2 (the metric form of UBC's 0.08 per ft2), at most 40 % (one level) / 60 % and 23.1 (1 + D/L) %.
+    | 
+    | ASCE 7-10 4.7 (NSCP 205.6 alternate, and NSCP 405.2.3): L = Lo (0.25 + 4.57 / sqrt(KLL AT)), KLL 4 for columns and 2 for beams, when KLL AT is at least 37.16 m2; L at least 0.50 Lo (one level) / 0.40 Lo.
+    | 
+    | Both: no reduction above 4.8 kPa, except 20 % for members supporting more than one floor.
+    (default) 1. NSCP 2015 205.5
+              2. ASCE 7-10 4.7
+    -> NSCP 2015 205.5   [default]
+
+[DIALOG 00:20:15] choice: Factored Forces
+    | Tributary area for the live load reduction:
+    (default) 1. Geometric: halfway lines (as ETABS)
+              2. Analysis load share: 1 kPa on every floor, as the frame carries it
+    -> Geometric: halfway lines (as ETABS)   [default]
+
+[DIALOG 00:20:15] choice: Factored Forces
+    | Include pattern live load on the beams (ACI 318-14 6.4.2)?
+    | 
+    | Each span is also designed for its live load as a simple span (largest sagging) and with fixed ends (largest hogging), times the factor.
+    (default) 1. Yes
+              2. No
+    -> Yes   [default]
+
+[DIALOG 00:20:15] values: Factored Forces
+    | Pattern live load factor.
+    Factor on the live load = 0.75   [default]
+
+[DIALOG 00:20:15] choice: Beam Design
+    | SMRF (seismic) design? Gravity beams (on other beams only) are designed for gravity in any case.
+    (default) 1. Yes
+              2. No
+    -> Yes   [default]
+
+[DIALOG 00:20:15] choice: Beam Design
+    | Gravity combination for the beam seismic shear:
+    (default) 1. ULS 100 1.4 DL
+              2. ULS 101 1.2 DL + 1.6 LL + 0.5 Lr
+              3. ULS 102 1.2 DL + 1.6 Lr + f LL
+    -> ULS 100 1.4 DL   [default]
+
+[DIALOG 00:20:15] values: Beam Design
+    | Beam bars and cover.
+    Beam main bar (mm) = 28   [default]
+    Beam stirrup (mm) = 12   [default]
+    Beam web (side) bar (mm) = 12   [default]
+    Web bar fy (MPa) = 414   [default]
+    Beam cover (mm) = 40   [default]
+
+[DIALOG 00:20:15] choice: Beam Design - Cover against Earth
+    | Do the beams of any floor level need 75 mm cover (cast against or exposed to earth, such as footing tie beams and ground beams)? The other beams keep 40 mm.
+    (default) 1. No - 40 mm cover on every level
+              2. Yes - choose the levels with 75 mm cover
+    -> Yes - choose the levels with 75 mm cover   [chosen for this test]
+
+[DIALOG 00:20:15] two-list picker: Levels whose beams get 75 mm cover
+    | available: RD, 3F, 2F, GF
+    -> ['GF']   [chosen for this test]
+
+[DIALOG 00:20:15] choice: Beam Design - Deflection
+    | Do the beams support partitions or finishes likely to be damaged by deflection?
+    (default) 1. Yes: L/480 after partitions are installed
+              2. No: L/240
+    -> Yes: L/480 after partitions are installed   [default]
+
+[DIALOG 00:20:15] folder picker: Folder for the beam results, calculations and schedules
+    | 
+    -> C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\r2-earth\results
+
+[PROGRESS WINDOW 00:20:15] Beam design
+    [00:20:15] Reading the analysis results and building the factored forces
+    [00:20:21] Beam 2BY-1  |  Level 2F / Combo: ULS 100 1.4 DL / Check: Demands: Mu, Vu and Tu at the supports and midspan
+    [00:20:21] Beam 2BY-1  |  Level 2F / Combo: ULS 101 1.2 DL + 1.6 LL + 0.5 Lr / Check: Demands: Mu, Vu and Tu at the supports and midspan
+    ... 18,271 more per-member progress lines left out ...
+    [00:20:35] Saving 1 of 3: the results workbook (.xlsx)
+    [00:20:35] Saving 2 of 3: the beam schedules (.dxf)
+    [00:20:36] Saving 3 of 3: the calculation report (.pdf, LaTeX)
+[PROGRESS WINDOW closed after 23 s]
+
+========================================================================
+SUMMARY - sdt beams
+========================================================================
+Model: r2-earth.EDB
+Beams designed       102
+Combinations         25
+Passing              102
+Failing              0
+75 mm cover on       GF
+Deflection           0 failing of 102
+Read from the model  25 strength combinations (ULS names); deflection combinations (DEF names)
+
+Nothing needs attention.
+
+Files:
+  Results       C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\r2-earth\results\r2-earth - Beam Design.xlsx
+  Schedules     2F_Girder_Schedule.dxf, 2F_Beam_Schedule.dxf, 3F_Girder_Schedule.dxf, 3F_Beam_Schedule.dxf, GF_Girder_Schedule.dxf, RD_Girder_Schedule.dxf, RD_Beam_Schedule.dxf
+  Calculations  C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\r2-earth\results\r2-earth - Beam Calculations.pdf
+  Design data   C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\r2-earth\r2-earth - design data.pkl
+========================================================================
+Summary saved: C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\r2-earth\results\r2-earth - Beam Design summary.txt
+
+[SUMMARY WINDOW 00:20:38] Summary - sdt beams
+
+========================================================================
+SUMMARY - sdt beams
+========================================================================
+Model: r2-earth.EDB
+Beams designed       102
+Combinations         25
+Passing              102
+Failing              0
+75 mm cover on       GF
+Deflection           0 failing of 102
+Read from the model  25 strength combinations (ULS names); deflection combinations (DEF names)
+
+Nothing needs attention.
+
+Files:
+  Results       C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\r2-earth\results\r2-earth - Beam Design.xlsx
+  Schedules     2F_Girder_Schedule.dxf, 2F_Beam_Schedule.dxf, 3F_Girder_Schedule.dxf, 3F_Beam_Schedule.dxf, GF_Girder_Schedule.dxf, RD_Girder_Schedule.dxf, RD_Beam_Schedule.dxf
+  Calculations  C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\r2-earth\results\r2-earth - Beam Calculations.pdf
+  Design data   C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\r2-earth\r2-earth - design data.pkl
+========================================================================
+Summary saved: C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\r2-earth\results\r2-earth - Beam Design summary.txt
+
+[sdt beams ended 00:20:38 after 24 s, exit 0]

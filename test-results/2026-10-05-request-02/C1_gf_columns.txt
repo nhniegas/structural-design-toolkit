@@ -1,0 +1,515 @@
+FOOTING-LEVEL COLUMNS GF-C1, GF-C2, GF-C2A (copied from 2026-10-05/08_columns.xlsx)
+==================================================================================
+For each column: the distinct values over its 50 rows, then, for each end, the row
+with the largest shear utilization with every column of the workbook from the section
+to the joint shear. The workbook has no column named Capacity_Based_Ve and no Mpr or
+moment limit per end: 'Probable Ve (kN)' is the only capacity shear value it gives.
+What it shows (see notes.txt, section C, for the arithmetic):
+  - lu = 500 mm for all three (1.0 m story less the 500 mm tie beams).
+  - GF-C1 (corner): Ve 8,869 to 9,224 kN. GF-C2 and GF-C2A: about 2,600 and 3,900 kN.
+  - The bottom end has no beam ('no beam frames into this end'): it is the footing.
+  - Tie beams at the top joint: FTB 300x500 with 2D28 top and 2D28 bottom.
+
+================ GF-C1: 50 rows in the workbook (ends x combinations) ================
+Distinct values over all its rows:
+    Section: ['CR_600X600_C04_G60']
+    lᵤ, about 3 (mm): ['500']
+    lᵤ, about 2 (mm): ['500']
+    Probable Vₑ (kN): ['8868.55', '8913.7', '8932.42', '8938.62', '8955.3', '8974.31', '8989.71', '8996.9', '9185.1', '9223.78']
+    V꜀ (kN): ['0']
+    Concrete Shear Neglected: ['YES']
+    ϕVₙ (kN): ['835.39']
+    Pᵤ (kN) (Pu): min 1.6, max 700.4
+    Analysis Vᵤ (kN): min 2.25, max 41.33
+    Shear Utilization: min 10.62, max 11.04
+
+  -- Bottom (I): the row with the largest shear utilization (ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA5) --
+  [SECTION / LONGITUDINAL REINFORCEMENT]
+    Section: CR_600X600_C04_G60
+    Shape: Rectangular
+    Width (mm): 600
+    Depth (mm): 600
+    Diameter (mm): N/A - rectangular column
+    Concrete Cover (mm): 40
+    f′c (MPa): 27.59
+    fᵧ (MPa): 413.69
+    fᵧₜ (MPa): 413.69
+    Longitudinal Bars: 16
+    Bars on X Edge: 5
+    Bars on Y Edge: 5
+    Bundle Layout: 16 single bars
+    Vertical Bar Continuity: Own design
+    ρ Longitudinal: 0.0218
+    ρ Limit: 0.06
+  [FLEXURE / AXIAL]
+    Pᵤ (kN): 700.43
+  [SLENDERNESS]
+    lᵤ, about 3 (mm): 500
+    k, about 3: 1
+    k lᵤ / r, about 3: 2.78
+    Limit 34 + 12 M₁/M₂ ≤ 40, about 3: 22
+    Cₘ, about 3: Not slender
+    P꜀, about 3 (kN): Not slender
+    δₙₛ, about 3: 1
+    M₂,min, about 3 (kN·m): Not slender
+    Mᵤ₃ from analysis (kN·m): 0
+    lᵤ, about 2 (mm): 500
+    k, about 2: 1
+    k lᵤ / r, about 2: 2.78
+    Limit 34 + 12 M₁/M₂ ≤ 40, about 2: 22
+    Cₘ, about 2: Not slender
+    P꜀, about 2 (kN): Not slender
+    δₙₛ, about 2: 1
+    M₂,min, about 2 (kN·m): Not slender
+    Mᵤ₂ from analysis (kN·m): 0
+    βdns: 0.66
+    βdns basis: dead load share of Pu
+    Base of the column (ψ at the support): Pinned support in the model, psi = 10
+    Slenderness Check: PASS - not slender
+  [COLUMN SHEAR]
+    Analysis Vᵤ (kN): 41.33
+    Probable Vₑ (kN): 9223.78
+    Design Vᵤ (kN): 9223.78
+    V꜀ (kN): 0
+    Concrete Shear Neglected: YES
+    ϕVₙ (kN): 835.39
+    Shear Utilization: 11.04
+    Shear Check: FAIL
+  [BEAM-COLUMN CAPACITY]
+    Column Bars Contributing at Joint: N/A - no beam frames into this end
+    Beam Bars at Joint, X: N/A - no beam frames into this end
+    ΣMₙ,Column X (kN·m): N/A - no beam frames into this end
+    ΣMₙ,Beam X (kN·m): N/A - no beam frames into this end
+    ΣMₙ,Column / ΣMₙ,Beam, X: N/A - no beam frames into this end
+    Beam Bars at Joint, Y: N/A - no beam frames into this end
+    ΣMₙ,Column Y (kN·m): N/A - no beam frames into this end
+    ΣMₙ,Beam Y (kN·m): N/A - no beam frames into this end
+    ΣMₙ,Column / ΣMₙ,Beam, Y: N/A - no beam frames into this end
+    BCC Check: N/A - no beam frames into this end
+  [JOINT SHEAR]
+    Joint Shear Demand X (kN): N/A - no beam frames into this end
+    ϕ Joint Shear Capacity X (kN): N/A - no beam frames into this end
+    Joint Shear Utilization X: N/A - no beam frames into this end
+    Joint Shear Demand Y (kN): N/A - no beam frames into this end
+    ϕ Joint Shear Capacity Y (kN): N/A - no beam frames into this end
+    Joint Shear Utilization Y: N/A - no beam frames into this end
+    Joint Shear Check: N/A - no beam frames into this end
+
+  -- Top (J): the row with the largest shear utilization (ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA5) --
+  [SECTION / LONGITUDINAL REINFORCEMENT]
+    Section: CR_600X600_C04_G60
+    Shape: Rectangular
+    Width (mm): 600
+    Depth (mm): 600
+    Diameter (mm): N/A - rectangular column
+    Concrete Cover (mm): 40
+    f′c (MPa): 27.59
+    fᵧ (MPa): 413.69
+    fᵧₜ (MPa): 413.69
+    Longitudinal Bars: 16
+    Bars on X Edge: 5
+    Bars on Y Edge: 5
+    Bundle Layout: 16 single bars
+    Vertical Bar Continuity: Own design
+    ρ Longitudinal: 0.0218
+    ρ Limit: 0.06
+  [FLEXURE / AXIAL]
+    Pᵤ (kN): 262.39
+  [SLENDERNESS]
+    lᵤ, about 3 (mm): 500
+    k, about 3: 1
+    k lᵤ / r, about 3: 2.78
+    Limit 34 + 12 M₁/M₂ ≤ 40, about 3: 22
+    Cₘ, about 3: Not slender
+    P꜀, about 3 (kN): Not slender
+    δₙₛ, about 3: 1
+    M₂,min, about 3 (kN·m): Not slender
+    Mᵤ₃ from analysis (kN·m): -20.84
+    lᵤ, about 2 (mm): 500
+    k, about 2: 1
+    k lᵤ / r, about 2: 2.78
+    Limit 34 + 12 M₁/M₂ ≤ 40, about 2: 22
+    Cₘ, about 2: Not slender
+    P꜀, about 2 (kN): Not slender
+    δₙₛ, about 2: 1
+    M₂,min, about 2 (kN·m): Not slender
+    Mᵤ₂ from analysis (kN·m): -26.57
+    βdns: 1
+    βdns basis: dead load share of Pu
+    Base of the column (ψ at the support): Pinned support in the model, psi = 10
+    Slenderness Check: PASS - not slender
+  [COLUMN SHEAR]
+    Analysis Vᵤ (kN): 41.33
+    Probable Vₑ (kN): 9223.78
+    Design Vᵤ (kN): 9223.78
+    V꜀ (kN): 0
+    Concrete Shear Neglected: YES
+    ϕVₙ (kN): 835.39
+    Shear Utilization: 11.04
+    Shear Check: FAIL
+  [BEAM-COLUMN CAPACITY]
+    Column Bars Contributing at Joint: 2-C1 (I): 16 bars D25; 16 single bars; GF-C1 (J): 16 bars D25; 16 single bars
+    Beam Bars at Joint, X: GFGY-1A (J): top 2D28, bottom 2D28
+    ΣMₙ,Column X (kN·m): 1573.74
+    ΣMₙ,Beam X (kN·m): 202.75
+    ΣMₙ,Column / ΣMₙ,Beam, X: 7.76
+    Beam Bars at Joint, Y: GFGX-1 (I): top 2D28, bottom 2D28
+    ΣMₙ,Column Y (kN·m): 1573.74
+    ΣMₙ,Beam Y (kN·m): 202.75
+    ΣMₙ,Column / ΣMₙ,Beam, Y: 7.76
+    BCC Check: PASS
+  [JOINT SHEAR]
+    Joint Shear Demand X (kN): 531.75
+    ϕ Joint Shear Capacity X (kN): 2999.26
+    Joint Shear Utilization X: 0.18
+    Joint Shear Demand Y (kN): 531.75
+    ϕ Joint Shear Capacity Y (kN): 2999.26
+    Joint Shear Utilization Y: 0.18
+    Joint Shear Check: PASS
+
+  Beams named at the joints of GF-C1: ['GFGX-1', 'GFGY-1A']
+  Their rows in 07_beams.xlsx (envelope, top and bottom):
+Story UniqueName            SectProp  Width  Depth                 Combo   Face     Lₙ  Mᵤ, left  Mᵤ, mid  Mᵤ, right  n₍left, 1₎  n₍left, 2₎  n₍left, 3₎  n₍mid, 1₎  n₍mid, 2₎  n₍mid, 3₎  n₍right, 1₎  n₍right, 2₎  n₍right, 3₎  Stirrup legs  TopCover  BotCover  Vₑ, left (kN)  Vₑ, right (kN) SMRF moment strength ratio check SMRF steel ratio check Design status
+   GF     GFGX-1 FTB_300X500_C04_G60    300    500 ENVELOPE (ALL COMBOS)    TOP 4800.0    107.49    42.24     105.64           2           0           0          2          0          0            2            0            0             2        60        60         116.68          116.34                             PASS                   PASS            OK
+   GF     GFGX-1 FTB_300X500_C04_G60    300    500 ENVELOPE (ALL COMBOS) BOTTOM 4800.0     89.59    46.29      89.24           0           0           2          0          0          2            0            0            2             2        60        60         116.68          116.34                             PASS                   PASS            OK
+   GF    GFGY-1A FTB_300X500_C04_G60    300    500 ENVELOPE (ALL COMBOS)    TOP 3800.0    127.57    39.23     128.88           2           0           0          2          0          0            2            0            0             2        60        60         141.15          141.21                             PASS                   PASS            OK
+   GF    GFGY-1A FTB_300X500_C04_G60    300    500 ENVELOPE (ALL COMBOS) BOTTOM 3800.0    116.58    44.08     117.65           0           0           2          0          0          2            0            0            2             2        60        60         141.15          141.21                             PASS                   PASS            OK
+
+================ GF-C2: 50 rows in the workbook (ends x combinations) ================
+Distinct values over all its rows:
+    Section: ['CR_600X600_C04_G60']
+    lᵤ, about 3 (mm): ['500']
+    lᵤ, about 2 (mm): ['500']
+    Probable Vₑ (kN): ['2472.48', '2490.75', '2495.32', '2529.24', '2538.62', '2538.7', '2553.28', '2559.29', '2574.63', '2595.57']
+    V꜀ (kN): ['0']
+    Concrete Shear Neglected: ['YES']
+    ϕVₙ (kN): ['835.39']
+    Pᵤ (kN) (Pu): min 206.5, max 866.1
+    Analysis Vᵤ (kN): min 3.63, max 125.04
+    Shear Utilization: min 2.96, max 3.11
+
+  -- Bottom (I): the row with the largest shear utilization (ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA1) --
+  [SECTION / LONGITUDINAL REINFORCEMENT]
+    Section: CR_600X600_C04_G60
+    Shape: Rectangular
+    Width (mm): 600
+    Depth (mm): 600
+    Diameter (mm): N/A - rectangular column
+    Concrete Cover (mm): 40
+    f′c (MPa): 27.59
+    fᵧ (MPa): 413.69
+    fᵧₜ (MPa): 413.69
+    Longitudinal Bars: 16
+    Bars on X Edge: 5
+    Bars on Y Edge: 5
+    Bundle Layout: 16 single bars
+    Vertical Bar Continuity: Own design
+    ρ Longitudinal: 0.0218
+    ρ Limit: 0.06
+  [FLEXURE / AXIAL]
+    Pᵤ (kN): 866.15
+  [SLENDERNESS]
+    lᵤ, about 3 (mm): 500
+    k, about 3: 1
+    k lᵤ / r, about 3: 2.78
+    Limit 34 + 12 M₁/M₂ ≤ 40, about 3: 22
+    Cₘ, about 3: Not slender
+    P꜀, about 3 (kN): Not slender
+    δₙₛ, about 3: 1
+    M₂,min, about 3 (kN·m): Not slender
+    Mᵤ₃ from analysis (kN·m): 0
+    lᵤ, about 2 (mm): 500
+    k, about 2: 1
+    k lᵤ / r, about 2: 2.78
+    Limit 34 + 12 M₁/M₂ ≤ 40, about 2: 22
+    Cₘ, about 2: Not slender
+    P꜀, about 2 (kN): Not slender
+    δₙₛ, about 2: 1
+    M₂,min, about 2 (kN·m): Not slender
+    Mᵤ₂ from analysis (kN·m): 0
+    βdns: 0.81
+    βdns basis: dead load share of Pu
+    Base of the column (ψ at the support): Pinned support in the model, psi = 10
+    Slenderness Check: PASS - not slender
+  [COLUMN SHEAR]
+    Analysis Vᵤ (kN): 47.95
+    Probable Vₑ (kN): 2595.57
+    Design Vᵤ (kN): 2595.57
+    V꜀ (kN): 0
+    Concrete Shear Neglected: YES
+    ϕVₙ (kN): 835.39
+    Shear Utilization: 3.11
+    Shear Check: FAIL
+  [BEAM-COLUMN CAPACITY]
+    Column Bars Contributing at Joint: N/A - no beam frames into this end
+    Beam Bars at Joint, X: N/A - no beam frames into this end
+    ΣMₙ,Column X (kN·m): N/A - no beam frames into this end
+    ΣMₙ,Beam X (kN·m): N/A - no beam frames into this end
+    ΣMₙ,Column / ΣMₙ,Beam, X: N/A - no beam frames into this end
+    Beam Bars at Joint, Y: N/A - no beam frames into this end
+    ΣMₙ,Column Y (kN·m): N/A - no beam frames into this end
+    ΣMₙ,Beam Y (kN·m): N/A - no beam frames into this end
+    ΣMₙ,Column / ΣMₙ,Beam, Y: N/A - no beam frames into this end
+    BCC Check: N/A - no beam frames into this end
+  [JOINT SHEAR]
+    Joint Shear Demand X (kN): N/A - no beam frames into this end
+    ϕ Joint Shear Capacity X (kN): N/A - no beam frames into this end
+    Joint Shear Utilization X: N/A - no beam frames into this end
+    Joint Shear Demand Y (kN): N/A - no beam frames into this end
+    ϕ Joint Shear Capacity Y (kN): N/A - no beam frames into this end
+    Joint Shear Utilization Y: N/A - no beam frames into this end
+    Joint Shear Check: N/A - no beam frames into this end
+
+  -- Top (J): the row with the largest shear utilization (ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA1) --
+  [SECTION / LONGITUDINAL REINFORCEMENT]
+    Section: CR_600X600_C04_G60
+    Shape: Rectangular
+    Width (mm): 600
+    Depth (mm): 600
+    Diameter (mm): N/A - rectangular column
+    Concrete Cover (mm): 40
+    f′c (MPa): 27.59
+    fᵧ (MPa): 413.69
+    fᵧₜ (MPa): 413.69
+    Longitudinal Bars: 16
+    Bars on X Edge: 5
+    Bars on Y Edge: 5
+    Bundle Layout: 16 single bars
+    Vertical Bar Continuity: Own design
+    ρ Longitudinal: 0.0218
+    ρ Limit: 0.06
+  [FLEXURE / AXIAL]
+    Pᵤ (kN): 607.33
+  [SLENDERNESS]
+    lᵤ, about 3 (mm): 500
+    k, about 3: 1
+    k lᵤ / r, about 3: 2.78
+    Limit 34 + 12 M₁/M₂ ≤ 40, about 3: 22
+    Cₘ, about 3: Not slender
+    P꜀, about 3 (kN): Not slender
+    δₙₛ, about 3: 1
+    M₂,min, about 3 (kN·m): Not slender
+    Mᵤ₃ from analysis (kN·m): -23.86
+    lᵤ, about 2 (mm): 500
+    k, about 2: 1
+    k lᵤ / r, about 2: 2.78
+    Limit 34 + 12 M₁/M₂ ≤ 40, about 2: 22
+    Cₘ, about 2: Not slender
+    P꜀, about 2 (kN): Not slender
+    δₙₛ, about 2: 1
+    M₂,min, about 2 (kN·m): Not slender
+    Mᵤ₂ from analysis (kN·m): 24.36
+    βdns: 1
+    βdns basis: dead load share of Pu
+    Base of the column (ψ at the support): Pinned support in the model, psi = 10
+    Slenderness Check: PASS - not slender
+  [COLUMN SHEAR]
+    Analysis Vᵤ (kN): 47.95
+    Probable Vₑ (kN): 2595.57
+    Design Vᵤ (kN): 2595.57
+    V꜀ (kN): 0
+    Concrete Shear Neglected: YES
+    ϕVₙ (kN): 835.39
+    Shear Utilization: 3.11
+    Shear Check: FAIL
+  [BEAM-COLUMN CAPACITY]
+    Column Bars Contributing at Joint: 2-C2 (I): 16 bars D25; 16 single bars; GF-C2 (J): 16 bars D25; 16 single bars
+    Beam Bars at Joint, X: GFGY-1 (J): top 2D28, bottom 2D28; GFGY-1A (I): top 2D28, bottom 2D28
+    ΣMₙ,Column X (kN·m): 1753.6
+    ΣMₙ,Beam X (kN·m): 405.51
+    ΣMₙ,Column / ΣMₙ,Beam, X: 4.32
+    Beam Bars at Joint, Y: GFGX-2 (I): top 2D28, bottom 2D28
+    ΣMₙ,Column Y (kN·m): 1753.6
+    ΣMₙ,Beam Y (kN·m): 202.75
+    ΣMₙ,Column / ΣMₙ,Beam, Y: 8.65
+    BCC Check: PASS
+  [JOINT SHEAR]
+    Joint Shear Demand X (kN): 1051.82
+    ϕ Joint Shear Capacity X (kN): 1928.76
+    Joint Shear Utilization X: 0.55
+    Joint Shear Demand Y (kN): 525.91
+    ϕ Joint Shear Capacity Y (kN): 1607.3
+    Joint Shear Utilization Y: 0.33
+    Joint Shear Check: PASS
+
+  Beams named at the joints of GF-C2: ['GFGX-2', 'GFGY-1', 'GFGY-1A']
+  Their rows in 07_beams.xlsx (envelope, top and bottom):
+Story UniqueName            SectProp  Width  Depth                 Combo   Face     Lₙ  Mᵤ, left  Mᵤ, mid  Mᵤ, right  n₍left, 1₎  n₍left, 2₎  n₍left, 3₎  n₍mid, 1₎  n₍mid, 2₎  n₍mid, 3₎  n₍right, 1₎  n₍right, 2₎  n₍right, 3₎  Stirrup legs  TopCover  BotCover  Vₑ, left (kN)  Vₑ, right (kN) SMRF moment strength ratio check SMRF steel ratio check Design status
+   GF     GFGX-2 FTB_300X500_C04_G60    300    500 ENVELOPE (ALL COMBOS)    TOP 4600.0    104.26    41.03      99.96           2           0           0          2          0          0            2            0            0             2        60        60         121.20          120.30                             PASS                   PASS            OK
+   GF     GFGX-2 FTB_300X500_C04_G60    300    500 ENVELOPE (ALL COMBOS) BOTTOM 4600.0     85.79    44.40      85.27           0           0           2          0          0          2            0            0            2             2        60        60         121.20          120.30                             PASS                   PASS            OK
+   GF     GFGY-1 FTB_300X500_C04_G60    300    500 ENVELOPE (ALL COMBOS)    TOP 3800.0    129.21    39.37     127.63           2           0           0          2          0          0            2            0            0             2        60        60         141.24          141.12                             PASS                   PASS            OK
+   GF     GFGY-1 FTB_300X500_C04_G60    300    500 ENVELOPE (ALL COMBOS) BOTTOM 3800.0    117.86    44.17     116.74           0           0           2          0          0          2            0            0            2             2        60        60         141.24          141.12                             PASS                   PASS            OK
+   GF    GFGY-1A FTB_300X500_C04_G60    300    500 ENVELOPE (ALL COMBOS)    TOP 3800.0    127.57    39.23     128.88           2           0           0          2          0          0            2            0            0             2        60        60         141.15          141.21                             PASS                   PASS            OK
+   GF    GFGY-1A FTB_300X500_C04_G60    300    500 ENVELOPE (ALL COMBOS) BOTTOM 3800.0    116.58    44.08     117.65           0           0           2          0          0          2            0            0            2             2        60        60         141.15          141.21                             PASS                   PASS            OK
+
+================ GF-C2A: 50 rows in the workbook (ends x combinations) ================
+Distinct values over all its rows:
+    Section: ['CR_600X800_C04_G60']
+    lᵤ, about 3 (mm): ['500']
+    lᵤ, about 2 (mm): ['500']
+    Probable Vₑ (kN): ['3676.28', '3677.12', '3751.26', '3851.75', '3868.77', '3868.96', '3906.41', '3917.56', '3940.96', '3941.74']
+    V꜀ (kN): ['0']
+    Concrete Shear Neglected: ['YES']
+    ϕVₙ (kN): ['1113.86']
+    Pᵤ (kN) (Pu): min 569.4, max 1250.4
+    Analysis Vᵤ (kN): min 4.50, max 101.57
+    Shear Utilization: min 3.20, max 3.44
+
+  -- Bottom (I): the row with the largest shear utilization (ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA1) --
+  [SECTION / LONGITUDINAL REINFORCEMENT]
+    Section: CR_600X800_C04_G60
+    Shape: Rectangular
+    Width (mm): 600
+    Depth (mm): 800
+    Diameter (mm): N/A - rectangular column
+    Concrete Cover (mm): 40
+    f′c (MPa): 27.59
+    fᵧ (MPa): 413.69
+    fᵧₜ (MPa): 413.69
+    Longitudinal Bars: 18
+    Bars on X Edge: 5
+    Bars on Y Edge: 6
+    Bundle Layout: 18 single bars
+    Vertical Bar Continuity: Own design
+    ρ Longitudinal: 0.0184
+    ρ Limit: 0.06
+  [FLEXURE / AXIAL]
+    Pᵤ (kN): 1250.39
+  [SLENDERNESS]
+    lᵤ, about 3 (mm): 500
+    k, about 3: 1
+    k lᵤ / r, about 3: 2.08
+    Limit 34 + 12 M₁/M₂ ≤ 40, about 3: 22
+    Cₘ, about 3: Not slender
+    P꜀, about 3 (kN): Not slender
+    δₙₛ, about 3: 1
+    M₂,min, about 3 (kN·m): Not slender
+    Mᵤ₃ from analysis (kN·m): 0
+    lᵤ, about 2 (mm): 500
+    k, about 2: 1
+    k lᵤ / r, about 2: 2.78
+    Limit 34 + 12 M₁/M₂ ≤ 40, about 2: 22
+    Cₘ, about 2: Not slender
+    P꜀, about 2 (kN): Not slender
+    δₙₛ, about 2: 1
+    M₂,min, about 2 (kN·m): Not slender
+    Mᵤ₂ from analysis (kN·m): 0
+    βdns: 0.96
+    βdns basis: dead load share of Pu
+    Base of the column (ψ at the support): Pinned support in the model, psi = 10
+    Slenderness Check: PASS - not slender
+  [COLUMN SHEAR]
+    Analysis Vᵤ (kN): 80.94
+    Probable Vₑ (kN): 3941.74
+    Design Vᵤ (kN): 3941.74
+    V꜀ (kN): 0
+    Concrete Shear Neglected: YES
+    ϕVₙ (kN): 1113.86
+    Shear Utilization: 3.44
+    Shear Check: FAIL
+  [BEAM-COLUMN CAPACITY]
+    Column Bars Contributing at Joint: N/A - no beam frames into this end
+    Beam Bars at Joint, X: N/A - no beam frames into this end
+    ΣMₙ,Column X (kN·m): N/A - no beam frames into this end
+    ΣMₙ,Beam X (kN·m): N/A - no beam frames into this end
+    ΣMₙ,Column / ΣMₙ,Beam, X: N/A - no beam frames into this end
+    Beam Bars at Joint, Y: N/A - no beam frames into this end
+    ΣMₙ,Column Y (kN·m): N/A - no beam frames into this end
+    ΣMₙ,Beam Y (kN·m): N/A - no beam frames into this end
+    ΣMₙ,Column / ΣMₙ,Beam, Y: N/A - no beam frames into this end
+    BCC Check: N/A - no beam frames into this end
+  [JOINT SHEAR]
+    Joint Shear Demand X (kN): N/A - no beam frames into this end
+    ϕ Joint Shear Capacity X (kN): N/A - no beam frames into this end
+    Joint Shear Utilization X: N/A - no beam frames into this end
+    Joint Shear Demand Y (kN): N/A - no beam frames into this end
+    ϕ Joint Shear Capacity Y (kN): N/A - no beam frames into this end
+    Joint Shear Utilization Y: N/A - no beam frames into this end
+    Joint Shear Check: N/A - no beam frames into this end
+
+  -- Top (J): the row with the largest shear utilization (ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA1) --
+  [SECTION / LONGITUDINAL REINFORCEMENT]
+    Section: CR_600X800_C04_G60
+    Shape: Rectangular
+    Width (mm): 600
+    Depth (mm): 800
+    Diameter (mm): N/A - rectangular column
+    Concrete Cover (mm): 40
+    f′c (MPa): 27.59
+    fᵧ (MPa): 413.69
+    fᵧₜ (MPa): 413.69
+    Longitudinal Bars: 18
+    Bars on X Edge: 5
+    Bars on Y Edge: 6
+    Bundle Layout: 18 single bars
+    Vertical Bar Continuity: Own design
+    ρ Longitudinal: 0.0184
+    ρ Limit: 0.06
+  [FLEXURE / AXIAL]
+    Pᵤ (kN): 1236.29
+  [SLENDERNESS]
+    lᵤ, about 3 (mm): 500
+    k, about 3: 1
+    k lᵤ / r, about 3: 2.08
+    Limit 34 + 12 M₁/M₂ ≤ 40, about 3: 22
+    Cₘ, about 3: Not slender
+    P꜀, about 3 (kN): Not slender
+    δₙₛ, about 3: 1
+    M₂,min, about 3 (kN·m): Not slender
+    Mᵤ₃ from analysis (kN·m): 42.03
+    lᵤ, about 2 (mm): 500
+    k, about 2: 1
+    k lᵤ / r, about 2: 2.78
+    Limit 34 + 12 M₁/M₂ ≤ 40, about 2: 22
+    Cₘ, about 2: Not slender
+    P꜀, about 2 (kN): Not slender
+    δₙₛ, about 2: 1
+    M₂,min, about 2 (kN·m): Not slender
+    Mᵤ₂ from analysis (kN·m): 17.25
+    βdns: 0.97
+    βdns basis: dead load share of Pu
+    Base of the column (ψ at the support): Pinned support in the model, psi = 10
+    Slenderness Check: PASS - not slender
+  [COLUMN SHEAR]
+    Analysis Vᵤ (kN): 80.94
+    Probable Vₑ (kN): 3941.74
+    Design Vᵤ (kN): 3941.74
+    V꜀ (kN): 0
+    Concrete Shear Neglected: YES
+    ϕVₙ (kN): 1113.86
+    Shear Utilization: 3.44
+    Shear Check: FAIL
+  [BEAM-COLUMN CAPACITY]
+    Column Bars Contributing at Joint: 2-C2A (I): 18 bars D25; 18 single bars; GF-C2A (J): 18 bars D25; 18 single bars
+    Beam Bars at Joint, X: GFGY-2 (J): top 2D28, bottom 2D28; GFGY-2A (I): top 2D28, bottom 2D28
+    ΣMₙ,Column X (kN·m): 2226.05
+    ΣMₙ,Beam X (kN·m): 405.51
+    ΣMₙ,Column / ΣMₙ,Beam, X: 5.49
+    Beam Bars at Joint, Y: GFGX-2 (J): top 2D28, bottom 2D28; GFGX-2A (I): top 2D28, bottom 2D28
+    ΣMₙ,Column Y (kN·m): 3023.95
+    ΣMₙ,Beam Y (kN·m): 405.51
+    ΣMₙ,Column / ΣMₙ,Beam, Y: 7.46
+    BCC Check: PASS
+  [JOINT SHEAR]
+    Joint Shear Demand X (kN): 1051.82
+    ϕ Joint Shear Capacity X (kN): 2571.68
+    Joint Shear Utilization X: 0.41
+    Joint Shear Demand Y (kN): 1051.82
+    ϕ Joint Shear Capacity Y (kN): 2571.68
+    Joint Shear Utilization Y: 0.41
+    Joint Shear Check: PASS
+
+  Beams named at the joints of GF-C2A: ['GFGX-2', 'GFGX-2A', 'GFGY-2', 'GFGY-2A']
+  Their rows in 07_beams.xlsx (envelope, top and bottom):
+Story UniqueName            SectProp  Width  Depth                 Combo   Face     Lₙ  Mᵤ, left  Mᵤ, mid  Mᵤ, right  n₍left, 1₎  n₍left, 2₎  n₍left, 3₎  n₍mid, 1₎  n₍mid, 2₎  n₍mid, 3₎  n₍right, 1₎  n₍right, 2₎  n₍right, 3₎  Stirrup legs  TopCover  BotCover  Vₑ, left (kN)  Vₑ, right (kN) SMRF moment strength ratio check SMRF steel ratio check Design status
+   GF     GFGX-2 FTB_300X500_C04_G60    300    500 ENVELOPE (ALL COMBOS)    TOP 4600.0    104.26    41.03      99.96           2           0           0          2          0          0            2            0            0             2        60        60         121.20          120.30                             PASS                   PASS            OK
+   GF     GFGX-2 FTB_300X500_C04_G60    300    500 ENVELOPE (ALL COMBOS) BOTTOM 4600.0     85.79    44.40      85.27           0           0           2          0          0          2            0            0            2             2        60        60         121.20          120.30                             PASS                   PASS            OK
+   GF    GFGX-2A FTB_300X500_C04_G60    300    500 ENVELOPE (ALL COMBOS)    TOP 4500.0    100.32    40.22     102.14           2           0           0          2          0          0            2            0            0             2        60        60         123.02          123.26                             PASS                   PASS            OK
+   GF    GFGX-2A FTB_300X500_C04_G60    300    500 ENVELOPE (ALL COMBOS) BOTTOM 4500.0     84.49    44.38      85.35           0           0           2          0          0          2            0            0            2             2        60        60         123.02          123.26                             PASS                   PASS            OK
+   GF     GFGY-2 FTB_300X500_C04_G60    300    500 ENVELOPE (ALL COMBOS)    TOP 3700.0    113.88    34.03     113.01           2           0           0          2          0          0            2            0            0             2        60        60         144.76          144.65                             PASS                   PASS            OK
+   GF     GFGY-2 FTB_300X500_C04_G60    300    500 ENVELOPE (ALL COMBOS) BOTTOM 3700.0    102.49    38.79     102.05           0           0           2          0          0          2            0            0            2             2        60        60         144.76          144.65                             PASS                   PASS            OK
+   GF    GFGY-2A FTB_300X500_C04_G60    300    500 ENVELOPE (ALL COMBOS)    TOP 3700.0    112.96    34.03     113.92           2           0           0          2          0          0            2            0            0             2        60        60         144.63          144.78                             PASS                   PASS            OK
+   GF    GFGY-2A FTB_300X500_C04_G60    300    500 ENVELOPE (ALL COMBOS) BOTTOM 3700.0    102.07    38.78     102.47           0           0           2          0          0          2            0            0            2             2        60        60         144.63          144.78                             PASS                   PASS            OK
+
+All columns of the workbook, for reference:
+0=Column Label; 1=Unique Name; 2=Story; 3=End; 4=Load Combination; 5=Section; 6=Shape; 7=Width (mm); 8=Depth (mm); 9=Diameter (mm); 10=Concrete Cover (mm); 11=f′c (MPa); 12=fᵧ (MPa); 13=fᵧₜ (MPa); 14=Longitudinal Bars; 15=Bars on X Edge; 16=Bars on Y Edge; 17=Bundle Layout; 18=Vertical Bar Continuity; 19=Bar Layout Data (x, y, n); 20=ρ Longitudinal; 21=ρ Limit; 22=Pᵤ (kN); 23=Mᵤ₂ design (kN·m); 24=Mᵤ₃ design (kN·m); 25=ϕMₙ (kN·m); 26=Flexure Utilization; 27=Axial Check; 28=Flexure Check; 29=lᵤ, about 3 (mm); 30=k, about 3; 31=k lᵤ / r, about 3; 32=Limit 34 + 12 M₁/M₂ ≤ 40, about 3; 33=Cₘ, about 3; 34=P꜀, about 3 (kN); 35=δₙₛ, about 3; 36=M₂,min, about 3 (kN·m); 37=Mᵤ₃ from analysis (kN·m); 38=lᵤ, about 2 (mm); 39=k, about 2; 40=k lᵤ / r, about 2; 41=Limit 34 + 12 M₁/M₂ ≤ 40, about 2; 42=Cₘ, about 2; 43=P꜀, about 2 (kN); 44=δₙₛ, about 2; 45=M₂,min, about 2 (kN·m); 46=Mᵤ₂ from analysis (kN·m); 47=βdns; 48=βdns basis; 49=Base of the column (ψ at the support); 50=Slenderness Check; 51=Analysis Vᵤ (kN); 52=Probable Vₑ (kN); 53=Design Vᵤ (kN); 54=V꜀ (kN); 55=Concrete Shear Neglected; 56=ϕVₙ (kN); 57=Shear Utilization; 58=Shear Check; 59=Column Bars Contributing at Joint; 60=Beam Bars at Joint, X; 61=ΣMₙ,Column X (kN·m); 62=ΣMₙ,Beam X (kN·m); 63=ΣMₙ,Column / ΣMₙ,Beam, X; 64=Beam Bars at Joint, Y; 65=ΣMₙ,Column Y (kN·m); 66=ΣMₙ,Beam Y (kN·m); 67=ΣMₙ,Column / ΣMₙ,Beam, Y; 68=BCC Check; 69=Joint Shear Demand X (kN); 70=ϕ Joint Shear Capacity X (kN); 71=Joint Shear Utilization X; 72=Joint Shear Demand Y (kN); 73=ϕ Joint Shear Capacity Y (kN); 74=Joint Shear Utilization Y; 75=Joint Shear Check; 76=Hoop / Spiral Type; 77=Transverse Reinforcement Provision; 78=Tie Bar Diameter (mm); 79=Tie / Spiral Spacing (mm); 80=Tie Legs along X Edge; 81=Tie Legs along Y Edge; 82=Governing ACI 18.7.5 Expression; 83=High Pᵤ / f′c Condition; 84=ρₛ,req from 18.7.5(a); 85=ρₛ,req from 18.7.5(b); 86=ρₛ,req from 18.7.5(c); 87=ρₛ,req from 18.7.5(d); 88=ρₛ,req from 18.7.5(e); 89=ρₛ,req from 18.7.5(f); 90=kᶠ; 91=kₙ; 92=Required Aₛₕ/(s b꜀), X; 93=Provided Aₛₕ/(s b꜀), X; 94=Required Aₛₕ/(s b꜀), Y; 95=Provided Aₛₕ/(s b꜀), Y; 96=Confinement Ratio Check; 97=Tie Spacing Check; 98=Bar Support Check, X Edge; 99=Bar Support Check, Y Edge; 100=Added Hoop Legs; 101=Tie Diameter Check; 102=SMRF Column Dimension Check; 103=Transverse Reinforcement Check; 104=Overall Design Status; 105=Design Status Reason

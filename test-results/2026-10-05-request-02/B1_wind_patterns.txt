@@ -1,0 +1,137 @@
+WIND PATTERNS WX AND WY
+=======================
+RESULT: WX and WY are the same pattern. Both have ASCECase = 'Create All' and
+Angle = 0, so each one expands into the same 12 sub-patterns: ASCE cases 1 to 4 at
+angle 0 and at angle 90, with the same eccentricities. Their 12 base reactions are
+identical line by line (step 1: FX -142.2 kN; step 2: FY -295.7 kN; ...). That is why
+the drift is the same: each case already holds both directions, and the worst step is
+the Y one for both.
+Exposure from diaphragms, widths 10000 (angle 0) and 18000 (angle 90), speed 150 mph,
+exposure B, Kzt 1, G 0.85, Kd 0.85. UserCp = No, so the table has no Cp columns.
+The building is not square: 18.0 m in X by 10.0 m in Y (grids A to D at 6 m, 1 to 3 at
+5 m).
+
+Model: C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\r2-drift\r2-drift.EDB
+
+--- Load Pattern Definitions - Auto Wind - ASCE 7-10 (every column, one block per row) ---
+  Name=WX; IsAuto=No; Exposure=Diaphragms; TopStory=RD; BotStory=GF; Parapet=No; UserCp=No; ASCECase=Create All; e1=0.15; e2=0.15; WindSpeed=150; ExpType=B; kzt=1; GustFact=0.85; Kd=0.85; WidthType=Auto; Angle=0; Story=RD; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+  Name=WX; IsAuto=No; Story=3F; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+  Name=WX; IsAuto=No; Story=2F; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+  Name=WX(1/12); IsAuto=Yes; Exposure=Diaphragms; TopStory=RD; BotStory=GF; Parapet=No; UserCp=No; ASCECase=1; e1=0; e2=0; WindSpeed=150; ExpType=B; kzt=1; GustFact=0.85; Kd=0.85; WidthType=Auto; Angle=0; Story=RD; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+  Name=WX(1/12); IsAuto=Yes; Story=3F; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+  Name=WX(1/12); IsAuto=Yes; Story=2F; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+  Name=WX(10/12); IsAuto=Yes; Exposure=Diaphragms; TopStory=RD; BotStory=GF; Parapet=No; UserCp=No; ASCECase=4; e1=-0.15; e2=-0.15; WindSpeed=150; ExpType=B; kzt=1; GustFact=0.85; Kd=0.85; WidthType=Auto; Angle=0; Story=RD; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+  Name=WX(10/12); IsAuto=Yes; Story=3F; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+  Name=WX(10/12); IsAuto=Yes; Story=2F; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+  Name=WX(11/12); IsAuto=Yes; Exposure=Diaphragms; TopStory=RD; BotStory=GF; Parapet=No; UserCp=No; ASCECase=4; e1=0.15; e2=0.15; WindSpeed=150; ExpType=B; kzt=1; GustFact=0.85; Kd=0.85; WidthType=Auto; Angle=90; Story=RD; Diaphragm=D1; Width=18000; Depth=10000; X=9000; Y=5000
+  Name=WX(11/12); IsAuto=Yes; Story=3F; Diaphragm=D1; Width=18000; Depth=10000; X=9000; Y=5000
+  Name=WX(11/12); IsAuto=Yes; Story=2F; Diaphragm=D1; Width=18000; Depth=10000; X=9000; Y=5000
+  Name=WX(12/12); IsAuto=Yes; Exposure=Diaphragms; TopStory=RD; BotStory=GF; Parapet=No; UserCp=No; ASCECase=4; e1=-0.15; e2=-0.15; WindSpeed=150; ExpType=B; kzt=1; GustFact=0.85; Kd=0.85; WidthType=Auto; Angle=90; Story=RD; Diaphragm=D1; Width=18000; Depth=10000; X=9000; Y=5000
+  Name=WX(12/12); IsAuto=Yes; Story=3F; Diaphragm=D1; Width=18000; Depth=10000; X=9000; Y=5000
+  Name=WX(12/12); IsAuto=Yes; Story=2F; Diaphragm=D1; Width=18000; Depth=10000; X=9000; Y=5000
+  Name=WX(2/12); IsAuto=Yes; Exposure=Diaphragms; TopStory=RD; BotStory=GF; Parapet=No; UserCp=No; ASCECase=1; e1=0; e2=0; WindSpeed=150; ExpType=B; kzt=1; GustFact=0.85; Kd=0.85; WidthType=Auto; Angle=90; Story=RD; Diaphragm=D1; Width=18000; Depth=10000; X=9000; Y=5000
+  Name=WX(2/12); IsAuto=Yes; Story=3F; Diaphragm=D1; Width=18000; Depth=10000; X=9000; Y=5000
+  Name=WX(2/12); IsAuto=Yes; Story=2F; Diaphragm=D1; Width=18000; Depth=10000; X=9000; Y=5000
+  Name=WX(3/12); IsAuto=Yes; Exposure=Diaphragms; TopStory=RD; BotStory=GF; Parapet=No; UserCp=No; ASCECase=2; e1=0.15; e2=0; WindSpeed=150; ExpType=B; kzt=1; GustFact=0.85; Kd=0.85; WidthType=Auto; Angle=0; Story=RD; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+  Name=WX(3/12); IsAuto=Yes; Story=3F; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+  Name=WX(3/12); IsAuto=Yes; Story=2F; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+  Name=WX(4/12); IsAuto=Yes; Exposure=Diaphragms; TopStory=RD; BotStory=GF; Parapet=No; UserCp=No; ASCECase=2; e1=-0.15; e2=0; WindSpeed=150; ExpType=B; kzt=1; GustFact=0.85; Kd=0.85; WidthType=Auto; Angle=0; Story=RD; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+  Name=WX(4/12); IsAuto=Yes; Story=3F; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+  Name=WX(4/12); IsAuto=Yes; Story=2F; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+  Name=WX(5/12); IsAuto=Yes; Exposure=Diaphragms; TopStory=RD; BotStory=GF; Parapet=No; UserCp=No; ASCECase=2; e1=0.15; e2=0; WindSpeed=150; ExpType=B; kzt=1; GustFact=0.85; Kd=0.85; WidthType=Auto; Angle=90; Story=RD; Diaphragm=D1; Width=18000; Depth=10000; X=9000; Y=5000
+  Name=WX(5/12); IsAuto=Yes; Story=3F; Diaphragm=D1; Width=18000; Depth=10000; X=9000; Y=5000
+  Name=WX(5/12); IsAuto=Yes; Story=2F; Diaphragm=D1; Width=18000; Depth=10000; X=9000; Y=5000
+  Name=WX(6/12); IsAuto=Yes; Exposure=Diaphragms; TopStory=RD; BotStory=GF; Parapet=No; UserCp=No; ASCECase=2; e1=-0.15; e2=0; WindSpeed=150; ExpType=B; kzt=1; GustFact=0.85; Kd=0.85; WidthType=Auto; Angle=90; Story=RD; Diaphragm=D1; Width=18000; Depth=10000; X=9000; Y=5000
+  Name=WX(6/12); IsAuto=Yes; Story=3F; Diaphragm=D1; Width=18000; Depth=10000; X=9000; Y=5000
+  Name=WX(6/12); IsAuto=Yes; Story=2F; Diaphragm=D1; Width=18000; Depth=10000; X=9000; Y=5000
+  Name=WX(7/12); IsAuto=Yes; Exposure=Diaphragms; TopStory=RD; BotStory=GF; Parapet=No; UserCp=No; ASCECase=3; e1=0; e2=0; WindSpeed=150; ExpType=B; kzt=1; GustFact=0.85; Kd=0.85; WidthType=Auto; Angle=0; Story=RD; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+  Name=WX(7/12); IsAuto=Yes; Story=3F; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+  Name=WX(7/12); IsAuto=Yes; Story=2F; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+  Name=WX(8/12); IsAuto=Yes; Exposure=Diaphragms; TopStory=RD; BotStory=GF; Parapet=No; UserCp=No; ASCECase=3; e1=0; e2=0; WindSpeed=150; ExpType=B; kzt=1; GustFact=0.85; Kd=0.85; WidthType=Auto; Angle=90; Story=RD; Diaphragm=D1; Width=18000; Depth=10000; X=9000; Y=5000
+  Name=WX(8/12); IsAuto=Yes; Story=3F; Diaphragm=D1; Width=18000; Depth=10000; X=9000; Y=5000
+  Name=WX(8/12); IsAuto=Yes; Story=2F; Diaphragm=D1; Width=18000; Depth=10000; X=9000; Y=5000
+  Name=WX(9/12); IsAuto=Yes; Exposure=Diaphragms; TopStory=RD; BotStory=GF; Parapet=No; UserCp=No; ASCECase=4; e1=0.15; e2=0.15; WindSpeed=150; ExpType=B; kzt=1; GustFact=0.85; Kd=0.85; WidthType=Auto; Angle=0; Story=RD; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+  Name=WX(9/12); IsAuto=Yes; Story=3F; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+  Name=WX(9/12); IsAuto=Yes; Story=2F; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+  Name=WY; IsAuto=No; Exposure=Diaphragms; TopStory=RD; BotStory=GF; Parapet=No; UserCp=No; ASCECase=Create All; e1=0.15; e2=0.15; WindSpeed=150; ExpType=B; kzt=1; GustFact=0.85; Kd=0.85; WidthType=Auto; Angle=0; Story=RD; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+  Name=WY; IsAuto=No; Story=3F; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+  Name=WY; IsAuto=No; Story=2F; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+  Name=WY(1/12); IsAuto=Yes; Exposure=Diaphragms; TopStory=RD; BotStory=GF; Parapet=No; UserCp=No; ASCECase=1; e1=0; e2=0; WindSpeed=150; ExpType=B; kzt=1; GustFact=0.85; Kd=0.85; WidthType=Auto; Angle=0; Story=RD; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+  Name=WY(1/12); IsAuto=Yes; Story=3F; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+  Name=WY(1/12); IsAuto=Yes; Story=2F; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+  Name=WY(10/12); IsAuto=Yes; Exposure=Diaphragms; TopStory=RD; BotStory=GF; Parapet=No; UserCp=No; ASCECase=4; e1=-0.15; e2=-0.15; WindSpeed=150; ExpType=B; kzt=1; GustFact=0.85; Kd=0.85; WidthType=Auto; Angle=0; Story=RD; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+  Name=WY(10/12); IsAuto=Yes; Story=3F; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+  Name=WY(10/12); IsAuto=Yes; Story=2F; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+  Name=WY(11/12); IsAuto=Yes; Exposure=Diaphragms; TopStory=RD; BotStory=GF; Parapet=No; UserCp=No; ASCECase=4; e1=0.15; e2=0.15; WindSpeed=150; ExpType=B; kzt=1; GustFact=0.85; Kd=0.85; WidthType=Auto; Angle=90; Story=RD; Diaphragm=D1; Width=18000; Depth=10000; X=9000; Y=5000
+  Name=WY(11/12); IsAuto=Yes; Story=3F; Diaphragm=D1; Width=18000; Depth=10000; X=9000; Y=5000
+  Name=WY(11/12); IsAuto=Yes; Story=2F; Diaphragm=D1; Width=18000; Depth=10000; X=9000; Y=5000
+  Name=WY(12/12); IsAuto=Yes; Exposure=Diaphragms; TopStory=RD; BotStory=GF; Parapet=No; UserCp=No; ASCECase=4; e1=-0.15; e2=-0.15; WindSpeed=150; ExpType=B; kzt=1; GustFact=0.85; Kd=0.85; WidthType=Auto; Angle=90; Story=RD; Diaphragm=D1; Width=18000; Depth=10000; X=9000; Y=5000
+  Name=WY(12/12); IsAuto=Yes; Story=3F; Diaphragm=D1; Width=18000; Depth=10000; X=9000; Y=5000
+  Name=WY(12/12); IsAuto=Yes; Story=2F; Diaphragm=D1; Width=18000; Depth=10000; X=9000; Y=5000
+  Name=WY(2/12); IsAuto=Yes; Exposure=Diaphragms; TopStory=RD; BotStory=GF; Parapet=No; UserCp=No; ASCECase=1; e1=0; e2=0; WindSpeed=150; ExpType=B; kzt=1; GustFact=0.85; Kd=0.85; WidthType=Auto; Angle=90; Story=RD; Diaphragm=D1; Width=18000; Depth=10000; X=9000; Y=5000
+  Name=WY(2/12); IsAuto=Yes; Story=3F; Diaphragm=D1; Width=18000; Depth=10000; X=9000; Y=5000
+  Name=WY(2/12); IsAuto=Yes; Story=2F; Diaphragm=D1; Width=18000; Depth=10000; X=9000; Y=5000
+  Name=WY(3/12); IsAuto=Yes; Exposure=Diaphragms; TopStory=RD; BotStory=GF; Parapet=No; UserCp=No; ASCECase=2; e1=0.15; e2=0; WindSpeed=150; ExpType=B; kzt=1; GustFact=0.85; Kd=0.85; WidthType=Auto; Angle=0; Story=RD; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+  Name=WY(3/12); IsAuto=Yes; Story=3F; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+  Name=WY(3/12); IsAuto=Yes; Story=2F; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+  Name=WY(4/12); IsAuto=Yes; Exposure=Diaphragms; TopStory=RD; BotStory=GF; Parapet=No; UserCp=No; ASCECase=2; e1=-0.15; e2=0; WindSpeed=150; ExpType=B; kzt=1; GustFact=0.85; Kd=0.85; WidthType=Auto; Angle=0; Story=RD; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+  Name=WY(4/12); IsAuto=Yes; Story=3F; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+  Name=WY(4/12); IsAuto=Yes; Story=2F; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+  Name=WY(5/12); IsAuto=Yes; Exposure=Diaphragms; TopStory=RD; BotStory=GF; Parapet=No; UserCp=No; ASCECase=2; e1=0.15; e2=0; WindSpeed=150; ExpType=B; kzt=1; GustFact=0.85; Kd=0.85; WidthType=Auto; Angle=90; Story=RD; Diaphragm=D1; Width=18000; Depth=10000; X=9000; Y=5000
+  Name=WY(5/12); IsAuto=Yes; Story=3F; Diaphragm=D1; Width=18000; Depth=10000; X=9000; Y=5000
+  Name=WY(5/12); IsAuto=Yes; Story=2F; Diaphragm=D1; Width=18000; Depth=10000; X=9000; Y=5000
+  Name=WY(6/12); IsAuto=Yes; Exposure=Diaphragms; TopStory=RD; BotStory=GF; Parapet=No; UserCp=No; ASCECase=2; e1=-0.15; e2=0; WindSpeed=150; ExpType=B; kzt=1; GustFact=0.85; Kd=0.85; WidthType=Auto; Angle=90; Story=RD; Diaphragm=D1; Width=18000; Depth=10000; X=9000; Y=5000
+  Name=WY(6/12); IsAuto=Yes; Story=3F; Diaphragm=D1; Width=18000; Depth=10000; X=9000; Y=5000
+  Name=WY(6/12); IsAuto=Yes; Story=2F; Diaphragm=D1; Width=18000; Depth=10000; X=9000; Y=5000
+  Name=WY(7/12); IsAuto=Yes; Exposure=Diaphragms; TopStory=RD; BotStory=GF; Parapet=No; UserCp=No; ASCECase=3; e1=0; e2=0; WindSpeed=150; ExpType=B; kzt=1; GustFact=0.85; Kd=0.85; WidthType=Auto; Angle=0; Story=RD; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+  Name=WY(7/12); IsAuto=Yes; Story=3F; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+  Name=WY(7/12); IsAuto=Yes; Story=2F; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+  Name=WY(8/12); IsAuto=Yes; Exposure=Diaphragms; TopStory=RD; BotStory=GF; Parapet=No; UserCp=No; ASCECase=3; e1=0; e2=0; WindSpeed=150; ExpType=B; kzt=1; GustFact=0.85; Kd=0.85; WidthType=Auto; Angle=90; Story=RD; Diaphragm=D1; Width=18000; Depth=10000; X=9000; Y=5000
+  Name=WY(8/12); IsAuto=Yes; Story=3F; Diaphragm=D1; Width=18000; Depth=10000; X=9000; Y=5000
+  Name=WY(8/12); IsAuto=Yes; Story=2F; Diaphragm=D1; Width=18000; Depth=10000; X=9000; Y=5000
+  Name=WY(9/12); IsAuto=Yes; Exposure=Diaphragms; TopStory=RD; BotStory=GF; Parapet=No; UserCp=No; ASCECase=4; e1=0.15; e2=0.15; WindSpeed=150; ExpType=B; kzt=1; GustFact=0.85; Kd=0.85; WidthType=Auto; Angle=0; Story=RD; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+  Name=WY(9/12); IsAuto=Yes; Story=3F; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+  Name=WY(9/12); IsAuto=Yes; Story=2F; Diaphragm=D1; Width=10000; Depth=18000; X=9000; Y=5000
+
+Load cases starting with W: {'WX': 'Linear Static', 'WY': 'Linear Static'}
+
+--- Base reactions of the wind cases (forces in kN, moments in kN-m x 1000 = as read / 1e3) ---
+OutputCase  CaseType     StepType StepNumber      FX      FY  FZ          MX          MY          MZ
+        WX LinStatic Step By Step          1 -142.22    0.00 0.0      -35.04 -1207436.07   711109.72
+        WX LinStatic Step By Step          2    0.00 -295.71 0.0  2500390.60       65.02 -2661355.31
+        WX LinStatic Step By Step          3 -106.67    0.00 0.0     -146.90  -905531.52   373338.63
+        WX LinStatic Step By Step          4 -106.67    0.00 0.0       94.34  -905622.58   693325.94
+        WX LinStatic Step By Step          5    0.00 -221.78 0.0  1874841.98      218.90 -2594798.63
+        WX LinStatic Step By Step          6    0.00 -221.78 0.0  1875743.92     -121.37 -1397234.34
+        WX LinStatic Step By Step          7 -106.67  192.00 0.0 -1627238.65  -905619.55  2261329.59
+        WX LinStatic Step By Step          8 -123.21 -221.78 0.0  1875262.76 -1043591.38 -1379962.26
+        WX LinStatic Step By Step          9  -80.07  144.13 0.0 -1221897.73  -679673.49  1188272.67
+        WX LinStatic Step By Step         10  -80.07  144.13 0.0 -1221129.90  -679963.34  2206736.82
+        WX LinStatic Step By Step         11  -92.49 -166.48 0.0  1407254.23  -783222.13 -1624107.66
+        WX LinStatic Step By Step         12  -92.49 -166.48 0.0  1408140.26  -783556.39  -447675.69
+        WY LinStatic Step By Step          1 -142.22    0.00 0.0      -35.04 -1207436.07   711109.72
+        WY LinStatic Step By Step          2    0.00 -295.71 0.0  2500390.60       65.02 -2661355.31
+        WY LinStatic Step By Step          3 -106.67    0.00 0.0     -146.90  -905531.52   373338.63
+        WY LinStatic Step By Step          4 -106.67    0.00 0.0       94.34  -905622.58   693325.94
+        WY LinStatic Step By Step          5    0.00 -221.78 0.0  1874841.98      218.90 -2594798.63
+        WY LinStatic Step By Step          6    0.00 -221.78 0.0  1875743.92     -121.37 -1397234.34
+        WY LinStatic Step By Step          7 -106.67  192.00 0.0 -1627238.65  -905619.55  2261329.59
+        WY LinStatic Step By Step          8 -123.21 -221.78 0.0  1875262.76 -1043591.38 -1379962.26
+        WY LinStatic Step By Step          9  -80.07  144.13 0.0 -1221897.73  -679673.49  1188272.67
+        WY LinStatic Step By Step         10  -80.07  144.13 0.0 -1221129.90  -679963.34  2206736.82
+        WY LinStatic Step By Step         11  -92.49 -166.48 0.0  1407254.23  -783222.13 -1624107.66
+        WY LinStatic Step By Step         12  -92.49 -166.48 0.0  1408140.26  -783556.39  -447675.69
+
+--- Plan dimensions from the joints ('Point Object Connectivity'), mm ---
+X from 0 to 18000  (width 18000)
+Y from 0 to 10000  (width 10000)
+
+--- Grid lines ('Grid Definitions - Grid Lines') ---
+Name            LineType ID    X1    Y1    X2    Y2 BubbleLoc Visible
+  G1 General (Cartesian)  A     0 -2500     0 12500     Start     Yes
+  G1 General (Cartesian)  B  6000 -2500  6000 12500     Start     Yes
+  G1 General (Cartesian)  C 12000 -2500 12000 12500     Start     Yes
+  G1 General (Cartesian)  D 18000 -2500 18000 12500     Start     Yes
+  G1 General (Cartesian)  1 -2500     0 20500     0     Start     Yes
+  G1 General (Cartesian)  2 -2500  5000 20500  5000     Start     Yes
+  G1 General (Cartesian)  3 -2500 10000 20500 10000     Start     Yes

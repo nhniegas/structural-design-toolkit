@@ -1,0 +1,116 @@
+NOTES ON REQUEST 02
+===================
+
+How this was run
+----------------
+Same PC and method as 2026-10-05/: ETABS Ultimate 22.6.0, toolkit 0.1.1 (main
+checkout), the real commands in a private ETABS, dialogs answered by a script.
+Each dialog is printed with its options, its default and the answer given:
+"[default]" = default accepted, "[chosen for this test]" = the answer this
+request asked for. Run on 2026-10-05, 00:15 to 00:21. Every item used a fresh
+copy of the same 3-storey test model, opened with N-mm present units.
+
+
+A. Drift: which story height
+----------------------------
+GF has no diaphragm (A1), so your reading of center_drifts is right: 2F is measured
+from the base, over 5.5 m. Numbers for the strength level (0.35 / 0.70), N-mm:
+
+                              EQXSD               EQYSD               wind (WX = WY)
+  sdt drift, centre of mass   0.00265 at 2F       0.00255 at 2F       0.00124 at 2F
+  sdt drift, outer corners    0.00278 at 2F       0.00301 at 2F       0.00130 at GF
+  ETABS Story Drifts (max)    0.002785 at 2F      0.003012 at 2F      0.001304 at GF
+  ETABS Story Drifts at GF    0.002761            0.002938            0.001304
+
+  Governing combinations: DRIFT 101 (1.2 + Ev) DL + f LL - 1.0 EQXSD,
+  DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 EQYSD, WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WX.
+
+Centre of mass displacement of 2F in those combinations (A2, last table):
+  UX = 14.559 mm, UY = 13.999 mm.
+  14.559 / 5500 = 0.002647 and 13.999 / 5500 = 0.002545: exactly what sdt prints, so
+  it does divide the 2F displacement by 5.5 m.
+  Over 4.5 m with nothing subtracted it would be 0.003235 and 0.003111. Those are the
+  values the kN-m run printed (0.00323, 0.00311), so in kN-m the height came out as 4.5.
+
+My arithmetic, not a toolkit result: neither 5.5 m nor 4.5 m with a zero start is the
+2F story drift, because GF moves. Taking the GF displacement as its ETABS story drift
+times 1.0 m (2.76 mm in X, 2.94 mm in Y):
+  X: (14.559 - 2.76) / 4500 = 0.00262      Y: (13.999 - 2.94) / 4500 = 0.00246
+So on this model the 5.5 m figure (0.00265, 0.00255) is close to the true centre value
+by coincidence: the 1.0 m footing story drifts about as much as 2F. It is not 18 % low
+here. What the centre-of-mass method does miss:
+  - the GF story itself, which has no diaphragm and so is never reported. Its ETABS
+    drift (0.00276 X, 0.00294 Y) is as large as 2F's, and it governs the wind case;
+  - torsion: the corner and ETABS values in Y (0.00301) are 18 % above the centre value.
+
+B. Wind
+-------
+WX and WY are the same pattern twice (B1): both 'Create All' at angle 0. Each expands
+into the same 12 sub-patterns covering both directions. Base reactions, both cases:
+step 1 FX -142.2 kN (ASCE case 1, angle 0); step 2 FY -295.7 kN (case 1, angle 90).
+Plan 18.0 m (X) by 10.0 m (Y), not square. So the identical drift is expected from how
+the patterns are defined, and the wind combinations are run twice for nothing.
+
+C. Footing-level columns
+------------------------
+From the workbook (C1): lu = 500 mm; phi Vn 835 kN (600x600), 1,114 kN (600x800).
+  GF-C1  (corner, 600x600): Ve 8,869 to 9,224 kN, ratio 10.6 to 11.0
+  GF-C2  (edge, 600x600):   Ve 2,472 to 2,596 kN, ratio 3.0 to 3.1
+  GF-C2A (600x800):         Ve 3,676 to 3,942 kN, ratio 3.2 to 3.4
+My reading, not checked in the code: Ve x lu for GF-C1 is 9,224 x 0.5 = 4,612 kN-m, far
+more than two Mpr of a 600x600 column with 16D25 can be. For GF-C2, 2,600 x 0.5 =
+1,300 kN-m is of the order of one Mpr. The beams at the top joint are tie beams with
+2D28 (sum of Mn 203 to 406 kN-m in the 2-C2 bottom rows of D1), so a cap by the beam
+moments at the top would give far less than either. I could not tell from the workbook
+which moments were used; it has no Mpr columns. The corner column having the largest Ve
+is the odd part.
+With 'check the foundation level: No' (C2) the 12 failures go away: 25 pass, 22 fail.
+
+D. Joint shear
+--------------
+From D1. Both joints are 600x600 columns with f'c 27.59 MPa and G_500X500 girders
+(500 wide, 500 deep) carrying 4D28 top and 4D28 bottom.
+Worked back from the workbook (my arithmetic):
+  - Capacity: 1,928.76 kN = 0.85 x 1.2 x sqrt(27.59) x 600 x 600 / 1000. So phi = 0.85,
+    the coefficient is 1.2 (MPa units; ACI 18.8.4.1 'three faces or two opposite
+    faces') and Aj is the full 600 x 600 column. At the top of 3-C1A the capacity is
+    1,339.42 kN = 0.85 x 1.2 x sqrt(27.59) x 500 x 500: there the 500x500 column above
+    (RD-C1A) is used. Both directions get the same coefficient, with one beam or two.
+  - Demand: one beam, 1.25 x 413.69 x 2,463 mm2 (4D28) = 1,273.7 kN less the column
+    shear gives 1,109 kN (column shear 164 kN); two beams give exactly twice, 2,218 kN.
+    So with two beams both the top bars of one and the bottom bars of the other are
+    taken, as you said.
+  - Is 4D28 needed? Top Mu at these ends: 194 to 198 kN-m at 2F, 160 to 162 at 3F
+    (GX girders), 128 to 170 (GY). Bottom Mu 61 to 124 kN-m. Rough hand check with
+    d = 440 mm: phi Mn is about 192 kN-m for 2D28, 280 for 3D28, 360 for 4D28. So
+    strength needs 3 bars on top at 2F and 2 elsewhere, and 2 at the bottom. The 4 top
+    and 4 bottom come from something other than strength (a minimum number of bars for
+    the 500 mm width, or a detailing rule); the workbook does not say which. The two
+    SMRF checks are PASS. Halving the bars would roughly halve the joint demand.
+
+E. Default deflection combinations
+----------------------------------
+See E1. The default of each of the four role dialogs is a factored ULS combination,
+and 'Let the toolkit add it' is the last option. A user who presses Enter four times
+gets deflections from 1.4 DL and 1.2 DL + 1.6 LL. The run still reports 0 failing.
+
+F. Earth cover
+--------------
+No crash on this model, because its narrowest beam is 300 mm (F1). The 250 mm case of
+the simulation needs a model with a 250 mm beam; none here.
+
+G. Untagged members
+-------------------
+See G1. Readiness dialog: Continue (default) / Stop. Untagged dialog: the default is
+'Tag them now, in this model (sdt tag)'.
+
+Timings
+-------
+sdt drift 36 s (centre, after an analysis) and 27 s (corners); sdt analyze 11 to 17 s;
+sdt beams 22 to 24 s; sdt columns 54 s; the two stopped sdt beams runs 1 s each.
+
+Not done
+--------
+- A 250 mm beam for F, a model created in kN-m, a true basement: none on this machine.
+- Nothing was traced in the toolkit code beyond what is quoted; the arithmetic above
+  is from the output numbers.
