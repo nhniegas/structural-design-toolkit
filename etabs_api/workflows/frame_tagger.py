@@ -480,7 +480,7 @@ TAG_TARGETS = {
 
 def auto_tag_frames(prefixes: dict[str, str] | None = None,
                     in_place: bool | None = None) -> str | None:
-    """Tag every beam and column of the open ETABS model (``xs tag``).
+    """Tag every beam and column of the open ETABS model (``sdt tag``).
 
     ``in_place`` False (the default answer) saves the model as a tagged copy
     in its own folder first, so the original file is not changed; True tags

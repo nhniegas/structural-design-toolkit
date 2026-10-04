@@ -5,7 +5,7 @@ Read only: nothing in the model is changed. Each check prints one line,
     [FAIL] Seismic: Story range should be GF to RD: EQXPE 3F-RD   (NSCP 208.5.2.3)
 
 with OK, INFO (a fact to confirm), WARN (likely missing or unusual), FAIL
-(wrong) or N/A (needs analysis results; run ``xs analyze``).
+(wrong) or N/A (needs analysis results; run ``sdt analyze``).
 
 The basis is NSCP 2015 (7th edition): loads 205, combinations 203, wind 207,
 earthquake 208 and the special moment frame limits of 418 (ACI 318M-14
@@ -104,10 +104,10 @@ def check_model(d: ModelData) -> list[Finding]:
     out.append(Finding("Model", WARN if untagged else OK,
                        f"{len(untagged)} beams/columns without a tag (numeric names; the design "
                        f"skips them){': ' + ', '.join(untagged[:10]) if untagged else ''}"
-                       if untagged else "Every beam and column is tagged.", "xs tag"))
+                       if untagged else "Every beam and column is tagged.", "sdt tag"))
     odd = sorted({str(p) for p in sections["SectProp"] if parse_section(str(p)) is None})
     out.append(Finding("Model", WARN if odd else OK,
-                       f"Sections outside the setup naming (not resized by xs design): "
+                       f"Sections outside the setup naming (not resized by sdt design): "
                        f"{', '.join(odd[:8])}" if odd else
                        "Every frame uses a setup section (G_, B_, FTB_, CR_, C_)."))
     floors = d.table("Floor Object Connectivity")
@@ -501,7 +501,7 @@ def check_seismic(d: ModelData, settings: dict | None = None) -> list[Finding]:
     # results
     if not d.analysed:
         out.append(Finding("Seismic", NA, "Base shear coefficient, period cap, response "
-                           "spectrum scaling, modal mass and drift: not analysed (run xs analyze)."))
+                           "spectrum scaling, modal mass and drift: not analysed (run sdt analyze)."))
         return out
     out += _check_static_results(d, seismic, bottom)
     from etabs_api.workflows.model_setup import DRIFT_SUFFIX
@@ -526,9 +526,9 @@ def check_seismic(d: ModelData, settings: dict | None = None) -> list[Finding]:
                            f"{case}: base shear {abs(values[axis]) / 1e3:,.0f} kN = "
                            f"{ratio * 100:.0f} % of the static {static / 1e3:,.0f} kN" +
                            ("" if status == OK else f" ({regular * 100:g} % is enough only for a "
-                            f"regular structure, {irregular * 100:g} % if irregular; xs analyze "
+                            f"regular structure, {irregular * 100:g} % if irregular; sdt analyze "
                             f"scales it to {irregular * 100:g} %)" if status == WARN else
-                            f" (below {regular * 100:g} %: scale it, xs analyze)"),
+                            f" (below {regular * 100:g} %: scale it, sdt analyze)"),
                            "NSCP 208.5.3.5.4"))
     if not d.modal.empty:
         for axis in ("UX", "UY"):
@@ -629,7 +629,7 @@ def _check_drift(d: ModelData, seismic: pd.DataFrame) -> list[Finding]:
     out = []
     if d.drift_from == "cases":
         out.append(Finding("Seismic", WARN, "No DRIFT combinations: drift from the load cases "
-                           "alone (run xs setup to add the 203.3 drift combinations).",
+                           "alone (run sdt setup to add the 203.3 drift combinations).",
                            "NSCP 208.6.4.1"))
     parents = seismic["Name"].astype(str).str.split("(").str[0]
     drift_rows = seismic[parents.map(lambda n: d.pattern_types.get(n) == SEISMIC_DRIFT)]
@@ -705,7 +705,7 @@ def check_combinations(d: ModelData) -> list[Finding]:
     defl = [n for n in names if n.startswith("DEF")]
     out.append(Finding("Combinations", OK if len(defl) >= 3 else WARN,
                        f"{len(defl)} deflection combinations." if defl else
-                       "No DEF deflection combinations (xs beams adds them)."))
+                       "No DEF deflection combinations (sdt beams adds them)."))
     missing = sorted({str(load) for load in combos["LoadName"].dropna().astype(str)
                       if load not in cases and load not in set(names)})
     out.append(Finding("Combinations", FAIL if missing else OK,

@@ -885,7 +885,9 @@ def build_grid_column_model(
 
 
 def _defaults_path() -> str:
-    return os.path.join(os.path.expanduser("~"), ".xlwings_structural", "grid_column_model.json")
+    from utilities.user_settings import settings_path as user_settings_path
+
+    return user_settings_path("grid_column_model.json")
 
 
 def run_grid_column_model() -> str | None:

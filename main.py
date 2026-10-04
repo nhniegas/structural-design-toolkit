@@ -31,8 +31,8 @@
                              (design/wind_calculator_directional_asce7.py)
     python main.py --help    list the commands
 
-After ``pip install -e .`` (pyproject.toml) the same commands run as ``xs setup``,
-``xs wind`` and so on, from any folder while the environment is active.
+After ``pip install -e .`` (pyproject.toml) the same commands run as ``sdt setup``,
+``sdt wind`` and so on, from any folder while the environment is active.
 
 Each command asks for its inputs in dialogs. The design checks then ask whether
 to print the results in the terminal, export a PDF report, or both.
@@ -140,9 +140,12 @@ COMMANDS = {
 }
 
 
+COMMAND_NAMES = {"sdt": "sdt", "xs": "xs"}  # installed scripts (pyproject.toml)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="xs" if Path(sys.argv[0]).stem == "xs" else "python main.py",
+        prog=COMMAND_NAMES.get(Path(sys.argv[0]).stem, "python main.py"),
         description="ETABS workflows and design checks. Each one asks for its inputs in dialogs.",
     )
     commands = parser.add_subparsers(dest="command", metavar="command")

@@ -1,6 +1,6 @@
 """Beam design for ACI 318M-14: flexure, shear, torsion, SMRF, detailing and schedules.
 
-The terminal workflow (``xs beams``) is in ``design/concrete_workflow.py``;
+The terminal workflow (``sdt beams``) is in ``design/concrete_workflow.py``;
 this module designs from tables (``design_beams``) and writes the results
 file, the DXF schedules and the calculation report.
 """
@@ -672,19 +672,21 @@ class BeamTorsionDesign:
 
         # cot(theta) squared; theta = 45 deg gives 1.0 (ACI 22.7.6.1.2).
         cot_theta = 1.0 / math.tan(math.radians(cfg.truss_angle_degrees))
-        fyt_design = self.fyt  # confinement/torsion may use the full fyt
+        # ACI 20.2.2.4 (NSCP 420.2.2.4): fy and fyt are at most 420 MPa for torsion.
+        fyt_design = min(self.fyt, self.code.material.max_fyt_shear)
+        fy_design = min(self.fy, self.code.material.max_fyt_shear)
         if torsion_required:
             Tn_req = (Tu_design * 1e6) / phi_t
             # Closed stirrup requirement from the torsional shear-flow equilibrium (Eq. 22.7.6.1a).
             At_s_demand = Tn_req / (2.0 * self.A_o * fyt_design * cot_theta)
             # Longitudinal torsion steel (Eq. 22.7.6.1b).
-            Al_demand = At_s_demand * self.p_h * (fyt_design / self.fy) * cot_theta**2
+            Al_demand = At_s_demand * self.p_h * (fyt_design / fy_design) * cot_theta**2
 
             # ACI 9.6.4.3: the minimum uses fy (NOT fyt) in the first term.
-            term_1 = cfg.al_min_coeff * sqrt_fc * self.Acp / self.fy
+            term_1 = cfg.al_min_coeff * sqrt_fc * self.Acp / fy_design
             at_s_floor = cfg.at_s_min_coeff * self.width / fyt_design
-            Al_min_a = term_1 - At_s_demand * self.p_h * (fyt_design / self.fy)
-            Al_min_b = term_1 - at_s_floor * self.p_h * (fyt_design / self.fy)
+            Al_min_a = term_1 - At_s_demand * self.p_h * (fyt_design / fy_design)
+            Al_min_b = term_1 - at_s_floor * self.p_h * (fyt_design / fy_design)
             Al_design = max(Al_demand, max(0.0, min(Al_min_a, Al_min_b)))
         else:
             At_s_demand = 0.0
@@ -692,8 +694,8 @@ class BeamTorsionDesign:
 
         shear_cfg = self.code.beam_shear
         Av_2At_s_min = max(
-            (shear_cfg.av_min_coeff_sqrt_fc * sqrt_fc * self.width) / self.fyt,
-            (shear_cfg.av_min_coeff_fyt * self.width) / self.fyt,
+            (shear_cfg.av_min_coeff_sqrt_fc * sqrt_fc * self.width) / fyt_design,
+            (shear_cfg.av_min_coeff_fyt * self.width) / fyt_design,
         )
         s_max_torsion = min(self.p_h / cfg.s_max_ph_divisor, cfg.s_max_abs)
 
@@ -1217,6 +1219,15 @@ def execute_beam_design(
             min_st = df_forces_beam["Station"].min()
             max_st = df_forces_beam["Station"].max()
             span_length = max_st - min_st
+            # Clear span ln between the support faces, for the probable-moment
+            # shear Ve = (Mpr1 + Mpr2) / ln (ACI 18.6.5.1): the joint-to-joint
+            # length less half of each supporting column.
+            support_half = sum(
+                0.5 * float(prop_row.get(key) or 0.0)
+                for key in ("SupportWidth_I", "SupportWidth_J")
+                if pd.notna(prop_row.get(key))
+            )
+            clear_span = span_length - support_half if span_length > support_half else span_length
 
             # Moment design zones use the end quarter of the modeled span.
             m_left_boundary = min_st + detailing.moment_zone_fraction * span_length
@@ -1289,7 +1300,7 @@ def execute_beam_design(
                 top_row = prop_row.to_dict()
                 top_row["Combo"] = combo
                 top_row["Face"] = "TOP"
-                top_row["ClearSpan_Ln"] = span_length
+                top_row["ClearSpan_Ln"] = clear_span
                 top_row["Mu_left"] = Mneg_left
                 top_row["Mu_mid"] = Mneg_mid
                 top_row["Mu_right"] = Mneg_right
@@ -1305,7 +1316,7 @@ def execute_beam_design(
                 bot_row = prop_row.to_dict()
                 bot_row["Combo"] = combo
                 bot_row["Face"] = "BOTTOM"
-                bot_row["ClearSpan_Ln"] = span_length
+                bot_row["ClearSpan_Ln"] = clear_span
                 bot_row["Mu_left"] = Mpos_left
                 bot_row["Mu_mid"] = Mpos_mid
                 bot_row["Mu_right"] = Mpos_right
@@ -1347,6 +1358,7 @@ def execute_beam_design(
         df_grav = df_b[df_b["Combo"] == gravity_combo_name]
         Vu_grav_left = df_grav["Vu_left"].max() if not df_grav.empty else 0.0
         Vu_grav_right = df_grav["Vu_right"].max() if not df_grav.empty else 0.0
+        Vu_grav_mid = df_grav["Vu_mid_2h"].max() if not df_grav.empty else 0.0
 
         prev_state = None
         smrf_flexure_check = "N/A"
@@ -1544,6 +1556,7 @@ def execute_beam_design(
             min_legs = detailing.min_stirrup_legs
             gov_legs_left = gov_legs_mid = gov_legs_right = min_legs
             min_s_left = min_s_mid = min_s_right = detailing.max_spacing_default
+            section_failures: list[str] = []
 
             for combo_name in df_b["Combo"].unique():
                 df_c_top = df_b[
@@ -1555,7 +1568,14 @@ def execute_beam_design(
                     if seismic_here
                     else df_c_top["Vu_left"]
                 )
-                Vu_M = df_c_top["Vu_mid_2h"]
+                # ACI 18.6.5.1: the probable-moment shear acts along the whole span,
+                # so beyond 2h it is the sway shear plus the gravity shear there.
+                Vu_M = (
+                    max(df_c_top["Vu_mid_2h"],
+                        seismic_res["V_sway_max"] + abs(Vu_grav_mid))
+                    if seismic_here and not is_cantilever
+                    else df_c_top["Vu_mid_2h"]
+                )
                 Vu_R = (
                     max(df_c_top["Vu_right"], seismic_res["Vu_seismic_right"])
                     if seismic_here
@@ -1606,6 +1626,15 @@ def execute_beam_design(
 
                         s_r = shear.solve_shear_capacity(Vu_val)
                         t_r = torsion.solve_torsion_capacity(Tu_val, Vu_val)
+                        if s_r["shear_failed"] or t_r["torsion_failed"]:
+                            failure = (
+                                "SHEAR STRENGTH: Vu > phi(Vc + 0.66 sqrt(fc') bw d), "
+                                "ACI 22.5.1.2" if s_r["shear_failed"]
+                                else "SHEAR STRENGTH: shear + torsion stress above "
+                                "ACI 22.7.7.1"
+                            )
+                            if failure not in section_failures:
+                                section_failures.append(failure)
 
                         # Required transverse steel ratio must satisfy shear-plus-torsion and torsion minimums.
                         des_ratio = max(
@@ -1782,6 +1811,8 @@ def execute_beam_design(
                 summary["Design_Status"] = (
                     "FAILED: SMRF STEEL RATIO ABOVE 2.5% (ACI 18.6.3.1)"
                 )
+            elif section_failures:  # the section, not the stirrups, is too small
+                summary["Design_Status"] = "FAILED: " + "; ".join(section_failures)
             elif (
                 s_2h < detailing.min_acceptable_spacing
                 or s_mid < detailing.min_acceptable_spacing
@@ -1906,6 +1937,39 @@ def _beam_sort_key(name) -> tuple:
 BEAM_BAR_INPUTS = ("dm", "ds", "dw", "fyw", "cc")  # main, stirrup, web bar, web fy, cover
 
 
+def _support_widths(frame_df: pd.DataFrame, conn_df: pd.DataFrame) -> pd.DataFrame:
+    """The largest side of the column at each end of every beam (0 when none), mm.
+
+    The beam direction is not used, so the larger column side is taken: the
+    clear span, and with it the probable-moment shear, errs on the safe side.
+    """
+    frame = frame_df.copy()
+    frame.columns = [str(c).strip() for c in frame.columns]
+    conn = conn_df.copy()
+    conn.columns = [str(c).strip() for c in conn.columns]
+    if not {"UniqueName", "DesignType", "UniquePtI", "UniquePtJ"} <= set(conn.columns):
+        return pd.DataFrame(columns=["UniqueName", "SupportWidth_I", "SupportWidth_J"])
+    sizes = {}
+    for row in frame.to_dict("records"):
+        values = [pd.to_numeric(row.get(key), errors="coerce")
+                  for key in ("Width", "Depth", "Diameter")]
+        values = [float(v) for v in values if pd.notna(v) and float(v) > 0]
+        if values:
+            sizes[str(row.get("UniqueName"))] = max(values)
+    width_at: dict[str, float] = {}
+    columns = conn[conn["DesignType"].astype(str).eq("Column")]
+    for row in columns.to_dict("records"):
+        side = sizes.get(str(row["UniqueName"]), 0.0)
+        for point in (row["UniquePtI"], row["UniquePtJ"]):
+            width_at[point] = max(width_at.get(point, 0.0), side)
+    beams = conn[conn["DesignType"].astype(str).eq("Beam")]
+    return pd.DataFrame({
+        "UniqueName": beams["UniqueName"].to_numpy(),
+        "SupportWidth_I": [width_at.get(p, 0.0) for p in beams["UniquePtI"]],
+        "SupportWidth_J": [width_at.get(p, 0.0) for p in beams["UniquePtJ"]],
+    })
+
+
 def prepare_beam_table(frame_df: pd.DataFrame, conn_df: pd.DataFrame,
                        bars: dict) -> pd.DataFrame:
     """The beams of FRAME DATA with their support status and the bar inputs.
@@ -1919,6 +1983,8 @@ def prepare_beam_table(frame_df: pd.DataFrame, conn_df: pd.DataFrame,
     frame_df.columns = [str(c).strip() for c in frame_df.columns]
     conn_df.columns = [str(c).strip() for c in conn_df.columns]
     support_df = identify_cantilever_beams(frame_df, conn_df)
+    support_df = support_df.merge(_support_widths(frame_df, conn_df), on="UniqueName",
+                                  how="left")
     beam_df = frame_df.merge(support_df, on="UniqueName", how="left")
     if "DesignType" in beam_df.columns:
         beam_df = beam_df[beam_df["DesignType"] == "Beam"].copy()
@@ -1940,7 +2006,9 @@ DEFLECTION_LIMIT_OPTIONS = {
 
 
 def _deflection_settings_path() -> str:
-    return os.path.join(os.path.expanduser("~"), ".xlwings_structural", "beam_deflection.json")
+    from utilities.user_settings import settings_path as user_settings_path
+
+    return user_settings_path("beam_deflection.json")
 
 
 def ask_deflection_limit() -> int | None:
