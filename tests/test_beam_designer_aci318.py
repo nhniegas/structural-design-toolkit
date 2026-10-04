@@ -862,3 +862,54 @@ def test_beam_results_are_saved_as_a_formatted_workbook(tmp_path):
     assert sheet.title == "BEAM DESIGN"
     assert sheet.cell(row=1, column=1).font.bold
     assert sheet.max_row == len(results) + 1
+
+
+# ==========================================================================
+# CODE CHECKS ADDED WITH THE NSCP 2015 REVIEW
+# ==========================================================================
+def test_shear_beyond_the_section_limit_fails_the_beam():
+    """phi(Vc + Vs,max) = 0.75 (0.17 + 0.66) sqrt(28) x 300 x d < 1500 kN: the section,
+    not the stirrups, is too small (ACI 22.5.1.2); the status must say so."""
+    results = beam.execute_beam_design(
+        _mock_beam_properties(), _mock_force_table(wu=500.0), False, "GRAV")
+    assert results["Design_Status"].str.contains("SHEAR STRENGTH").all()
+
+
+def test_the_clear_span_runs_face_to_face_of_the_columns():
+    """Ve = sum Mpr / ln (ACI 18.6.5.1): 6000 mm between joints, 500 mm columns
+    at both ends -> ln = 6000 - 250 - 250 = 5500 mm."""
+    props = _mock_beam_properties().assign(SupportWidth_I=500.0, SupportWidth_J=500.0)
+    results = beam.execute_beam_design(props, _mock_force_table(), True, "GRAV")
+    assert results["ClearSpan_Ln"].iloc[0] == pytest.approx(5500.0)
+
+
+def test_support_widths_come_from_the_columns_at_each_end():
+    frame = pd.DataFrame({
+        "UniqueName": ["2GX-1", "2-C1", "2-C2"], "DesignType": ["Beam", "Column", "Column"],
+        "Width": [300, 400, 600], "Depth": [500, 500, 600], "Diameter": [0, 0, 0],
+    })
+    conn = pd.DataFrame({
+        "UniqueName": ["2GX-1", "2-C1", "2-C2"], "DesignType": ["Beam", "Column", "Column"],
+        "UniquePtI": ["a", "x", "y"], "UniquePtJ": ["b", "a", "b"],
+    })
+    widths = beam._support_widths(frame, conn).set_index("UniqueName")
+    assert widths.loc["2GX-1", "SupportWidth_I"] == 500
+    assert widths.loc["2GX-1", "SupportWidth_J"] == 600
+
+
+def test_torsion_steel_uses_fyt_at_most_420_mpa():
+    """ACI 20.2.2.4: a 550 MPa stirrup is designed as 420 MPa for torsion."""
+    plain = beam.BeamTorsionDesign(300, 600, 540, 28, 415, 420, 10, 40)
+    strong = beam.BeamTorsionDesign(300, 600, 540, 28, 415, 550, 10, 40)
+    assert strong.solve_torsion_capacity(40.0, 50.0)["At_s_demand"] == pytest.approx(
+        plain.solve_torsion_capacity(40.0, 50.0)["At_s_demand"])
+
+
+def test_smrf_midspan_stirrups_carry_the_probable_moment_shear():
+    """Beyond 2h the design shear is the sway shear plus the gravity shear there."""
+    seismic = beam.execute_beam_design(_mock_beam_properties(), _mock_force_table(wu=20.0),
+                                       True, "GRAV")
+    gravity = beam.execute_beam_design(_mock_beam_properties(), _mock_force_table(wu=20.0),
+                                       False, "GRAV")
+    assert seismic["Spacing_Mid"].iloc[0] <= gravity["Spacing_Mid"].iloc[0]
+    assert seismic["V_sway_max_kN"].iloc[0] > 0
