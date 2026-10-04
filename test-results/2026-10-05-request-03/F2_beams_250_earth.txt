@@ -1,0 +1,167 @@
+sdt beams WITH A 250 mm TIE BEAM AND EARTH COVER
+================================================
+On a fresh copy the section FTB_250X500_C04_G60 was defined through the API as a copy
+of FTB_300X500_C04_G60 (same material C04, depth 500, rebar data and modifiers) with a
+width of 250 mm, and assigned to one GF tie beam, GFGX-1. The copy was saved and
+sdt analyze run. Then sdt beams, 'Cover against Earth': Yes, level GF; all else
+default.
+
+RESULT: IT CRASHES, as in the simulation. After 18 s in the progress window the whole
+command stops with
+    ValueError: SECTION DETAILING ERROR: Beam width (250 mm) fits max 1 main bars per
+    layer, but requires 2 stirrup legs!
+raised in check_stirrup_leg_anchorage (beam_designer_aci318.py, line 1094), called
+from execute_beam_design (line 1697). The traceback is below.
+No output file was written: the results folder is empty (no .xlsx, .dxf, .pdf, no
+summary) and no design data file was saved beside the model. The other 101 beams are
+lost with it. Not tried: the same beam without the earth cover.
+One thing about this log: the earth cover dialog shows a third option, 'Yes - the same
+levels as last time: GF', as its default. That is an answer remembered from the
+request 02 test run (see notes.txt), not what a first-time user would see.
+
+--- defining and assigning the 250 mm section ---
+Model: C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\r3-250\r3-250.$et
+GetRectangle(FTB_300X500_C04_G60): ['', 'C04', 500.0, 300.0, 16711680, '', '272ec215-8c5a-42c1-953c-6e2fa647dff6', 0]
+present units 9; FTB_300X500_C04_G60: material C04, depth 500.0, width 300.0
+SetRectangle(FTB_250X500_C04_G60, C04, 500.0, 250): 0
+GetRebarBeam: ['G60', 'G60', 60.0, 60.0, 0.0, 0.0, 0.0, 0.0, 0]
+SetRebarBeam: 0
+GetModifiers: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+SetModifiers: [(1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0), 0]
+section of GFGX-1 before: FTB_300X500_C04_G60
+SetSection(GFGX-1, FTB_250X500_C04_G60): 0
+section of GFGX-1 after: FTB_250X500_C04_G60
+GetRectangle(new): ['', 'C04', 500.0, 250.0, 65280, '', 'cdfa6afe-1b92-40be-85fa-a3034016b280', 0]
+Save: 0
+
+How this was run
+----------------
+Same PC and method as before: ETABS Ultimate 22.6.0, toolkit 0.1.1 (main checkout),
+the real commands in a private ETABS, dialogs answered by a script. "[default]" =
+default accepted, "[chosen for this test]" = the answer this request asked for.
+Run on 2026-10-05, 00:34 to 00:42, on fresh copies of the same test model (N-mm).
+
+$ sdt beams     (toolkit 0.1.1, model r3-250.$et, present units N-mm, started 00:35:15)
+
+[DIALOG 00:35:15] choice: Beam Design
+    | Seismic combinations to design for (gravity and wind ULS combinations are always included):
+              1. Static (EQ)
+    (default) 2. Response spectrum (RSA)
+              3. Both
+    -> Response spectrum (RSA)   [default]
+
+[DIALOG 00:35:15] choice: Factored Forces
+    | Reduce the reducible live load?
+    (default) 1. Yes
+              2. No
+    -> Yes   [default]
+
+[DIALOG 00:35:15] choice: Factored Forces
+    | Live load reduction rule:
+    | 
+    | NSCP 2015 205.5: R = r (A - 14) %, r = 0.86 per m2 (the metric form of UBC's 0.08 per ft2), at most 40 % (one level) / 60 % and 23.1 (1 + D/L) %.
+    | 
+    | ASCE 7-10 4.7 (NSCP 205.6 alternate, and NSCP 405.2.3): L = Lo (0.25 + 4.57 / sqrt(KLL AT)), KLL 4 for columns and 2 for beams, when KLL AT is at least 37.16 m2; L at least 0.50 Lo (one level) / 0.40 Lo.
+    | 
+    | Both: no reduction above 4.8 kPa, except 20 % for members supporting more than one floor.
+    (default) 1. NSCP 2015 205.5
+              2. ASCE 7-10 4.7
+    -> NSCP 2015 205.5   [default]
+
+[DIALOG 00:35:15] choice: Factored Forces
+    | Tributary area for the live load reduction:
+    (default) 1. Geometric: halfway lines (as ETABS)
+              2. Analysis load share: 1 kPa on every floor, as the frame carries it
+    -> Geometric: halfway lines (as ETABS)   [default]
+
+[DIALOG 00:35:15] choice: Factored Forces
+    | Include pattern live load on the beams (ACI 318-14 6.4.2)?
+    | 
+    | Each span is also designed for its live load as a simple span (largest sagging) and with fixed ends (largest hogging), times the factor.
+    (default) 1. Yes
+              2. No
+    -> Yes   [default]
+
+[DIALOG 00:35:15] values: Factored Forces
+    | Pattern live load factor.
+    Factor on the live load = 0.75   [default]
+
+[DIALOG 00:35:15] choice: Beam Design
+    | SMRF (seismic) design? Gravity beams (on other beams only) are designed for gravity in any case.
+    (default) 1. Yes
+              2. No
+    -> Yes   [default]
+
+[DIALOG 00:35:15] choice: Beam Design
+    | Gravity combination for the beam seismic shear:
+    (default) 1. ULS 100 1.4 DL
+              2. ULS 101 1.2 DL + 1.6 LL + 0.5 Lr
+              3. ULS 102 1.2 DL + 1.6 Lr + f LL
+    -> ULS 100 1.4 DL   [default]
+
+[DIALOG 00:35:15] values: Beam Design
+    | Beam bars and cover.
+    Beam main bar (mm) = 28   [default]
+    Beam stirrup (mm) = 12   [default]
+    Beam web (side) bar (mm) = 12   [default]
+    Web bar fy (MPa) = 414   [default]
+    Beam cover (mm) = 40   [default]
+
+[DIALOG 00:35:15] choice: Beam Design - Cover against Earth
+    | Do the beams of any floor level need 75 mm cover (cast against or exposed to earth, such as footing tie beams and ground beams)? The other beams keep 40 mm. (last time: GF)
+              1. No - 40 mm cover on every level
+              2. Yes - choose the levels with 75 mm cover
+    (default) 3. Yes - the same levels as last time: GF
+    -> Yes - choose the levels with 75 mm cover   [chosen for this test]
+
+[DIALOG 00:35:15] two-list picker: Levels whose beams get 75 mm cover
+    | available: RD, 3F, 2F, GF
+    -> ['GF']   [chosen for this test]
+
+[DIALOG 00:35:15] choice: Beam Design - Deflection
+    | Do the beams support partitions or finishes likely to be damaged by deflection?
+    (default) 1. Yes: L/480 after partitions are installed
+              2. No: L/240
+    -> Yes: L/480 after partitions are installed   [default]
+
+[DIALOG 00:35:15] folder picker: Folder for the beam results, calculations and schedules
+    | 
+    -> C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\r3-250\results
+
+[PROGRESS WINDOW 00:35:15] Beam design
+    [00:35:15] Reading the analysis results and building the factored forces
+    [00:35:22] Beam 2BY-1  |  Level 2F / Combo: ULS 100 1.4 DL / Check: Demands: Mu, Vu and Tu at the supports and midspan
+    [00:35:22] Beam 2BY-1  |  Level 2F / Combo: ULS 101 1.2 DL + 1.6 LL + 0.5 Lr / Check: Demands: Mu, Vu and Tu at the supports and midspan
+    ... 11,509 more per-member progress lines left out ...
+[PROGRESS WINDOW closed after 18 s]
+Traceback (most recent call last):
+  File "C:\Users\NHELHA~1\AppData\Local\Temp\claude\C--Users-Nhel-Harold-Niegas-Desktop-structural-design-toolkit\02d65ae0-a37e-4bb2-b757-f747d48c58e8\scratchpad\harness.py", line 423, in main
+    sdt.main([command])
+    ~~~~~~~~^^^^^^^^^^^
+  File "C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\main.py", line 271, in main
+    COMMANDS[arguments.command][0]()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\main.py", line 127, in _beams
+    return run_beams()
+  File "C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\design\concrete_workflow.py", line 319, in run_beams
+    results = design_beams(tables, smrf, gravity, bars, divisor, progress=window.update,
+                           earth_cover_stories=earth_stories)
+  File "C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\design\beam_designer_aci318.py", line 2094, in design_beams
+    results = execute_beam_design(
+        df_beam_props=beam_props,
+    ...<3 lines>...
+        progress=progress,
+    )
+  File "C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\design\beam_designer_aci318.py", line 1697, in execute_beam_design
+    anch_check = check_stirrup_leg_anchorage(
+        eng.n_top,
+    ...<6 lines>...
+        c_cover,
+    )
+  File "C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\design\beam_designer_aci318.py", line 1094, in check_stirrup_leg_anchorage
+    raise ValueError(
+    ...<2 lines>...
+    )
+ValueError: SECTION DETAILING ERROR: Beam width (250 mm) fits max 1 main bars per layer, but requires 2 stirrup legs!
+
+[sdt beams ended 00:35:33 after 18 s, exit exception]

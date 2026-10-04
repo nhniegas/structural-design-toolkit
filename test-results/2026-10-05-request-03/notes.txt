@@ -1,0 +1,61 @@
+NOTES ON REQUEST 03
+===================
+
+How this was run
+----------------
+Same PC and method as before: ETABS Ultimate 22.6.0, toolkit 0.1.1 (main checkout),
+the real commands in a private ETABS, dialogs answered by a script. "[default]" =
+default accepted, "[chosen for this test]" = the answer this request asked for.
+Run on 2026-10-05, 00:34 to 00:42, on fresh copies of the same test model (N-mm).
+
+
+C. GF-C1 capacity shear
+-----------------------
+The PDF does not show the working (C3), so the Mpr at each end and any beam limit
+cannot be given. What the run does show:
+
+  Column  Largest Ve    in combination                           Pu with it
+  GF-C1   9,226.36 kN   ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA5   259.74 kN top, 703.08 kN
+                                                                  bottom: compression
+  GF-C2   2,595.58 kN   ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA1   607.31 kN: compression
+
+  (Positive Pu is compression: 1.4 DL gives +446 kN in GF-C1.)
+
+- Uplift is not the cause. GF-C1 is in compression in every combination but four:
+  ULS 110 (0.9 - Ev) DL + 1.0 RSA5 to RSA8 give Pu = -1.07 kN at the top, practically
+  zero, and their Ve (8,958 kN) is in the middle of the range.
+- Ve hardly depends on Pu: for GF-C1 it stays between 8,869 and 9,226 kN while Pu goes
+  from -1 to 703 kN. For GF-C2, 2,472 to 2,596 kN for Pu from 206 to 866 kN. So the
+  factor of about 3.6 between the two columns does not come from the axial load.
+- Both are CR_600X600 with 16 D25 and the same lu (500 mm), so the same Mpr would be
+  expected. GF-C1 is a corner column, GF-C2 an edge column.
+- One odd row: for GF-C1, ULS 107 ... RSA5 has Pu = 703.08 kN at the bottom while
+  RSA6, RSA7 and RSA8, which are identical everywhere else, have 267.27 kN.
+
+F. Earth cover on a 250 mm beam
+-------------------------------
+Crashes as expected, no output files written (F2). In this harness the exception is
+caught and printed; typed as 'sdt beams' in a terminal it would end the command with the
+same traceback, since main() does not catch it.
+
+About the defaults in this request's logs (a slip of the test procedure)
+------------------------------------------------------------------------
+The harness keeps the toolkit's "remembered answers" in a scratch folder instead of the
+user's own. Until now that folder was shared between test runs, so answers given for
+request 02 were remembered:
+  - the earth cover dialog offered 'the same levels as last time: GF' (F2 log);
+  - a first attempt at item C ran sdt columns with 'foundation level: No' as its
+    default, remembered from C2 of request 02. That attempt was thrown away.
+The harness now gives every command an empty folder. Item C was run again that way:
+its log shows 'Yes - check them' as the default, and 13 pass / 34 fail as on 2026-10-05.
+Request 02's own files are not affected: none of their dialogs showed a remembered
+answer (checked: no 'last time' in any of those logs, and the remembered bar sizes and
+combinations were equal to the built-in defaults).
+A second attempt failed on a mistyped output folder (FileNotFoundError when sdt beams
+saved its workbook, after the design itself had finished): also the test procedure, but
+it shows that a folder that does not exist ends the command after all the work is done.
+
+Small differences from 2026-10-05 in GF-C1 (Ve 9,226 against 9,224 kN, Pu 259.7 against
+262.4 kN): in this run the copy was reopened before sdt beams, which lost the analysis
+results, so sdt beams ran the analysis itself ('Note: The analysis was run.') with the
+spectrum scale factors that sdt analyze had already written.

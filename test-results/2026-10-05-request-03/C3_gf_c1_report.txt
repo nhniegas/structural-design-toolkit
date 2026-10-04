@@ -1,0 +1,540 @@
+CAPACITY SHEAR OF GF-C1 AND GF-C2: WHAT THE PDF REPORT SHOWS
+=============================================================
+sdt columns with the defaults (foundation level checked) on a fresh copy; the PDF
+'r3-cols2 - Column Calculations.pdf' (96 pages) was kept and its text taken with
+pdftotext -layout. Below: the whole section of each of the two columns.
+
+RESULT: the report does NOT show the capacity shear working. Its column shear table
+has Vu, Ve, design Vu, Vc, phi Vn and the ratio, and one line: 'Ve is the shear from
+the probable moment strengths at the column ends.' There is no Mpr per end, no axial
+load used for Mpr, no beam moment limit and no lu in that table (lu = 500 mm is in
+the slenderness table). So Mpr cannot be read from the PDF or the workbook.
+What can be read (table at the end of this file, from the workbook of the same run):
+  GF-C1: Ve 8,869 to 9,226 kN over the 25 combinations; Ve x lu = 4,434 to 4,613 kN-m.
+         Largest Ve with Pu = 260 kN at the top (compression), 267 to 703 kN at the
+         bottom.
+  GF-C2: Ve 2,472 to 2,596 kN; Ve x lu = 1,236 to 1,298 kN-m. Largest Ve with
+         Pu = 607 kN (compression).
+  The strong column - weak beam table of the same section gives sum of Mnc = 1,500
+  kN-m at the top joint of GF-C1 (two columns), and sum of Mnb = 203 kN-m.
+
+########## PDF text: GF-C1 ##########
+6 Column GF-C1 (GF)
+
+Section and vertical reinforcement
+
+Parameter       Value               Parameter                Value
+
+Section         CR_600X600_C04_G60  Column mark              C1
+Width, X (mm)   600                 Depth, Y (mm)            600
+fc′ (MPa)       27.59               fy (MPa)                 413.69
+fyt (MPa)       413.69              Vertical bars            16
+Bars on X edge  5                   Bars on Y edge           5
+Steel ratio, ρ  0.0218              Limit on ρ               0.0600
+Bundles         16 single bars      Vertical bar continuity  Own design
+
+Axial load and flexure - governing combination at each end
+
+End        Combination              Pu Mu2 Mu3 ϕMn Mu/ϕMn Axial Flexure
+
+Top (J) ULS 107 (1.2 + Ev) DL + f LL + 1.0 259.74 -26.97 -21.43 679.95   0.05 PASS PASS
+                                                                         0.00 PASS PASS
+           RSA5
+
+Bottom (I) ULS 100 1.4 DL           453.84 0.00 0.00 773.37
+
+Forces in kN, moments in kN-m. phi Mn is the design strength along the direction of the Mu2-Mu3 resultant where phi Pn = Pu, read from
+the section’s biaxial interaction surface (figure below).
+
+Slenderness (ACI 6.2.5, 6.6.4.5)
+
+Axis                      lu (mm) k klu/r Limit Slender Cm Pc (kN) δns
+
+About 3 (over the depth)   500 1.00 2.8 22.0 No     –        – 1.00
+
+About 2 (over the width)   500 1.00 2.8 22.0 No     –        – 1.00
+
+Sway (P-Delta) effects are in the forces of the ETABS P-delta analysis (ACI 6.7). Member (P-delta) effects are added here by moment
+magnification: Mu2 and Mu3 in the table above are the magnified design moments. Limit = 34 + 12 M1/M2, at most 40; k from the
+alignment chart of a braced column, at most 1.0; (EI)eff = 0.4 Ec Ig / (1 + beta_dns), beta_dns up to 1.00. Base: Pinned support in the
+model, psi = 10. Check: PASS - not slender.
+
+                                                 8
+Column shear - governing combination at each end
+
+End          Combination                               Vu     Ve Design Vu Vc ϕVn Vu/ϕVn Check
+
+Top (J)      ULS 107 (1.2 + Ev) DL + f LL + 1.0  41.94     9,226.36      9,226.36 0.00 835.39    11.04 FAIL
+Bottom (I)   RSA5                                41.94     9,226.36      9,226.36 0.00 835.39    11.04 FAIL
+             ULS 107 (1.2 + Ev) DL + f LL + 1.0
+             RSA5
+
+Forces in kN. Ve is the shear from the probable moment strengths at the column ends.
+
+Strong column - weak beam
+
+End          Axis Combination                              ΣMnc ΣMnb ΣMnc/ΣMnb Check
+
+Top (J) X          ULS 110 (0.9 - Ev) DL + 1.0 RSA5        1,500.23      202.75       7.40 PASS
+Top (J) Y          ULS 110 (0.9 - Ev) DL + 1.0 RSA5        1,500.23      202.75       7.40 PASS
+Bottom (I) X       N/A - no beam frames into this end
+Bottom (I) Y       N/A - no beam frames into this end               –           –        ––
+                                                                    –           –        ––
+
+Moments in kN-m. Each axis shows the combination with the lowest ratio.
+
+Joint shear
+
+End          Axis  Vj        ϕVn Vj /ϕVn Check
+
+Top (J) X          531.75    2,999.26    0.18 PASS
+Top (J) Y          531.75    2,999.26    0.18 PASS
+Bottom (I) X
+Bottom (I) Y              –           –     – N/A - no beam frames into this end
+                          –           –     – N/A - no beam frames into this end
+
+Forces in kN. The demand comes from the beam bars at 1.25 fy and the capacity from the joint size and confinement, so the check is the same
+for every load combination.
+
+Transverse reinforcement
+
+Parameter                                       Value
+
+Type                                            Rectilinear hoops and crossties
+Provided                                        12 mm Rectilinear hoops and crossties @ 130 mm; X: 6 legs, Y: 6 legs
+Tie bar diameter (mm)                           12
+Spacing (mm)                                    130
+Tie legs along X edge                           6
+Tie legs along Y edge                           6
+Governing ACI 18.7.5 expression                 18.7.5(a)
+High axial load or high concrete strength rule  NOT APPLIED
+Required steel ratio, 18.7.5(a)                 0.0066
+Required steel ratio, 18.7.5(b)                 0.0060
+kf                                              1.000
+kn                                              1.143
+Required Ash/(s bc), X                          0.0066
+Provided Ash/(s bc), X                          0.0100
+Required Ash/(s bc), Y                          0.0066
+Provided Ash/(s bc), Y                          0.0100
+Confinement ratio check                         PASS
+Tie spacing check                               PASS
+Bar support check, X edge                       PASS - 4 legs needed along the X edge
+Bar support check, Y edge                       PASS - 4 legs needed along the Y edge
+Tie diameter check                              PASS
+SMRF column dimension check                     PASS
+Transverse reinforcement check                  PASS
+
+Design status
+
+Parameter          Value
+
+Overall design status FAIL
+
+Reason             FAIL; FAIL: column shear strength
+
+                                                           9
+Design interaction surface (phi Pn, phi Mnx, phi Mny) of the final bar layout with every combination at both ends; the hull vertices decide
+   the check, the star governs. Strong column - weak beam is a separate check at the joints, on nominal strengths, and is not drawn here:
+                             lowest sum Mnc / sum Mnb along X 7.40, along Y 7.40 (required 1.2): PASS; see the table above.
+
+
+########## PDF text: GF-C2 ##########
+22 Column GF-C2 (GF)
+
+Section and vertical reinforcement
+
+Parameter       Value                     Parameter                Value
+
+Section         CR_600X600_C04_G60        Column mark              C2
+Width, X (mm)   600                       Depth, Y (mm)            600
+fc′ (MPa)       27.59                     fy (MPa)                 413.69
+fyt (MPa)       413.69                    Vertical bars            16
+Bars on X edge  5                         Bars on Y edge           5
+Steel ratio, ρ  0.0218                    Limit on ρ               0.0600
+Bundles         16 single bars            Vertical bar continuity  Own design
+
+Axial load and flexure - governing combination at each end
+
+End        Combination                    Pu Mu2 Mu3 ϕMn Mu/ϕMn Axial Flexure
+
+Top (J) ULS 110 (0.9 - Ev) DL + 1.0 RSA5  293.68 64.96 -7.47 736.29            0.09 PASS PASS
+Bottom (I) ULS 100 1.4 DL                 691.30 0.00 0.00 814.46              0.00 PASS PASS
+
+Forces in kN, moments in kN-m. phi Mn is the design strength along the direction of the Mu2-Mu3 resultant where phi Pn = Pu, read from
+the section’s biaxial interaction surface (figure below).
+
+Slenderness (ACI 6.2.5, 6.6.4.5)
+
+Axis                      lu (mm) k klu/r Limit Slender Cm Pc (kN) δns
+
+About 3 (over the depth)  500 1.00 2.8 22.0 No           –         – 1.00
+
+About 2 (over the width)  500 1.00 2.8 22.0 No           –         – 1.00
+
+Sway (P-Delta) effects are in the forces of the ETABS P-delta analysis (ACI 6.7). Member (P-delta) effects are added here by moment
+magnification: Mu2 and Mu3 in the table above are the magnified design moments. Limit = 34 + 12 M1/M2, at most 40; k from the
+alignment chart of a braced column, at most 1.0; (EI)eff = 0.4 Ec Ig / (1 + beta_dns), beta_dns up to 1.00. Base: Pinned support in the
+model, psi = 10. Check: PASS - not slender.
+
+                                                     40
+Column shear - governing combination at each end
+
+End          Combination                               Vu      Ve Design Vu Vc ϕVn Vu/ϕVn Check
+
+Top (J)      ULS 107 (1.2 + Ev) DL + f LL + 1.0  50.19     2,595.58      2,595.58 0.00 835.39    3.11 FAIL
+Bottom (I)   RSA1                                50.19     2,595.58      2,595.58 0.00 835.39    3.11 FAIL
+             ULS 107 (1.2 + Ev) DL + f LL + 1.0
+             RSA1
+
+Forces in kN. Ve is the shear from the probable moment strengths at the column ends.
+
+Strong column - weak beam
+
+End          Axis Combination                              ΣMnc ΣMnb ΣMnc/ΣMnb Check
+
+Top (J) X          ULS 110 (0.9 - Ev) DL + 1.0 RSA1        1,615.30      405.51       3.98 PASS
+Top (J) Y          ULS 110 (0.9 - Ev) DL + 1.0 RSA1        1,615.30      202.75       7.97 PASS
+Bottom (I) X       N/A - no beam frames into this end
+Bottom (I) Y       N/A - no beam frames into this end               –           –        ––
+                                                                    –           –        ––
+
+Moments in kN-m. Each axis shows the combination with the lowest ratio.
+
+Joint shear
+
+End          Axis  Vj          ϕVn Vj /ϕVn Check
+
+Top (J) X          1,051.82    1,928.76    0.55 PASS
+Top (J) Y            525.91    1,607.30    0.33 PASS
+Bottom (I) X                –
+Bottom (I) Y                –           –     – N/A - no beam frames into this end
+                                        –     – N/A - no beam frames into this end
+
+Forces in kN. The demand comes from the beam bars at 1.25 fy and the capacity from the joint size and confinement, so the check is the same
+for every load combination.
+
+Transverse reinforcement
+
+Parameter                                       Value
+
+Type                                            Rectilinear hoops and crossties
+Provided                                        12 mm Rectilinear hoops and crossties @ 130 mm; X: 6 legs, Y: 6 legs
+Tie bar diameter (mm)                           12
+Spacing (mm)                                    130
+Tie legs along X edge                           6
+Tie legs along Y edge                           6
+Governing ACI 18.7.5 expression                 18.7.5(a)
+High axial load or high concrete strength rule  NOT APPLIED
+Required steel ratio, 18.7.5(a)                 0.0066
+Required steel ratio, 18.7.5(b)                 0.0060
+kf                                              1.000
+kn                                              1.143
+Required Ash/(s bc), X                          0.0066
+Provided Ash/(s bc), X                          0.0100
+Required Ash/(s bc), Y                          0.0066
+Provided Ash/(s bc), Y                          0.0100
+Confinement ratio check                         PASS
+Tie spacing check                               PASS
+Bar support check, X edge                       PASS - 4 legs needed along the X edge
+Bar support check, Y edge                       PASS - 4 legs needed along the Y edge
+Tie diameter check                              PASS
+SMRF column dimension check                     PASS
+Transverse reinforcement check                  PASS
+
+Design status
+
+Parameter          Value
+
+Overall design status FAIL
+
+Reason             FAIL; FAIL: column shear strength
+
+                                                           41
+Design interaction surface (phi Pn, phi Mnx, phi Mny) of the final bar layout with every combination at both ends; the hull vertices decide
+   the check, the star governs. Strong column - weak beam is a separate check at the joints, on nominal strengths, and is not drawn here:
+                             lowest sum Mnc / sum Mnb along X 3.98, along Y 7.97 (required 1.2): PASS; see the table above.
+
+
+########## Workbook rows of the same run: Pu, analysis Vu and Ve ##########
+Workbook: r3-cols2 - Column Design.xlsx
+
+=== GF-C1: every row of the workbook ===
+       End                             Combination  Pu (kN)  Mu2 design  Mu3 design  Analysis Vu  Probable Ve  Design Vu  phi Vn  Vu/phi Vn
+   Top (J)                          ULS 100 1.4 DL   446.41       -2.93       -0.11         4.69      8974.31    8974.31  835.39      10.74
+   Top (J)        ULS 101 1.2 DL + 1.6 LL + 0.5 Lr   462.18       -1.41       -1.03         2.25      8989.71    8989.71  835.39      10.76
+   Top (J)          ULS 102 1.2 DL + 1.6 Lr + f LL   407.50       -2.17       -0.38         3.46      8932.42    8932.42  835.39      10.69
+   Top (J)        ULS 103 1.2 DL + 1.6 Lr + 0.5 WX   410.95       -6.39       -3.20        10.20      8938.62    8938.62  835.39      10.70
+   Top (J)        ULS 104 1.2 DL + 1.6 Lr + 0.5 WY   410.95       -6.39       -3.20        10.20      8938.62    8938.62  835.39      10.70
+   Top (J) ULS 105 1.2 DL + f LL + 0.5 Lr + 1.0 WX   464.12       -9.93       -6.61        15.84      8996.90    8996.90  835.39      10.77
+   Top (J) ULS 106 1.2 DL + f LL + 0.5 Lr + 1.0 WY   464.12       -9.93       -6.61        15.84      8996.90    8996.90  835.39      10.77
+   Top (J) ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA1   300.05      -18.37      -22.71        35.06      9187.10    9187.10  835.39      11.00
+   Top (J) ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA2   300.05      -18.37      -22.71        35.06      9187.10    9187.10  835.39      11.00
+   Top (J) ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA3   300.05      -18.37      -22.71        35.06      9187.10    9187.10  835.39      11.00
+   Top (J) ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA4   300.05      -18.37      -22.71        35.06      9187.10    9187.10  835.39      11.00
+   Top (J) ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA5   259.74      -26.97      -21.43        41.94      9226.36    9226.36  835.39      11.04
+   Top (J) ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA6   259.74      -26.97      -21.43        41.94      9226.36    9226.36  835.39      11.04
+   Top (J) ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA7   259.74      -26.97      -21.43        41.94      9226.36    9226.36  835.39      11.04
+   Top (J) ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA8   259.74      -26.97      -21.43        41.94      9226.36    9226.36  835.39      11.04
+   Top (J)                 ULS 108 0.9 DL + 1.0 WX   343.60       -9.65       -6.29        15.38      8868.55    8868.55  835.39      10.62
+   Top (J)                 ULS 109 0.9 DL + 1.0 WY   343.60       -9.65       -6.29        15.38      8868.55    8868.55  835.39      10.62
+   Top (J)        ULS 110 (0.9 - Ev) DL + 1.0 RSA1    39.23      -17.17      -22.36        34.49      8915.85    8915.85  835.39      10.67
+   Top (J)        ULS 110 (0.9 - Ev) DL + 1.0 RSA2    39.23      -17.17      -22.36        34.49      8915.85    8915.85  835.39      10.67
+   Top (J)        ULS 110 (0.9 - Ev) DL + 1.0 RSA3    39.23      -17.17      -22.36        34.49      8915.85    8915.85  835.39      10.67
+   Top (J)        ULS 110 (0.9 - Ev) DL + 1.0 RSA4    39.23      -17.17      -22.36        34.49      8915.85    8915.85  835.39      10.67
+   Top (J)        ULS 110 (0.9 - Ev) DL + 1.0 RSA5    -1.07      -25.76      -21.08        40.02      8958.07    8958.07  835.39      10.72
+   Top (J)        ULS 110 (0.9 - Ev) DL + 1.0 RSA6    -1.07      -25.76      -21.08        40.02      8958.07    8958.07  835.39      10.72
+   Top (J)        ULS 110 (0.9 - Ev) DL + 1.0 RSA7    -1.07      -25.76      -21.08        40.02      8958.07    8958.07  835.39      10.72
+   Top (J)        ULS 110 (0.9 - Ev) DL + 1.0 RSA8    -1.07      -25.76      -21.08        40.02      8958.07    8958.07  835.39      10.72
+Bottom (I)                          ULS 100 1.4 DL   453.84        0.00        0.00         4.69      8974.31    8974.31  835.39      10.74
+Bottom (I)        ULS 101 1.2 DL + 1.6 LL + 0.5 Lr   468.54        0.00        0.00         2.25      8989.71    8989.71  835.39      10.76
+Bottom (I)          ULS 102 1.2 DL + 1.6 Lr + f LL   413.86        0.00        0.00         3.46      8932.42    8932.42  835.39      10.69
+Bottom (I)        ULS 103 1.2 DL + 1.6 Lr + 0.5 WX   377.75        0.00        0.00        10.20      8938.62    8938.62  835.39      10.70
+Bottom (I)        ULS 104 1.2 DL + 1.6 Lr + 0.5 WY   377.75        0.00        0.00        10.20      8938.62    8938.62  835.39      10.70
+Bottom (I) ULS 105 1.2 DL + f LL + 0.5 Lr + 1.0 WX   391.36        0.00        0.00        15.84      8996.90    8996.90  835.39      10.77
+Bottom (I) ULS 106 1.2 DL + f LL + 0.5 Lr + 1.0 WY   391.36        0.00        0.00        15.84      8996.90    8996.90  835.39      10.77
+Bottom (I) ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA1   307.57        0.00        0.00        35.06      9187.10    9187.10  835.39      11.00
+Bottom (I) ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA2   307.57        0.00        0.00        35.06      9187.10    9187.10  835.39      11.00
+Bottom (I) ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA3   307.57        0.00        0.00        35.06      9187.10    9187.10  835.39      11.00
+Bottom (I) ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA4   307.57        0.00        0.00        35.06      9187.10    9187.10  835.39      11.00
+Bottom (I) ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA5   703.08        0.00        0.00        41.94      9226.36    9226.36  835.39      11.04
+Bottom (I) ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA6   267.27        0.00        0.00        41.94      9226.36    9226.36  835.39      11.04
+Bottom (I) ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA7   267.27        0.00        0.00        41.94      9226.36    9226.36  835.39      11.04
+Bottom (I) ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA8   267.27        0.00        0.00        41.94      9226.36    9226.36  835.39      11.04
+Bottom (I)                 ULS 108 0.9 DL + 1.0 WX   269.26        0.00        0.00        15.38      8868.55    8868.55  835.39      10.62
+Bottom (I)                 ULS 109 0.9 DL + 1.0 WY   269.26        0.00        0.00        15.38      8868.55    8868.55  835.39      10.62
+Bottom (I)        ULS 110 (0.9 - Ev) DL + 1.0 RSA1    42.83        0.00        0.00        34.49      8915.85    8915.85  835.39      10.67
+Bottom (I)        ULS 110 (0.9 - Ev) DL + 1.0 RSA2    42.83        0.00        0.00        34.49      8915.85    8915.85  835.39      10.67
+Bottom (I)        ULS 110 (0.9 - Ev) DL + 1.0 RSA3    42.83        0.00        0.00        34.49      8915.85    8915.85  835.39      10.67
+Bottom (I)        ULS 110 (0.9 - Ev) DL + 1.0 RSA4    42.83        0.00        0.00        34.49      8915.85    8915.85  835.39      10.67
+Bottom (I)        ULS 110 (0.9 - Ev) DL + 1.0 RSA5     2.53        0.00        0.00        40.02      8958.07    8958.07  835.39      10.72
+Bottom (I)        ULS 110 (0.9 - Ev) DL + 1.0 RSA6     2.53        0.00        0.00        40.02      8958.07    8958.07  835.39      10.72
+Bottom (I)        ULS 110 (0.9 - Ev) DL + 1.0 RSA7     2.53        0.00        0.00        40.02      8958.07    8958.07  835.39      10.72
+Bottom (I)        ULS 110 (0.9 - Ev) DL + 1.0 RSA8     2.53        0.00        0.00        40.02      8958.07    8958.07  835.39      10.72
+
+Largest Ve of GF-C1: 9226.36 kN in 'ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA5', Top (J), with Pu = 259.74 kN
+Smallest Ve of GF-C1: 8868.55 kN in 'ULS 108 0.9 DL + 1.0 WX', Top (J), with Pu = 343.60 kN
+Pu over all rows: min -1.07, max 703.08 kN
+Ve x lu (lu = 0.5 m): 4434 to 4613 kN-m
+Ve against Pu, one line per combination (the same Ve at both ends):
+                                         Pu_top  Pu_bottom       Ve
+Combination                                                        
+ULS 108 0.9 DL + 1.0 WX                  343.60     269.26  8868.55
+ULS 109 0.9 DL + 1.0 WY                  343.60     269.26  8868.55
+ULS 110 (0.9 - Ev) DL + 1.0 RSA1          39.23      42.83  8915.85
+ULS 110 (0.9 - Ev) DL + 1.0 RSA2          39.23      42.83  8915.85
+ULS 110 (0.9 - Ev) DL + 1.0 RSA3          39.23      42.83  8915.85
+ULS 110 (0.9 - Ev) DL + 1.0 RSA4          39.23      42.83  8915.85
+ULS 102 1.2 DL + 1.6 Lr + f LL           407.50     413.86  8932.42
+ULS 104 1.2 DL + 1.6 Lr + 0.5 WY         410.95     377.75  8938.62
+ULS 103 1.2 DL + 1.6 Lr + 0.5 WX         410.95     377.75  8938.62
+ULS 110 (0.9 - Ev) DL + 1.0 RSA7          -1.07       2.53  8958.07
+ULS 110 (0.9 - Ev) DL + 1.0 RSA5          -1.07       2.53  8958.07
+ULS 110 (0.9 - Ev) DL + 1.0 RSA6          -1.07       2.53  8958.07
+ULS 110 (0.9 - Ev) DL + 1.0 RSA8          -1.07       2.53  8958.07
+ULS 100 1.4 DL                           446.41     453.84  8974.31
+ULS 101 1.2 DL + 1.6 LL + 0.5 Lr         462.18     468.54  8989.71
+ULS 106 1.2 DL + f LL + 0.5 Lr + 1.0 WY  464.12     391.36  8996.90
+ULS 105 1.2 DL + f LL + 0.5 Lr + 1.0 WX  464.12     391.36  8996.90
+ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA4  300.05     307.57  9187.10
+ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA2  300.05     307.57  9187.10
+ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA1  300.05     307.57  9187.10
+ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA3  300.05     307.57  9187.10
+ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA7  259.74     267.27  9226.36
+ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA6  259.74     267.27  9226.36
+ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA5  259.74     703.08  9226.36
+ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA8  259.74     267.27  9226.36
+
+=== GF-C2: every row of the workbook ===
+       End                             Combination  Pu (kN)  Mu2 design  Mu3 design  Analysis Vu  Probable Ve  Design Vu  phi Vn  Vu/phi Vn
+   Top (J)                          ULS 100 1.4 DL   685.37        0.04       -1.80         3.63      2553.28    2553.28  835.39       3.06
+   Top (J)        ULS 101 1.2 DL + 1.6 LL + 0.5 Lr   710.88        0.05       -3.35         6.72      2559.29    2559.29  835.39       3.06
+   Top (J)          ULS 102 1.2 DL + 1.6 Lr + f LL   626.03        0.04       -2.11         4.24      2538.62    2538.62  835.39       3.04
+   Top (J)        ULS 103 1.2 DL + 1.6 Lr + 0.5 WX   587.61      -11.46       -1.55        22.56      2529.24    2529.24  835.39       3.03
+   Top (J)        ULS 104 1.2 DL + 1.6 Lr + 0.5 WY   587.61      -11.46       -1.55        22.56      2529.24    2529.24  835.39       3.03
+   Top (J) ULS 105 1.2 DL + f LL + 0.5 Lr + 1.0 WX   626.34      -22.95       -2.11        45.19      2538.70    2538.70  835.39       3.04
+   Top (J) ULS 106 1.2 DL + f LL + 0.5 Lr + 1.0 WY   626.34      -22.95       -2.11        45.19      2538.70    2538.70  835.39       3.04
+   Top (J) ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA1   607.31       25.50      -23.86        50.19      2595.58    2595.58  835.39       3.11
+   Top (J) ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA2   607.31       25.50      -23.86        50.19      2595.58    2595.58  835.39       3.11
+   Top (J) ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA3   607.31       25.50      -23.86        50.19      2595.58    2595.58  835.39       3.11
+   Top (J) ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA4   607.31       25.50      -23.86        50.19      2595.58    2595.58  835.39       3.11
+   Top (J) ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA5   694.52       64.99       -8.98       127.92      2574.63    2574.63  835.39       3.08
+   Top (J) ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA6   694.52       64.99       -8.98       127.92      2574.63    2574.63  835.39       3.08
+   Top (J) ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA7   694.52       64.99       -8.98       127.92      2574.63    2574.63  835.39       3.08
+   Top (J) ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA8   694.52       64.99       -8.98       127.92      2574.63    2574.63  835.39       3.08
+   Top (J)                 ULS 108 0.9 DL + 1.0 WX   440.91      -22.97       -1.16        45.22      2490.75    2490.75  835.39       2.98
+   Top (J)                 ULS 109 0.9 DL + 1.0 WY   440.91      -22.97       -1.16        45.22      2490.75    2490.75  835.39       2.98
+   Top (J)        ULS 110 (0.9 - Ev) DL + 1.0 RSA1   206.47       25.47      -22.34        50.13      2495.33    2495.33  835.39       2.99
+   Top (J)        ULS 110 (0.9 - Ev) DL + 1.0 RSA2   206.47       25.47      -22.34        50.13      2495.33    2495.33  835.39       2.99
+   Top (J)        ULS 110 (0.9 - Ev) DL + 1.0 RSA3   206.47       25.47      -22.34        50.13      2495.33    2495.33  835.39       2.99
+   Top (J)        ULS 110 (0.9 - Ev) DL + 1.0 RSA4   206.47       25.47      -22.34        50.13      2495.33    2495.33  835.39       2.99
+   Top (J)        ULS 110 (0.9 - Ev) DL + 1.0 RSA5   293.68       64.96       -7.47       127.87      2472.48    2472.48  835.39       2.96
+   Top (J)        ULS 110 (0.9 - Ev) DL + 1.0 RSA6   293.68       64.96       -7.47       127.87      2472.48    2472.48  835.39       2.96
+   Top (J)        ULS 110 (0.9 - Ev) DL + 1.0 RSA7   293.68       64.96       -7.47       127.87      2472.48    2472.48  835.39       2.96
+   Top (J)        ULS 110 (0.9 - Ev) DL + 1.0 RSA8   293.68       64.96       -7.47       127.87      2472.48    2472.48  835.39       2.96
+Bottom (I)                          ULS 100 1.4 DL   691.30        0.00        0.00         3.63      2553.28    2553.28  835.39       3.06
+Bottom (I)        ULS 101 1.2 DL + 1.6 LL + 0.5 Lr   715.97        0.00        0.00         6.72      2559.29    2559.29  835.39       3.06
+Bottom (I)          ULS 102 1.2 DL + 1.6 Lr + f LL   631.12        0.00        0.00         4.24      2538.62    2538.62  835.39       3.04
+Bottom (I)        ULS 103 1.2 DL + 1.6 Lr + 0.5 WX   580.74        0.00        0.00        22.56      2529.24    2529.24  835.39       3.03
+Bottom (I)        ULS 104 1.2 DL + 1.6 Lr + 0.5 WY   580.74        0.00        0.00        22.56      2529.24    2529.24  835.39       3.03
+Bottom (I) ULS 105 1.2 DL + f LL + 0.5 Lr + 1.0 WX   607.50        0.00        0.00        45.19      2538.70    2538.70  835.39       3.04
+Bottom (I) ULS 106 1.2 DL + f LL + 0.5 Lr + 1.0 WY   607.50        0.00        0.00        45.19      2538.70    2538.70  835.39       3.04
+Bottom (I) ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA1   866.17        0.00        0.00        50.19      2595.58    2595.58  835.39       3.11
+Bottom (I) ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA2   613.33        0.00        0.00        50.19      2595.58    2595.58  835.39       3.11
+Bottom (I) ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA3   613.33        0.00        0.00        50.19      2595.58    2595.58  835.39       3.11
+Bottom (I) ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA4   613.33        0.00        0.00        50.19      2595.58    2595.58  835.39       3.11
+Bottom (I) ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA5   700.54        0.00        0.00       127.92      2574.63    2574.63  835.39       3.08
+Bottom (I) ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA6   700.54        0.00        0.00       127.92      2574.63    2574.63  835.39       3.08
+Bottom (I) ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA7   700.54        0.00        0.00       127.92      2574.63    2574.63  835.39       3.08
+Bottom (I) ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA8   700.54        0.00        0.00       127.92      2574.63    2574.63  835.39       3.08
+Bottom (I)                 ULS 108 0.9 DL + 1.0 WX   420.79        0.00        0.00        45.22      2490.75    2490.75  835.39       2.98
+Bottom (I)                 ULS 109 0.9 DL + 1.0 WY   420.79        0.00        0.00        45.22      2490.75    2490.75  835.39       2.98
+Bottom (I)        ULS 110 (0.9 - Ev) DL + 1.0 RSA1   209.36        0.00        0.00        50.13      2495.33    2495.33  835.39       2.99
+Bottom (I)        ULS 110 (0.9 - Ev) DL + 1.0 RSA2   209.36        0.00        0.00        50.13      2495.33    2495.33  835.39       2.99
+Bottom (I)        ULS 110 (0.9 - Ev) DL + 1.0 RSA3   209.36        0.00        0.00        50.13      2495.33    2495.33  835.39       2.99
+Bottom (I)        ULS 110 (0.9 - Ev) DL + 1.0 RSA4   209.36        0.00        0.00        50.13      2495.33    2495.33  835.39       2.99
+Bottom (I)        ULS 110 (0.9 - Ev) DL + 1.0 RSA5   296.57        0.00        0.00       127.87      2472.48    2472.48  835.39       2.96
+Bottom (I)        ULS 110 (0.9 - Ev) DL + 1.0 RSA6   296.57        0.00        0.00       127.87      2472.48    2472.48  835.39       2.96
+Bottom (I)        ULS 110 (0.9 - Ev) DL + 1.0 RSA7   296.57        0.00        0.00       127.87      2472.48    2472.48  835.39       2.96
+Bottom (I)        ULS 110 (0.9 - Ev) DL + 1.0 RSA8   296.57        0.00        0.00       127.87      2472.48    2472.48  835.39       2.96
+
+Largest Ve of GF-C2: 2595.58 kN in 'ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA1', Top (J), with Pu = 607.31 kN
+Smallest Ve of GF-C2: 2472.48 kN in 'ULS 110 (0.9 - Ev) DL + 1.0 RSA5', Top (J), with Pu = 293.68 kN
+Pu over all rows: min 206.47, max 866.17 kN
+Ve x lu (lu = 0.5 m): 1236 to 1298 kN-m
+Ve against Pu, one line per combination (the same Ve at both ends):
+                                         Pu_top  Pu_bottom       Ve
+Combination                                                        
+ULS 110 (0.9 - Ev) DL + 1.0 RSA8         293.68     296.57  2472.48
+ULS 110 (0.9 - Ev) DL + 1.0 RSA5         293.68     296.57  2472.48
+ULS 110 (0.9 - Ev) DL + 1.0 RSA7         293.68     296.57  2472.48
+ULS 110 (0.9 - Ev) DL + 1.0 RSA6         293.68     296.57  2472.48
+ULS 108 0.9 DL + 1.0 WX                  440.91     420.79  2490.75
+ULS 109 0.9 DL + 1.0 WY                  440.91     420.79  2490.75
+ULS 110 (0.9 - Ev) DL + 1.0 RSA3         206.47     209.36  2495.33
+ULS 110 (0.9 - Ev) DL + 1.0 RSA1         206.47     209.36  2495.33
+ULS 110 (0.9 - Ev) DL + 1.0 RSA2         206.47     209.36  2495.33
+ULS 110 (0.9 - Ev) DL + 1.0 RSA4         206.47     209.36  2495.33
+ULS 104 1.2 DL + 1.6 Lr + 0.5 WY         587.61     580.74  2529.24
+ULS 103 1.2 DL + 1.6 Lr + 0.5 WX         587.61     580.74  2529.24
+ULS 102 1.2 DL + 1.6 Lr + f LL           626.03     631.12  2538.62
+ULS 106 1.2 DL + f LL + 0.5 Lr + 1.0 WY  626.34     607.50  2538.70
+ULS 105 1.2 DL + f LL + 0.5 Lr + 1.0 WX  626.34     607.50  2538.70
+ULS 100 1.4 DL                           685.37     691.30  2553.28
+ULS 101 1.2 DL + 1.6 LL + 0.5 Lr         710.88     715.97  2559.29
+ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA6  694.52     700.54  2574.63
+ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA5  694.52     700.54  2574.63
+ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA8  694.52     700.54  2574.63
+ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA7  694.52     700.54  2574.63
+ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA2  607.31     613.33  2595.58
+ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA4  607.31     613.33  2595.58
+ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA1  607.31     866.17  2595.58
+ULS 107 (1.2 + Ev) DL + f LL + 1.0 RSA3  607.31     613.33  2595.58
+
+All Pu of the whole workbook (47 columns): min -18.82, max 1250.39 kN
+
+How this was run
+----------------
+Same PC and method as before: ETABS Ultimate 22.6.0, toolkit 0.1.1 (main checkout),
+the real commands in a private ETABS, dialogs answered by a script. "[default]" =
+default accepted, "[chosen for this test]" = the answer this request asked for.
+Run on 2026-10-05, 00:34 to 00:42, on fresh copies of the same test model (N-mm).
+
+########## the sdt columns run ##########
+$ sdt columns     (toolkit 0.1.1, model r3-cols2.EDB, present units N-mm, started 00:40:41)
+
+[DIALOG 00:40:42] values: Column Design
+    | Column bars and cover.
+    Column main bar (mm) = 25   [default]
+    Column tie (mm) = 12   [default]
+    Column cover (mm) = 40   [default]
+
+[DIALOG 00:40:42] choice: Column Design - Bottom Story Cover
+    | Use 75 mm concrete cover for the columns of the bottom-most story?
+              1. Yes - use 75 mm cover on the bottom-most story
+    (default) 2. No - keep 40 mm cover on every story
+    -> No - keep 40 mm cover on every story   [default]
+
+[DIALOG 00:40:42] choice: Column Design - Vertical Bars
+    | Carry the larger number of vertical bars of an upper level down to the levels below it?
+    (default) 1. Yes - lower levels use at least the bars of the level above
+              2. No - design every level on its own
+    -> Yes - lower levels use at least the bars of the level above   [default]
+
+[DIALOG 00:40:42] choice: Column Design - Topmost Level
+    | Run the strong column - weak beam (BCC) and joint shear checks at the joints on top of the columns (roof level)? No column stands above these joints, so one column alone must be 1.2 times stronger than the beams and the check often fails.
+    (default) 1. Yes - check them (ACI 18.7.3, 18.8)
+              2. No - leave them out at the topmost level
+    -> Yes - check them (ACI 18.7.3, 18.8)   [default]
+
+[DIALOG 00:40:42] choice: Column Design - Foundation Level
+    | Run the BCC, joint shear and probable-moment shear (Ve) checks on the columns of the bottom-most story (foundation to ground level)? These columns are short, so Ve = sum of Mpr / clear height becomes very large and a larger section does not help: the probable moment grows with the section.
+    (default) 1. Yes - check them (ACI 18.7.3, 18.7.6, 18.8)
+              2. No - leave them out; design these columns for the analysis shear
+    -> Yes - check them (ACI 18.7.3, 18.7.6, 18.8)   [default]
+
+[DIALOG 00:40:42] choice: Column Schedule - Interior Ties
+    | How should the interior ties be drawn?
+    (default) 1. Crossties (one tie with a hook at each end)
+              2. Closed inner hoops (each enclosing two bar positions)
+    -> Crossties (one tie with a hook at each end)   [default]
+
+[DIALOG 00:40:42] folder picker: Folder for the column results, calculations and schedule
+    | 
+    -> C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\r3-cols2\results
+
+[PROGRESS WINDOW 00:40:42] Column design
+    [00:40:46] Column C3  |  Level RD  |  End I and J / Combo: ULS 100 1.4 DL / Check: Flexure and axial (P-M)
+    [00:40:46] Column C3  |  Level RD  |  End I and J / Check: Transverse detailing
+    ... 56,236 more per-member progress lines left out ...
+    [00:40:56] Saving 1 of 3: the results workbook (.xlsx)
+    [00:41:04] Saving 2 of 3: the column schedule (.dxf)
+    [00:41:05] Saving 3 of 3: the calculation report (.pdf, LaTeX)
+[PROGRESS WINDOW closed after 52 s]
+
+========================================================================
+SUMMARY - sdt columns
+========================================================================
+Model: r3-cols2.EDB
+Columns designed     47
+Combinations         25
+Passing              13
+Failing              34
+Slender columns      12 (member effects, ACI 6.6.4.5; sway effects from the ETABS P-delta analysis)
+Read from the model  25 strength combinations (ULS names); deflection combinations (DEF names)
+
+Needs attention (2):
+  - Column shear: GF-C1, GF-C1A, GF-C1B, GF-C1C, GF-C2, GF-C2A, GF-C2B, GF-C2C, GF-C3, GF-C3A, GF-C3B, GF-C3C
+  - Joint shear: 2-C1A, 2-C1B, 2-C2, 2-C2C, 2-C3A, 2-C3B, 3-C1A, 3-C1B, 3-C2, 3-C2A, 3-C2B, 3-C2C, ... (22 in all)
+
+Files:
+  Results       C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\r3-cols2\results\r3-cols2 - Column Design.xlsx
+  Schedule      Column_Schedule.dxf
+  Calculations  C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\r3-cols2\results\r3-cols2 - Column Calculations.pdf
+========================================================================
+Summary saved: C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\r3-cols2\results\r3-cols2 - Column Design summary.txt
+
+[SUMMARY WINDOW 00:41:34] Summary - sdt columns
+
+========================================================================
+SUMMARY - sdt columns
+========================================================================
+Model: r3-cols2.EDB
+Columns designed     47
+Combinations         25
+Passing              13
+Failing              34
+Slender columns      12 (member effects, ACI 6.6.4.5; sway effects from the ETABS P-delta analysis)
+Read from the model  25 strength combinations (ULS names); deflection combinations (DEF names)
+
+Needs attention (2):
+  - Column shear: GF-C1, GF-C1A, GF-C1B, GF-C1C, GF-C2, GF-C2A, GF-C2B, GF-C2C, GF-C3, GF-C3A, GF-C3B, GF-C3C
+  - Joint shear: 2-C1A, 2-C1B, 2-C2, 2-C2C, 2-C3A, 2-C3B, 3-C1A, 3-C1B, 3-C2, 3-C2A, 3-C2B, 3-C2C, ... (22 in all)
+
+Files:
+  Results       C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\r3-cols2\results\r3-cols2 - Column Design.xlsx
+  Schedule      Column_Schedule.dxf
+  Calculations  C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\r3-cols2\results\r3-cols2 - Column Calculations.pdf
+========================================================================
+Summary saved: C:\Users\Nhel Harold Niegas\Desktop\structural-design-toolkit\edb\test edb\cloud-request\r3-cols2\results\r3-cols2 - Column Design summary.txt
+
+[sdt columns ended 00:41:34 after 53 s, exit 0]
