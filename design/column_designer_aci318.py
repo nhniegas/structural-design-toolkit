@@ -1217,26 +1217,33 @@ def _bundle_spacing_is_valid(
     bar_diameter: float,
     aggregate_size: float | None = None,
 ) -> bool:
-    """Check clear distances between equivalent circular bar-bundle envelopes."""
+    """Check clear distances between equivalent circular bar-bundle envelopes.
+
+    Column bars need a clear spacing of at least 40 mm, 1.5 db and 4/3 of the
+    aggregate (NSCP 425.2.3 / ACI 25.2.3); a bundle counts as one bar of the
+    same area (ACI 25.6.1.6).
+    """
     if aggregate_size is None:
         aggregate_size = CODE.column_strength.default_aggregate_size
-    equivalent_diameters = [
-        bar_diameter * math.sqrt(count) for count in bundle_counts
-    ]
-    for first in range(len(positions)):
-        for second in range(first + 1, len(positions)):
-            center_distance = math.dist(positions[first], positions[second])
-            first_diameter = equivalent_diameters[first]
-            second_diameter = equivalent_diameters[second]
-            mean_diameter = (first_diameter + second_diameter) / 2.0
-            minimum_clear = max(
-                CODE.beam_detailing.min_clear_spacing,
-                mean_diameter,
-                CODE.beam_detailing.aggregate_spacing_factor * aggregate_size,
-            )
-            if center_distance + 1e-8 < mean_diameter + minimum_clear:
-                return False
-    return True
+    equivalent_diameters = np.array([bar_diameter * math.sqrt(count) for count in bundle_counts])
+    points = np.asarray(positions, dtype=float).reshape(-1, 2)
+    if len(points) < 2:
+        return True
+    distance = np.hypot(points[:, None, 0] - points[None, :, 0],
+                        points[:, None, 1] - points[None, :, 1])
+    mean_diameter = (equivalent_diameters[:, None] + equivalent_diameters[None, :]) / 2.0
+    minimum_clear = _column_clear_spacing(mean_diameter, aggregate_size)
+    upper = np.triu_indices(len(points), 1)
+    return bool(np.all(distance[upper] + 1e-8 >= (mean_diameter + minimum_clear)[upper]))
+
+
+def _column_clear_spacing(bar_diameter, aggregate_size: float, code: AciCode = CODE):
+    """Minimum clear spacing of longitudinal column bars (NSCP 425.2.3 / ACI 25.2.3)."""
+    strength = code.column_strength
+    return np.maximum(
+        np.maximum(strength.min_clear_spacing, strength.clear_spacing_bar_multiple * bar_diameter),
+        code.beam_detailing.aggregate_spacing_factor * aggregate_size,
+    )
 
 
 def _enumerate_column_bar_layouts(
@@ -1328,14 +1335,8 @@ def _enumerate_column_bar_layouts(
             raise ValueError("Column core dimensions must be positive.")
         min_nx = max(1, math.ceil(span_x / max_spacing))
         min_ny = max(1, math.ceil(span_y / max_spacing))
-        min_pitch = (
-            max(
-                engine.code.beam_detailing.min_clear_spacing,
-                bar_diameter,
-                engine.code.beam_detailing.aggregate_spacing_factor * aggregate_size,
-            )
+        min_pitch = float(_column_clear_spacing(bar_diameter, aggregate_size, engine.code)) \
             + bar_diameter
-        )
         max_nx = max(min_nx, int(span_x // min_pitch))
         max_ny = max(min_ny, int(span_y // min_pitch))
         # A square column gets the same bars on all four faces: nothing on site
@@ -1699,14 +1700,24 @@ def _smrf_so_limit(code: AciCode, hx: float | None = None) -> float:
     return min(cfg.so_max, max(cfg.so_min, so))
 
 
-def _minimum_tie_diameter(engine: ColumnFlexureDesign) -> float:
-    """Smallest permitted transverse bar diameter (ACI 25.7.2.2 / 25.7.3.2), in mm."""
+def _minimum_tie_diameter(engine: ColumnFlexureDesign, bar_layout=None) -> float:
+    """Smallest permitted transverse bar diameter (NSCP 425.7.2.2 / 425.7.3.2), in mm.
+
+    Ties are 12 mm for bars larger than 32 mm and for BUNDLED bars, 10 mm otherwise.
+    """
     cfg = engine.code.column_transverse
     if engine.shape == "circular":
         return cfg.spiral_diameter_min
-    if engine.dmain > cfg.large_bar_threshold:
+    bundled = bar_layout is not None and any(count > 1 for _, _, count in bar_layout)
+    if engine.dmain > cfg.large_bar_threshold or bundled:
         return cfg.tie_diameter_large_bars
     return cfg.tie_diameter_small_bars
+
+
+def _confined_core(engine: ColumnFlexureDesign) -> tuple[float, float]:
+    """bc along the width and along the depth: the core to the OUTSIDE edges of the
+    hoops (ACI 18.7.5.4 notation), in mm."""
+    return engine.width - 2.0 * engine.cc, engine.height - 2.0 * engine.cc
 
 
 def _column_transverse_candidate_passes(
@@ -1753,7 +1764,7 @@ def _column_transverse_candidate_passes(
     if is_smrf:
         transverse = _smrf_transverse_design(
             engine,
-            sum(count for _, _, count in bar_layout),
+            len(bar_layout),
             max_compression,
             spacing_limit,
         )
@@ -1766,8 +1777,7 @@ def _column_transverse_candidate_passes(
         provided_legs = 2
         support_check = "PASS"
     if is_smrf and engine.shape == "rectangular":
-        core_width = engine.width - 2.0 * (engine.cc + engine.dties / 2.0)
-        core_height = engine.height - 2.0 * (engine.cc + engine.dties / 2.0)
+        core_width, core_height = _confined_core(engine)
         tie_area = math.pi * engine.dties**2 / 4.0
         provided_x = provided_legs * tie_area / (
             transverse["Transverse_Spacing_Provided_mm"] * core_width
@@ -1786,7 +1796,7 @@ def _column_transverse_candidate_passes(
     else:
         confinement_passes = True
 
-    minimum_tie_diameter = _minimum_tie_diameter(engine)
+    minimum_tie_diameter = _minimum_tie_diameter(engine, bar_layout)
     seismic_cfg = engine.code.column_seismic
     detailing_passes = (
         not is_smrf
@@ -1841,7 +1851,7 @@ def _column_layout_summary(layout: list[tuple[float, float, int]]) -> str:
 
 def _smrf_transverse_design(
     engine: ColumnFlexureDesign,
-    n_bars: int,
+    n_bars: int,  # bar positions (a bundle counts once), for kn
     max_compression: float,
     spacing_limit: float,
 ) -> dict:
@@ -1869,12 +1879,12 @@ def _smrf_transverse_design(
     )
 
     if engine.shape == "circular":
-        # Core diameter to the spiral centreline (used for the spiral ratio) ...
-        core_diameter = engine.diameter - 2.0 * (engine.cc + engine.dties / 2.0)
+        # Dc and Ach are measured to the OUTSIDE edge of the spiral (ACI 25.7.3.3,
+        # 18.7.5.4): rho_s = 4 Asp / (Dc s), the ratio of spiral to core volume.
+        core_diameter = engine.diameter - 2.0 * engine.cc
         if core_diameter <= 0:
             raise ValueError("Circular column core diameter must be positive.")
-        # ... but Ach is measured to the OUTSIDE edge of the spiral (ACI 18.7.5.4 notation).
-        ach = math.pi * (engine.diameter - 2.0 * engine.cc) ** 2 / 4.0
+        ach = math.pi * core_diameter ** 2 / 4.0
         confinement_expressions = {
             "18.7.5(d)": seismic.spiral_coeff_d * (ag / ach - 1.0) * engine.fc / fyt,
             "18.7.5(e)": seismic.spiral_coeff_e * engine.fc / fyt,
@@ -1934,16 +1944,16 @@ def _smrf_transverse_design(
             "Alternating_Support_Check": "N/A for continuous spiral",
         }
 
-    core_width = engine.width - 2.0 * (engine.cc + engine.dties / 2.0)
-    core_height = engine.height - 2.0 * (engine.cc + engine.dties / 2.0)
+    # bc and Ach are measured to the OUTSIDE edges of the hoops (ACI 18.7.5.4,
+    # NSCP 418.7.5.4 notation): Ash >= ratio * s * bc.
+    core_width, core_height = _confined_core(engine)
     if min(core_width, core_height) <= 0:
         raise ValueError("Rectangular column core dimensions must be positive.")
-    # Ach is measured to the OUTSIDE edges of the transverse reinforcement
-    # (ACI 18.7.5.4); the hoop centreline dimensions above are used for Ash/(s bc).
-    ach = (engine.width - 2.0 * engine.cc) * (engine.height - 2.0 * engine.cc)
+    ach = core_width * core_height
 
+    # kn = nl / (nl - 2): nl counts the bars or BUNDLES laterally supported around
+    # the perimeter (ACI 18.7.5.4), so a bundle is one; callers pass positions.
     nl = max(n_bars, 4)
-    # ACI rectilinear-hoop confinement factor based on longitudinal bar count.
     kn = nl / (nl - 2.0)
     base_a = seismic.rect_coeff_a * (ag / ach - 1.0) * engine.fc / fyt
     base_b = seismic.rect_coeff_b * engine.fc / fyt
@@ -2209,8 +2219,16 @@ def _column_shear_checks(
     is_smrf: bool,
     bundle_layout: list[tuple[float, float, int]] | None = None,
     progress=None,
+    clear_height: float | None = None,
+    beam_moment_limits: dict[tuple[str, str], float] | None = None,
 ) -> tuple[list[dict], int]:
     """Check column shear in both local directions and size transverse legs.
+
+    ``clear_height`` is the clear height lu between the beams (mm) for the
+    capacity shear Ve of a special moment frame column. ``beam_moment_limits``
+    maps (shear direction "V2"/"V3", end "I"/"J") to the end moment the beams can
+    deliver to this column, kN-m: ACI 18.7.6.1.1 lets Ve stop at the shear that
+    the joint strengths (beam Mpr) can develop.
 
     The function compares analysis shear with the capacity-based probable-moment
     shear, then selects, for each direction, a leg count sufficient for all force
@@ -2253,7 +2271,11 @@ def _column_shear_checks(
         raise ValueError(
             f"Column {member} needs distinct numeric end stations for capacity shear."
         )
+    # Ve = (Mpr,top + Mpr,bottom) / lu over the CLEAR height (ACI 18.7.6.1.1); the
+    # station range is the joint-to-joint length, used when lu is not known.
     clear_length = float(station_values.max() - station_values.min())
+    if clear_height is not None and 0 < clear_height < clear_length:
+        clear_length = float(clear_height)
     if engine.shape == "rectangular":
         axis_dimensions = {
             # (breadth, overall depth). V2 acts along local 2, the section depth.
@@ -2265,28 +2287,31 @@ def _column_shear_checks(
             "V2": (web_width, section_depth),
             "V3": (web_width, section_depth),
         }
+    beam_shear = engine.code.beam_shear
+    root_fc = math.sqrt(engine.fc)
     output: list[dict] = []
 
     # The probable-strength section (1.25 fy) is the same for every combination,
     # direction and end, so it is built once and only the axial load changes.
-    probable_row = row.copy()
-    probable_row["UniqueName"] = member
-    probable_row["fy"] = engine.fy * seismic_cfg.probable_stress_factor
-    probable_engine, probable_section = _build_column_section(
-        probable_row,
-        n_bars,
-        engine.dmain,
-        engine.dties,
-        engine.cc,
-        is_smrf,
-        bundle_layout=bundle_layout,
-    )
+    # Capacity design applies to special moment frames only (ACI 18.7.6.1).
+    probable_surface = probable_engine = probable_section = None
+    if is_smrf:
+        probable_row = row.copy()
+        probable_row["UniqueName"] = member
+        probable_row["fy"] = engine.fy * seismic_cfg.probable_stress_factor
+        probable_engine, probable_section = _build_column_section(
+            probable_row,
+            n_bars,
+            engine.dmain,
+            engine.dties,
+            engine.cc,
+            is_smrf,
+            bundle_layout=bundle_layout,
+        )
+        if USE_INTERACTION_SURFACE:
+            from design.column_interaction import demand_moments, surface_for
 
-    probable_surface = None
-    if USE_INTERACTION_SURFACE:
-        from design.column_interaction import demand_moments, surface_for
-
-        probable_surface = surface_for(probable_engine, probable_section, bundle_layout)
+            probable_surface = surface_for(probable_engine, probable_section, bundle_layout)
 
     # Find one transverse-leg count that satisfies every combo/end/direction.
     for combo in sorted(forces["Combo"].dropna().astype(str).unique()):
@@ -2302,73 +2327,80 @@ def _column_shear_checks(
                 if moment_name == "M3"
                 else _section_bending_angle(1.0, 0.0)
             )
-            probable_moments = []
-            for end in ("I", "J"):
-                if progress is not None:
-                    progress(
-                        member, end, f"Column shear, {shear_name} (capacity design)", combo
-                    )
-                axial = _numeric(end_forces[end]["P"], "P", member) * 1000.0
-                if probable_surface is not None:
-                    # Mpr along the principal axis at this axial load (1.25 fy section)
-                    m2_unit, m3_unit = (0.0, 1.0) if moment_name == "M3" else (1.0, 0.0)
-                    probable_mn = probable_surface.nominal_capacity_fast(
-                        axial, *demand_moments(m2_unit, m3_unit))
-                else:
-                    probable_mn, _, _, _, _ = probable_engine.solve_moment_capacity(
-                        probable_section,
-                        axial_load=axial,
-                        bending_angle=moment_theta,
-                    )
-                probable_moments.append(abs(float(probable_mn)) / 1e6)
-            # Capacity-based Ve is the probable end-moment sum divided by clear span.
-            capacity_shear_kN = (
-                sum(probable_moments) * 1000.0 / clear_length
-            )
+            capacity_shear_kN = 0.0
+            if is_smrf:
+                probable_moments = []
+                for end in ("I", "J"):
+                    if progress is not None:
+                        progress(
+                            member, end, f"Column shear, {shear_name} (capacity design)", combo
+                        )
+                    axial = _numeric(end_forces[end]["P"], "P", member) * 1000.0
+                    if probable_surface is not None:
+                        # Mpr along the principal axis at this axial load (1.25 fy section)
+                        m2_unit, m3_unit = (0.0, 1.0) if moment_name == "M3" else (1.0, 0.0)
+                        probable_mn = probable_surface.nominal_capacity_fast(
+                            axial, *demand_moments(m2_unit, m3_unit))
+                    else:
+                        probable_mn, _, _, _, _ = probable_engine.solve_moment_capacity(
+                            probable_section,
+                            axial_load=axial,
+                            bending_angle=moment_theta,
+                        )
+                    end_moment = abs(float(probable_mn)) / 1e6
+                    limit = (beam_moment_limits or {}).get((shear_name, end))
+                    if limit is not None and math.isfinite(limit):
+                        end_moment = min(end_moment, limit)
+                    probable_moments.append(end_moment)
+                # Capacity-based Ve is the probable end-moment sum divided by lu.
+                capacity_shear_kN = sum(probable_moments) * 1000.0 / clear_length
 
             effective_depth = max(
                 1.0,
                 overall_depth - engine.cc - engine.dties - engine.dmain / 2.0,
             )
-            compression = max(
-                0.0,
-                max(
-                    _numeric(end_forces[end]["P"], "P", member) * 1000.0
-                    for end in ("I", "J")
-                ),
-            )
-            shear_concrete = 0.0
-            if not is_smrf:
-                axial_factor = max(
-                    0.0, 1.0 + compression / (shear_cfg.axial_divisor * ag)
-                )
-                vc_upper = (
-                    shear_cfg.vc_coeff
-                    * math.sqrt(engine.fc)
-                    * breadth
-                    * effective_depth
-                    * axial_factor
-                )
-                vc_limit = (
-                    shear_cfg.vc_upper_coeff
-                    * math.sqrt(engine.fc)
-                    * breadth
-                    * effective_depth
-                )
-                shear_concrete = min(vc_upper, vc_limit)
+            # Vs may not exceed 0.66 sqrt(fc') b d (ACI 22.5.1.2): beyond it the
+            # section, not the ties, is too small.
+            vs_max = beam_shear.vs_max_coeff * root_fc * breadth * effective_depth
 
             for end in ("I", "J"):
                 force = end_forces[end]
+                axial_N = _numeric(force["P"], "P", member) * 1000.0
+                shear_concrete = 0.0
+                if not is_smrf:
+                    # ACI 22.5.6.1 (compression) and 22.5.7.1 (tension, Nu negative)
+                    divisor = (shear_cfg.axial_divisor if axial_N >= 0
+                               else shear_cfg.tension_axial_divisor)
+                    axial_factor = max(0.0, 1.0 + axial_N / (divisor * ag))
+                    shear_concrete = min(
+                        shear_cfg.vc_coeff * root_fc * breadth * effective_depth * axial_factor,
+                        shear_cfg.vc_upper_coeff * root_fc * breadth * effective_depth,
+                    )
                 analysis_shear = abs(_numeric(force[v_name], v_name, member))
                 design_shear = max(analysis_shear, capacity_shear_kN)
                 # Convert design shear to required steel shear after subtracting Vc.
                 required_vs = max(
                     0.0, design_shear * 1000.0 / phi_shear - shear_concrete
                 )
+                # Ties at no more than d/2, d/4 for a large Vs (ACI 10.7.6.5.2), and
+                # at least Av,min (ACI 10.6.2.2) once Vu > 0.5 phi Vc.
+                shear_spacing_limit = math.inf
+                minimum_legs = 1
+                if design_shear * 1000.0 > 0.5 * phi_shear * shear_concrete:
+                    tight = required_vs > beam_shear.vs_spacing_threshold_coeff * root_fc \
+                        * breadth * effective_depth
+                    shear_spacing_limit = effective_depth * (
+                        beam_shear.s_max_d_fraction_high if tight
+                        else beam_shear.s_max_d_fraction_low)
+                    av_min = max(beam_shear.av_min_coeff_sqrt_fc * root_fc,
+                                 beam_shear.av_min_coeff_fyt) * breadth * spacing / fyt
+                    minimum_legs = math.ceil(av_min / tie_area - 1e-9)
                 required_legs = max(
                     1,
+                    minimum_legs,
                     math.ceil(
-                        required_vs * spacing / (fyt * effective_depth * tie_area)
+                        min(required_vs, vs_max) * spacing / (fyt * effective_depth * tie_area)
+                        - 1e-9
                     ),
                 )
                 required_legs = max(required_legs, starting_legs[shear_name])
@@ -2385,25 +2417,25 @@ def _column_shear_checks(
                         "Vc_kN": shear_concrete / 1000.0,
                         "Concrete_Shear_Strength_Neglected": is_smrf,
                         "Required_Transverse_Legs": required_legs,
+                        "Shear_Spacing_Limit_mm": shear_spacing_limit,
+                        "Clear_Height_mm": clear_length,
                         "_effective_depth_mm": effective_depth,
                         "_shear_concrete_N": shear_concrete,
+                        "_vs_max_N": vs_max,
                         "Vc_Assumption": (
                             "0 used conservatively for all SMRF checks"
                             if is_smrf
-                            else "ACI 22.5 axial-compression expression"
+                            else "ACI 22.5.6 / 22.5.7 with the axial load of the end"
                         ),
                     }
                 )
     for item in output:
         direction_legs = provided_legs[item["Shear_Direction"]]
-        shear_capacity = phi_shear * (
-            item["_shear_concrete_N"]
-            + direction_legs
-            * tie_area
-            * fyt
-            * item["_effective_depth_mm"]
-            / spacing
-        ) / 1000.0
+        steel_shear = min(
+            direction_legs * tie_area * fyt * item["_effective_depth_mm"] / spacing,
+            item["_vs_max_N"],
+        )
+        shear_capacity = phi_shear * (item["_shear_concrete_N"] + steel_shear) / 1000.0
         item["Provided_Transverse_Legs"] = direction_legs
         item["phi_Vn_kN"] = shear_capacity
         item["Shear_Utilization"] = (
@@ -2412,10 +2444,12 @@ def _column_shear_checks(
             else math.inf
         )
         item["Shear_Check"] = (
-            "PASS" if item["Design_Shear_kN"] <= shear_capacity else "FAIL"
+            "PASS" if item["Design_Shear_kN"] <= shear_capacity + 1e-9
+            else "FAIL: Vs above 0.66 sqrt(fc') b d (ACI 22.5.1.2) - enlarge the section"
         )
         del item["_effective_depth_mm"]
         del item["_shear_concrete_N"]
+        del item["_vs_max_N"]
     return output, max(provided_legs.values())
 
 
@@ -2646,6 +2680,25 @@ def _evaluate_smrf_joints(
             section, axial_load=axial, bending_angle=theta
         )
         return float(nominal) / 1e6, axial
+
+    low_axial_cache: dict[str, bool] = {}
+
+    def column_low_axial(column: str) -> bool:
+        """Pu < 0.1 Ag fc' in every combination (ACI 18.7.3.1)."""
+        if column not in low_axial_cache:
+            row = frame_data_row(column)
+            diameter = pd.to_numeric(pd.Series([row.get("Diameter")]), errors="coerce").iloc[0]
+            if pd.notna(diameter) and diameter > 0:
+                area = math.pi * float(diameter) ** 2 / 4.0
+            else:
+                area = _numeric(row["Width"], "Width", column) * _numeric(
+                    row["Depth"], "Depth", column)
+            fc = _numeric(row["f'c"], "f'c", column)
+            axial = pd.to_numeric(force_groups[column]["P"], errors="coerce").max()
+            low_axial_cache[column] = bool(
+                pd.notna(axial) and axial * 1000.0
+                < CODE.column_seismic.bcc_exempt_axial_fraction * area * fc)
+        return low_axial_cache[column]
 
     def column_continuity(joint: str, members: list[str]) -> tuple[str, float]:
         """Check adjacent upper/lower column alignment against the 1:6 limit."""
@@ -2904,6 +2957,19 @@ def _evaluate_smrf_joints(
                         f"{column_result['Longitudinal_Bar_Layout']}"
                     )
 
+                # ACI 18.7.3.1: no strong column - weak beam check where the column
+                # stops at this joint (none above) and its Pu < 0.1 Ag fc' (every
+                # combination is used, which covers those with earthquake).
+                bcc_exempt = False
+                above_columns = [
+                    column for column in connected_columns
+                    if point_coordinates[get_end_info(column, joint, False)[1]][2]
+                    > point_coordinates[joint][2] + 1e-6
+                ]
+                if not above_columns:
+                    bcc_exempt = all(
+                        column_low_axial(column) for column in connected_columns)
+
                 for sway_direction in (-1.0, 1.0):
                     beam_nominal = 0.0
                     beam_tension = 0.0
@@ -2943,6 +3009,8 @@ def _evaluate_smrf_joints(
                     )
                     required_ratio = CODE.column_seismic.strong_column_ratio
                     b_c_check = "PASS" if ratio >= required_ratio else "FAIL"
+                    if bcc_exempt:
+                        b_c_check = BCC_EXEMPT_TEXT
 
                     # Determine transverse-beam confinement and effective joint area.
                     section_row = frame_data_row(connected_columns[0])
@@ -3053,6 +3121,34 @@ def _evaluate_smrf_joints(
                     joint_shear_check = (
                         "PASS" if joint_shear_demand <= phi_vn_kN else "FAIL"
                     )
+                    # Joint dimensions (NSCP 418.8.2.3, 418.8.2.4): where the beam bars
+                    # run through the joint (beams on both sides), the column side along
+                    # them is at least 20 db; the joint is at least half the beam depth.
+                    largest_bar = max(beam_strengths[beam]["Largest_Beam_Bar_mm"]
+                                      for beam in members)
+                    deepest_beam = max(beam_strengths[beam]["Beam_Depth_mm"]
+                                       for beam in members)
+                    through_bars = in_plane_faces == 2
+                    dimension_ratio = max(
+                        (CODE.column_seismic.joint_bar_diameter_multiple * largest_bar
+                         / joint_depth) if through_bars else 0.0,
+                        deepest_beam / (CODE.column_seismic.joint_beam_depth_limit
+                                        * joint_depth),
+                    )
+                    dimension_problems = []
+                    if through_bars and joint_depth < (
+                            CODE.column_seismic.joint_bar_diameter_multiple * largest_bar - 1e-6):
+                        dimension_problems.append(
+                            f"ACI 18.8.2.3: column side {joint_depth:.0f} mm < 20 x "
+                            f"{largest_bar:g} mm beam bar")
+                    if deepest_beam > CODE.column_seismic.joint_beam_depth_limit * joint_depth + 1e-6:
+                        dimension_problems.append(
+                            f"ACI 18.8.2.4: joint depth {joint_depth:.0f} mm < half of the "
+                            f"{deepest_beam:.0f} mm beam")
+                    if dimension_problems:
+                        joint_shear_check = "FAIL: " + "; ".join(dimension_problems)
+                        # the loop grows the column side through the joint utilization
+                        shear_ratio = max(shear_ratio, dimension_ratio)
                     if missing_transverse_geometry:
                         joint_shear_check = (
                             "BLOCKED: transverse beam geometry missing for "
@@ -3102,9 +3198,10 @@ def _evaluate_smrf_joints(
                             ),
                             "Sum_Column_Mn_kNm": column_capacity,
                             "Sum_Beam_Mn_kNm": beam_nominal,
-                            "Column_Beam_Ratio": ratio,
+                            "Column_Beam_Ratio": np.nan if bcc_exempt else ratio,
                             "Required_Ratio": required_ratio,
                             "Strong_Column_Check": b_c_check,
+                            "Joint_Check_Reason": BCC_EXEMPT_TEXT if bcc_exempt else "",
                             "Beam_Probable_Mn_kNm": beam_probable_sum,
                             "Beam_Tension_Force_kN": beam_tension,
                             "Capacity_Based_Column_Shear_kN": column_shear,
@@ -3118,19 +3215,17 @@ def _evaluate_smrf_joints(
                             "Joint_Shear_Utilization": shear_ratio,
                             "Joint_Shear_Check": joint_shear_check,
                             "Slab_Steel_Included": False,
-                            "Joint_Depth_Check": (
-                                "PASS"
-                                if all(
-                                    beam_strengths[beam]["Beam_Depth_mm"]
-                                    <= CODE.column_seismic.joint_beam_depth_limit
-                                    * joint_depth
-                                    for beam in members
-                                )
-                                else "FAIL: ACI 18.8.2.4"
+                            "Joint_Dimension_Check": (
+                                "; ".join(dimension_problems) or "PASS"
                             ),
+                            "BCC_Exempt": bcc_exempt,
                         }
                     )
     return pd.DataFrame(rows)
+
+
+BCC_EXEMPT_TEXT = ("N/A - ACI 18.7.3.1: the column stops at this joint and "
+                   "Pu < 0.1 Ag fc'")
 
 
 # Per-end report fields of the joint checks. X is the column's width direction
@@ -4510,9 +4605,13 @@ def design_columns(
         )
 
         while not initial_joints.empty:
+            exempt = (initial_joints["BCC_Exempt"].eq(True)
+                      if "BCC_Exempt" in initial_joints.columns
+                      else pd.Series(False, index=initial_joints.index))
             failing_rows = initial_joints.loc[
                 initial_joints["Sum_Column_Mn_kNm"].notna()
                 & initial_joints["Sum_Beam_Mn_kNm"].notna()
+                & ~exempt
                 & initial_joints.apply(
                     lambda row: current_joint_ratio(row)
                     < CODE.column_seismic.strong_column_ratio - 1e-9,
@@ -4614,6 +4713,15 @@ def design_columns(
                     member, joint_row, selected_index
                 ) - candidate_joint_capacity(member, joint_row, baseline_index)
 
+            initial_joints.at[
+                joint_index, "Column_Reinforcement_At_Joint"
+            ] = "; ".join(updated_reinforcement)
+            # A BLOCKED row (missing data) has no sums, and an exempt top joint
+            # (ACI 18.7.3.1) no ratio: their check text stays as it is.
+            if bool(joint_row.get("BCC_Exempt", False)) is True or pd.isna(
+                joint_row.get("Sum_Column_Mn_kNm")
+            ) or pd.isna(joint_row.get("Sum_Beam_Mn_kNm")):
+                continue
             total_column_capacity = (
                 float(joint_row["Sum_Column_Mn_kNm"]) + nominal_delta
             )
@@ -4630,13 +4738,64 @@ def design_columns(
             initial_joints.at[joint_index, "Strong_Column_Check"] = (
                 "PASS" if ratio >= CODE.column_seismic.strong_column_ratio else "FAIL"
             )
-            initial_joints.at[
-                joint_index, "Column_Reinforcement_At_Joint"
-            ] = "; ".join(updated_reinforcement)
 
             # Joint shear demand uses the BEAMS' probable moments only, so adding
             # column bars changes the strong-column ratio but not the joint shear.
         joint_results = initial_joints
+
+    # Clear height of each column for its capacity shear: the joint-to-joint length
+    # less the deepest beam framing into its top joint (beams hang from the floor).
+    beam_depth_at_joint: dict[str, float] = {}
+    beam_depths = {}
+    if {"Depth", "DesignType"} <= set(frame_data.columns):
+        is_beam = frame_data["DesignType"].astype(str).str.strip().str.casefold().eq("beam")
+        beam_depths = dict(zip(frame_data.loc[is_beam, "UniqueName"].astype(str),
+                               pd.to_numeric(frame_data.loc[is_beam, "Depth"], errors="coerce")))
+    for member, connection in connection_by_name.iterrows():
+        depth = beam_depths.get(str(member))
+        if depth is None or not math.isfinite(depth):
+            continue
+        for point in ("UniquePtI", "UniquePtJ"):
+            joint = _normalize_object_name(connection[point])
+            beam_depth_at_joint[joint] = max(beam_depth_at_joint.get(joint, 0.0), float(depth))
+    clear_heights: dict[str, float] = {}
+    for member in column_rows["UniqueName"].astype(str):
+        if member not in connection_by_name.index or member not in force_frames:
+            continue
+        stations = pd.to_numeric(force_frames[member]["Station"], errors="coerce").dropna()
+        if stations.empty:
+            continue
+        _, top_joint = column_ends(member)
+        clear_heights[member] = float(stations.max() - stations.min()) \
+            - beam_depth_at_joint.get(top_joint, 0.0)
+
+    # ACI 18.7.6.1.1: the column end moment for Ve need not exceed what the beams
+    # deliver at their probable strength. At each joint the beams' sum of Mpr is
+    # shared equally by the columns there (the largest over both sway directions).
+    # Beams along the column's Y axis (local 2) bend it about local 3 (V2); beams
+    # along X (local 3) about local 2 (V3).
+    beam_moment_limits: dict[str, dict[tuple[str, str], float]] = {}
+    if is_smrf and not joint_results.empty and "Beam_Probable_Mn_kNm" in joint_results:
+        for joint_row in joint_results.to_dict("records"):
+            try:
+                beam_mpr = float(joint_row.get("Beam_Probable_Mn_kNm"))
+            except (TypeError, ValueError):
+                continue
+            if not math.isfinite(beam_mpr):
+                continue
+            entries = [entry.strip().rsplit(":", 2)
+                       for entry in str(joint_row.get("Column_End_Members", "")).split(",")
+                       if entry.strip()]
+            entries = [entry for entry in entries if len(entry) == 3]
+            if not entries:
+                continue
+            share = beam_mpr / len(entries)
+            for member, end, axis in entries:
+                if axis not in ("X", "Y"):
+                    continue
+                key = ("V2" if axis == "Y" else "V3", end)
+                limits = beam_moment_limits.setdefault(member, {})
+                limits[key] = max(limits.get(key, 0.0), share)
 
     output_rows: list[dict] = []
     force_check_rows: list[dict] = []
@@ -4718,7 +4877,7 @@ def design_columns(
             maximum_compression = max(0.0, float(axial_values.max()) * 1000.0)
             transverse = _smrf_transverse_design(
                 final_engine,
-                selected_bars,
+                len(selected_layout),
                 maximum_compression,
                 spacing_provided,
             )
@@ -4777,7 +4936,7 @@ def design_columns(
                 "Kn": np.nan,
             }
 
-        required_tie_diameter = _minimum_tie_diameter(final_engine)
+        required_tie_diameter = _minimum_tie_diameter(final_engine, selected_layout)
         tie_diameter_check = (
             "PASS"
             if dties >= required_tie_diameter
@@ -4804,17 +4963,31 @@ def design_columns(
             else "FAIL"
         )
 
-        member_shear_checks, _ = _column_shear_checks(
-            row,
-            forces,
-            final_engine,
-            selected_bars,
-            spacing_provided,
-            (transverse["Transverse_Legs_X"], transverse["Transverse_Legs_Y"]),
-            is_smrf,
-            bundle_layout=selected_layout,
-            progress=report_progress,
+        def shear_checks_at(tie_spacing: float) -> list[dict]:
+            checks, _ = _column_shear_checks(
+                row,
+                forces,
+                final_engine,
+                selected_bars,
+                tie_spacing,
+                (transverse["Transverse_Legs_X"], transverse["Transverse_Legs_Y"]),
+                is_smrf,
+                bundle_layout=selected_layout,
+                progress=report_progress,
+                clear_height=clear_heights.get(member),
+                beam_moment_limits=beam_moment_limits.get(member),
+            )
+            return checks
+
+        member_shear_checks = shear_checks_at(spacing_provided)
+        # Shear ties at no more than d/2 (d/4 for a large Vs), ACI 10.7.6.5.2.
+        shear_spacing = min(
+            (check["Shear_Spacing_Limit_mm"] for check in member_shear_checks),
+            default=math.inf,
         )
+        if shear_spacing < spacing_provided - 1e-6:
+            spacing_provided = math.floor(shear_spacing / 5.0) * 5.0
+            member_shear_checks = shear_checks_at(spacing_provided)
         # Shear along the depth (V2) uses the legs counted along the X edge and
         # shear along the width (V3) the legs counted along the Y edge.
         for check in member_shear_checks:
@@ -4828,12 +5001,7 @@ def design_columns(
             transverse["Transverse_Legs_X"], transverse["Transverse_Legs_Y"]
         )
         if final_engine.shape == "rectangular" and is_smrf:
-            core_width = final_engine.width - 2.0 * (
-                final_engine.cc + final_engine.dties / 2.0
-            )
-            core_height = final_engine.height - 2.0 * (
-                final_engine.cc + final_engine.dties / 2.0
-            )
+            core_width, core_height = _confined_core(final_engine)
             tie_area = math.pi * final_engine.dties**2 / 4.0
             transverse["Provided_Ash_s_Ratio_X"] = (
                 transverse["Transverse_Legs_X"] * tie_area / (spacing_provided * core_width)
@@ -5085,7 +5253,7 @@ def column_size_passes(
             spacing = layout_engine.solve_max_spacing()["max_tie_spacing_mm"]
             if is_smrf:
                 spacing = min(spacing, _smrf_transverse_design(
-                    layout_engine, bars, max_compression, spacing
+                    layout_engine, len(layout), max_compression, spacing
                 )["Transverse_Spacing_Provided_mm"])
             shear, _ = _column_shear_checks(
                 row, forces, layout_engine, bars, spacing, 2, is_smrf, bundle_layout=layout)

@@ -213,6 +213,10 @@ class ColumnStrengthConfig:
     max_bundle_size: int = 4  #                                               ACI 25.6.1.1
     default_aggregate_size: float = 20.0  # mm, project assumption
     max_longitudinal_spacing: float = 150.0  # mm, project rule (ACI 18.7.5.2 allows hx<=350)
+    # Clear spacing of longitudinal column bars: at least 40 mm, 1.5 db and 4/3 of the
+    # aggregate (a bundle counts as one bar of the same area)   NSCP 425.2.3, ACI 25.2.3
+    min_clear_spacing: float = 40.0  # mm
+    clear_spacing_bar_multiple: float = 1.5
 
 
 @dataclass(frozen=True)
@@ -221,10 +225,12 @@ class ColumnTransverseConfig:
 
     tie_spacing_bar_multiple: float = 16.0  # s <= 16 db                         ACI 25.7.2.1
     tie_spacing_tie_multiple: float = 48.0  # s <= 48 dtie                       ACI 25.7.2.1
-    tie_diameter_small_bars: float = 9.5  # mm, for longitudinal bars <= 32 mm   ACI 25.7.2.2
-    tie_diameter_large_bars: float = 12.7  # mm, for longitudinal bars > 32 mm   ACI 25.7.2.2
-    large_bar_threshold: float = 32.0  # mm                                      ACI 25.7.2.2
-    spiral_diameter_min: float = 9.5  # mm                                       ACI 25.7.3.2
+    # NSCP 425.7.2.2 states the metric sizes: 10 mm ties for 32 mm bars or smaller,
+    # 12 mm for 36 mm bars or larger and for bundled bars (ACI: No. 10 and No. 13)
+    tie_diameter_small_bars: float = 10.0  # mm                                  NSCP 425.7.2.2
+    tie_diameter_large_bars: float = 12.0  # mm, bars > 32 mm or bundled         NSCP 425.7.2.2
+    large_bar_threshold: float = 32.0  # mm                                      NSCP 425.7.2.2
+    spiral_diameter_min: float = 10.0  # mm                                      NSCP 425.7.3.2
     spiral_clear_spacing_min: float = 25.0  # mm                                 ACI 25.7.3.1
     spiral_clear_spacing_max: float = 75.0  # mm                                 ACI 25.7.3.1
     tie_spacing_abs_max: float = 300.0  # mm, upper cap on reported tie spacing (project rule)
@@ -262,7 +268,9 @@ class ColumnSeismicConfig:
     joint_shear_coeff_4_faces: float = 1.7  #                                    ACI Table 18.8.4.1
     joint_shear_coeff_3_faces: float = 1.2  #                                    ACI Table 18.8.4.1
     joint_shear_coeff_other: float = 1.0  #                                      ACI Table 18.8.4.1
-    joint_beam_depth_limit: float = 2.0  # beam depth <= 2 x joint depth (project check)
+    joint_beam_depth_limit: float = 2.0  # joint depth >= beam depth / 2              ACI 18.8.2.4
+    joint_bar_diameter_multiple: float = 20.0  # column side >= 20 db of through beam bars  ACI 18.8.2.3
+    bcc_exempt_axial_fraction: float = 0.1  # no 6/5 rule at a top joint, Pu < 0.1 Ag fc'  ACI 18.7.3.1
     column_offset_limit: float = 1.0 / 6.0  # 1:6 alignment (project check)
     transverse_beam_width_fraction: float = 0.75  # transverse beam >= 3/4 joint width  ACI 18.8.4.2
 
@@ -273,6 +281,7 @@ class ColumnShearConfig:
 
     vc_coeff: float = 0.17  #                                                    ACI 22.5.6.1
     axial_divisor: float = 14.0  # 1 + Nu/(14*Ag)                                ACI 22.5.6.1
+    tension_axial_divisor: float = 3.5  # 1 + Nu/(3.5*Ag), Nu negative           ACI 22.5.7.1
     vc_upper_coeff: float = 0.29  # practical upper cap on Vc
 
 
