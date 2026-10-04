@@ -19,4 +19,4 @@ xs = "main:main"  # earlier name of the command
 py-modules = ["main"]
 
 [tool.setuptools.packages.find]
-include = ["design*", "etabs_api*", "utilities*", "geotech*"]
+include = ["design*", "etabs_api*", "utilities*"]
