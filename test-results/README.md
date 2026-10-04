@@ -119,3 +119,5 @@ confidential.
 - `REQUEST_02.md`: drift story height, identical wind drift, short
   footing-level columns, joint shear inputs, default deflection combinations,
   earth cover crash, untagged default.
+- `REQUEST_03.md`: the capacity shear of the GF corner column, and the earth
+  cover crash on a 250 mm beam.
