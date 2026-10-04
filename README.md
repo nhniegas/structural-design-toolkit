@@ -31,7 +31,6 @@ Supporting code:
 - `utilities/design_cli.py`: the terminal workflow shared by the composite, steel and wind checks (input dialog, then printout, PDF or both).
 - `utilities/_gui_helpers.py`: file pickers, list pickers, choice and text-entry dialogs, and the loading window.
 - `utilities/_calc_report.py`: layout of the beam and column PDF calculation reports.
-- `geotech/logspiral_passive.py`: standalone log-spiral passive earth pressure calculator (run in a terminal).
 - `main.qmd`: Quarto template for written reports.
 - `main.py`: terminal entry point of every command (`sdt --help` lists them).
 
@@ -46,8 +45,8 @@ Supporting code:
 ## Setup
 
 ```powershell
-git clone https://github.com/nhniegas/xlwings_spreadsheet_structural.git
-cd xlwings_spreadsheet_structural
+git clone https://github.com/nhniegas/structural-design-toolkit.git
+cd structural-design-toolkit
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
@@ -143,6 +142,10 @@ python -m pytest tests
 ```
 
 The tests need no ETABS. GitHub Actions runs them on every push to `main` (`.github/workflows/ci.yml`). Pushing a tag such as `v1.0.0` builds a release package (`.github/workflows/release.yml`).
+
+## Geotechnical tools
+
+The log-spiral passive earth pressure calculator moved to its own repository, [geotech-toolkit](https://github.com/nhniegas/geotech-toolkit).
 
 ## Engineering use
 

@@ -37,16 +37,6 @@ jobs:
           git archive --format=zip --output "dist/structural-design-toolkit-${{ github.ref_name }}.zip" HEAD @paths
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      # Standalone geotech tool (same build as geotech/build_exe.bat). Skipped if the script is not committed.
-      - name: Build LogSpiralPassive.exe
-        if: hashFiles('geotech/logspiral_passive.py') != ''
-        shell: pwsh
-        run: |
-          python -m pip install --upgrade pyinstaller
-          python -m PyInstaller --onefile --console --clean --name LogSpiralPassive `
-            --distpath dist --workpath build/pyinstaller --specpath build geotech/logspiral_passive.py
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
       - uses: actions/upload-artifact@v4
         with:
           name: release-package
