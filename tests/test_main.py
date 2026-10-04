@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import main  # noqa: E402
 
 
-@pytest.mark.parametrize("command", ["setup", "grids", "tag", "analyze", "beams", "deflection", "columns", "design", "composite", "steel", "wind"])
+@pytest.mark.parametrize("command", ["setup", "grids", "tag", "check", "analyze", "drift", "beams", "deflection", "columns", "design", "composite", "steel", "wind"])
 def test_each_command_runs_its_workflow(command, monkeypatch):
     ran = []
     for name in main.COMMANDS:

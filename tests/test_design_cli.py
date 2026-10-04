@@ -125,6 +125,21 @@ def dialogs(monkeypatch, tmp_path):
     monkeypatch.setattr(_gui_helpers, "select_option", lambda *a, **k: answers["option"])
     monkeypatch.setattr(_gui_helpers, "select_save_file", lambda **k: answers["save"])
     monkeypatch.setattr(_gui_helpers, "show_warning", lambda message, **k: warnings.append(message))
+
+    class _NoWindow:  # no loading window during the tests
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def update(self, text):
+            pass
+
+    monkeypatch.setattr(_gui_helpers, "LoadingWindow", _NoWindow)
     answers["warnings"] = warnings
     return answers
 

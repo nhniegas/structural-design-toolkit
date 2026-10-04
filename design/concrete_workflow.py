@@ -289,9 +289,11 @@ def run_beams() -> DesignStore | None:
         results = design_beams(tables, smrf, gravity, bars, divisor, progress=window.update)
         store.beam_results = results
         store.save()
-        window.update("Saving the results, the schedules and the calculation report")
+        window.update("Saving 1 of 3: the results workbook (.xlsx)")
         xlsx = write_beam_results_xlsx(results, os.path.join(folder, f"{stem} - Beam Design.xlsx"))
+        window.update("Saving 2 of 3: the beam schedules (.dxf)")
         dxf = export_beam_dxf(results, folder)
+        window.update("Saving 3 of 3: the calculation report (.pdf, LaTeX)")
         pdf = export_beam_pdf(results, os.path.join(folder, f"{stem} - Beam Calculations.pdf"),
                               smrf, gravity)
     for note in notes:
@@ -396,6 +398,7 @@ def run_deflection() -> pd.DataFrame | None:
         checked = add_deflection_columns(results, service, divisor, connectivity,
                                          progress=window.update)
         table = deflection_table(checked)
+        window.update("Saving the deflection workbook (.xlsx)")
         path = write_deflection_xlsx(table, os.path.join(folder, f"{stem} - Deflection.xlsx"))
     status = table["Deflection check"].astype(str)
     print(f"Deflection: {len(table)} beams, {int((status == 'FAIL').sum())} failing "
@@ -469,11 +472,13 @@ def run_columns() -> DesignStore | None:
         store.inputs.update({"column_bars": bars, "continuous_bars": answers[0],
                              "bottom_cover": answers[1]})
         store.save()
-        window.update("Saving the results, the schedule and the calculation report")
+        window.update("Saving 1 of 3: the results workbook (.xlsx)")
         xlsx = write_column_results_xlsx(report, groups,
                                          os.path.join(folder, f"{stem} - Column Design.xlsx"))
+        window.update("Saving 2 of 3: the column schedule (.dxf)")
         dxf = export_column_cad_drawings(report, folder, bars["dmain"], bars["cover"], smrf,
                                          tie_style, store.tables["CONNECTIVITY"])
+        window.update("Saving 3 of 3: the calculation report (.pdf, LaTeX)")
         pdf = export_column_pdf(report, os.path.join(folder, f"{stem} - Column Calculations.pdf"),
                                 smrf, bars["dmain"], bars["dties"], bars["cover"])
     failing = report.groupby("UniqueName")["Column_Design_Status"].apply(

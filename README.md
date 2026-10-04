@@ -14,7 +14,7 @@ Structural design calculations and ETABS automation, run from the terminal with 
 
 Supporting code:
 
-- `design/aci318_config.py`: every ACI 318M-14 constant used by the beam and column designers, with its clause.
+- `design/code_config.py`: every structural code value, each with its clause. `CODE` holds ACI 318M-14 (NSCP chapter 4), used by the beam and column designers. `NSCP` holds NSCP 2015 chapter 2: load factors, live load reduction (with the ASCE 7 alternate), and the earthquake values with the UBC 97 tables that ETABS uses. NSCP 2015 governs; the other codes are guides.
 - `etabs_api/core/`: the ETABS connection and thin wrappers for tables, geometry, assignments, loads, properties, results and stories.
 - `etabs_api/workflows/`: automation built on the office conventions, listed below.
 - `design/concrete_workflow.py`: the `xs beams`, `xs deflection` and `xs columns` commands and the design data stored between them.
@@ -25,6 +25,7 @@ Supporting code:
 - `etabs_api/workflows/design_loop.py`, `sections.py`: the analysis and design loop with member resizing.
 - `etabs_api/workflows/tributary.py`: geometric tributary areas for the live load reduction.
 - `design/beam_deflection.py`: beam deflection checks (ACI 318M-14 24.2).
+- `design/column_interaction.py`: the biaxial P-Mx-My design interaction surface of a column layout, built once and cached. It also provides the demand convex hull and the 3D figure for the calculation report.
 - `etabs_api/workflows/model_analysis.py`: analysis run, response spectrum scaling, period, modal mass and weight checks.
 - `etabs_api/workflows/model_setup.py`, `ubc97.py`, `load_combinations.py`: definition of materials, sections, loads and NSCP 2015 combinations in an ETABS model.
 - `utilities/design_cli.py`: the terminal workflow shared by the composite, steel and wind checks (input dialog, then printout, PDF or both).
@@ -73,7 +74,7 @@ From the project folder, with the environment active:
 .venv\Scripts\Activate.ps1
 python main.py setup     # materials, sections, loads, spectrum, cases and combinations
 python main.py grids     # stories, grids, columns and walls from a DXF of framing plans
-python main.py tag       # unique names for every beam and column, in a tagged copy
+python main.py tag       # unique names for every beam and column (a tagged copy or the model itself)
 python main.py analyze   # run, scale the response spectrum, check periods, modal mass and weight
 python main.py beams     # extract the forces and design the beams; results, calcs and schedules
 python main.py deflection  # only the beam deflections (bars of the last beam design)
@@ -121,6 +122,10 @@ This defines the materials, frame sections, load patterns, UBC 97 response spect
 ## Running and checking the analysis
 
 `xs analyze` (or `python main.py analyze`) runs the analysis, scales the response spectrum cases to 100 % of the static base shear, and checks the periods against UBC 97 Method A, the modal participating mass and the seismic weight. See [ETABS analysis checks](doc/etabs_analysis.md).
+
+`xs check` (or `python main.py check`) checks the open model against NSCP 2015 without changing it, and prints one line per check in the terminal. It covers missing loads, supports and diaphragms; the seismic inputs against the Section 208 tables (Z, Na, Nv, Ca, Cv, I, R, Ct); the story ranges and the Ev term in the combinations; P-delta, the mass source and the cracked-section modifiers; and the Section 418 member limits. After `xs analyze` it also recomputes the base shear coefficient and period cap, and checks the spectrum scaling, modal mass and the drift ΔM = 0.7RΔS. See [Model check](doc/etabs_model_check.md).
+
+`xs drift` (or `python main.py drift`) checks the story drift of the `DRIFT` and `WDRIFT` combinations using the drift stiffness: strength level (0.35 / 0.70) and service level (1.4 times). It works on the open model: it sets the modifiers, analyses, reports and restores the model. The drift is read at the diaphragm centre of mass or at the four outer column joints of each story. See [Story drift](doc/etabs_drift.md).
 
 `xs design` runs the analysis and the beam and column design again and again on a copy of the model, resizing the members until they pass (deflection included). See [Design loop](doc/etabs_design_loop.md).
 

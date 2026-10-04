@@ -7,8 +7,13 @@
                              a DXF of framing plans  (etabs_api/workflows/grid_column_model.py)
     python main.py tag       give every beam and column of the open model its unique
                              name, in a tagged copy  (etabs_api/workflows/frame_tagger.py)
+    python main.py check     check the open model for missing or inconsistent inputs
+                             (read only; etabs_api/workflows/model_check.py)
     python main.py analyze   run the analysis, scale the response spectrum to the static
                              base shear, check periods, modal mass and weight
+    python main.py drift     story drift of the DRIFT / WDRIFT combinations with the drift
+                             stiffness, strength and service level; the model is restored
+                             (etabs_api/workflows/drift_check.py)
                              (etabs_api/workflows/model_analysis.py)
     python main.py beams     extract the forces and design the beams; save the results,
                              calculations and schedules (design/concrete_workflow.py)
@@ -58,10 +63,22 @@ def _tag():
     return auto_tag_frames()
 
 
+def _check():
+    from etabs_api.workflows.model_check import run_model_check
+
+    return run_model_check()
+
+
 def _analyze():
     from etabs_api.workflows.model_analysis import run_model_analysis
 
     return run_model_analysis()
+
+
+def _drift():
+    from etabs_api.workflows.drift_check import run_drift_check
+
+    return run_drift_check()
 
 
 def _beams():
@@ -110,7 +127,9 @@ COMMANDS = {
     "setup": (_setup, "define materials, sections, loads, spectrum, cases and combinations"),
     "grids": (_grids, "build or update stories, grids, columns and walls from a DXF"),
     "tag": (_tag, "give every beam and column of the open model its unique name"),
+    "check": (_check, "check the open model for missing or inconsistent inputs (read only)"),
     "analyze": (_analyze, "run, scale the response spectrum, check periods, mass and weight"),
+    "drift": (_drift, "story drift with the drift stiffness (strength, service), then restore"),
     "beams": (_beams, "extract the forces and design the beams (ACI 318M-14)"),
     "deflection": (_deflection, "check only the beam deflections (bars of the last beam design)"),
     "columns": (_columns, "design the columns from the stored beam step"),

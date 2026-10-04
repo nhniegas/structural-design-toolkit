@@ -14,7 +14,7 @@ from typing import Dict, List
 import ezdxf
 import pandas as pd
 
-from design.aci318_config import CODE, AciCode
+from design.code_config import CODE, AciCode
 from design.beam_deflection import (
     DEFLECTION_COLUMNS,
     LIMIT_DAMAGED,
@@ -151,7 +151,7 @@ class BeamFlexureDesign:
         """Initialize the rectangular beam section and reinforcement design inputs (mm, MPa, kN-m).
 
         ``d_agg`` is the maximum aggregate size; ``None`` uses the configured default.
-        ``code`` holds every ACI constant (see aci318_config.py).
+        ``code`` holds every ACI constant (see code_config.py).
         """
         self.code = code
         detailing = code.beam_detailing

@@ -20,12 +20,12 @@ The report is printed in the terminal and the model is saved.
 ## What it does
 
 1. Runs every load case.
-2. For each response spectrum case (`RSAX` along U1, `RSAY` along U2), compares its base shear with the largest static seismic case of the same direction (the load patterns of type Seismic). When the spectrum base shear is lower, the scale factor of the spectrum case is multiplied by static / spectrum and the analysis runs again. The analysis is linear, so one scaling is exact; it is repeated (at most three times) until the two agree within 1 %. A spectrum base shear above the static one is left as it is.
+2. Puts every response spectrum case back to its unscaled factor, g I / R from the seismic patterns, so a second run does not keep the first run's scaling. For each response spectrum case (`RSAX` along U1, `RSAY` along U2), compares its base shear with the largest static seismic case of the same direction (the load patterns of type Seismic). The drift cases `RSAXD` and `RSAYD` (names ending in D) are compared with the drift patterns (type Seismic (Drift): `EQXSD`, `EQYSD`), whose period is not capped (NSCP 208.6.5.2). So the drift cases are not inflated to the capped-period strength shear, and the drift check in `xs check` uses them. When the spectrum base shear is lower, the scale factor of the spectrum case is multiplied by static / spectrum and the analysis runs again. The analysis is linear, so one scaling is exact; it is repeated (at most three times) until the two agree within 1 %. A spectrum base shear above the static one is left as it is.
 3. Reports:
 
 | Check | Rule |
 |---|---|
-| Periods | The modal period with the largest mass in X and in Y, against UBC 97 Method A, T_A = Ct hn^(3/4) (hn in ft, the height above the base), and the Method B cap: 1.3 T_A in zone 4, 1.4 T_A in zones 1 to 3. A longer modal period is reported: the static seismic cases use the capped period |
+| Periods | The modal period with the largest mass in X and in Y, against NSCP 208.5.2.2 Method A, T_A = Ct hn^(3/4) (Ct and hn in ft units, as UBC 97 and ETABS; the height above the base), and the Method B cap: 1.3 T_A in zone 4, 1.4 T_A in zone 2. A longer modal period is reported: the static seismic cases use the capped period |
 | Modal mass | The sum of the modal participating mass in X and Y; a warning below 90 % (add modes) |
 | Weight | The seismic weight from the mass source (Mass Summary by Story), against the vertical base reaction of the mass-source load patterns with their multipliers. A difference above 1 % is reported: element self mass or added mass in the mass source, or loads on the base |
 
@@ -45,8 +45,10 @@ Base reaction of the same loads:     14,567.5 kN
 
 ## Not covered yet
 
-- The 90 % / 100 % scaling rule of NSCP for regular and irregular structures: the spectrum is always scaled to 100 %.
-- Story drift, torsional irregularity (Ax), soft story, mass and weak story irregularities.
+- The 90 % / 100 % scaling rule of NSCP for regular and irregular structures: the spectrum is always scaled to 100 % (`xs check` reports 90 to 100 % as a warning).
+- Irregularities (torsion and Ax, soft story, mass, weak story). Story drift is checked by `xs check`.
+
+The values (scaling target, period caps, modal mass) are in `design/code_config.py` (`NSCP.seismic`).
 - A PDF or Excel report.
 
 ## Tests

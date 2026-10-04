@@ -40,9 +40,10 @@ python main.py grids
 
 1. Pick the DXF file.
 2. Confirm the layer names and type the concrete and rebar grade (ksi) of the columns and walls.
-3. Choose the model: the one open in ETABS, or a new blank model.
-4. A dialog lists what will change. Choose **Apply these changes** or **Cancel**.
-5. The closing message lists what was done. The full list of changes is saved beside the model as `<name> - plan changes.txt`.
+3. Choose whether to add a footing level (see below); if so, type the embedment depth (mm) and the name of the ground level (`GF` by default). Both are remembered.
+4. Choose the model: the one open in ETABS, or a new blank model.
+5. A dialog lists what will change. Choose **Apply these changes** or **Cancel**.
+6. The closing message lists what was done. The full list of changes is saved beside the model as `<name> - plan changes.txt`.
 
 Closing any dialog cancels the run without changing the model.
 
@@ -50,12 +51,25 @@ Closing any dialog cancels the run without changing the model.
 
 | Item | Rule |
 |---|---|
-| Stories | Names and heights from the plan titles. Only set when the model has no members yet |
+| Stories | Names and heights from the plan titles. On a model with members, the base elevation and every story height are updated in place and ETABS moves the levels above with their members; stories can only be added or removed while the model has no members |
 | Grid lines | General grid lines in the first grid system. The drawing replaces them on every run |
-| Column sections | `CR_<width>X<depth>_<concrete>_<rebar>` or `C_<diameter>_...`, created if missing, with the same modifiers and rebar data as the model setup |
+| Column sections | `CR_<width>X<depth>_<concrete>_<rebar>` or `C_<diameter>_...`, created if missing, with the same rebar data as the model setup (no stiffness modifiers) |
 | Columns | From the level below up to the story of the plan. Depth is along the ETABS local 2 axis; the rotation is kept between 0 and 90 degrees |
 | Wall sections | `SW_<thickness>_<concrete>_<rebar>`, thin shell, created if missing |
 | Walls | One panel per straight wall, over the story height |
+
+## Footing level
+
+Without it, the base of the model is the ground: the lowest plan's `HEIGHT` is measured from elevation 0.
+
+With a footing level of embedment depth D:
+
+- the base goes down to -D;
+- a ground story (`GF`, height D) is added below the lowest plan and ends at elevation 0, so the ground level is the zero reference;
+- the drawn stories keep their heights above it (the sample's `2F` stays 4500 above `GF`);
+- the columns and walls of the lowest plan are repeated in the ground story, from the footings up to the ground level.
+
+The ground level name must not be one of the drawing's stories. Use the same choice on every run of a revision, so the ground story columns are matched as unchanged. A changed depth on a later run moves the base and stretches the ground story columns; the ground level stays at 0.
 
 ## Revisions
 
@@ -86,7 +100,8 @@ Check the list in the confirmation dialog before applying, particularly for a la
 from etabs_api.workflows.grid_column_model import build_grid_column_model
 
 building, changes, log, path = build_grid_column_model(
-    r"C:\...\FRAMING PLANS.dxf", concrete_ksi=5, rebar_ksi=60, target="open")
+    r"C:\...\FRAMING PLANS.dxf", concrete_ksi=5, rebar_ksi=60, target="open",
+    footing_depth=1500, ground_story="GF")  # footing level optional
 ```
 
 ## Tests

@@ -4,7 +4,9 @@
 2. Scale the response spectrum cases so their base shear is 100 % of the
    static base shear in the same direction (only up, never down), and run
    again. The analysis is linear, so one scaling is exact; it is repeated
-   until the two agree within 1 %.
+   until the two agree within 1 %. The strength cases (RSAX, RSAY) follow the
+   seismic patterns; the drift cases (RSAXD, RSAYD) follow the drift patterns
+   (EQXSD, EQYSD), whose period is not capped (NSCP 208.6.5.2).
 3. Report:
 
    * periods: the governing modal period in each direction against UBC 97
@@ -29,23 +31,28 @@ if __package__ in (None, ""):
     # Run as a script: make the project folder (two levels up) importable.
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from design.code_config import NSCP  # noqa: E402
 from etabs_api.core.helpers import as_list  # noqa: E402
 
-G = 9806.65  # mm/s2
+G = NSCP.seismic.gravity  # mm/s2
 FT = 304.8   # mm
 SCALE_TOLERANCE = 0.01
+SCALE_TARGET = NSCP.seismic.scaling_irregular  # 100 % of the static base shear
 MAX_SCALING_RUNS = 3
 SEISMIC_PATTERN_TYPE = 5
+SEISMIC_DRIFT_PATTERN_TYPE = 61
+DRIFT_SUFFIX = "D"  # RSAXD, RSAYD: the drift spectrum cases (model_setup.DRIFT_SUFFIX)
 
 
 def method_a_period(ct: float, height_mm: float) -> float:
-    """UBC 97 Eq. 30-8: T_A = Ct hn^(3/4), Ct in ft units."""
-    return ct * (height_mm / FT) ** 0.75
+    """NSCP Eq. 208-12 (UBC 97 Eq. 30-8): T_A = Ct hn^(3/4), Ct in ft units."""
+    return ct * (height_mm / FT) ** NSCP.seismic.period_exponent
 
 
 def period_cap(zone_factor: float) -> float:
-    """UBC 97 1630.2.2: Method B may not exceed 1.3 T_A in zone 4, 1.4 T_A otherwise."""
-    return 1.3 if zone_factor >= 0.4 else 1.4
+    """NSCP 208.5.2.2: Method B may not exceed 1.3 T_A in zone 4, 1.4 T_A otherwise."""
+    k = NSCP.seismic
+    return k.period_cap_zone4 if zone_factor >= k.zone4_factor else k.period_cap_other
 
 
 @dataclass
@@ -82,7 +89,8 @@ class AnalysisReport:
         lines = ["", "=" * 72, "ETABS ANALYSIS", "=" * 72]
         if self.model_path:
             lines.append(f"Model: {self.model_path}")
-        lines += ["", "--- Response spectrum scaled to 100 % of the static base shear ---"]
+        lines += ["", f"--- Response spectrum scaled to {SCALE_TARGET * 100:g} % of the static "
+                  "base shear (drift cases: of the drift patterns) ---"]
         for s in self.scaling:
             lines.append(
                 f"{s.direction}: static {s.static_case} {s.static_shear / 1e3:,.1f} kN | "
@@ -135,11 +143,12 @@ def _case_names(connector) -> dict[str, str]:
     return dict(zip(table["Name"].astype(str), table["Type"].astype(str)))
 
 
-def seismic_static_cases(connector) -> list[str]:
-    """Load cases of the seismic load patterns (type Quake) with a linear static case."""
+def seismic_static_cases(connector, pattern_type: int = SEISMIC_PATTERN_TYPE) -> list[str]:
+    """Load cases of the seismic load patterns (type Quake, or ``pattern_type``)
+    with a linear static case."""
     patterns = connector.sap_model.LoadPatterns
     names = [str(n) for n in as_list(patterns.GetNameList(0, [])[1])]
-    seismic = [n for n in names if int(patterns.GetLoadType(n)[0]) == SEISMIC_PATTERN_TYPE]
+    seismic = [n for n in names if int(patterns.GetLoadType(n)[0]) == pattern_type]
     cases = _case_names(connector)
     return [n for n in seismic if cases.get(n) == "Linear Static"]
 
@@ -184,20 +193,22 @@ def multiply_spectrum_scale(connector, case: str, factor: float) -> None:
         raise RuntimeError(f"Could not set the scale factor of {case}.")
 
 
-def scale_spectrum_to_static(connector, run) -> list[ShearScaling]:
+def scale_spectrum_to_static(connector, run, progress=None) -> list[ShearScaling]:
     """Scale each spectrum case up to the static base shear of its direction.
 
     ``run`` runs the analysis. Returns the scaling of each direction.
     """
     statics = seismic_static_cases(connector)
+    drifts = seismic_static_cases(connector, SEISMIC_DRIFT_PATTERN_TYPE)
     spectra = spectrum_cases(connector)
-    if not statics or not spectra:
+    if not (statics or drifts) or not spectra:
         return []
-    first = base_shears(connector, statics + list(spectra))
+    first = base_shears(connector, statics + drifts + list(spectra))
     out = {}
     for case, direction in spectra.items():
         component = "FX" if direction == "X" else "FY"
-        own = [c for c in statics if c in first.index
+        drift = case.upper().endswith(DRIFT_SUFFIX) and bool(drifts)
+        own = [c for c in (drifts if drift else statics) if c in first.index
                and abs(first.loc[c, component]) >= abs(first.loc[c, "FY" if component == "FX" else "FX"])]
         if not own:
             continue
@@ -205,25 +216,29 @@ def scale_spectrum_to_static(connector, run) -> list[ShearScaling]:
         out[case] = ShearScaling(direction, static_case, abs(first.loc[static_case, component]),
                                  case, abs(first.loc[case, component]), 1.0,
                                  abs(first.loc[case, component]))
-    for _ in range(MAX_SCALING_RUNS):
+    say = progress or (lambda text: None)
+    for attempt in range(1, MAX_SCALING_RUNS + 1):
         changed = False
         for item in out.values():
             if item.spectrum_after <= 0:
                 continue
-            ratio = item.static_shear / item.spectrum_after
+            ratio = SCALE_TARGET * item.static_shear / item.spectrum_after
             if ratio > 1.0 + SCALE_TOLERANCE / 10:  # scale up only
                 multiply_spectrum_scale(connector, item.spectrum_case, ratio)
                 item.factor *= ratio
                 changed = True
         if not changed:
             break
+        say("Running the analysis again with the scaled spectrum\n" + ", ".join(
+            f"{i.spectrum_case} x {i.factor:.3f}" for i in out.values())
+            + (f"\n(pass {attempt})" if attempt > 1 else ""))
         run()
         again = base_shears(connector, list(out))
         for case, item in out.items():
             component = "FX" if item.direction == "X" else "FY"
             item.spectrum_after = abs(again.loc[case, component])
-        if all(abs(i.spectrum_after / i.static_shear - 1) <= SCALE_TOLERANCE
-               or i.spectrum_after > i.static_shear for i in out.values()):
+        if all(abs(i.spectrum_after / (SCALE_TARGET * i.static_shear) - 1) <= SCALE_TOLERANCE
+               or i.spectrum_after > SCALE_TARGET * i.static_shear for i in out.values()):
             break
     return sorted(out.values(), key=lambda s: s.direction)
 
@@ -275,22 +290,65 @@ def reaction_weight(connector, loads: list[tuple[str, float]]) -> float | None:
     return float(sum(m * abs(reactions.loc[p, "FZ"]) for p, m in loads if p in reactions.index))
 
 
+def base_spectrum_scale(connector) -> float | None:
+    """g I / R from the model's UBC 97 seismic patterns: the unscaled spectrum factor."""
+    from etabs_api.workflows.ubc97 import response_spectrum_scale
+
+    model = connector.sap_model
+    try:
+        names = [str(n) for n in as_list(model.LoadPatterns.GetNameList(0, [])[1])]
+        model.DatabaseTables.SetLoadPatternsSelectedForDisplay(names)
+        table = connector._read_database_table("Load Pattern Definitions - Auto Seismic - UBC 97")
+        if "IsAuto" in table:
+            table = table[table["IsAuto"].astype(str) != "Yes"]
+        importance = float(pd.to_numeric(table["I"], errors="coerce").dropna().iloc[0])
+        r_factor = float(pd.to_numeric(table["R"], errors="coerce").dropna().iloc[0])
+        return response_spectrum_scale(importance, r_factor)
+    except Exception:
+        return None
+
+
+def reset_spectrum_scale(connector) -> float | None:
+    """Put every spectrum case back to g I / R, so the scaling starts from the
+    unscaled spectrum and not from an earlier run's factors. Returns the factor."""
+    base = base_spectrum_scale(connector)
+    if base is None:
+        return None
+    model = connector.sap_model
+    if model.GetModelIsLocked():
+        model.SetModelIsLocked(False)
+    api = model.LoadCases.ResponseSpectrum
+    for case in spectrum_cases(connector):
+        count, directions, functions, scales, systems, angles, _ = api.GetLoads(case)
+        api.SetLoads(case, count, as_list(directions), as_list(functions),
+                     [base] * len(as_list(scales)), as_list(systems), as_list(angles))
+    return base
+
+
 def analyze_model(connector, zone_factor: float | None = None, ct: float | None = None,
-                  scale: bool = True) -> AnalysisReport:
-    """Run, scale the spectrum, run again, and check periods, mass and weight."""
+                  scale: bool = True, progress=None) -> AnalysisReport:
+    """Reset the spectrum to g I / R, run, scale it to the static base shear, run
+    again, and check periods, mass and weight. ``progress`` gets each step."""
+    say = progress or (lambda text: None)
     report = AnalysisReport(model_path=str(connector.sap_model.GetModelFilename()))
+    if scale:
+        say("Putting the response spectrum cases back to g I / R")
+        reset_spectrum_scale(connector)
 
     def run():
         connector.analysis.run()
 
+    say("Running every load case")
     run()
     if scale:
-        report.scaling = scale_spectrum_to_static(connector, run)
+        say("Comparing the spectrum and static base shears")
+        report.scaling = scale_spectrum_to_static(connector, run, say)
     for item in report.scaling:
-        if item.spectrum_after < item.static_shear * (1 - SCALE_TOLERANCE):
+        if item.spectrum_after < SCALE_TARGET * item.static_shear * (1 - SCALE_TOLERANCE):
             report.warnings.append(f"{item.spectrum_case} base shear is below the static base "
                                    "shear after scaling.")
 
+    say("Reading the modal periods and participating mass")
     periods = modal_periods(connector)
     report.periods = periods
     if not periods.empty:
@@ -302,10 +360,11 @@ def analyze_model(connector, zone_factor: float | None = None, ct: float | None 
             if column in periods.columns:
                 total = float(periods[column].iloc[-1])
                 report.mass_sum[direction] = total
-                if total < 0.90:
+                if total < NSCP.seismic.modal_mass:
                     report.warnings.append(
                         f"Modal participating mass in {direction} is {total * 100:.1f} % "
-                        "(below 90 %): add modes to the modal case.")
+                        f"(below {NSCP.seismic.modal_mass * 100:g} %): add modes to the modal "
+                        "case.")
     if ct and zone_factor:
         report.method_a = method_a_period(ct, building_height(connector))
         report.cap = period_cap(zone_factor)
@@ -316,6 +375,7 @@ def analyze_model(connector, zone_factor: float | None = None, ct: float | None 
                     f"Modal period {direction} {period:.3f} s is above {report.cap:.1f} T_A = "
                     f"{limit:.3f} s: the static base shear uses the capped period.")
 
+    say("Reading the seismic weight and the base reactions")
     weights = story_weights(connector)
     report.story_weights = weights
     report.seismic_weight = float(weights["Weight (kN)"].sum() * 1e3)
@@ -384,9 +444,10 @@ def run_model_analysis() -> AnalysisReport | None:
         show_warning("The zone factor and Ct must be numbers.", title=title)
         return None
 
-    with LoadingWindow("Running the analysis and scaling the response spectrum..."):
-        report = analyze_model(connector, zone, ct)
-    model.File.Save(path)
+    with LoadingWindow("Analysis") as window:
+        report = analyze_model(connector, zone, ct, progress=window.update)
+    # Save() keeps the results; Save(path) drops them even for the same file
+    model.File.Save()
     print(report.text())
     print(f"Saved: {path}")
     return report

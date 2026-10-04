@@ -25,6 +25,26 @@ def test_method_b_cap_depends_on_the_zone(zone, cap):
     assert ma.period_cap(zone) == cap
 
 
+def test_drift_spectrum_cases_follow_the_drift_patterns(monkeypatch):
+    # strength: RSAX to EQXPE (capped period); drift: RSAXD to EQXSD (uncapped)
+    shears = {"EQXPE": 1000e3, "EQXSD": 500e3, "RSAX": 400e3, "RSAXD": 300e3}
+    monkeypatch.setattr(ma, "seismic_static_cases", lambda c, t=ma.SEISMIC_PATTERN_TYPE:
+                        ["EQXPE"] if t == ma.SEISMIC_PATTERN_TYPE else ["EQXSD"])
+    monkeypatch.setattr(ma, "spectrum_cases", lambda c: {"RSAX": "X", "RSAXD": "X"})
+    monkeypatch.setattr(ma, "base_shears", lambda c, cases: pd.DataFrame(
+        {"FX": [shears[k] for k in cases], "FY": [0.0] * len(cases)}, index=cases))
+
+    def scale(connector, case, factor):
+        shears[case] *= factor
+
+    monkeypatch.setattr(ma, "multiply_spectrum_scale", scale)
+    result = {s.spectrum_case: s for s in ma.scale_spectrum_to_static(None, lambda: None)}
+    assert result["RSAX"].static_case == "EQXPE"
+    assert result["RSAXD"].static_case == "EQXSD"
+    assert shears["RSAX"] == pytest.approx(1000e3)
+    assert shears["RSAXD"] == pytest.approx(500e3)
+
+
 def test_report_text_lists_scaling_periods_and_warnings():
     report = ma.AnalysisReport(
         model_path="M.EDB",

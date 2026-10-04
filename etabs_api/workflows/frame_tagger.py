@@ -472,13 +472,22 @@ def apply_frame_tags(connector, tags: dict[str, str], progress=None) -> list[str
     return failed
 
 
-def auto_tag_frames(prefixes: dict[str, str] | None = None) -> str | None:
-    """Excel button: tag every beam and column in a copy of the open ETABS model.
+TAG_TARGETS = {
+    "Into a copy saved beside it (<model> - TAGGED.EDB)": False,
+    "Into this model (overwrite it)": True,
+}
 
-    The model is saved under a new name in its own folder first, so the
-    original file is not changed. Returns the path of the tagged copy.
+
+def auto_tag_frames(prefixes: dict[str, str] | None = None,
+                    in_place: bool | None = None) -> str | None:
+    """Tag every beam and column of the open ETABS model (``xs tag``).
+
+    ``in_place`` False (the default answer) saves the model as a tagged copy
+    in its own folder first, so the original file is not changed; True tags
+    and saves the model itself. It is asked when not given. Returns the path
+    of the tagged model.
     """
-    from utilities._gui_helpers import LoadingWindow, enter_values, show_warning
+    from utilities._gui_helpers import LoadingWindow, enter_values, select_option, show_warning
 
     from etabs_api.core.connection import ETABSConnector
 
@@ -521,15 +530,21 @@ def auto_tag_frames(prefixes: dict[str, str] | None = None) -> str | None:
         )
         return None
 
+    if in_place is None:
+        chosen = select_option("Auto Tagging", "Where should the tags go?", list(TAG_TARGETS))
+        if chosen is None:
+            return None  # dialog closed without confirming
+        in_place = TAG_TARGETS[chosen]
+
     tags = plan_frame_tags(points, beams, columns, prefixes, restrained)
     all_names = [str(name) for name in as_list(model.FrameObj.GetNameList()[1])]
     clashes = set(conflicting_tags(tags, all_names))
     tags = {old: new for old, new in tags.items() if new not in clashes}
 
-    new_path = tagged_model_path(model_path)
+    new_path = model_path if in_place else tagged_model_path(model_path)
     with LoadingWindow("Tagging beams and columns...") as window:
         if return_code(model.File.Save(new_path)) != 0:
-            show_warning(f"ETABS could not save the copy:\n{new_path}", title="Auto Tagging")
+            show_warning(f"ETABS could not save the model:\n{new_path}", title="Auto Tagging")
             return None
         if model.GetModelIsLocked():
             model.SetModelIsLocked(False)  # names cannot change in a locked model
@@ -539,8 +554,9 @@ def auto_tag_frames(prefixes: dict[str, str] | None = None) -> str | None:
 
     message = (
         f"Tagged {len(tags) - len(failed)} beams and columns.\n\n"
-        f"Saved as:\n{new_path}\n\nETABS now has this tagged copy open. "
-        "The original model was not changed."
+        + (f"Saved in the model itself:\n{new_path}" if in_place else
+           f"Saved as:\n{new_path}\n\nETABS now has this tagged copy open. "
+           "The original model was not changed.")
     )
     if clashes:
         message += (

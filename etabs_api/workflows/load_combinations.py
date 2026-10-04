@@ -17,26 +17,41 @@ the other. The vertical effect Ev = 0.5 Ca I D is put into the dead load factor.
 
 from __future__ import annotations
 
+import os
+import sys
 from dataclasses import dataclass, field
+
+if __package__ in (None, ""):
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+from design.code_config import NSCP  # noqa: E402
 
 DEAD_TYPES = ("Dead", "Super Dead")
 LIVE_TYPES = ("Live", "Reducible Live")
 ROOF_LIVE_TYPES = ("Roof Live",)
+_FACTORS = NSCP.load_factors
 
-# (100 % case, factor, 30 % case, factor) for the static seismic cases.
-_STATIC_DIRECTIONS = (
-    ("EQXPE", 1.0, "EQYPE", 0.3), ("EQXPE", 1.0, "EQYNE", -0.3),
-    ("EQXNE", -1.0, "EQYPE", 0.3), ("EQXNE", -1.0, "EQYNE", -0.3),
-    ("EQYPE", 1.0, "EQXPE", 0.3), ("EQYPE", 1.0, "EQXNE", -0.3),
-    ("EQYNE", -1.0, "EQXPE", 0.3), ("EQYNE", -1.0, "EQXNE", -0.3),
-)
-_SPECTRUM_DIRECTIONS = (
-    ("RSAX", 1.0, "RSAY", 0.3), ("RSAX", 1.0, "RSAY", -0.3),
-    ("RSAX", -1.0, "RSAY", 0.3), ("RSAX", -1.0, "RSAY", -0.3),
-    ("RSAY", 1.0, "RSAX", 0.3), ("RSAY", 1.0, "RSAX", -0.3),
-    ("RSAY", -1.0, "RSAX", 0.3), ("RSAY", -1.0, "RSAX", -0.3),
-)
-SERVICE_SEISMIC = 1.0 / 1.4  # E / 1.4 in the service combinations
+
+def _directions(x_plus: str, x_minus: str, y_plus: str, y_minus: str) -> tuple:
+    """(100 % case, factor, 30 % case, factor) of the eight directional combinations."""
+    o = _FACTORS.orthogonal
+    out = []
+    for main, sign, other_plus, other_minus in ((x_plus, 1.0, y_plus, y_minus),
+                                                (x_minus, -1.0, y_plus, y_minus),
+                                                (y_plus, 1.0, x_plus, x_minus),
+                                                (y_minus, -1.0, x_plus, x_minus)):
+        out += [(main, sign, other_plus, o), (main, sign, other_minus, -o)]
+    return tuple(out)
+
+
+_STATIC_DIRECTIONS = _directions("EQXPE", "EQXNE", "EQYPE", "EQYNE")
+_SPECTRUM_DIRECTIONS = _directions("RSAX", "RSAX", "RSAY", "RSAY")
+SERVICE_SEISMIC = 1.0 / _FACTORS.service_seismic_divisor  # E / 1.4 in the service combinations
+# Drift (NSCP 208.6.4.1: the 203.3 combinations; rho = 1.0 by 208.6.1). E is a
+# drift case: a drift pattern (period not capped) or a spectrum drift case.
+DRIFT_SET = "DRIFT"         # seismic drift combinations, 203-5 and 203-7
+WIND_DRIFT_SET = "WDRIFT"   # wind drift combinations, 203-3, 203-4 and 203-6
+DRIFT_SPECTRUM_CASES = ("RSAXD", "RSAYD")
 
 
 @dataclass
@@ -50,24 +65,32 @@ class Combination:
     design: bool = False  # used for concrete design (strength)
 
 
+def _g(value: float) -> str:
+    """A factor as it reads in a combination name: 1.0, 1.2, 0.45, 0.714."""
+    value = round(value, 3)
+    return f"{value:.1f}" if abs(value * 10 - round(value * 10)) < 1e-9 else f"{value:g}"
+
+
 def build_combinations(
     patterns: dict[str, str],
     ca: float,
     importance: float = 1.0,
-    rho: float = 1.0,
-    omega0: float = 2.8,
-    live_factor: float = 0.5,
+    rho: float = _FACTORS.rho,
+    omega0: float = _FACTORS.omega0,
+    live_factor: float = _FACTORS.live_companion,
 ) -> list[Combination]:
     """All combinations, in the order they must be created.
 
     ``patterns`` maps each load pattern to its ETABS type. Dead and super dead
     patterns form DL, live and reducible live form LL, roof live forms Lr, and
-    the wind patterns are ``WX`` and ``WY``. ``live_factor`` is f on LL.
+    the wind patterns are ``WX`` and ``WY``. ``live_factor`` is f on LL. The
+    factors are those of ``NSCP.load_factors`` (design/code_config.py).
     """
+    k = _FACTORS
     dead = [name for name, kind in patterns.items() if kind in DEAD_TYPES]
     live = [name for name, kind in patterns.items() if kind in LIVE_TYPES]
     roof = [name for name, kind in patterns.items() if kind in ROOF_LIVE_TYPES]
-    ev = 0.5 * ca * importance
+    ev = k.vertical_effect * ca * importance
     out: list[Combination] = []
 
     def gravity(dl: float, ll: float = 0.0, lr: float = 0.0) -> list[tuple[str, float]]:
@@ -104,61 +127,93 @@ def build_combinations(
 
     f = live_factor
     w = (("WX", "WX"), ("WY", "WY"))
-    # ---- strength ----
+    d, d_min, s = k.dead, k.dead_minimum, k.service
+    # ---- strength (NSCP 203.3.1) ----
     for name in (
-        add("ULS 100 1.4 DL", gravity(1.4), design=True),
-        add("ULS 101 1.2 DL + 1.6 LL + 0.5 Lr", gravity(1.2, 1.6, 0.5), design=True),
-        add("ULS 102 1.2 DL + 1.6 Lr + f LL", gravity(1.2, f, 1.6), design=True),
+        add(f"ULS 100 {_g(k.dead_only)} DL", gravity(k.dead_only), design=True),
+        add(f"ULS 101 {_g(d)} DL + {_g(k.live)} LL + {_g(k.roof_live_companion)} Lr",
+            gravity(d, k.live, k.roof_live_companion), design=True),
+        add(f"ULS 102 {_g(d)} DL + {_g(k.roof_live)} Lr + f LL",
+            gravity(d, f, k.roof_live), design=True),
     ):
         group("ULS_GRAVITY", name)
     for number, (text, case) in zip((103, 104), w):
-        group("ULS_WIND", add(f"ULS {number} 1.2 DL + 1.6 Lr + 0.5 {text}",
-                              gravity(1.2, 0.0, 1.6) + [(case, 0.5)], design=True))
+        group("ULS_WIND", add(
+            f"ULS {number} {_g(d)} DL + {_g(k.roof_live)} Lr + {_g(k.wind_with_roof)} {text}",
+            gravity(d, 0.0, k.roof_live) + [(case, k.wind_with_roof)], design=True))
     for number, (text, case) in zip((105, 106), w):
-        group("ULS_WIND", add(f"ULS {number} 1.2 DL + f LL + 0.5 Lr + 1.0 {text}",
-                              gravity(1.2, f, 0.5) + [(case, 1.0)], design=True))
-    seismic("ULS", 107, "(1.2 + Ev) DL + f LL + 1.0", gravity(1.2 + ev, f), rho, "ULS", True)
+        group("ULS_WIND", add(
+            f"ULS {number} {_g(d)} DL + f LL + {_g(k.roof_live_companion)} Lr + "
+            f"{_g(k.wind)} {text}",
+            gravity(d, f, k.roof_live_companion) + [(case, k.wind)], design=True))
+    seismic("ULS", 107, f"({_g(d)} + Ev) DL + f LL + {_g(k.seismic)}", gravity(d + ev, f),
+            k.seismic * rho, "ULS", True)
     for number, (text, case) in zip((108, 109), w):
-        group("ULS_WIND", add(f"ULS {number} 0.9 DL + 1.0 {text}",
-                              gravity(0.9) + [(case, 1.0)], design=True))
-    seismic("ULS", 110, "(0.9 - Ev) DL + 1.0", gravity(0.9 - ev), rho, "ULS", True)
+        group("ULS_WIND", add(f"ULS {number} {_g(d_min)} DL + {_g(k.wind)} {text}",
+                              gravity(d_min) + [(case, k.wind)], design=True))
+    seismic("ULS", 110, f"({_g(d_min)} - Ev) DL + {_g(k.seismic)}", gravity(d_min - ev),
+            k.seismic * rho, "ULS", True)
 
-    # ---- service ----
-    e = SERVICE_SEISMIC
-    group("SLS_GRAVITY", add("SLS 100 1.0 DL + 1.0 LL + 1.0 Lr", gravity(1.0, 1.0, 1.0)))
-    group("SLS_GRAVITY", add("SLS 101 1.0 DL + 0.75 LL + 0.75 Lr", gravity(1.0, 0.75, 0.75)))
+    # ---- service (NSCP 203.4.1) ----
+    e, c, sw = SERVICE_SEISMIC, k.service_companion, k.service_wind
+    s_min = k.service_dead_minimum
+    group("SLS_GRAVITY", add(f"SLS 100 {_g(s)} DL + {_g(s)} LL + {_g(s)} Lr", gravity(s, s, s)))
+    group("SLS_GRAVITY", add(f"SLS 101 {_g(s)} DL + {_g(c)} LL + {_g(c)} Lr", gravity(s, c, c)))
     for number, (text, case) in zip((102, 103), w):
-        group("SLS_WIND", add(f"SLS {number} 1.0 DL + 0.6 {text}", gravity(1.0) + [(case, 0.6)]))
-    seismic("SLS", 104, "(1.0 + 0.714 Ev) DL + 0.714", gravity(1.0 + e * ev), e * rho, "SLS")
+        group("SLS_WIND", add(f"SLS {number} {_g(s)} DL + {_g(sw)} {text}",
+                              gravity(s) + [(case, sw)]))
+    seismic("SLS", 104, f"({_g(s)} + {_g(e)} Ev) DL + {_g(e)}", gravity(s + e * ev), e * rho, "SLS")
     for number, (text, case) in zip((105, 106), w):
-        group("SLS_WIND", add(f"SLS {number} 1.0 DL + 0.75 LL + 0.75 Lr + 0.45 {text}",
-                              gravity(1.0, 0.75, 0.75) + [(case, 0.45)]))
-    seismic("SLS", 107, "(1.0 + 0.536 Ev) DL + 0.75 LL + 0.536",
-            gravity(1.0 + 0.75 * e * ev, 0.75), 0.75 * e * rho, "SLS")
+        group("SLS_WIND", add(f"SLS {number} {_g(s)} DL + {_g(c)} LL + {_g(c)} Lr + "
+                              f"{_g(c * sw)} {text}",
+                              gravity(s, c, c) + [(case, c * sw)]))
+    seismic("SLS", 107, f"({_g(s)} + {_g(c * e)} Ev) DL + {_g(c)} LL + {_g(c * e)}",
+            gravity(s + c * e * ev, c), c * e * rho, "SLS")
     for number, (text, case) in zip((108, 109), w):
-        group("SLS_WIND", add(f"SLS {number} 0.6 DL + 0.6 {text}", gravity(0.6) + [(case, 0.6)]))
-    seismic("SLS", 110, "(0.6 - 0.714 Ev) DL + 0.714", gravity(0.6 - e * ev), e * rho, "SLS")
+        group("SLS_WIND", add(f"SLS {number} {_g(s_min)} DL + {_g(sw)} {text}",
+                              gravity(s_min) + [(case, sw)]))
+    seismic("SLS", 110, f"({_g(s_min)} - {_g(e)} Ev) DL + {_g(e)}", gravity(s_min - e * ev),
+            e * rho, "SLS")
     for number, (text, case) in zip((111, 112), w):
-        group("SLS_WIND", add(f"SLS {number} 1.0 DL + 1.0 LL + 0.6 {text}",
-                              gravity(1.0, 1.0) + [(case, 0.6)]))
-    seismic("SLS", 113, "(1.0 + 0.714 Ev) DL + 1.0 LL + 0.714",
-            gravity(1.0 + e * ev, 1.0), e * rho, "SLS")
+        group("SLS_WIND", add(f"SLS {number} {_g(s)} DL + {_g(s)} LL + {_g(sw)} {text}",
+                              gravity(s, s) + [(case, sw)]))
+    seismic("SLS", 113, f"({_g(s)} + {_g(e)} Ev) DL + {_g(s)} LL + {_g(e)}",
+            gravity(s + e * ev, s), e * rho, "SLS")
+
+    # ---- drift: seismic (203-5, 203-7) and wind (203-3, 203-4, 203-6) ----
+    e_drift = k.seismic * k.drift_rho
+    drift_static = [name for name, kind in patterns.items() if kind == "Seismic (Drift)"]
+    for case, signs in [(c, (1.0, -1.0)) for c in drift_static] + \
+            [(c, (1.0,)) for c in DRIFT_SPECTRUM_CASES]:
+        for number, dl, ll, text in ((100, d + ev, f, f"({_g(d)} + Ev) DL + f LL"),
+                                     (102, d_min - ev, 0.0, f"({_g(d_min)} - Ev) DL")):
+            for offset, sign in enumerate(signs):
+                operator = "+" if sign > 0 else "-"
+                group("DRIFT", add(f"{DRIFT_SET} {number + offset} {text} {operator} "
+                                   f"{_g(e_drift)} {case}",
+                                   gravity(dl, ll) + [(case, sign * e_drift)]))
+    for text, case in w:
+        for number, expression, cases in (
+            (100, f"{_g(d)} DL + {_g(k.roof_live)} Lr + {_g(k.wind_with_roof)}",
+             gravity(d, 0.0, k.roof_live) + [(case, k.wind_with_roof)]),
+            (101, f"{_g(d)} DL + f LL + {_g(k.roof_live_companion)} Lr + {_g(k.wind)}",
+             gravity(d, f, k.roof_live_companion) + [(case, k.wind)]),
+            (102, f"{_g(d_min)} DL + {_g(k.wind)}", gravity(d_min) + [(case, k.wind)]),
+        ):
+            group("WDRIFT", add(f"{WIND_DRIFT_SET} {number} {expression} {text}", cases))
 
     # ---- deflection (unfactored, no live load reduction) ----
-    add("DEF 100 1.0 DL", gravity(1.0))
-    add("DEF 101 1.0 DL + 1.0 LL", gravity(1.0, 1.0))
-    add("DEF 102 1.0 DL + 0.25 LL", gravity(1.0, 0.25))
-    add("DEF 103 1.0 DL + 1.0 Lr", gravity(1.0, 0.0, 1.0))
+    out.extend(deflection_set(dead, live, roof))
 
     # ---- special seismic: Em = omega0 Eh on the envelope of the directions ----
     for label in ("EQ", "RSA"):
         for number, expression, cases, sign in (
-            (100, "1.2 DL + f LL + 1.0 Em", gravity(1.2, f), 1.0),
-            (101, "0.9 DL + 1.0 Em", gravity(0.9), 1.0),
-            (102, "0.9 DL - 1.0 Em", gravity(0.9), -1.0),
+            (100, f"{_g(d)} DL + f LL + {_g(k.seismic)} Em", gravity(d, f), 1.0),
+            (101, f"{_g(d_min)} DL + {_g(k.seismic)} Em", gravity(d_min), 1.0),
+            (102, f"{_g(d_min)} DL - {_g(k.seismic)} Em", gravity(d_min), -1.0),
         ):
             group(f"SSLC_{label}", add(f"SSLC {number} {expression} {label}", cases,
-                                       [(f"ENVE_{label}", sign * omega0)]))
+                                       [(f"ENVE_{label}", sign * k.seismic * omega0)]))
 
     # ---- envelopes ----
     def envelope(name: str, *keys: str) -> None:
@@ -175,7 +230,27 @@ def build_combinations(
     envelope("ENVE_SLS_BOTH (EQ & RSA)", "SLS_GRAVITY", "SLS_WIND", "SLS_EQ", "SLS_RSA")
     envelope("ENVE_SSLC_EQ", "SSLC_EQ")
     envelope("ENVE_SSLC_RSA", "SSLC_RSA")
+    envelope("ENVE_DRIFT", "DRIFT")
+    envelope("ENVE_WDRIFT", "WDRIFT")
     return out
+
+
+def deflection_set(dead: list[str], live: list[str], roof: list[str]) -> list[Combination]:
+    """DL, DL + LL, DL + sustained LL and DL + Lr, unfactored."""
+    s, sustained = _FACTORS.service, _FACTORS.sustained_live
+
+    def items(ll: float = 0.0, lr: float = 0.0) -> list[tuple[str, float]]:
+        out = [(p, s) for p in dead]
+        out += [(p, ll) for p in live if ll]
+        out += [(p, lr) for p in roof if lr]
+        return out
+
+    return [
+        Combination(f"DEF 100 {_g(s)} DL", cases=items()),
+        Combination(f"DEF 101 {_g(s)} DL + {_g(s)} LL", cases=items(s)),
+        Combination(f"DEF 102 {_g(s)} DL + {_g(sustained)} LL", cases=items(sustained)),
+        Combination(f"DEF 103 {_g(s)} DL + {_g(s)} Lr", cases=items(lr=s)),
+    ]
 
 
 # ETABS load pattern types (eLoadPatternType) of DL, LL and Lr
@@ -186,24 +261,11 @@ _ROOF_PATTERN_TYPES = (11,)
 
 def deflection_combinations(pattern_types: dict[str, int]) -> list[Combination]:
     """The four deflection combinations from the pattern types of a model."""
-    names = {
-        "Dead": [p for p, t in pattern_types.items() if t in _DEAD_PATTERN_TYPES],
-        "Live": [p for p, t in pattern_types.items() if t in _LIVE_PATTERN_TYPES],
-        "Roof": [p for p, t in pattern_types.items() if t in _ROOF_PATTERN_TYPES],
-    }
-
-    def items(live: float = 0.0, roof: float = 0.0):
-        out = [(p, 1.0) for p in names["Dead"]]
-        out += [(p, live) for p in names["Live"] if live]
-        out += [(p, roof) for p in names["Roof"] if roof]
-        return out
-
-    return [
-        Combination("DEF 100 1.0 DL", cases=items()),
-        Combination("DEF 101 1.0 DL + 1.0 LL", cases=items(1.0)),
-        Combination("DEF 102 1.0 DL + 0.25 LL", cases=items(0.25)),
-        Combination("DEF 103 1.0 DL + 1.0 Lr", cases=items(roof=1.0)),
-    ]
+    return deflection_set(
+        [p for p, t in pattern_types.items() if t in _DEAD_PATTERN_TYPES],
+        [p for p, t in pattern_types.items() if t in _LIVE_PATTERN_TYPES],
+        [p for p, t in pattern_types.items() if t in _ROOF_PATTERN_TYPES],
+    )
 
 
 def ensure_deflection_combinations(model) -> list[str]:

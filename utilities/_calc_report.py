@@ -34,6 +34,8 @@ class MemberReport:
     heading: str
     summary: list
     tables: list = field(default_factory=list)
+    # (image path relative to the PDF's folder, caption), shown after the tables
+    figures: list = field(default_factory=list)
 
 
 # Characters used in sheet values and combination names that pdflatex cannot
@@ -114,6 +116,18 @@ def _table_latex(table: ReportTable) -> str:
     return "\n".join(lines)
 
 
+def _figure_latex(image: str, caption: str) -> str:
+    """LaTeX for one centred image and its caption (path relative to the PDF folder)."""
+    path = str(image).replace("\\", "/")
+    return "\n".join([
+        r"\begin{center}",
+        r"\includegraphics[width=0.78\textwidth]{" + path + "}",
+        r"\\[0.1cm]{\footnotesize " + latex_text(caption) + "}",
+        r"\end{center}",
+        "",
+    ])
+
+
 def build_calc_report(
     title: str,
     information: list,
@@ -139,6 +153,7 @@ def build_calc_report(
     doc.packages.append(Package("booktabs"))
     doc.packages.append(Package("amsmath"))
     doc.packages.append(Package("longtable"))
+    doc.packages.append(Package("graphicx"))
     doc.preamble.append(NoEscape(r"\pagestyle{plain}"))
     doc.preamble.append(NoEscape(r"\setlength{\parindent}{0pt}"))
     doc.preamble.append(NoEscape(r"\setlength{\LTleft}{0pt}"))
@@ -177,6 +192,8 @@ def build_calc_report(
         with doc.create(Section(NoEscape(latex_text(member.heading)))):
             for table in member.tables:
                 doc.append(NoEscape(_table_latex(table)))
+            for image, caption in member.figures:
+                doc.append(NoEscape(_figure_latex(image, caption)))
 
     try:
         doc.generate_pdf(filepath, clean_tex=True, compiler="pdflatex")
