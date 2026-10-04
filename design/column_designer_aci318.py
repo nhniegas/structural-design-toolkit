@@ -14,6 +14,7 @@ import pandas as pd
 import ezdxf
 from dataclasses import dataclass
 from design.code_config import CODE, AciCode
+from design.column_interaction import clip_moments, section_rings
 from scipy.optimize import brentq
 from shapely.geometry import LineString, Polygon
 from shapely.ops import unary_union
@@ -504,6 +505,8 @@ def _concrete_section_for(geometry) -> ConcreteSection:
     """
     if isinstance(geometry, ConcreteSection):
         return geometry
+    if isinstance(geometry, LazyColumnSection):
+        geometry = geometry.geometry()
     cached = getattr(geometry, "_column_concrete_section", None)
     if cached is None:
         cached = ConcreteSection(geometry)
@@ -790,7 +793,7 @@ def _fast_rectangular_block_capacity(
         steel_profile = bars[0].material.stress_strain_profile
         cached = {
             "vertices": vertices,
-            "concrete": concrete_geometry.geom,
+            "rings": section_rings(concrete_geometry.geom),
             "concrete_area": float(concrete_geometry.geom.area),
             "concrete_centroid": (
                 float(concrete_geometry.geom.centroid.x),
@@ -856,7 +859,6 @@ def _fast_rectangular_block_capacity(
     steel_stresses = cached["steel_stresses"]
     ultimate_strain = cached["ultimate_strain"]
     concrete_stress = cached["concrete_stress"]
-    concrete_geometry = cached["concrete"]
 
     def section_actions(neutral_axis_depth: float) -> tuple[float, float, float]:
         """Return axial force and global moments for one neutral-axis depth."""
@@ -870,30 +872,13 @@ def _fast_rectangular_block_capacity(
             concrete_area = cached["concrete_area"]
             concrete_cx, concrete_cy = cached["concrete_centroid"]
         else:
-            margin = angle_data["margin"]
-            u_min = angle_data["u_min"] - margin
-            u_max = angle_data["u_max"] + margin
-            v_upper = v_max + margin
-
-            def local_to_global(u: float, v: float) -> tuple[float, float]:
-                return (
-                    u * cosine - v * sine,
-                    u * sine + v * cosine,
-                )
-
-            compression_polygon = Polygon(
-                [
-                    local_to_global(u_min, compression_boundary),
-                    local_to_global(u_max, compression_boundary),
-                    local_to_global(u_max, v_upper),
-                    local_to_global(u_min, v_upper),
-                ]
+            area, first_x, first_y = clip_moments(
+                cached["rings"], -sine, cosine, compression_boundary
             )
-            clipped = concrete_geometry.intersection(compression_polygon)
-            concrete_area = float(clipped.area)
-            if concrete_area:
-                concrete_cx = float(clipped.centroid.x)
-                concrete_cy = float(clipped.centroid.y)
+            concrete_area = float(area)
+            if concrete_area > 0:
+                concrete_cx = float(first_x) / concrete_area
+                concrete_cy = float(first_y) / concrete_area
             else:
                 concrete_cx, concrete_cy = centroid_x, centroid_y
 
@@ -1131,16 +1116,35 @@ def _new_column_section(width, height, diameter_value, is_circular, row, member,
         shape="circular" if is_circular else "rectangular",
         is_smrf=is_smrf,
     )
-    concrete, steel = engine.define_materials()
-    section = engine.define_section(height, width, diameter_value, concrete)
-    section = engine.add_reinf(
-        section,
-        dmain,
-        steel,
-        initial_bars=n_bars,
-        bundle_layout=bundle_layout,
-    )
-    return engine, section
+    return engine, LazyColumnSection(engine, n_bars, bundle_layout)
+
+
+class LazyColumnSection:
+    """The reinforced geometry of a column, built (and meshed) on first use only.
+
+    The bar layout search and the interaction surface need only the outline and
+    the bars (``column_interaction.layout_section_data``); the concreteproperties
+    geometry, which takes about 0.1 s per layout, is built only when the exact
+    per-point solver or a drawing asks for it.
+    """
+
+    def __init__(self, engine: ColumnFlexureDesign, n_bars: int, bundle_layout) -> None:
+        self.engine, self.n_bars, self.bundle_layout = engine, n_bars, bundle_layout
+        self._geometry = None
+
+    @property
+    def is_built(self) -> bool:
+        return self._geometry is not None
+
+    def geometry(self):
+        if self._geometry is None:
+            concrete, steel = self.engine.define_materials()
+            section = self.engine.define_section(
+                self.engine.height, self.engine.width, self.engine.diameter, concrete)
+            self._geometry = self.engine.add_reinf(
+                section, self.engine.dmain, steel, initial_bars=self.n_bars,
+                bundle_layout=self.bundle_layout)
+        return self._geometry
 
 
 def _perimeter_bar_positions(
@@ -1393,6 +1397,7 @@ _END_FORCE_INDEX: dict[int, tuple[pd.DataFrame, dict]] = {}
 
 def _clear_end_force_index() -> None:
     _END_FORCE_INDEX.clear()
+    _DEMAND_INDEX.clear()
 
 
 def _end_force_rows(forces: pd.DataFrame) -> dict:
@@ -1566,65 +1571,88 @@ USE_INTERACTION_SURFACE = True  # False: the per-demand solver (Mn at Pn = Pu, t
 
 def column_demands(member: str, force_rows: pd.DataFrame) -> list[tuple[str, str, float, float, float]]:
     """(combo, end, Pu kN, Mu2 kN-m, Mu3 kN-m) of every combination at both ends."""
+    entry = _DEMAND_INDEX.get(id(force_rows))
+    if entry is not None and entry[0] is force_rows:
+        return entry[1]
+    index = _end_force_rows(force_rows)
     out = []
     for combo in sorted(force_rows["Combo"].dropna().astype(str).unique()):
-        for endpoint, at_i in (("I", True), ("J", False)):
-            force = _column_force_at_end(force_rows, combo, at_i)
-            out.append((combo, endpoint, _numeric(force["P"], "P", member),
-                        _numeric(force["M2"], "M2", member), _numeric(force["M3"], "M3", member)))
+        rows = index.get(combo)
+        if rows is None:
+            raise ValueError(f"Column force stations for combo {combo!r} are not numeric.")
+        for endpoint, row in (("I", rows[0]), ("J", rows[1])):
+            out.append((combo, endpoint, _numeric(row["P"], "P", member),
+                        _numeric(row["M2"], "M2", member), _numeric(row["M3"], "M3", member)))
+    _DEMAND_INDEX[id(force_rows)] = (force_rows, out)
     return out
+
+
+# Each member's demands, read once from its force table (cleared with the end-force index).
+_DEMAND_INDEX: dict[int, tuple[pd.DataFrame, list]] = {}
 
 
 def _evaluate_on_surface(member, force_rows, surface, engine, n_bars, dmain,
                          stop_at_first_failure, progress, strength_limits):
     """Flexure and axial checks on the layout's interaction surface (ACI design
-    surface, phi Pn = Pu). While searching for a layout (``stop_at_first_failure``)
-    the convex hull vertices of the demands are checked first: they are the
-    demands most likely to fail, so a layout that cannot work is rejected after a
-    few checks. The other demands are then confirmed, because the phi-scaled
-    surface is not strictly convex where phi changes from 0.65 to 0.90. Otherwise
-    every demand is checked and reported."""
-    from design.column_interaction import demand_moments, hull_vertices
+    surface, phi Pn = Pu). Every demand is looked up at once (one vectorized call).
+    While searching for a layout (``stop_at_first_failure``) the convex hull
+    vertices of the demands are checked first: they are the demands most likely
+    to fail, so a layout that cannot work is rejected before the others are
+    looked up. The others are then confirmed, because the phi-scaled surface is
+    not strictly convex where phi changes from 0.65 to 0.90."""
+    from design.column_interaction import hull_vertices
 
     demands = column_demands(member, force_rows)
-    points = np.array([[p * 1e3, *demand_moments(m2 * 1e6, m3 * 1e6)]
-                       for _, _, p, m2, m3 in demands], dtype=float).reshape(-1, 3)
-    if stop_at_first_failure:
-        hull = hull_vertices(points)
-        rest = np.setdiff1d(np.arange(len(demands)), hull)
-        indices = np.concatenate([hull, rest]).astype(int)
-    else:
-        indices = np.arange(len(demands))
+    data = np.array([[p, m2, m3] for _, _, p, m2, m3 in demands], dtype=float).reshape(-1, 3)
+    # Section moments: Mx = M3, My = -M2 (column_interaction.demand_moments), in N and N-mm.
+    points = np.column_stack([data[:, 0] * 1e3, data[:, 2] * 1e6, -data[:, 1] * 1e6])
     tension_capacity = (engine.code.strength.tension_controlled * n_bars * math.pi * dmain**2
                         / 4.0 * engine.fy / 1000.0)
+    if progress is not None and demands:
+        progress(member, "I and J", "Flexure and axial (P-M)", demands[0][0])
+    if stop_at_first_failure and len(demands) > 4:
+        hull = hull_vertices(points)
+        groups = [hull, np.setdiff1d(np.arange(len(demands)), hull)]
+    else:
+        groups = [np.arange(len(demands))]
     checks, passed = [], True
-    for index in indices:
-        combo, endpoint, axial_kN, m2_kNm, m3_kNm = demands[int(index)]
-        if progress is not None:
-            progress(member, endpoint, "Flexure and axial (P-M)", combo)
-        pu, mx, my = points[int(index)]
-        capacity, phi = surface.capacity(pu, mx, my)
-        moment_demand = math.hypot(m2_kNm, m3_kNm)
+    for indices in groups:
+        indices = np.asarray(indices, dtype=int)
+        if not len(indices):
+            continue
+        pu, mx, my = points[indices].T
+        capacity, phi = surface.capacities(pu, mx, my)
+        demand = np.hypot(data[indices, 1], data[indices, 2])
         capacity_kNm = capacity / 1e6
-        utilization = (moment_demand / capacity_kNm if capacity_kNm > 0
-                       else (0.0 if moment_demand <= 1e-9 and phi == phi else math.inf))
-        moment_pass = bool(utilization <= 1.0)
-        axial_pass = bool(pu <= surface.p_cap if axial_kN >= 0
-                          else abs(axial_kN) <= tension_capacity)
-        checks.append({
-            "UniqueName": member, "Combo": combo, "End": endpoint, "Pu_kN": axial_kN,
-            "Mu2_kNm": m2_kNm, "Mu3_kNm": m3_kNm, "Mu_resultant_kNm": moment_demand,
-            "Mn_kNm": capacity_kNm / phi if phi == phi and phi > 0 else np.nan,
-            "phi_Mn_kNm": capacity_kNm, "Phi": phi,
-            "phi_Pn_max_kN": surface.p_cap / 1000.0, "phi_Pn_tension_kN": tension_capacity,
-            "Flexure_Utilization": utilization,
-            "Axial_Check": "PASS" if axial_pass else "FAIL",
-            "Flexure_Check": "PASS" if moment_pass else "FAIL",
-            "Strength_Check": "PASS" if moment_pass and axial_pass else "FAIL",
-        })
-        passed = passed and moment_pass and axial_pass
+        with np.errstate(divide="ignore", invalid="ignore"):
+            utilization = np.where(
+                capacity_kNm > 0, demand / capacity_kNm,
+                np.where((demand <= 1e-9) & ~np.isnan(phi), 0.0, math.inf))
+        moment_pass = utilization <= 1.0
+        axial = data[indices, 0]
+        axial_pass = np.where(axial >= 0, pu <= surface.p_cap,
+                              np.abs(axial) <= tension_capacity)
+        for k, index in enumerate(indices):
+            combo, endpoint, axial_kN, m2_kNm, m3_kNm = demands[int(index)]
+            ok_m, ok_p = bool(moment_pass[k]), bool(axial_pass[k])
+            f = float(phi[k])
+            checks.append({
+                "UniqueName": member, "Combo": combo, "End": endpoint, "Pu_kN": axial_kN,
+                "Mu2_kNm": m2_kNm, "Mu3_kNm": m3_kNm, "Mu_resultant_kNm": float(demand[k]),
+                "Mn_kNm": float(capacity_kNm[k]) / f if f == f and f > 0 else np.nan,
+                "phi_Mn_kNm": float(capacity_kNm[k]), "Phi": f,
+                "phi_Pn_max_kN": surface.p_cap / 1000.0, "phi_Pn_tension_kN": tension_capacity,
+                "Flexure_Utilization": float(utilization[k]),
+                "Axial_Check": "PASS" if ok_p else "FAIL",
+                "Flexure_Check": "PASS" if ok_m else "FAIL",
+                "Strength_Check": "PASS" if ok_m and ok_p else "FAIL",
+            })
+        passed = passed and bool(moment_pass.all() and axial_pass.all())
         if stop_at_first_failure and not passed:
             return False, checks, strength_limits
+    if not stop_at_first_failure:
+        order = {(c, e): i for i, (c, e, *_rest) in enumerate(demands)}
+        checks.sort(key=lambda check: order[(check["Combo"], check["End"])])
     return passed, checks, strength_limits
 
 
@@ -2440,8 +2468,17 @@ def _evaluate_smrf_joints(
     connection_by_name = connectivity.drop_duplicates("UniqueName").set_index(
         "UniqueName"
     )
+    ends_of = {
+        str(member): (_normalize_object_name(i), _normalize_object_name(j))
+        for member, i, j in zip(connection_by_name.index, connection_by_name["UniquePtI"],
+                                connection_by_name["UniquePtJ"])
+    }
     design_by_name = frame_data.drop_duplicates("UniqueName").set_index("UniqueName")
     result_by_name = column_results.drop_duplicates("UniqueName").set_index("UniqueName")
+    result_rows = {
+        str(name): row for name, row in zip(result_by_name.index,
+                                             result_by_name.to_dict("records"))
+    }
     beam_result_groups = {
         name: rows.copy()
         for name, rows in beam_design.groupby("UniqueName", dropna=True)
@@ -2488,11 +2525,15 @@ def _evaluate_smrf_joints(
             )
         return dict(beam_end_strengths[key])
 
+    frame_rows: dict[str, pd.Series] = {}
+
     def frame_data_row(member: str) -> pd.Series:
         """Return the unique properties row for a member or explain what is missing."""
-        if member not in design_by_name.index:
-            raise ValueError(f"FRAME DATA is missing framing member {member}.")
-        return design_by_name.loc[member]
+        if member not in frame_rows:
+            if member not in design_by_name.index:
+                raise ValueError(f"FRAME DATA is missing framing member {member}.")
+            frame_rows[member] = design_by_name.loc[member]
+        return frame_rows[member]
 
     def beam_geometry_row(member: str) -> pd.Series:
         """Return beam geometry from BEAM DESIGN, falling back to FRAME DATA."""
@@ -2507,7 +2548,7 @@ def _evaluate_smrf_joints(
             if member not in result_by_name.index:
                 summaries.append(f"{member}: MISSING column design")
                 continue
-            column_result = result_by_name.loc[member]
+            column_result = result_rows[member]
             end = get_end_info(member, joint, require_force_data=False)[0]
             summaries.append(
                 f"{member} ({end}): "
@@ -2536,11 +2577,11 @@ def _evaluate_smrf_joints(
     def _end_info(
         member: str, joint: str, require_force_data: bool
     ) -> tuple[str, str, np.ndarray, float]:
-        connection = connection_by_name.loc[member]
-        if _normalize_object_name(connection["UniquePtI"]) == joint:
-            end, far_point = "I", _normalize_object_name(connection["UniquePtJ"])
-        elif _normalize_object_name(connection["UniquePtJ"]) == joint:
-            end, far_point = "J", _normalize_object_name(connection["UniquePtI"])
+        point_i, point_j = ends_of[member]
+        if point_i == joint:
+            end, far_point = "I", point_j
+        elif point_j == joint:
+            end, far_point = "J", point_i
         else:
             raise ValueError(f"Member {member} is not connected to joint {joint}.")
         if joint not in point_coordinates or far_point not in point_coordinates:
@@ -2566,14 +2607,9 @@ def _evaluate_smrf_joints(
         """Return nominal column moment and axial force at a joint for one combo."""
         end, _, _, _ = get_end_info(member, joint)
         row = frame_data_row(member)
-        connection = connection_by_name.loc[member]
-        point_i = _normalize_object_name(connection["UniquePtI"])
-        point_j = _normalize_object_name(connection["UniquePtJ"])
         if member not in frame_angles:
             raise ValueError(f"Local-axis angle is missing for column {member}.")
-        _, local_2, local_3 = _frame_local_axes(
-            point_coordinates[point_i], point_coordinates[point_j], frame_angles[member]
-        )
+        _, local_2, local_3 = member_axes(member, frame_angles[member])
         m2_direction = float(np.dot(moment_axis, local_2))
         m3_direction = float(np.dot(moment_axis, local_3))
         theta = _section_bending_angle(m2_direction, m3_direction)
@@ -2584,7 +2620,7 @@ def _evaluate_smrf_joints(
         # is built once per strength factor and reused for every joint and combo.
         section_key = (member, fy_factor)
         if section_key not in column_sections:
-            bars = int(result_by_name.loc[member]["Longitudinal_Bars"])
+            bars = int(result_rows[member]["Longitudinal_Bars"])
             capacity_row = row.copy()
             capacity_row["UniqueName"] = member
             capacity_row["fy"] = _numeric(row["fy"], "fy", member) * fy_factor
@@ -2652,17 +2688,23 @@ def _evaluate_smrf_joints(
         """
         if column not in frame_angles or column not in connection_by_name.index:
             return ""
-        connection = connection_by_name.loc[column]
-        point_i = _normalize_object_name(connection["UniquePtI"])
-        point_j = _normalize_object_name(connection["UniquePtJ"])
+        point_i, point_j = ends_of[column]
         if point_i not in point_coordinates or point_j not in point_coordinates:
             return ""
-        _, axis_2, axis_3 = _frame_local_axes(
-            point_coordinates[point_i], point_coordinates[point_j], frame_angles[column]
-        )
+        _, axis_2, axis_3 = member_axes(column, frame_angles[column])
         along_2 = abs(float(np.dot(frame_direction, axis_2)))
         along_3 = abs(float(np.dot(frame_direction, axis_3)))
         return "Y" if along_2 >= along_3 else "X"
+
+    axes_cache: dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
+
+    def member_axes(member: str, angle: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """ETABS local axes of a member, worked out once."""
+        if member not in axes_cache:
+            point_i, point_j = ends_of[member]
+            axes_cache[member] = _frame_local_axes(
+                point_coordinates[point_i], point_coordinates[point_j], angle)
+        return axes_cache[member]
 
     rows: list[dict] = []
     for joint, connected_beams in beams_at_point.items():
@@ -2823,16 +2865,9 @@ def _evaluate_smrf_joints(
                             "BEAM DESIGN; include and design it before column design."
                         )
                     beam_strengths[beam] = beam_end_strength(beam, end, 1.0)
-                    beam_connection = connection_by_name.loc[beam]
-                    beam_i = _normalize_object_name(beam_connection["UniquePtI"])
-                    beam_j = _normalize_object_name(beam_connection["UniquePtJ"])
                     # The queried ETABS Local Axes table is column-only; horizontal
                     # beams therefore use the explicit default beta=0 basis.
-                    local_1, _, local_3 = _frame_local_axes(
-                        point_coordinates[beam_i],
-                        point_coordinates[beam_j],
-                        frame_angles.get(beam, 0.0),
-                    )
+                    local_1, _, local_3 = member_axes(beam, frame_angles.get(beam, 0.0))
                     beam_strengths[beam]["Moment_Projection"] = abs(
                         float(np.dot(local_3, moment_axis))
                     )
@@ -2846,7 +2881,7 @@ def _evaluate_smrf_joints(
                 axial_values = []
                 column_reinforcement_summary = []
                 for column in connected_columns:
-                    column_result = result_by_name.loc[column]
+                    column_result = result_rows[column]
                     if progress is not None:
                         progress(
                             column,
@@ -2928,18 +2963,12 @@ def _evaluate_smrf_joints(
                         joint_depth = joint_width = math.sqrt(col_w * col_d)
                     else:
                         column = connected_columns[0]
-                        connection = connection_by_name.loc[column]
-                        point_i = _normalize_object_name(connection["UniquePtI"])
-                        point_j = _normalize_object_name(connection["UniquePtJ"])
                         if column not in frame_angles:
                             raise ValueError(
                                 f"Local-axis angle is missing for column {column}."
                             )
-                        _, column_axis_2, column_axis_3 = _frame_local_axes(
-                            point_coordinates[point_i],
-                            point_coordinates[point_j],
-                            frame_angles[column],
-                        )
+                        _, column_axis_2, column_axis_3 = member_axes(
+                            column, frame_angles[column])
                         # Column depth lies along local 2 and width along local 3.
                         joint_depth = (
                             abs(float(np.dot(representative, column_axis_2))) * col_d
@@ -3270,19 +3299,38 @@ def _build_consolidated_column_report(
 
     force_map = {
         (str(row["UniqueName"]), str(row["Combo"]), str(row["End"])): row
-        for _, row in load_checks.iterrows()
+        for row in load_checks.to_dict("records")
     }
-    shear_groups = {
-        (str(member), str(combo), str(end)): rows
-        for (member, combo, end), rows in shear_checks.groupby(
-            ["UniqueName", "Combo", "End"], dropna=False
+    combos_of: dict[str, set[str]] = {}
+    for force_member, combo, _end in force_map:
+        combos_of.setdefault(force_member, set()).add(combo)
+    # Shear rows of one column, combination and end, reduced to their worst values once.
+    shear_groups: dict[tuple[str, str, str], dict] = {}
+    if not shear_checks.empty:
+        table = shear_checks.assign(
+            _member=shear_checks["UniqueName"].astype(str),
+            _combo=shear_checks["Combo"].astype(str),
+            _end=shear_checks["End"].astype(str),
+            _neglected=shear_checks["Concrete_Shear_Strength_Neglected"].eq(True),
+            _passes=shear_checks["Shear_Check"].eq("PASS"),
         )
-    } if not shear_checks.empty else {}
+        reduced = table.groupby(["_member", "_combo", "_end"], dropna=False).agg(
+            Analysis_Shear_kN=("Analysis_Shear_kN", "max"),
+            Capacity_Based_Ve_kN=("Capacity_Based_Ve_kN", "max"),
+            Design_Shear_kN=("Design_Shear_kN", "max"),
+            Vc_kN=("Vc_kN", "min"),
+            neglected=("_neglected", "all"),
+            phi_Vn_kN=("phi_Vn_kN", "min"),
+            Shear_Utilization=("Shear_Utilization", "max"),
+            passes=("_passes", "all"),
+        )
+        shear_groups = {key: values for key, values in zip(
+            reduced.index, reduced.to_dict("records"))}
     # Joint rows per column, combination, end and column axis. Entries are
     # "member:end:axis"; an empty axis means the column orientation is unknown.
     joint_groups: dict[tuple[str, str, str, str], list[pd.Series]] = {}
     if not joint_results.empty:
-        for _, joint_row in joint_results.iterrows():
+        for joint_row in joint_results.to_dict("records"):
             combo = str(joint_row.get("Load_Combo", ""))
             for entry in str(joint_row.get("Column_End_Members", "")).split(","):
                 parts = [part.strip() for part in entry.rsplit(":", 2)]
@@ -3294,9 +3342,12 @@ def _build_consolidated_column_report(
                     continue
                 joint_groups.setdefault((member, combo, end, axis), []).append(joint_row)
 
-    def number(item: pd.Series, key: str) -> float:
+    def number(item, key: str) -> float:
         """Read a numeric joint value; NaN when it is missing or text."""
-        return pd.to_numeric(pd.Series([item.get(key)]), errors="coerce").iloc[0]
+        try:
+            return float(item.get(key))
+        except (TypeError, ValueError):
+            return np.nan
 
     def unique_text(items: list[pd.Series], key: str) -> str:
         """Join the distinct text values of one joint field."""
@@ -3305,15 +3356,9 @@ def _build_consolidated_column_report(
         )
 
     report_rows: list[dict] = []
-    for _, column in column_results.iterrows():
+    for column in column_results.to_dict("records"):
         member = str(column["UniqueName"])
-        combos = sorted(
-            {
-                combo
-                for (force_member, combo, _end) in force_map
-                if force_member == member
-            }
-        )
+        combos = sorted(combos_of.get(member, ()))
         if not combos:
             combos = [""]
         for combo in combos:
@@ -3437,33 +3482,17 @@ def _build_consolidated_column_report(
                     ):
                         report_row[f"{prefix}_{end}"] = "N/A"
                 else:
-                    report_row[f"Analysis_Vu_kN_{end}"] = shear_rows[
-                        "Analysis_Shear_kN"
-                    ].max()
-                    report_row[f"Probable_Ve_kN_{end}"] = shear_rows[
-                        "Capacity_Based_Ve_kN"
-                    ].max()
-                    report_row[f"Design_Vu_kN_{end}"] = shear_rows[
-                        "Design_Shear_kN"
-                    ].max()
-                    report_row[f"Vc_kN_{end}"] = shear_rows["Vc_kN"].min()
+                    report_row[f"Analysis_Vu_kN_{end}"] = shear_rows["Analysis_Shear_kN"]
+                    report_row[f"Probable_Ve_kN_{end}"] = shear_rows["Capacity_Based_Ve_kN"]
+                    report_row[f"Design_Vu_kN_{end}"] = shear_rows["Design_Shear_kN"]
+                    report_row[f"Vc_kN_{end}"] = shear_rows["Vc_kN"]
                     report_row[f"Concrete_Shear_Neglected_{end}"] = (
-                        "YES"
-                        if shear_rows[
-                            "Concrete_Shear_Strength_Neglected"
-                        ].eq(True).all()
-                        else "NO"
+                        "YES" if shear_rows["neglected"] else "NO"
                     )
-                    report_row[f"phi_Vn_kN_{end}"] = shear_rows[
-                        "phi_Vn_kN"
-                    ].min()
-                    report_row[f"Shear_Utilization_{end}"] = shear_rows[
-                        "Shear_Utilization"
-                    ].max()
+                    report_row[f"phi_Vn_kN_{end}"] = shear_rows["phi_Vn_kN"]
+                    report_row[f"Shear_Utilization_{end}"] = shear_rows["Shear_Utilization"]
                     report_row[f"Shear_Check_{end}"] = (
-                        "PASS"
-                        if shear_rows["Shear_Check"].eq("PASS").all()
-                        else "FAIL"
+                        "PASS" if shear_rows["passes"] else "FAIL"
                     )
 
                 end_rows: list[pd.Series] = []
@@ -3662,7 +3691,7 @@ def _expand_column_report_hierarchy(
     )
 
     long_rows: list[dict] = []
-    for _, wide_row in wide_report.iterrows():
+    for wide_row in wide_report.to_dict("records"):
         for end in ("I", "J"):
             result = {
                 key: wide_row.get(key)
@@ -3735,12 +3764,8 @@ def _expand_column_report_hierarchy(
         ],
     )
     long_report["_end_order"] = long_report["End"].map({"J": 0, "I": 1})
-    long_report["_elevation"] = [
-        float(wide_report.loc[index // 2, "Level_Elevation_m"])
-        if pd.notna(wide_report.loc[index // 2, "Level_Elevation_m"])
-        else -math.inf
-        for index in range(len(long_report))
-    ]
+    elevations = pd.to_numeric(wide_report["Level_Elevation_m"], errors="coerce")
+    long_report["_elevation"] = np.repeat(elevations.fillna(-math.inf).to_numpy(float), 2)
     long_report = (
         long_report.assign(
             _label_sort=long_report["Column_Label"].astype(str),
@@ -4386,9 +4411,20 @@ def design_columns(
                     bundle_layout=layout,
                 )
             engine, section = candidate_section_cache[section_key]
-            nominal, _, _, _, _ = engine.solve_moment_capacity(
-                section, axial_load=axial, bending_angle=theta
-            )
+            surface = None
+            if USE_INTERACTION_SURFACE:
+                from design.column_interaction import demand_moments, surface_for
+
+                surface = surface_for(engine, section, layout)
+            if surface is not None:
+                m2_direction = float(np.dot(moment_axis, local_2))
+                m3_direction = float(np.dot(moment_axis, local_3))
+                nominal = surface.nominal_capacity_fast(
+                    axial, *demand_moments(m2_direction, m3_direction))
+            else:
+                nominal, _, _, _, _ = engine.solve_moment_capacity(
+                    section, axial_load=axial, bending_angle=theta
+                )
             capacity = float(nominal) / 1e6
             candidate_capacity_cache[cache_key] = capacity
             return capacity

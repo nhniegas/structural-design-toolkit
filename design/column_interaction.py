@@ -10,7 +10,7 @@ The surface is the ACI 318M-14 design surface (phi Pn, phi Mnx, phi Mny):
 * phi Pn capped at phi 0.80 Po (tied) or phi 0.85 Po (spiral) (Table 22.4.2.1).
 
 It is computed on a grid of neutral-axis angles x neutral-axis depths, all at
-once with NumPy and vectorized shapely clipping, and cached by layout (shape,
+once with NumPy (closed-form clipping of the convex rings), and cached by layout (shape,
 size, bars, cover, materials), so every column, combination and iteration with
 the same layout reuses it.
 
@@ -31,7 +31,6 @@ import math
 from dataclasses import dataclass
 
 import numpy as np
-import shapely
 
 N_ANGLES = 72        # neutral-axis angles over 360 degrees (5 degrees)
 N_DEPTHS = 120       # neutral-axis depths per angle (chords of a convex surface: conservative, ~0.1 %)
@@ -49,49 +48,69 @@ class InteractionSurface:
     p_cap: float         # phi Pn,max (0.80 / 0.85 Po)
     p_tension: float     # phi Tn (all bars yielding in tension), positive number
 
+    def _rows(self, nominal: bool):
+        """(P rows made non-decreasing along the depth, Mx, My, phi), cached."""
+        cache = self.__dict__.setdefault("_row_cache", {})
+        if nominal not in cache:
+            if nominal:
+                p, x, y = self.p / self.phi, self.mx / self.phi, self.my / self.phi
+                phi = np.ones_like(p)
+            else:
+                p, x, y, phi = self.p, self.mx, self.my, self.phi
+            cache[nominal] = (np.maximum.accumulate(p, axis=1), x, y, phi)
+        return cache[nominal]
+
+    def _contours(self, levels: np.ndarray, nominal: bool = False):
+        """Load contours at the axial ``levels`` (one row each, one point per angle):
+        Mx, My, phi of shape (n_levels, n_angles) and the levels inside the range."""
+        p_rows, x, y, phi = self._rows(nominal)
+        levels = np.asarray(levels, dtype=float)
+        n = p_rows.shape[0]
+        cx = np.empty((len(levels), n))
+        cy = np.empty_like(cx)
+        cphi = np.empty_like(cx)
+        for k in range(n):
+            cx[:, k] = np.interp(levels, p_rows[k], x[k])
+            cy[:, k] = np.interp(levels, p_rows[k], y[k])
+            cphi[:, k] = np.interp(levels, p_rows[k], phi[k])
+        valid = (levels >= p_rows[:, 0].max()) & (levels <= p_rows[:, -1].min())
+        if not nominal:
+            valid &= (levels <= self.p_cap) & (levels >= -self.p_tension)
+        return cx, cy, cphi, valid
+
+    def capacities(self, pu, mx, my) -> tuple[np.ndarray, np.ndarray]:
+        """``capacity`` of many demands at once (arrays of Pu, Mx, My)."""
+        pu, mx, my = (np.atleast_1d(np.asarray(a, dtype=float)) for a in (pu, mx, my))
+        cx, cy, cphi, valid = self._contours(pu)
+        direction = np.where((mx != 0) | (my != 0), np.arctan2(my, mx), 0.0)
+        capacity, phi = _ray_capacities(cx, cy, cphi, direction)
+        return np.where(valid, capacity, 0.0), np.where(valid, phi, np.nan)
+
     def contour(self, pu: float) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
         """Mx, My and phi of the load contour at phi Pn = pu (one point per angle);
         None when pu is outside the axial range of the section."""
-        if pu > self.p_cap or pu < -self.p_tension:
-            return None
-        mx = np.empty(self.p.shape[0])
-        my = np.empty_like(mx)
-        phi = np.empty_like(mx)
-        for k in range(self.p.shape[0]):
-            p_row = np.maximum.accumulate(self.p[k])  # phi Pn grows with the depth
-            if pu < p_row[0] or pu > p_row[-1]:
-                return None
-            mx[k] = np.interp(pu, p_row, self.mx[k])
-            my[k] = np.interp(pu, p_row, self.my[k])
-            phi[k] = np.interp(pu, p_row, self.phi[k])
-        return mx, my, phi
+        cx, cy, cphi, valid = self._contours(np.array([pu]))
+        return (cx[0], cy[0], cphi[0]) if valid[0] else None
 
     def capacity(self, pu: float, mx: float, my: float) -> tuple[float, float]:
         """(phi Mn, phi) along the direction of (mx, my) at phi Pn = pu; (0, nan)
         when pu is outside the axial range."""
-        contour = self.contour(pu)
-        if contour is None:
-            return 0.0, math.nan
-        cx, cy, cphi = contour
-        direction = math.atan2(my, mx) if (mx or my) else 0.0
-        return _ray_capacity(cx, cy, cphi, direction)
+        capacity, phi = self.capacities(pu, mx, my)
+        return float(capacity[0]), float(phi[0])
+
+    def nominal_capacities(self, pn, mx, my) -> np.ndarray:
+        """``nominal_capacity`` of many axial loads and directions at once."""
+        pn, mx, my = (np.atleast_1d(np.asarray(a, dtype=float)) for a in (pn, mx, my))
+        cx, cy, cphi, valid = self._contours(pn, nominal=True)
+        direction = np.where((mx != 0) | (my != 0), np.arctan2(my, mx), 0.0)
+        capacity, _ = _ray_capacities(cx, cy, cphi, direction)
+        return np.where(valid, capacity, 0.0)
 
     def nominal_capacity(self, pn: float, mx: float, my: float) -> float:
         """Nominal Mn (phi = 1) along the direction of (mx, my) at the axial load pn,
         as the strong column - weak beam check uses it (ACI 18.7.3.2); 0 when pn is
         outside the nominal axial range."""
-        p_nom, x_nom, y_nom = self.p / self.phi, self.mx / self.phi, self.my / self.phi
-        cx = np.empty(p_nom.shape[0])
-        cy = np.empty_like(cx)
-        for k in range(p_nom.shape[0]):
-            row = np.maximum.accumulate(p_nom[k])
-            if pn < row[0] or pn > row[-1]:
-                return 0.0
-            cx[k] = np.interp(pn, row, x_nom[k])
-            cy[k] = np.interp(pn, row, y_nom[k])
-        direction = math.atan2(my, mx) if (mx or my) else 0.0
-        capacity, _ = _ray_capacity(cx, cy, np.ones_like(cx), direction)
-        return capacity
+        return float(self.nominal_capacities(pn, mx, my)[0])
 
     def nominal_curve(self, mx: float, my: float, levels: int = 600):
         """(P, Mn) table of the nominal strength along one moment direction, built once
@@ -99,13 +118,11 @@ class InteractionSurface:
         cache = self.__dict__.setdefault("_curves", {})
         direction = round(math.degrees(math.atan2(my, mx)) if (mx or my) else 0.0, 2)
         if direction not in cache:
-            p_nom = self.p / self.phi
-            lowest = float(np.max(p_nom[:, 0]))       # every angle reaches it
-            highest = float(np.min(p_nom.max(axis=1)))
-            axial = np.linspace(lowest, highest, levels)
+            p_rows = self._rows(True)[0]
+            axial = np.linspace(float(p_rows[:, 0].max()), float(p_rows[:, -1].min()), levels)
             radians = math.radians(direction)
-            moments = np.array([self.nominal_capacity(p, math.cos(radians), math.sin(radians))
-                                for p in axial])
+            moments = self.nominal_capacities(axial, np.full(levels, math.cos(radians)),
+                                              np.full(levels, math.sin(radians)))
             cache[direction] = (axial, moments)
         return cache[direction]
 
@@ -116,40 +133,53 @@ class InteractionSurface:
             return self.nominal_capacity(pn, mx, my)
         return float(np.interp(pn, axial, moments))
 
+    def utilizations(self, pu, mx, my) -> np.ndarray:
+        """|Mu| / phi Mn of many demands at once (``utilization``)."""
+        pu, mx, my = (np.atleast_1d(np.asarray(a, dtype=float)) for a in (pu, mx, my))
+        demand = np.hypot(mx, my)
+        capacity, _ = self.capacities(pu, mx, my)
+        inside = (pu >= -self.p_tension) & (pu <= self.p_cap)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ratio = np.where(capacity > 0, demand / capacity, math.inf)
+        return np.where(demand <= 1e-9, np.where(inside, 0.0, math.inf), ratio)
+
     def utilization(self, pu: float, mx: float, my: float) -> float:
-        demand = math.hypot(mx, my)
-        capacity, _ = self.capacity(pu, mx, my)
-        if demand <= 1e-9:
-            return 0.0 if -self.p_tension <= pu <= self.p_cap else math.inf
-        return demand / capacity if capacity > 0 else math.inf
+        return float(self.utilizations(pu, mx, my)[0])
+
+
+def _ray_capacities(cx: np.ndarray, cy: np.ndarray, cphi: np.ndarray,
+                    direction: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Distance from the origin to each contour polygon (rows of cx, cy) along its
+    ``direction``, and phi interpolated at that point."""
+    angles = np.arctan2(cy, cx)
+    order = np.argsort(angles, axis=1)
+    angles, cx, cy, cphi = (np.take_along_axis(a, order, axis=1)
+                            for a in (angles, cx, cy, cphi))
+    # close each polygon across +-pi
+    angles = np.concatenate([angles[:, -1:] - 2 * math.pi, angles,
+                             angles[:, :1] + 2 * math.pi], axis=1)
+    cx, cy, cphi = (np.concatenate([a[:, -1:], a, a[:, :1]], axis=1) for a in (cx, cy, cphi))
+    j = (angles < direction[:, None]).sum(axis=1)          # searchsorted, row by row
+    j = np.clip(j, 1, angles.shape[1] - 1)
+    rows = np.arange(len(j))
+    ax, ay, bx, by = cx[rows, j - 1], cy[rows, j - 1], cx[rows, j], cy[rows, j]
+    ux, uy = np.cos(direction), np.sin(direction)
+    # A + s (B - A) = t u  ->  solve for t (the capacity) and s (for phi)
+    det = (bx - ax) * (-uy) - (by - ay) * (-ux)
+    flat = np.abs(det) < 1e-12
+    safe = np.where(flat, 1.0, det)
+    s = np.where(flat, 0.0, ((-ax) * (-uy) - (-ay) * (-ux)) / safe)
+    t = np.where(flat, np.hypot(ax, ay), ((bx - ax) * (-ay) - (by - ay) * (-ax)) / safe)
+    s = np.clip(s, 0.0, 1.0)
+    phi = cphi[rows, j - 1] + s * (cphi[rows, j] - cphi[rows, j - 1])
+    return np.maximum(t, 0.0), phi
 
 
 def _ray_capacity(cx: np.ndarray, cy: np.ndarray, cphi: np.ndarray,
                   direction: float) -> tuple[float, float]:
     """Distance from the origin to the contour polygon along ``direction``."""
-    angles = np.arctan2(cy, cx)
-    radius = np.hypot(cx, cy)
-    order = np.argsort(angles)
-    angles, radius, cx, cy, cphi = (a[order] for a in (angles, radius, cx, cy, cphi))
-    # close the polygon across +-pi
-    angles = np.concatenate([angles[-1:] - 2 * math.pi, angles, angles[:1] + 2 * math.pi])
-    cx = np.concatenate([cx[-1:], cx, cx[:1]])
-    cy = np.concatenate([cy[-1:], cy, cy[:1]])
-    cphi = np.concatenate([cphi[-1:], cphi, cphi[:1]])
-    j = int(np.searchsorted(angles, direction))
-    j = min(max(j, 1), len(angles) - 1)
-    ax, ay, bx, by = cx[j - 1], cy[j - 1], cx[j], cy[j]
-    ux, uy = math.cos(direction), math.sin(direction)
-    # A + s (B - A) = t u  ->  solve for t (the capacity) and s (for phi)
-    det = (bx - ax) * (-uy) - (by - ay) * (-ux)
-    if abs(det) < 1e-12:
-        t = float(np.hypot(ax, ay))
-        s = 0.0
-    else:
-        s = ((-ax) * (-uy) - (-ay) * (-ux)) / det
-        t = ((bx - ax) * (-ay) - (by - ay) * (-ax)) / det
-    s = min(max(s, 0.0), 1.0)
-    return max(float(t), 0.0), float(cphi[j - 1] + s * (cphi[j] - cphi[j - 1]))
+    t, phi = _ray_capacities(cx[None, :], cy[None, :], cphi[None, :], np.array([direction]))
+    return float(t[0]), float(phi[0])
 
 
 def demand_moments(m2: float, m3: float) -> tuple[float, float]:
@@ -184,6 +214,59 @@ def hull_vertices(points: np.ndarray) -> np.ndarray:
 # =============================================================================
 # BUILD
 # =============================================================================
+def section_rings(geom) -> list[tuple[np.ndarray, float]]:
+    """Counter-clockwise vertex arrays of a concrete polygon: the outline with sign +1
+    and each hole (the bars cut out of the concrete) with sign -1. Every ring of a
+    column section is convex (rectangle, regular polygon, bar polygons)."""
+    rings = [(geom.exterior, 1.0)] + [(ring, -1.0) for ring in geom.interiors]
+    out = []
+    for ring, sign in rings:
+        points = np.asarray(ring.coords, dtype=float)[:-1]
+        x, y = points[:, 0], points[:, 1]
+        if np.sum(x * np.roll(y, -1) - np.roll(x, -1) * y) < 0:  # clockwise: reverse
+            points = points[::-1]
+        out.append((points, sign))
+    return out
+
+
+def clip_moments(rings, nx, ny, boundary):
+    """Area and first moments (A, Sx = sum x dA, Sy = sum y dA) of the part of the
+    section with nx*x + ny*y >= boundary, for arrays of half-planes at once.
+
+    ``nx``, ``ny`` and ``boundary`` broadcast to one shape; the results have that
+    shape. Each convex ring is clipped in closed form (Green's theorem over the
+    kept edges and the cut), which gives the same values as polygon clipping
+    without building a polygon per half-plane.
+    """
+    nx, ny, boundary = np.broadcast_arrays(*(np.asarray(a, dtype=float)
+                                             for a in (nx, ny, boundary)))
+    area = np.zeros(nx.shape)
+    sx = np.zeros(nx.shape)
+    sy = np.zeros(nx.shape)
+    for points, sign in rings:
+        x0, y0 = points[:, 0], points[:, 1]
+        x1, y1 = np.roll(x0, -1), np.roll(y0, -1)
+        d0 = nx[..., None] * x0 + ny[..., None] * y0 - boundary[..., None]
+        d1 = np.roll(d0, -1, axis=-1)
+        in0, in1 = d0 >= 0.0, d1 >= 0.0
+        with np.errstate(divide="ignore", invalid="ignore"):
+            t = np.where(in0 != in1, d0 / (d0 - d1), 0.0)
+        cx, cy = x0 + t * (x1 - x0), y0 + t * (y1 - y0)   # crossing of each edge
+        ax, ay = np.where(in0, x0, cx), np.where(in0, y0, cy)
+        bx, by = np.where(in1, x1, cx), np.where(in1, y1, cy)
+        keep = in0 | in1
+        # the cut closes the kept chain: from the exit crossing to the entry crossing
+        exit_, entry = in0 & ~in1, ~in0 & in1
+        ex, ey = (cx * exit_).sum(-1), (cy * exit_).sum(-1)
+        nx_, ny_ = (cx * entry).sum(-1), (cy * entry).sum(-1)
+        cross = np.where(keep, ax * by - bx * ay, 0.0)
+        cut = ex * ny_ - nx_ * ey
+        area += sign * (cross.sum(-1) + cut) / 2.0
+        sx += sign * (((ax + bx) * cross).sum(-1) + (ex + nx_) * cut) / 6.0
+        sy += sign * (((ay + by) * cross).sum(-1) + (ey + ny_) * cut) / 6.0
+    return area, sx, sy
+
+
 def _phi(strain: np.ndarray, fy: float, es: float, spiral: bool, strength) -> np.ndarray:
     """Vector form of AciCode.phi_flexure (Table 21.2.2)."""
     low = strength.compression_spiral if spiral else strength.compression_tied
@@ -193,10 +276,9 @@ def _phi(strain: np.ndarray, fy: float, es: float, spiral: bool, strength) -> np
                    strength.tension_controlled)
 
 
-def build_surface(section, engine, n_angles: int = N_ANGLES,
-                  n_depths: int = N_DEPTHS) -> InteractionSurface | None:
-    """The design surface of a concreteproperties section (rectangular block, lumped
-    elastic-plastic bars), or None for other sections (the exact solver is used)."""
+def _section_data(section) -> dict | None:
+    """Rings, bars and material constants of a concreteproperties section (rectangular
+    block, lumped elastic-plastic bars), or None for any other section."""
     from concreteproperties.stress_strain_profile import (
         RectangularStressBlock,
         SteelElasticPlastic,
@@ -215,28 +297,88 @@ def build_surface(section, engine, n_angles: int = N_ANGLES,
     bars = section.reinf_geometries_lumped
     if any(not isinstance(b.material.stress_strain_profile, SteelElasticPlastic) for b in bars):
         return None
-
-    code = engine.code
-    geom = concrete.geom
-    vertices = np.asarray(section.compound_geometry.points, dtype=float)
-    bar_xy = np.asarray([b.calculate_centroid() for b in bars], dtype=float)
-    bar_area = np.asarray([b.calculate_area() for b in bars], dtype=float)
     steel = bars[0].material.stress_strain_profile
-    steel_strains = np.asarray(steel.strains, dtype=float)
-    steel_stresses = np.asarray(steel.stresses, dtype=float)
-    stress_block = float(profile.stresses[2])
     eps_cu = float(profile.ultimate_strain)
-    block_ratio = 1.0 - float(profile.strains[1]) / eps_cu     # a = beta1 c
-    xc, yc = map(float, section.moment_centroid)
+    return {
+        "rings": section_rings(concrete.geom),
+        "vertices": np.asarray(section.compound_geometry.points, dtype=float),
+        "bar_xy": np.asarray([b.calculate_centroid() for b in bars], dtype=float),
+        "bar_area": np.asarray([b.calculate_area() for b in bars], dtype=float),
+        "steel_strains": np.asarray(steel.strains, dtype=float),
+        "steel_stresses": np.asarray(steel.stresses, dtype=float),
+        "stress_block": float(profile.stresses[2]),
+        "eps_cu": eps_cu,
+        "block_ratio": 1.0 - float(profile.strains[1]) / eps_cu,   # a = beta1 c
+        "centroid": tuple(map(float, section.moment_centroid)),
+    }
+
+
+def _bar_hole(area: float, n: int = 4) -> np.ndarray:
+    """The polygon concreteproperties cuts out for a bar of ``area`` (``add_bar``: a
+    regular ``n``-gon of that area, first vertex on the +x axis), centred at 0."""
+    side = 2.0 * math.sqrt(area / n) * math.sqrt(math.tan(math.pi / n))
+    radius = math.hypot(side / (2.0 * math.tan(math.pi / n)), side / 2.0)
+    angles = 2.0 * math.pi * np.arange(n) / n
+    return np.column_stack([radius * np.cos(angles), radius * np.sin(angles)])
+
+
+def layout_section_data(engine, bar_layout) -> dict:
+    """The same data as ``_section_data``, straight from the engine and the bar layout
+    ``[(x, y, bars), ...]``, without building (meshing) a concreteproperties section.
+    The concrete and the bars are those of ``ColumnFlexureDesign.define_materials``,
+    ``define_section`` and ``add_reinf``."""
+    code = engine.code
+    material = code.material
+    if engine.shape == "circular":
+        angles = 2.0 * math.pi * np.arange(20) / 20     # sectionproperties circular_section
+        outline = np.column_stack([engine.diameter / 2 * np.cos(angles),
+                                   engine.diameter / 2 * np.sin(angles)])
+        centroid = (0.0, 0.0)
+    else:
+        outline = np.array([(0.0, 0.0), (engine.width, 0.0), (engine.width, engine.height),
+                            (0.0, engine.height)])
+        centroid = (engine.width / 2.0, engine.height / 2.0)
+    bar = math.pi * engine.dmain ** 2 / 4.0
+    bar_xy = np.array([(x, y) for x, y, _ in bar_layout], dtype=float)
+    bar_area = np.array([bar * count for _, _, count in bar_layout], dtype=float)
+    rings = [(outline, 1.0)] + [(_bar_hole(a) + xy, -1.0) for xy, a in zip(bar_xy, bar_area)]
+    fy, es = engine.fy, material.steel_elastic_modulus
+    fracture = material.steel_fracture_strain
+    return {
+        "rings": rings,
+        "vertices": np.vstack([ring for ring, _ in rings]),
+        "bar_xy": bar_xy,
+        "bar_area": bar_area,
+        "steel_strains": np.array([-fracture, -fy / es, 0.0, fy / es, fracture]),
+        "steel_stresses": np.array([-fy, -fy, 0.0, fy, fy]),
+        "stress_block": material.stress_block_alpha * engine.fc,
+        "eps_cu": material.concrete_ultimate_strain,
+        "block_ratio": code.beta1(engine.fc),
+        "centroid": centroid,
+    }
+
+
+def build_surface(section, engine, n_angles: int = N_ANGLES,
+                  n_depths: int = N_DEPTHS, data: dict | None = None
+                  ) -> InteractionSurface | None:
+    """The design surface of a concreteproperties section (rectangular block, lumped
+    elastic-plastic bars), or None for other sections (the exact solver is used).
+    ``data`` (``layout_section_data``) replaces the section when given."""
+    if data is None:
+        data = _section_data(section)
+        if data is None:
+            return None
+    code = engine.code
+    vertices, bar_xy, bar_area = data["vertices"], data["bar_xy"], data["bar_area"]
+    steel_strains, steel_stresses = data["steel_strains"], data["steel_stresses"]
+    stress_block, eps_cu, block_ratio = data["stress_block"], data["eps_cu"], data["block_ratio"]
+    xc, yc = data["centroid"]
 
     theta = np.linspace(-math.pi, math.pi, n_angles, endpoint=False)
     normal = np.stack([-np.sin(theta), np.cos(theta)], axis=1)        # (n_angles, 2)
-    axis = np.stack([np.cos(theta), np.sin(theta)], axis=1)
     v = vertices @ normal.T                                           # (n_vertices, n_angles)
-    u = vertices @ axis.T
     v_max, v_min = v.max(axis=0), v.min(axis=0)
     depth = v_max - v_min
-    margin = np.maximum(depth, u.max(axis=0) - u.min(axis=0)) + 1.0
     # neutral-axis depths: from deep tension to beyond full compression
     # dense where the interaction curve bends (around the balance point up to full
     # compression), coarse in deep tension and beyond the section depth
@@ -248,30 +390,13 @@ def build_surface(section, engine, n_angles: int = N_ANGLES,
                                 np.geomspace(1.4, 4.0, n_tail)])
     c = depth[:, None] * fractions[None, :]                           # (n_angles, n_depths)
 
-    # concrete: clip the section by the compression half-plane of every grid point
+    # concrete: the section clipped by the compression half-plane of every grid point
     boundary = v_max[:, None] - block_ratio * c
-    big_u0 = (u.min(axis=0) - margin)[:, None] * np.ones_like(c)
-    big_u1 = (u.max(axis=0) + margin)[:, None] * np.ones_like(c)
-    top = (v_max + margin)[:, None] * np.ones_like(c)
-    cos, sin = np.cos(theta)[:, None], np.sin(theta)[:, None]
-
-    def to_xy(uu, vv):
-        return uu * cos - vv * sin, uu * sin + vv * cos
-
-    corners = [to_xy(big_u0, boundary), to_xy(big_u1, boundary),
-               to_xy(big_u1, top), to_xy(big_u0, top)]
-    ring = np.stack([np.stack(pt, axis=-1) for pt in corners + corners[:1]], axis=-2)
-    halves = shapely.polygons(ring.reshape(-1, 5, 2))
-    clipped = shapely.intersection(geom, halves)
-    area = shapely.area(clipped).reshape(c.shape)
-    centroid = shapely.centroid(clipped)
-    with np.errstate(invalid="ignore"):
-        cx = np.where(area > 0, shapely.get_x(centroid).reshape(c.shape), xc)
-        cy = np.where(area > 0, shapely.get_y(centroid).reshape(c.shape), yc)
-    force_c = area * stress_block
-    pn = force_c.copy()
-    mx = force_c * (cy - yc)
-    my = force_c * (cx - xc)
+    area, s_x, s_y = clip_moments(data["rings"], normal[:, 0, None],
+                                  normal[:, 1, None], boundary)
+    pn = area * stress_block
+    mx = stress_block * (s_y - area * yc)
+    my = stress_block * (s_x - area * xc)
 
     # bars: strain compatibility
     bar_v = bar_xy @ normal.T                                         # (n_bars, n_angles)
@@ -319,7 +444,12 @@ def surface_for(engine, section, bar_layout) -> InteractionSurface | None:
     """The cached surface of a layout (built on first use)."""
     key = layout_key(engine, bar_layout)
     if key not in _CACHE:
-        _CACHE[key] = build_surface(section, engine)
+        built = getattr(section, "is_built", True)
+        if bar_layout and not built:   # a lazy section: no need to mesh it for this
+            _CACHE[key] = build_surface(None, engine,
+                                        data=layout_section_data(engine, bar_layout))
+        else:
+            _CACHE[key] = build_surface(section, engine)
     return _CACHE[key]
 
 
