@@ -434,7 +434,7 @@ class Workbench:
     def _spectrum_loads(self) -> dict[str, tuple]:
         """The spectrum loads, with every scale factor at its base value g I / R (from the
         model's seismic patterns), so each iteration scales from the unscaled spectrum
-        and not from factors an earlier xs analyze left in the model."""
+        and not from factors an earlier sdt analyze left in the model."""
         from etabs_api.core.helpers import as_list
         from etabs_api.workflows.model_analysis import spectrum_cases
 
@@ -664,10 +664,14 @@ LOOP_FIELDS = {
     "Beam line shares one size when lengths differ by at most (%)": ("span_similarity", 30),
     "Rounds (beams, columns, final check) at most": ("max_rounds", 5),
 }
+
+
 def _saved(name: str) -> dict:
     import json
 
-    path = os.path.join(os.path.expanduser("~"), ".xlwings_structural", f"{name}.json")
+    from utilities.user_settings import settings_path as user_settings_path
+
+    path = user_settings_path(f"{name}.json")
     try:
         with open(path, encoding="utf-8") as handle:
             return json.load(handle)
@@ -678,7 +682,9 @@ def _saved(name: str) -> dict:
 def _save(name: str, values: dict) -> None:
     import json
 
-    path = os.path.join(os.path.expanduser("~"), ".xlwings_structural", f"{name}.json")
+    from utilities.user_settings import settings_path as user_settings_path
+
+    path = user_settings_path(f"{name}.json")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as handle:
         json.dump(values, handle, indent=2)
@@ -733,7 +739,7 @@ def _ask_ranges(families: set[str], settings: dict, title: str) -> bool:
 
 
 def final_drift_check(bench: Workbench, options, folder: str, stem: str) -> dict:
-    """Drift of the final sizes (xs drift), saved to ``<stem> - Drift.txt``.
+    """Drift of the final sizes (sdt drift), saved to ``<stem> - Drift.txt``.
 
     The sections are not resized for drift: a failure is reported, and the
     model is to be reconfigured (stiffer members, walls) and designed again.
@@ -750,7 +756,7 @@ def final_drift_check(bench: Workbench, options, folder: str, stem: str) -> dict
     bench.log(report.text())
     if failed:
         bench.log(f"DRIFT FAILS ({len(failed)} checks). The sections were not resized for drift: "
-                  "reconfigure the model (larger columns or beams, walls) and run xs design "
+                  "reconfigure the model (larger columns or beams, walls) and run sdt design "
                   "again.")
         for level, finding in failed:
             bench.log(f"  {level}: {finding.text}")
@@ -790,7 +796,7 @@ def run_design_cli() -> dict | None:
         show_warning("Save the ETABS model first: it has no file yet.", title=title)
         return None
 
-    # combinations, forces and the design inputs (as in xs beams and xs columns)
+    # combinations, forces and the design inputs (as in sdt beams and sdt columns)
     from design.concrete_workflow import (
         BEAM_FIELDS,
         COLUMN_FIELDS,
@@ -914,12 +920,12 @@ def run_design_cli() -> dict | None:
     print(f"Working copy: {working}\nLog: {log_path}\nOutputs: {folder}")
     if summary["drift"]["failed"]:
         print("DRIFT FAILS: the sections were not resized for drift. Reconfigure the model "
-              f"for drift and run xs design again. See {summary['drift']['path']}")
+              f"for drift and run sdt design again. See {summary['drift']['path']}")
     return summary
 
 
 def save_final_design(bench: Workbench, summary: dict, working: str, folder: str) -> None:
-    """Store the final design for xs columns and write the result files."""
+    """Store the final design for sdt columns and write the result files."""
     say = bench.progress
     from design.beam_designer_aci318 import (
         export_beam_dxf,
@@ -943,7 +949,7 @@ def save_final_design(bench: Workbench, summary: dict, working: str, folder: str
     })
     store.beam_results, store.column_report = beams, columns
     store.column_groups = getattr(bench, "column_groups", None)
-    say("Saving the design data for xs columns")
+    say("Saving the design data for sdt columns")
     store.save()
     if beams is not None and len(beams):
         say("Saving the beams 1 of 3: results workbook (.xlsx)")

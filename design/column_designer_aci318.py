@@ -1,6 +1,6 @@
 """ACI 318M-14 reinforced-concrete column design, SMRF checks and schedules.
 
-The terminal workflow (``xs columns``) is in ``design/concrete_workflow.py``;
+The terminal workflow (``sdt columns``) is in ``design/concrete_workflow.py``;
 this module designs from tables (``design_columns``) and writes the results
 file, the DXF schedule and the calculation report. Its tables use mm, MPa,
 kN and kN-m; section-library forces are converted at the calculation boundary.
@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from design.code_config import CODE, AciCode
 from design.column_interaction import clip_moments, section_rings
 from scipy.optimize import brentq
-from shapely.geometry import LineString, Polygon
+from shapely.geometry import LineString
 from shapely.ops import unary_union
 from sectionproperties.pre.library import rectangular_section, circular_section
 import concreteproperties.stress_strain_profile as ssp
@@ -5216,7 +5216,6 @@ def column_size_passes(
     forces["UniqueName"] = forces["UniqueName"].map(_normalize_object_name)
     row = frame_row.copy()
     row["UniqueName"] = _normalize_object_name(row["UniqueName"])
-    member = str(row["UniqueName"])
     engine, _ = _build_column_section(row, 4, dmain, dties, cover, is_smrf)
     if is_smrf:
         seismic = engine.code.column_seismic

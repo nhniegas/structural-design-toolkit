@@ -42,3 +42,22 @@ def test_tagger_loads_as_a_script():
     script = Path(__file__).resolve().parents[1] / "etabs_api" / "workflows" / "frame_tagger.py"
     module = runpy.run_path(str(script), run_name="not_main")
     assert callable(module["auto_tag_frames"])
+
+
+@pytest.mark.parametrize("script, prog", [("sdt", "sdt"), ("xs", "xs"), ("main.py", "python main.py")])
+def test_help_names_the_command_that_was_typed(script, prog, monkeypatch):
+    monkeypatch.setattr(sys, "argv", [script])
+    assert main.build_parser().prog == prog
+
+
+def test_saved_answers_move_from_the_old_settings_folder(tmp_path, monkeypatch):
+    from utilities import user_settings
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    old = tmp_path / user_settings.OLD_FOLDER
+    old.mkdir()
+    (old / "concrete_design.json").write_text('{"smrf": true}', encoding="utf-8")
+    path = Path(user_settings.settings_path("concrete_design.json"))
+    assert path.parent.name == user_settings.FOLDER
+    assert path.read_text(encoding="utf-8") == '{"smrf": true}'

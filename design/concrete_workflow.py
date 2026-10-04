@@ -1,18 +1,18 @@
 """Concrete beam and column design from the terminal (``python main.py beams`` / ``columns``).
 
-``xs beams``
+``sdt beams``
     Attaches to the model open in ETABS, asks the inputs, reads the forces
     from the analysis results (with the service loads for deflection), designs
     every beam, and saves the results (.xlsx), the calculation report (.pdf)
     and the beam schedules (.dxf) in the folder you choose.
 
-``xs deflection``
+``sdt deflection``
     Checks only the deflection of the beams and girders: the bars of the
-    last ``xs beams`` of the model with the service moments read again from
+    last ``sdt beams`` of the model with the service moments read again from
     ETABS, and a results file of the deflections.
 
-``xs columns``
-    Reads what ``xs beams`` stored for the model, asks the column inputs,
+``sdt columns``
+    Reads what ``sdt beams`` stored for the model, asks the column inputs,
     designs every column (the SMRF joint checks use the beam bars), and saves
     the results, the calculation report and the column schedule.
 
@@ -136,7 +136,9 @@ COLUMN_FIELDS = {
 
 
 def _settings_file() -> str:
-    return os.path.join(os.path.expanduser("~"), ".xlwings_structural", "concrete_design.json")
+    from utilities.user_settings import settings_path as user_settings_path
+
+    return user_settings_path("concrete_design.json")
 
 
 def _last() -> dict:
@@ -373,7 +375,7 @@ def run_deflection() -> pd.DataFrame | None:
     stem = os.path.splitext(os.path.basename(model_path))[0]
     if store is None or store.beam_results is None or store.beam_results.empty:
         show_warning(f"No beam design for {stem}: the deflection needs the beam bars. "
-                     "Run xs beams first.", title=title)
+                     "Run sdt beams first.", title=title)
         return None
     divisor = ask_deflection_limit()
     if divisor is None:
@@ -438,12 +440,12 @@ def run_columns() -> DesignStore | None:
     store = DesignStore.load(model_path)
     stem = os.path.splitext(os.path.basename(model_path))[0]
     if store is None or store.beam_results is None or store.beam_results.empty:
-        show_warning(f"No beam design for {stem}. Run xs beams first.", title=title)
+        show_warning(f"No beam design for {stem}. Run sdt beams first.", title=title)
         return None
     if store.is_stale():
         go_on = select_option(title, f"The model was saved after the beam design of {stem}. "
                               "The stored forces may be out of date.",
-                              ["Stop (run xs beams again)", "Continue with the stored data"])
+                              ["Stop (run sdt beams again)", "Continue with the stored data"])
         if go_on is None or go_on.startswith("Stop"):
             return None
     last = _last()

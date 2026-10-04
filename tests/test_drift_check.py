@@ -1,4 +1,4 @@
-"""Tests for the drift check (``xs drift``) that need no ETABS."""
+"""Tests for the drift check (``sdt drift``) that need no ETABS."""
 
 import pandas as pd
 import pytest

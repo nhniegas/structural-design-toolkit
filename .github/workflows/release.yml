@@ -32,9 +32,9 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
-          $wanted = 'main.py', 'pyproject.toml', 'requirements.txt', 'README.md', 'design', 'etabs_api', 'utilities', 'doc'
+          $wanted = 'main.py', 'pyproject.toml', 'requirements.txt', 'README.md', 'design', 'etabs_api', 'utilities', 'docs'
           $paths = $wanted | Where-Object { git ls-files -- $_ }
-          git archive --format=zip --output "dist/structural-toolkit-${{ github.ref_name }}.zip" HEAD @paths
+          git archive --format=zip --output "dist/structural-design-toolkit-${{ github.ref_name }}.zip" HEAD @paths
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       # Standalone geotech tool (same build as geotech/build_exe.bat). Skipped if the script is not committed.

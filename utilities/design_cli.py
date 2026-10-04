@@ -73,7 +73,9 @@ def dialog_label(field: Field) -> str:
 
 
 def _saved_path(name: str) -> str:
-    return os.path.join(os.path.expanduser("~"), ".xlwings_structural", f"{name}.json")
+    from utilities.user_settings import settings_path as user_settings_path
+
+    return user_settings_path(f"{name}.json")
 
 
 def _load(name: str) -> dict:
