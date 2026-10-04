@@ -5026,6 +5026,77 @@ def design_columns(
     return report, report_groups, joint_results
 
 
+def column_size_passes(
+    frame_row: pd.Series,
+    forces: pd.DataFrame,
+    dmain: float,
+    dties: float,
+    cover: float,
+    is_smrf: bool,
+) -> tuple[bool, str]:
+    """Whether a column section can be reinforced for its forces, and why not.
+
+    The same member checks as ``design_columns`` that depend on the section size
+    alone: a bar layout within the steel limit that passes flexure and axial load
+    on the interaction surface, its transverse detailing, the SMRF dimensions and
+    the column shear (the steel limit Vs <= 0.66 sqrt(fc') b d). ``forces`` is the
+    member's FACTORED LOADS rows as ETABS gives them (compression negative). The
+    joint checks need the beams and the columns around the joint, so they are
+    left to the full design.
+    """
+    forces, _ = _expand_combo_permutations(_to_compression_positive(_clean_table(forces)))
+    forces["UniqueName"] = forces["UniqueName"].map(_normalize_object_name)
+    row = frame_row.copy()
+    row["UniqueName"] = _normalize_object_name(row["UniqueName"])
+    member = str(row["UniqueName"])
+    engine, _ = _build_column_section(row, 4, dmain, dties, cover, is_smrf)
+    if is_smrf:
+        seismic = engine.code.column_seismic
+        sides = ((engine.diameter, engine.diameter) if engine.shape == "circular"
+                 else (min(engine.width, engine.height), max(engine.width, engine.height)))
+        if sides[0] < seismic.min_dimension or sides[0] / sides[1] < seismic.min_aspect_ratio:
+            return False, "SMRF dimensions (ACI 18.7.2.1)"
+    strength = engine.code.column_strength
+    ratio_limit = strength.rho_max_smrf if is_smrf else strength.rho_max
+    gross = (engine.width * engine.height if engine.shape == "rectangular"
+             else math.pi * engine.diameter**2 / 4.0)
+    max_bars = int(ratio_limit * gross / (math.pi * dmain**2 / 4.0))
+    try:
+        layouts = _enumerate_column_bar_layouts(engine, max_bars=max_bars)
+    except ValueError as exc:
+        return False, str(exc)
+    axial = pd.to_numeric(forces["P"], errors="coerce").dropna()
+    max_compression = max(0.0, float(axial.max()) * 1000.0) if not axial.empty else 0.0
+    reason = f"no bar layout within the {ratio_limit:.0%} limit passes flexure and axial load"
+    try:
+        for layout in layouts:
+            passes, _, _ = _evaluate_column_candidate(
+                row, forces, layout, dmain, dties, cover, is_smrf, stop_at_first_failure=True)
+            if not passes:
+                continue
+            bars = sum(count for _, _, count in layout)
+            layout_engine, _ = _build_column_section(
+                row, bars, dmain, dties, cover, is_smrf, bundle_layout=layout)
+            detailing, _, _ = _column_transverse_candidate_passes(
+                row, forces, layout_engine, layout, max_compression, is_smrf)
+            if not detailing:
+                reason = "transverse detailing"
+                continue
+            spacing = layout_engine.solve_max_spacing()["max_tie_spacing_mm"]
+            if is_smrf:
+                spacing = min(spacing, _smrf_transverse_design(
+                    layout_engine, bars, max_compression, spacing
+                )["Transverse_Spacing_Provided_mm"])
+            shear, _ = _column_shear_checks(
+                row, forces, layout_engine, bars, spacing, 2, is_smrf, bundle_layout=layout)
+            if all(check["Shear_Check"] == "PASS" for check in shear):
+                return True, "passes"
+            return False, "column shear (section too small for the shear steel)"
+    finally:
+        _clear_end_force_index()
+    return False, reason
+
+
 BOTTOM_COVER_MODES = ("none", "enlarge", "bars")
 BOTTOM_COVER_QUESTION = {
     "Yes - use {cover:g} mm cover on the bottom-most story": True,

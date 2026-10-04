@@ -52,8 +52,9 @@ The loop stops when the final check changes nothing (converged) or after the num
 | Beam | Bars do not fit in 3 layers, girder steel ratio above 2.5 %, SMRF moment ratios, deflection | Deeper first; wider when deeper would break width / depth >= 0.3 |
 | Beam | Stirrup spacing below the minimum (shear, torsion) | Wider first |
 | Column | Joint shear or beam-column strength in one direction | The side along that direction grows (from the column's local axes; a column more than 25 degrees off the axes grows square) |
-| Column | Flexure, axial load, no bar count within the 6 % limit, shear, SMRF dimension | Next size with both sides at least the current ones, the most square of the smallest |
+| Column | Flexure, axial load, no bar count within the 6 % limit, shear, SMRF dimension | Straight to the **first size that passes on the forces of the current analysis** (see below); the next analysis confirms it |
 
+- **Sizing on the current forces.** A column that fails flexure, axial load, the steel limit or shear is not grown one size per analysis. The candidate sizes (each the next "square" size up, as many as 12) are designed on the forces of the analysis just run: bar layout search on the interaction surface, transverse detailing, SMRF dimensions and the shear steel limit. The column goes to the first size that passes (or to the largest when none does). A larger column attracts more force, so the next analysis checks it again; usually it passes, and a column that needed three sizes takes one or two analyses instead of three. Joint shear and beam-column strength failures depend on the beams and the other columns at the joint, so they still grow one side one size. `LoopSettings.size_on_forces = False` restores the old one-step behaviour.
 - Members of one beam line (`2GX-3`, `2GX-3A`, ...) take the same size unless their lengths differ by more than the similarity limit.
 - A column is never smaller than the column above it.
 - Transverse detailing failures (tie spacing, confinement) do not resize a column: they are solved with ties, and are reported.
@@ -62,12 +63,11 @@ The loop stops when the final check changes nothing (converged) or after the num
 
 ## Time
 
-On the test model (103 beams, 47 columns) a beam iteration takes about 35 s and a column iteration about 1 to 1.5 minutes (analysis, extraction and column design, which is about 47 s). See the interaction surface in the [concrete guide](concrete_beam_column_design.md#column-strength-the-biaxial-interaction-surface).
+Column design is vectorized: the interaction surface of a bar layout is computed in closed form (no polygon clipping per grid point) and every demand of a column is checked against it in one call. On a 48-column, 4-story SMRF test model with 20 combinations column design takes about 5 s (it was 16 s), and a non-SMRF set of 20 columns with 80 load sets about 2 s (it was 20 s). Most of an iteration is now the ETABS analysis and extraction; sizing on the current forces cuts the number of those.
 
 ## Not covered yet
 
 - Resizing for drift (it is only checked and reported), and the irregularity and torsion checks.
-- Redesigning only the members that changed between column iterations.
 
 ## Tests
 
