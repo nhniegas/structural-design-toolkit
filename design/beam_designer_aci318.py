@@ -1,6 +1,6 @@
 """Beam design for ACI 318M-14: flexure, shear, torsion, SMRF, detailing and schedules.
 
-The terminal workflow (``xs beams``) is in ``design/concrete_workflow.py``;
+The terminal workflow (``sdt beams``) is in ``design/concrete_workflow.py``;
 this module designs from tables (``design_beams``) and writes the results
 file, the DXF schedules and the calculation report.
 """
@@ -2006,7 +2006,9 @@ DEFLECTION_LIMIT_OPTIONS = {
 
 
 def _deflection_settings_path() -> str:
-    return os.path.join(os.path.expanduser("~"), ".xlwings_structural", "beam_deflection.json")
+    from utilities.user_settings import settings_path as user_settings_path
+
+    return user_settings_path("beam_deflection.json")
 
 
 def ask_deflection_limit() -> int | None:

@@ -8,7 +8,7 @@
 2. From the project folder:
 
 ```powershell
-xs design
+sdt design
 ```
 
 (or `python main.py design`). The questions, asked once:
@@ -17,21 +17,21 @@ xs design
 |---|---|
 | Seismic combinations | Static (EQ), response spectrum (RSA) or both. Gravity and wind `ULS` combinations are always included |
 | Live load reduction, tributary area method, pattern live load | As in the extraction (see the [concrete guide](concrete_beam_column_design.md#step-1-etabs-extraction)) |
-| Design inputs | SMRF on or off, the gravity combination for the beam seismic shear, beam bars and cover, column bars and cover (as in `xs beams` / `xs columns`) |
+| Design inputs | SMRF on or off, the gravity combination for the beam seismic shear, beam bars and cover, column bars and cover (as in `sdt beams` / `sdt columns`) |
 | Column questions | Bottom-story cover and vertical bars carried down; asked once for every iteration |
 | Deflection limit | L/480 (partitions likely to be damaged) or L/240 |
 | Loop limits | Size increment past the setup ranges (50 mm), largest beam width and depth, largest column side, the downsizing threshold (0.7), the beam line similarity (30 %) and the number of rounds (5). Remembered for next time |
-| Drift of the final sizes | Where to read the drift, static and/or spectrum drift combinations, and the wind limit, as in [`xs drift`](etabs_drift.md) |
+| Drift of the final sizes | Where to read the drift, static and/or spectrum drift combinations, and the wind limit, as in [`sdt drift`](etabs_drift.md) |
 | Output folder | For the final results, calculations and schedules |
 | Size ranges | Only for section families that have none in the setup inputs (for example `FTB` tie beams); saved with the model's setup inputs |
 
-The model is saved as `<model> - DESIGN.EDB` and the loop works on that copy; the original is not changed. At the end the final design is written to the output folder (results, calculations, schedules, as `xs beams` and `xs columns` do) and stored in `<model> - DESIGN - design data.pkl`, so `xs columns` can be run again on it. The log `<model> - DESIGN log.txt` lists every iteration.
+The model is saved as `<model> - DESIGN.EDB` and the loop works on that copy; the original is not changed. At the end the final design is written to the output folder (results, calculations, schedules, as `sdt beams` and `sdt columns` do) and stored in `<model> - DESIGN - design data.pkl`, so `sdt columns` can be run again on it. The log `<model> - DESIGN log.txt` lists every iteration.
 
-**Drift.** Drift depends on the final member sizes, so it is checked once at the end, with `xs drift` on the final working copy, and saved as `<model> - DESIGN - Drift.txt` in the output folder. The sections are **not** resized for drift. If a check fails, the log and the terminal say so: reconfigure the model for drift (stiffer members or walls) and run `xs design` again.
+**Drift.** Drift depends on the final member sizes, so it is checked once at the end, with `sdt drift` on the final working copy, and saved as `<model> - DESIGN - Drift.txt` in the output folder. The sections are **not** resized for drift. If a check fails, the log and the terminal say so: reconfigure the model for drift (stiffer members or walls) and run `sdt design` again.
 
 ## One iteration
 
-1. Analysis, with the response spectrum scaled to 100 % of the static base shear. The scale factors start from the unscaled spectrum, g I / R from the model's seismic patterns, every time. So they follow the current stiffness and do not carry over a scaling from an earlier `xs analyze`.
+1. Analysis, with the response spectrum scaled to 100 % of the static base shear. The scale factors start from the unscaled spectrum, g I / R from the model's seismic patterns, every time. So they follow the current stiffness and do not carry over a scaling from an earlier `sdt analyze`.
 2. Extraction: forces from the analysis results, service loads for the deflection checks, frame data and connectivity (in memory).
 3. Beam design, with the deflection checks.
 4. In the column phase, column design (it uses the beam bars at the joints).

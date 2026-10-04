@@ -1,10 +1,10 @@
-# Story Drift (`xs drift`)
+# Story Drift (`sdt drift`)
 
-`xs drift` (or `python main.py drift`) checks the story drift of the model open in ETABS using the drift stiffness. It works on the model itself, not a copy, and puts the model back as it was when it finishes.
+`sdt drift` (or `python main.py drift`) checks the story drift of the model open in ETABS using the drift stiffness. It works on the model itself, not a copy, and puts the model back as it was when it finishes.
 
 ## Why a separate run
 
-ETABS keeps stiffness modifiers per member, not per load case. Drift with a different cracked-section stiffness than the strength design therefore needs its own analysis. `xs check` reports the drift of the model as it is, with its strength modifiers; `xs drift` reruns the analysis with each drift stiffness.
+ETABS keeps stiffness modifiers per member, not per load case. Drift with a different cracked-section stiffness than the strength design therefore needs its own analysis. `sdt check` reports the drift of the model as it is, with its strength modifiers; `sdt drift` reruns the analysis with each drift stiffness.
 
 ## What it does
 
@@ -17,7 +17,7 @@ ETABS keeps stiffness modifiers per member, not per load case. Drift with a diff
 3. Judges your modifiers: effective I (frame × section) of 0.35 for beams and 0.70 for columns, and mass and weight at 1.
 4. For each stiffness level:
    - sets the cracked-section I22 and I33 of every beam and column;
-   - runs the analysis, and scales the spectrum cases (`RSAXD` and `RSAYD` to the drift patterns `EQXSD` and `EQYSD`, as `xs analyze` does);
+   - runs the analysis, and scales the spectrum cases (`RSAXD` and `RSAYD` to the drift patterns `EQXSD` and `EQYSD`, as `sdt analyze` does);
    - reads the drift of the `DRIFT` and `WDRIFT` combinations.
 
    | Level | Beams | Columns | Basis |
@@ -29,9 +29,9 @@ ETABS keeps stiffness modifiers per member, not per load case. Drift with a diff
 5. Puts the modifiers and scale factors back and, if the model had results, analyses it again. It is left ready for the strength design.
 6. Prints the report and saves it beside the model as `<model> - Drift.txt`.
 
-`xs design` runs the same check once at the end, on the final sizes (see [design loop](etabs_design_loop.md)).
+`sdt design` runs the same check once at the end, on the final sizes (see [design loop](etabs_design_loop.md)).
 
-`xs setup` gives the frame sections no modifiers; you assign them to the frames in ETABS. The "As modelled" level shows the drift with them, and the report says whether they match the code values. For the strength and service levels, the stiffness set is the **effective** one: the member modifier is set to the target ÷ section modifier. So the result is exact even if a section carries a modifier from an older setup.
+`sdt setup` gives the frame sections no modifiers; you assign them to the frames in ETABS. The "As modelled" level shows the drift with them, and the report says whether they match the code values. For the strength and service levels, the stiffness set is the **effective** one: the member modifier is set to the target ÷ section modifier. So the result is exact even if a section carries a modifier from an older setup.
 
 ## Where the drift is read
 
@@ -47,7 +47,7 @@ For the spectrum combinations, ETABS gives Max and Min envelopes. The centre-of-
 - **Seismic** (`DRIFT` combinations: 203-5 and 203-7, E from `EQXSD`, `EQYSD`, `RSAXD` and `RSAYD`, ρ = 1.0): ΔM = 0.7 R ΔS, at most 0.025h when T < 0.7 s, otherwise 0.020h (NSCP 208.6.5.1). T is the drift pattern period from the same run. The worst combination of each case is reported.
 - **Wind** (`WDRIFT` combinations: 203-3, 203-4 and 203-6 on `WX` and `WY`): at most h / the typed limit. NSCP 207 sets no wind drift limit.
 
-The drift combinations come from `xs setup`; a model without them stops with a message to run `xs setup` first. Every value (stiffness, factor 1.4, limits) is in `design/code_config.py`.
+The drift combinations come from `sdt setup`; a model without them stops with a message to run `sdt setup` first. Every value (stiffness, factor 1.4, limits) is in `design/code_config.py`.
 
 ## Tests
 

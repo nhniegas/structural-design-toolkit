@@ -7,14 +7,14 @@ Beam and column design of an ETABS model from the terminal, ACI 318M-14. No spre
 Open the model in ETABS (saved, analysed or not), then from the project folder:
 
 ```powershell
-xs beams      # extract, design the beams, save the beam outputs
-xs deflection # only the deflections of the beams (bars of the last xs beams)
-xs columns    # design the columns from the stored beam step, save the column outputs
+sdt beams      # extract, design the beams, save the beam outputs
+sdt deflection # only the deflections of the beams (bars of the last sdt beams)
+sdt columns    # design the columns from the stored beam step, save the column outputs
 ```
 
 (or `python main.py beams` / `python main.py columns`). Design the beams first: the SMRF joint checks of the columns use the designed beam bars.
 
-**`xs beams` asks:**
+**`sdt beams` asks:**
 
 | Question | Notes |
 |---|---|
@@ -26,9 +26,9 @@ xs columns    # design the columns from the stored beam step, save the column ou
 | Deflection limit | Partitions likely to be damaged (L/480) or not (L/240) |
 | Output folder | For the results, the calculations and the schedules |
 
-**`xs deflection`** checks only the deflections, apart from the strength design: it takes the bars of the last `xs beams` of the model, reads the service moments again from ETABS (so a re-analysed model is checked with its current moments), asks the limit (L/480 or L/240) and the folder, and saves `<model> - Deflection.xlsx` with one row per beam: section, Ie, λΔ, the three deflections, their limits, the governing ratio and the check. It stops with a message when the model has no beam design yet (the cracked stiffness needs the bars).
+**`sdt deflection`** checks only the deflections, apart from the strength design: it takes the bars of the last `sdt beams` of the model, reads the service moments again from ETABS (so a re-analysed model is checked with its current moments), asks the limit (L/480 or L/240) and the folder, and saves `<model> - Deflection.xlsx` with one row per beam: section, Ie, λΔ, the three deflections, their limits, the governing ratio and the check. It stops with a message when the model has no beam design yet (the cracked stiffness needs the bars).
 
-**`xs columns` asks:** column main bar, tie and cover; the bottom-story cover; the vertical bars carried down; how interior ties are drawn; the output folder.
+**`sdt columns` asks:** column main bar, tie and cover; the bottom-story cover; the vertical bars carried down; how interior ties are drawn; the output folder.
 
 Answers are remembered and offered again next time. Every named member (not a number) is designed.
 
@@ -38,13 +38,13 @@ Answers are remembered and offered again next time. Every named member (not a nu
 |---|---|
 | `<model> - Beam Design.xlsx` | The beam results, two rows (top, bottom) per beam |
 | `<model> - Beam Calculations.pdf` | Beam calculation report |
-| `<model> - Deflection.xlsx` | `xs deflection`: the deflection checks, one row per beam |
+| `<model> - Deflection.xlsx` | `sdt deflection`: the deflection checks, one row per beam |
 | `<Story>_Girder_Schedule.dxf`, `<Story>_Beam_Schedule.dxf` | Beam schedules |
 | `<model> - Column Design.xlsx` | The column report, one row per column, end and combination |
 | `<model> - Column Calculations.pdf` | Column calculation report |
 | `Column_Schedule.dxf` | Column schedule with the reinforced sections |
 
-**Between the two steps** everything is kept next to the model in `<model> - design data.pkl`: the extracted tables (forces, service loads, frame data, connectivity, live load reduction, column orientation), the inputs and the results. It is internal (binary, for speed). `xs columns` finds it from the model open in ETABS and stops with "No beam design for <model>. Run xs beams first." when there is none. When the model file was saved after the beam step, it warns that the stored forces may be out of date and lets you stop or continue.
+**Between the two steps** everything is kept next to the model in `<model> - design data.pkl`: the extracted tables (forces, service loads, frame data, connectivity, live load reduction, column orientation), the inputs and the results. It is internal (binary, for speed). `sdt columns` finds it from the model open in ETABS and stops with "No beam design for <model>. Run sdt beams first." when there is none. When the model file was saved after the beam step, it warns that the stored forces may be out of date and lets you stop or continue.
 
 ## How the pieces fit
 
@@ -60,9 +60,9 @@ Defining the materials, sections, loads and combinations of the ETABS model is a
 
 ## Optional: automatic tagging
 
-`xs tag` (or `python main.py tag`) gives every beam and column in the open ETABS model a unique name: beams as `<level><type>-<number><letter>`, for example `2GX-10B`, and columns as `<level>-<type><number><letter>`, for example `3-C5C`. The extraction only reads named members, so tag the model before `xs beams`.
+`sdt tag` (or `python main.py tag`) gives every beam and column in the open ETABS model a unique name: beams as `<level><type>-<number><letter>`, for example `2GX-10B`, and columns as `<level>-<type><number><letter>`, for example `3-C5C`. The extraction only reads named members, so tag the model before `sdt beams`.
 
-`xs tag` asks where the tags go: into a copy saved beside the model as `<model name> - TAGGED.EDB` (the default; the original file is not changed and ETABS has the tagged copy open afterwards), or into the model itself, which is then saved with the new names.
+`sdt tag` asks where the tags go: into a copy saved beside the model as `<model name> - TAGGED.EDB` (the default; the original file is not changed and ETABS has the tagged copy open afterwards), or into the model itself, which is then saved with the new names.
 
 | Part | Rule |
 |---|---|
@@ -77,7 +77,7 @@ A planted column is a stack that does not reach a supported joint. Planted colum
 
 ## Extraction
 
-`xs beams` attaches to the model open in ETABS and reads every table the design needs.
+`sdt beams` attaches to the model open in ETABS and reads every table the design needs.
 
 ETABS concrete design is **not** run. The design forces are built from the analysis results of each load case (`etabs_api/workflows/analysis_forces.py`), so every number can be traced. The analysis is run first if any case needed has no results.
 
@@ -166,7 +166,7 @@ A gravity beam, one with neither end on a column or wall (`Beam-Framed / Floatin
 
 ### Deflection (ACI 318M-14 24.2)
 
-The beam design also checks deflection; `xs beams` asks once whether the beams support partitions or finishes likely to be damaged (L/480, or L/240 when not; remembered for next time).
+The beam design also checks deflection; `sdt beams` asks once whether the beams support partitions or finishes likely to be damaged (L/480, or L/240 when not; remembered for next time).
 
 `SERVICE LOADS` holds, for every beam, M3 and V2 at the stations of the deflection combinations `DEF 100 1.0 DL`, `DEF 101 1.0 DL + 1.0 LL`, `DEF 102 1.0 DL + 0.25 LL` and `DEF 103 1.0 DL + 1.0 Lr` (no live load reduction, no pattern live load). The extraction adds these combinations to a model that does not have them; adding combinations keeps the analysis results. Each row also has the downward tip deflection caused by the rotation of the beam's I end and of its J end, used for cantilevers, and whether the beam is on the roof level (the topmost story with beams).
 
@@ -200,7 +200,7 @@ For each column the designer:
 
 ### Cover on the bottom-most story
 
-`xs columns` first asks whether the columns of the bottom-most story get 75 mm concrete cover (`earth_contact_cover` in the configuration). The bottom-most story is read from how the columns stand on each other in `CONNECTIVITY`. If yes, a second dialog asks how:
+`sdt columns` first asks whether the columns of the bottom-most story get 75 mm concrete cover (`earth_contact_cover` in the configuration). The bottom-most story is read from how the columns stand on each other in `CONNECTIVITY`. If yes, a second dialog asks how:
 
 | Choice | Result |
 |---|---|
@@ -286,7 +286,7 @@ SMRF confinement (ACI 18.7.5.4) uses bc and Ach measured to the outside of the h
 
 ## Calculation reports (PDF)
 
-`xs beams` and `xs columns` write an A4 PDF from the design results to the output folder. The report is one column wide and starts with the design basis and a summary table of all members; each member then has its own section of value tables. Equations are not written out.
+`sdt beams` and `sdt columns` write an A4 PDF from the design results to the output folder. The report is one column wide and starts with the design basis and a summary table of all members; each member then has its own section of value tables. Equations are not written out.
 
 Beam report, per beam:
 

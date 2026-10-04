@@ -1,4 +1,4 @@
-"""Story drift with the drift stiffness (``python main.py drift`` / ``xs drift``).
+"""Story drift with the drift stiffness (``python main.py drift`` / ``sdt drift``).
 
 ETABS keeps stiffness modifiers per member, not per load case, so the drift
 needs its own analysis. On the model open in ETABS (no copy):
@@ -300,7 +300,7 @@ def run_drift(connector, reference: str = CENTER,
                          wind_denominator=wind_denominator, seismic=seismic)
     combos = _drift_combinations(model, seismic)
     if not combos:
-        raise RuntimeError("The model has no DRIFT / WDRIFT combinations: run xs setup first.")
+        raise RuntimeError("The model has no DRIFT / WDRIFT combinations: run sdt setup first.")
     had_results = mc._has_results(connector)
     names, columns, section_of = _frames(connector)
     original = {n: list(model.FrameObj.GetModifiers(n, [])[0]) for n in names}
@@ -461,7 +461,7 @@ def run_drift_check() -> DriftReport | None:
                                          f"beams {lv.beam:.2f}, columns {lv.column:.2f}")
                      for lv in levels)
     go = select_option(
-        title, "xs drift works on this model (no copy). It unlocks it, sets the drift stiffness "
+        title, "sdt drift works on this model (no copy). It unlocks it, sets the drift stiffness "
         f"of every beam and column and analyses it for each level:\n\n{text}\n\nThen it puts "
         "your modifiers and response spectrum scale factors back and analyses it again, so it "
         "is left as it was for the strength design. Continue?", ["Continue", "Cancel"])
