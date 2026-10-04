@@ -490,10 +490,13 @@ def test_the_loop_draws_the_column_schedule_with_the_chosen_tie_style(tmp_path, 
     working.write_text("")
     bench = dl.Workbench.__new__(dl.Workbench)
     bench.progress = lambda text: None
+    bench.log_path, bench.verbose = str(tmp_path / "log.txt"), False
     bench.settings = dl.LoopSettings(combos=["U1"], inner_tie_style="hoops")
     bench.tables = {"CONNECTIVITY": pd.DataFrame()}
     bench.column_groups = [("G", ["UniqueName"])]
     columns = pd.DataFrame({"UniqueName": ["C1"]})
     dl.save_final_design(bench, {"beams": None, "columns": columns}, str(working), str(tmp_path))
     assert drawn == ["hoops"]
+    # the stubbed PDF was not written: the log says so
+    assert "Column calculation report not written" in (tmp_path / "log.txt").read_text()
     assert dl.LoopSettings(combos=[]).inner_tie_style == "crossties"   # the default
