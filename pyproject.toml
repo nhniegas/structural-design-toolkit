@@ -2,7 +2,7 @@
 #   pip install -e .   then   sdt wind / sdt setup / sdt --help   (`xs` is kept as an alias)
 # Dependencies stay in requirements.txt (pip install -r requirements.txt).
 [build-system]
-requires = ["setuptools>=64"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -10,6 +10,8 @@ name = "structural-design-toolkit"
 version = "0.1.0"
 description = "Structural design checks and ETABS workflows"
 requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
 
 [project.scripts]
 sdt = "main:main"
