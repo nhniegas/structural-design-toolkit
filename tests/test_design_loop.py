@@ -154,3 +154,79 @@ def test_uls_combinations_by_seismic_choice():
     assert uls_combinations(names, "EQ") == names[:3]
     assert uls_combinations(names, "RSA") == names[:2] + [names[3]]
     assert uls_combinations(names, "Both") == names[:4]
+
+
+def test_a_failing_column_jumps_to_the_first_size_that_passes_on_the_forces():
+    """With a sizer, one analysis moves the column straight to the size that works."""
+    report = pd.DataFrame(column_rows("2-C1", Flexure_Check="FAIL"))
+    sections = {"2-C1": cr(400, 400)}
+    tried = []
+
+    def sizer(member, sizes):
+        tried.extend(sizes)
+        return next(i for i, size in enumerate(sizes) if size.width >= 700)
+
+    actions = column_actions(report, sections, {}, {}, set(), SETTINGS, allow_shrink=False,
+                             sizer=sizer)
+    assert actions["2-C1"][0] == cr(700, 700)
+    assert tried[:3] == [cr(500, 500), cr(600, 600), cr(700, 700)]
+    assert "first size that passes" in actions["2-C1"][1]
+
+
+def test_without_a_passing_size_the_column_goes_to_the_largest():
+    report = pd.DataFrame(column_rows("2-C1", Flexure_Check="FAIL"))
+    actions = column_actions(report, {"2-C1": cr(1100, 1100)}, {}, {}, set(), SETTINGS,
+                             allow_shrink=False, sizer=lambda member, sizes: None)
+    assert actions["2-C1"][0] == cr(1200, 1200)
+
+
+def test_joint_failures_still_grow_one_side_one_step():
+    report = pd.DataFrame(column_rows("2-C1", Joint_Shear_Utilization_X=1.3))
+    actions = column_actions(report, {"2-C1": cr(400, 400)}, {"2-C1": 0.0}, {}, set(),
+                             SETTINGS, sizer=lambda member, sizes: 3)
+    assert actions["2-C1"][0] == cr(400, 500)
+
+
+def test_column_size_passes_on_real_forces():
+    """A 300 mm column cannot carry 4000 kN; an 600 mm column can."""
+    import numpy as np
+
+    from design.column_designer_aci318 import column_size_passes
+
+    def row(side):
+        return pd.Series({"UniqueName": "2-C1", "Story": "2F", "DesignType": "Column",
+                          "Width": side, "Depth": side, "Diameter": np.nan,
+                          "f'c": 28.0, "fy": 415.0, "fys": 415.0})
+
+    forces = pd.DataFrame([{"UniqueName": "2-C1", "Combo": "ULS1", "Station": st, "P": -4000.0,
+                            "V2": 50.0, "V3": 20.0, "M2": 60.0, "M3": 150.0}
+                           for st in (0.0, 3000.0)])
+    small, reason = column_size_passes(row(300.0), forces, 25.0, 10.0, 40.0, False)
+    large, _ = column_size_passes(row(600.0), forces, 25.0, 10.0, 40.0, False)
+    assert not small and "flexure" in reason
+    assert large
+    smrf_small, reason = column_size_passes(row(250.0), forces, 25.0, 10.0, 40.0, True)
+    assert not smrf_small and "18.7.2.1" in reason
+
+
+def test_workbench_sizer_tries_the_sizes_on_the_extracted_forces():
+    import numpy as np
+
+    from etabs_api.workflows.design_loop import Workbench
+
+    bench = Workbench.__new__(Workbench)
+    bench.settings = LoopSettings(combos=[], smrf=False,
+                                  column_bars={"dmain": 25, "dties": 10, "cover": 40})
+    bench.progress, bench.stage, bench.last = (lambda text: None), "", ""
+    bench.tables = {
+        "FRAME DATA": pd.DataFrame([{"UniqueName": "2-C1", "Story": "2F", "DesignType": "Column",
+                                     "Width": 300.0, "Depth": 300.0, "Diameter": np.nan,
+                                     "f'c": 28.0, "fy": 415.0, "fys": 415.0}]),
+        "FACTORED LOADS": pd.DataFrame([{"UniqueName": "2-C1", "Combo": "ULS1", "Station": st,
+                                         "P": -4000.0, "V2": 50.0, "V3": 20.0, "M2": 60.0,
+                                         "M3": 150.0} for st in (0.0, 3000.0)]),
+    }
+    sizer = bench.column_sizer()
+    index = sizer("2-C1", [cr(350, 350), cr(400, 400), cr(500, 500), cr(600, 600)])
+    assert index in (1, 2)  # 400 or 500: the first that carries 4000 kN
+    assert sizer("missing", [cr(400, 400)]) is None
