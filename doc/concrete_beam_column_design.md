@@ -157,7 +157,9 @@ Each beam is designed at the left support, midspan and right support:
 
 With SMRF on, the moment-strength ratios of ACI 18.6.3.2 are enforced, not only checked: bars are added until the positive strength at each support face is at least half the negative strength there, and every section has at least a quarter of the largest support strength, top and bottom. The result is in `SMRF moment strength ratio check`; `SMRF steel ratio check` reports the 2.5 % limit. Cantilevers are left out of this step.
 
-The seismic design shear is reported at each end as `Vₑ, left` and `Vₑ, right`: the gravity shear from the gravity combination you chose plus the sway shear from the probable moments (`Vₛway,max`).
+The seismic design shear is reported at each end as `Vₑ, left` and `Vₑ, right`: the gravity shear from the gravity combination you chose plus the sway shear from the probable moments (`Vₛway,max`), over the clear span between the column faces (the joint-to-joint length less half of the larger side of the column at each end). The sway shear acts along the whole span, so the stirrups beyond 2h carry it too, with the gravity shear there and Vc.
+
+A shear larger than phi (Vc + 0.66 √f'c bw d) (ACI 22.5.1.2), or a combined shear and torsion stress above ACI 22.7.7.1, fails the beam with `FAILED: SHEAR STRENGTH`: the section is too small, and more stirrup legs cannot fix it. Torsion steel uses fy and fyt of at most 420 MPa (ACI 20.2.2.4).
 
 A gravity beam, one with neither end on a column or wall (`Beam-Framed / Floating` in `SupportStatus`), is not part of the moment frame. It is designed for gravity only even when SMRF is on: no probable-moment shear, no seismic hoop spacing, no strength-ratio or 2.5 % checks.
 
@@ -191,10 +193,10 @@ The beam schedules are two files per story: `<Story>_Girder_Schedule.dxf` for th
 
 For each column the designer:
 
-1. lists the bar layouts that fit the section, including bundled bars, in increasing order of steel. A square column only gets layouts with the same bars on all four faces
+1. lists the bar layouts that fit the section, including bundled bars, in increasing order of steel. Bars keep a clear spacing of at least 40 mm, 1.5 db and 4/3 of the aggregate (NSCP 425.2.3; a bundle counts as one bar of the same area). A square column only gets layouts with the same bars on all four faces
 2. picks the first layout that passes axial and flexure for every load set and both ends, and the transverse detailing rules
-3. with SMRF on, checks strong column-weak beam and joint shear at each joint, and moves a column to a heavier layout if the 6/5 ratio is not met
-4. checks column shear in both directions, using the larger of the analysis shear and the capacity-design shear from probable moments
+3. with SMRF on, checks strong column-weak beam and joint shear at each joint, and moves a column to a heavier layout if the 6/5 ratio is not met. The 6/5 rule is waived where the column stops at the joint and Pu < 0.1 Ag f'c (ACI 18.7.3.1). The joint also needs a column side of at least 20 db of the beam bars passing through it (18.8.2.3) and a depth of at least half the deepest beam (18.8.2.4); a violation fails the joint shear check and shows in its utilization
+4. checks column shear in both directions. Ordinary columns use the analysis shear and Vc of ACI 22.5.6 / 22.5.7 with the axial load of each end (tension lowers it). SMRF columns use the larger of the analysis shear and the capacity-design shear Ve = (Mpr,top + Mpr,bottom) / lu, with lu the clear height below the deepest beam at the top, and each Mpr no more than the beams' Mpr at that joint shared among its columns (ACI 18.7.6.1.1). Vs is limited to 0.66 √f'c b d: beyond it the column fails shear instead of getting more legs. Ties are at most d/2 apart (d/4 for a large Vs) once shear steel is needed, with at least Av,min
 
 ### Cover on the bottom-most story
 
@@ -278,8 +280,9 @@ Axial load and biaxial bending are checked on the ACI 318M-14 design interaction
 - **Bar search and the convex hull.** The demands of a column are checked first at the vertices of their convex hull, so a layout that cannot work is rejected after a few checks. The other demands are then confirmed, because the phi-scaled surface is not strictly convex where phi changes from 0.65 to 0.90. The final layout is reported for every combination at both ends.
 - **Strong column - weak beam.** It uses the nominal surface (phi = 1) at the factored axial load. Each column's Mn(P) along a fixed direction is concave, so the lowest sum of column strengths at a joint occurs at a vertex of the convex hull of the columns' axial loads over the combinations. Only those combinations are evaluated; the result is the same. The beam strengths and the joint shear do not depend on the combination.
 - **Capacity-design shear.** Mpr (1.25 fy) is read from the probable-strength surface along the principal axis, through a (P, Mn) table built once per direction.
+- **Speed.** The compression zone of every grid point is the section clipped by a half-plane; it is computed in closed form for all 8,640 points at once (Green's theorem over the kept edges of the outline and of each bar hole), with the same result as polygon clipping. The surface is built from the bar layout directly, without meshing a concreteproperties section, and every demand of a column is looked up in one vectorized call. A surface takes about 40 ms instead of 0.65 s; a 48-column SMRF model with 20 combinations is designed in about 5 s.
 
-With these changes the 47 columns of the test model take about 47 s instead of about 10 minutes, with the same bars and ties.
+SMRF confinement (ACI 18.7.5.4) uses bc and Ach measured to the outside of the hoops (Dc to the outside of the spiral, rho_s = 4 Asp / (Dc s)), and kn counts bar positions, a bundle once. Ties are at least 10 mm, and 12 mm for bars over 32 mm or bundled bars (NSCP 425.7.2.2).
 
 ## Calculation reports (PDF)
 
