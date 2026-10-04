@@ -109,3 +109,44 @@ def test_fast_nominal_curve_matches_the_full_lookup(rectangle, axial):
     for direction in ((1e6, 0.0), (0.0, 1e6), (7e5, 7e5)):
         full = surface.nominal_capacity(axial, *direction)
         assert surface.nominal_capacity_fast(axial, *direction) == pytest.approx(full, rel=2e-3)
+
+
+@pytest.mark.parametrize("shape", ["rectangle", "circle", "bundled"])
+def test_surface_from_the_layout_equals_the_meshed_section(shape):
+    """The layout path (no concreteproperties geometry) gives the same surface."""
+    if shape == "circle":
+        engine, _ = section(width=0, depth=0, diameter=700, bars=12)
+    else:
+        engine, _ = section()
+    layout = cd._enumerate_column_bar_layouts(engine, 60)[3 if shape == "bundled" else 0]
+    if shape == "bundled":
+        layout = [(x, y, 2) for x, y, _ in layout]
+    lazy = cd.LazyColumnSection(engine, sum(c for *_, c in layout), layout)
+    analytic = ci.build_surface(None, engine, data=ci.layout_section_data(engine, layout))
+    meshed = ci.build_surface(lazy.geometry(), engine)
+    for name in ("p", "mx", "my", "phi"):
+        scale = np.abs(getattr(meshed, name)).max()
+        assert np.allclose(getattr(analytic, name), getattr(meshed, name), atol=1e-7 * scale)
+    assert analytic.p_cap == pytest.approx(meshed.p_cap)
+
+
+def test_closed_form_clip_matches_polygon_clipping():
+    from shapely.geometry import Polygon, box
+
+    shape = box(0, 0, 400, 600).difference(Polygon([(100, 90), (110, 100), (100, 110), (90, 100)]))
+    rings = ci.section_rings(shape)
+    for angle in np.linspace(0, 2 * math.pi, 13):
+        nx, ny = math.cos(angle), math.sin(angle)
+        for offset in (-200.0, 50.0, 300.0, 450.0):
+            area, sx, sy = ci.clip_moments(rings, nx, ny, offset)
+            far = 5000.0
+            px, py = -ny, nx  # along the cut
+            cut = Polygon([(offset * nx + far * px, offset * ny + far * py),
+                           (offset * nx - far * px, offset * ny - far * py),
+                           (offset * nx - far * px + far * nx, offset * ny - far * py + far * ny),
+                           (offset * nx + far * px + far * nx, offset * ny + far * py + far * ny)])
+            clipped = shape.intersection(cut)
+            assert float(area) == pytest.approx(clipped.area, abs=1e-6)
+            if clipped.area > 1:
+                assert float(sx) / float(area) == pytest.approx(clipped.centroid.x, abs=1e-6)
+                assert float(sy) / float(area) == pytest.approx(clipped.centroid.y, abs=1e-6)
