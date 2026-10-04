@@ -33,11 +33,26 @@ Supporting code:
 - `utilities/_gui_helpers.py`: file pickers, list pickers, choice and text-entry dialogs, and the loading window.
 - `utilities/_calc_report.py`: layout of the beam and column PDF calculation reports.
 - `utilities/run_summary.py`: the summary every command shows in a window when it finishes (the terminal keeps the detailed results).
+- `utilities/doctor.py`: `sdt doctor`, the check that a machine can run the toolkit.
+- `build_exe.ps1`: builds the packaged program `sdt.exe`.
 - `utilities/_xlsx_values.py`: rounded numbers and stated blanks of the result workbooks.
 - `main.qmd`: Quarto template for written reports.
 - `main.py`: terminal entry point of every command (`sdt --help` lists them).
 
+## Download (no Python needed)
+
+1. Open the [Releases](https://github.com/nhniegas/structural-design-toolkit/releases) page and download `sdt-<version>-windows.zip` of the latest release.
+2. Unzip it anywhere and open the `sdt` folder. Keep the files of the folder together.
+3. Double-click `sdt.exe`. A terminal opens with the menu of commands: type a number or a name, and the menu comes back when the command ends.
+4. Run `doctor` first. It checks that ETABS, the dialogs and LaTeX are in place on your machine.
+
+Windows may warn that the program is from an unknown publisher (it is not signed): choose **More info**, then **Run anyway**. ETABS must be installed for the ETABS commands, and a LaTeX distribution such as MiKTeX for the PDF reports; without LaTeX the results and schedules are still written.
+
+From a terminal the program takes the same commands as below, for example `sdt.exe beams`.
+
 ## Requirements
+
+For running from the source code:
 
 - Windows (ETABS and its COM API)
 - Python 3.10 or newer (developed on 3.14)
@@ -88,7 +103,10 @@ sdt design      # analysis and beam/column design loop that resizes members unti
 sdt composite   # rectangular filled composite column, AISC DG6 (no ETABS)
 sdt steel       # wide-flange steel member, AISC 360-22 (no ETABS)
 sdt wind        # MWFRS wind pressures, ASCE 7 directional procedure (no ETABS)
+sdt doctor      # check that this machine can run the toolkit: ETABS, dialogs, LaTeX
+sdt             # the menu of commands (also what the packaged sdt.exe opens with)
 sdt --help      # list the commands
+sdt --version   # the version
 ```
 
 Each command asks for its inputs in dialogs. The standalone checks (`composite`, `steel`, `wind`) then ask whether to print the results in the terminal, export a PDF calculation report, or both. The terminal shows the detailed results of a command. When it finishes, a separate window shows its summary: what was run, the counts, what needs attention and the files written.
@@ -139,11 +157,36 @@ python -m pip install -r .github/requirements-ci.txt
 python -m pytest tests
 ```
 
-The tests need no ETABS. GitHub Actions runs them on every push to `main` (`.github/workflows/ci.yml`). Pushing a tag such as `v1.0.0` builds a release package (`.github/workflows/release.yml`).
+The tests need no ETABS. GitHub Actions runs them on every push to `main` (`.github/workflows/ci.yml`).
 
-## Geotechnical tools
+## Building and releasing the program
 
-The log-spiral passive earth pressure calculator moved to its own repository, [geotech-toolkit](https://github.com/nhniegas/geotech-toolkit).
+```powershell
+.\build_exe.ps1 -Zip
+```
+
+This builds `dist\sdt\sdt.exe` with PyInstaller and packs `dist\sdt-<version>-windows.zip`. Run `dist\sdt\sdt.exe doctor` to check the build.
+
+To release a version: set it in `pyproject.toml` and in `VERSION` of `main.py`, write `docs/releases/v<version>.md`, merge to `main`, then push a tag:
+
+```powershell
+git tag -a v0.1.0 -m "v0.1.0"
+git push origin v0.1.0
+```
+
+The tag starts `.github/workflows/release.yml`: it runs the tests, builds the program and publishes a GitHub Release with the program zip, the source zip and the release notes.
+
+## Future development
+
+Not in this version, and planned for later ones:
+
+- **Shear wall design.** Walls are counted and reported as not designed.
+- **Drift in the design loop.** Drift is checked on the final sizes and reported; members are not resized for it.
+- **Column base fixity from the model.** Reading the support restraints of ETABS for the slenderness of the bottom columns.
+- **Steel and composite members from the ETABS model.** `sdt steel` and `sdt composite` are standalone checks with typed inputs.
+- **Flanged beams.** The design loop resizes rectangular beams and rectangular or circular columns only.
+- **Seismic checks for other codes.** The period, base shear and spectrum scaling checks read UBC 97 seismic patterns; other patterns are designed for but those checks are reported as not applicable.
+- **Further checks and features** not listed here are added as they are built; each release lists what it adds.
 
 ## Engineering use
 

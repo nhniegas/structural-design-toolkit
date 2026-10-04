@@ -424,6 +424,82 @@ class DualListboxSelector:
         return self.selected_items
 
 
+def run_loading_window(message: str) -> None:
+    """The progress window itself. It runs in a process of its own (see
+    ``LoadingWindow``) and shows the lines it reads from its standard input."""
+    import queue
+    import threading
+    from tkinter import ttk
+
+    root = tk.Tk()
+    root.title("Background Processing")
+
+    width, height = 380, 130
+    x = (root.winfo_screenwidth() // 2) - (width // 2)
+    y = (root.winfo_screenheight() // 2) - (height // 2)
+
+    root.geometry(f"{width}x{height}+{x}+{y}")
+    root.resizable(False, False)
+    root.attributes("-topmost", True)
+    root.protocol("WM_DELETE_WINDOW", lambda: None)
+
+    label = tk.Label(root, text=message, font=("Arial", 9, "bold"), wraplength=340)
+    label.pack(pady=(22, 10))
+
+    progress = ttk.Progressbar(root, mode="indeterminate", length=300)
+    progress.pack(pady=5)
+    progress.start(10)
+
+    # Progress lines sent by LoadingWindow.update() arrive on stdin, one per line.
+    detail = tk.Label(root, text="", font=("Arial", 9), wraplength=340, justify="center")
+    updates: queue.Queue = queue.Queue()
+
+    def read_updates():
+        try:
+            sys.stdin.reconfigure(encoding="utf-8")
+            for line in sys.stdin:
+                updates.put(line.rstrip("\n").replace("\t", "\n"))
+        except Exception:
+            pass
+
+    def show_updates():
+        text = None
+        while not updates.empty():
+            text = updates.get_nowait()
+        if text is not None:
+            if not detail.winfo_ismapped():
+                detail.pack(pady=(6, 0))
+            detail.config(text=text)
+            root.update_idletasks()
+            needed = height + detail.winfo_reqheight() + 16
+            if needed > root.winfo_height():
+                root.geometry(f"{width}x{needed}+{x}+{y}")
+        root.after(100, show_updates)
+
+    threading.Thread(target=read_updates, daemon=True).start()
+    root.after(100, show_updates)
+
+    root.lift()
+    root.focus_force()
+    root.mainloop()
+
+
+LOADING_WINDOW_FLAG = "--loading-window"  # main.py runs run_loading_window for it
+
+
+def loading_window_command(message: str) -> list[str]:
+    """The command that opens the progress window in a process of its own.
+
+    The packaged program has no separate Python, so it starts itself with a
+    hidden first argument that main.py turns into ``run_loading_window``.
+    """
+    if getattr(sys, "frozen", False):
+        return [sys.executable, LOADING_WINDOW_FLAG, message]
+    return [sys.executable, "-c",
+            "import sys; from utilities._gui_helpers import run_loading_window; "
+            "run_loading_window(sys.argv[1])", message]
+
+
 class LoadingWindow:
     """Displays a process-isolated loading window centered on screen during heavy ETABS tasks."""
 
@@ -442,80 +518,17 @@ class LoadingWindow:
 
     def start(self):
         """Starts the loading popup."""
-        gui_script = f"""import ctypes
-import queue
-import sys
-import threading
-import tkinter as tk
-from tkinter import ttk
-
-try:
-    ctypes.windll.shcore.SetProcessDpiAwareness(2)
-except Exception:
-    try:
-        ctypes.windll.shcore.SetProcessDpiAwareness(1)
-    except Exception:
-        pass
-
-root = tk.Tk()
-root.title("Background Processing")
-
-width, height = 380, 130
-screen_w = root.winfo_screenwidth()
-screen_h = root.winfo_screenheight()
-x = (screen_w // 2) - (width // 2)
-y = (screen_h // 2) - (height // 2)
-
-root.geometry(f"{{width}}x{{height}}+{{x}}+{{y}}")
-root.resizable(False, False)
-root.attributes("-topmost", True)
-root.protocol("WM_DELETE_WINDOW", lambda: None)
-
-label = tk.Label(root, text="{self.message}", font=("Arial", 9, "bold"), wraplength=340)
-label.pack(pady=(22, 10))
-
-progress = ttk.Progressbar(root, mode="indeterminate", length=300)
-progress.pack(pady=5)
-progress.start(10)
-
-# Progress lines sent by LoadingWindow.update() arrive on stdin, one per line.
-detail = tk.Label(root, text="", font=("Arial", 9), wraplength=340, justify="center")
-updates = queue.Queue()
-
-def read_updates():
-    try:
-        sys.stdin.reconfigure(encoding="utf-8")
-        for line in sys.stdin:
-            updates.put(line.rstrip("\\n").replace("\\t", "\\n"))
-    except Exception:
-        pass
-
-def show_updates():
-    text = None
-    while not updates.empty():
-        text = updates.get_nowait()
-    if text is not None:
-        if not detail.winfo_ismapped():
-            detail.pack(pady=(6, 0))
-        detail.config(text=text)
-        root.update_idletasks()
-        needed = height + detail.winfo_reqheight() + 16
-        if needed > root.winfo_height():
-            root.geometry(f"{{width}}x{{needed}}+{{x}}+{{y}}")
-    root.after(100, show_updates)
-
-threading.Thread(target=read_updates, daemon=True).start()
-root.after(100, show_updates)
-
-root.lift()
-root.focus_force()
-root.mainloop()
-"""
+        # the window's process must find this package wherever the command was typed
+        project = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        environment = dict(os.environ)
+        environment["PYTHONPATH"] = os.pathsep.join(
+            [project] + [p for p in environment.get("PYTHONPATH", "").split(os.pathsep) if p])
         self.proc = subprocess.Popen(
-            [sys.executable, "-c", gui_script],
+            loading_window_command(self.message),
             stdin=subprocess.PIPE,
             text=True,
             encoding="utf-8",
+            env=environment,
         )
         time.sleep(0.5)
 

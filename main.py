@@ -33,7 +33,14 @@ the same commands.
                     (design/general_steel_section_designer_aisc360.py)
     sdt wind        MWFRS wind pressures, ASCE 7 directional procedure
                     (design/wind_calculator_directional_asce7.py)
+    sdt doctor      check that this machine can run the toolkit: ETABS and its
+                    API, the dialogs, LaTeX     (utilities/doctor.py)
     sdt --help      list the commands
+    sdt --version   the version
+
+``sdt`` alone, and the packaged ``sdt.exe`` when it is double-clicked, shows
+a menu of the commands: type a number or a name, and the menu comes back when
+the command ends.
 
 Each command asks for its inputs in dialogs. The standalone checks
 (composite, steel, wind) then ask whether to print the results in the
@@ -47,6 +54,35 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+
+VERSION = "0.1.0"  # the same as in pyproject.toml (tests/test_main.py checks it)
+# Hidden first argument: this process is the progress window of another one
+# (utilities/_gui_helpers.LoadingWindow). It is how the packaged program,
+# which has no separate Python to start, opens that window.
+LOADING_WINDOW_FLAG = "--loading-window"
+
+AUTHOR = "Nhel Harold Niegas"
+PROFILE = "https://github.com/nhniegas"
+REPOSITORY = "https://github.com/nhniegas/structural-design-toolkit"
+
+
+def banner() -> str:
+    """What the menu shows first: the program, its author and the terms of use."""
+    rule = "=" * 72
+    return "\n".join([
+        rule,
+        f"Structural Design Toolkit {VERSION}",
+        "ETABS automation and structural design checks (NSCP 2015, ACI 318M-14)",
+        "",
+        f"Author:   {AUTHOR}",
+        f"Profile:  {PROFILE}",
+        f"Source:   {REPOSITORY}",
+        f"License:  MIT (c) 2026 {AUTHOR}. Provided as is, without warranty.",
+        "",
+        "These tools automate calculations; they do not replace engineering",
+        "judgement. Check the results independently before using them for design.",
+        rule,
+    ])
 
 
 def _setup():
@@ -127,6 +163,12 @@ def _wind():
     return run()
 
 
+def _doctor():
+    from utilities.doctor import run_doctor
+
+    return run_doctor(VERSION)
+
+
 COMMANDS = {
     "setup": (_setup, "define materials, sections, loads, spectrum, cases and combinations"),
     "grids": (_grids, "build or update stories, grids, columns and walls from a DXF"),
@@ -141,6 +183,7 @@ COMMANDS = {
     "composite": (_composite, "check a rectangular filled composite column (AISC DG6)"),
     "steel": (_steel, "check a wide-flange steel member (AISC 360-22)"),
     "wind": (_wind, "MWFRS wind pressures by the ASCE 7 directional procedure"),
+    "doctor": (_doctor, "check that this machine can run the toolkit (ETABS, dialogs, LaTeX)"),
 }
 
 
@@ -152,16 +195,77 @@ def build_parser() -> argparse.ArgumentParser:
         prog=COMMAND_NAMES.get(Path(sys.argv[0]).stem, "python main.py"),
         description="ETABS workflows and design checks. Each one asks for its inputs in dialogs.",
     )
+    parser.add_argument("--version", action="version",
+                        version=f"Structural Design Toolkit {VERSION}")
     commands = parser.add_subparsers(dest="command", metavar="command")
     for name, (_, text) in COMMANDS.items():
         commands.add_parser(name, help=text, description=text)
     return parser
 
 
+def run_command(name: str) -> bool:
+    """Run one command for the menu. An error is printed, not raised, so the
+    window stays open and the menu comes back. True when it ran to its end."""
+    import traceback
+
+    try:
+        COMMANDS[name][0]()
+    except KeyboardInterrupt:
+        print(f"\n{name} was stopped (Ctrl+C).")
+        return False
+    except Exception:  # noqa: BLE001 - whatever a command raises is shown to the user
+        traceback.print_exc()
+        print(f"\n{name} stopped with the error above. Run 'doctor' to check this machine.")
+        return False
+    return True
+
+
+def menu_choice(typed: str) -> str | None:
+    """The command for what was typed at the menu: its number or its name
+    (or the start of its name, when only one command starts that way)."""
+    typed = typed.strip().lower()
+    names = list(COMMANDS)
+    if typed.isdigit():
+        return names[int(typed) - 1] if 1 <= int(typed) <= len(names) else None
+    if typed in COMMANDS:
+        return typed
+    starts = [name for name in names if typed and name.startswith(typed)]
+    return starts[0] if len(starts) == 1 else None
+
+
+def menu(read=input) -> int:
+    """List the commands and run the ones typed until the user quits."""
+    print(banner())
+    while True:
+        print("\nCommands:\n")
+        for number, (name, (_, text)) in enumerate(COMMANDS.items(), start=1):
+            print(f"  {number:>2}  {name:<11} {text}")
+        try:
+            typed = read("\nType a number or a name (q to quit): ")
+        except (EOFError, KeyboardInterrupt):
+            return 0
+        if typed.strip().lower() in ("q", "quit", "exit"):
+            return 0
+        name = menu_choice(typed)
+        if name is None:
+            print(f"'{typed.strip()}' is not one of the commands.")
+            continue
+        print(f"\n--- {name} ---")
+        run_command(name)
+
+
 def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv[:1] == [LOADING_WINDOW_FLAG]:
+        from utilities._gui_helpers import run_loading_window
+
+        run_loading_window(argv[1] if len(argv) > 1 else "")
+        return 0
     parser = build_parser()
     arguments = parser.parse_args(argv)
     if arguments.command is None:
+        if sys.stdin is not None and sys.stdin.isatty():
+            return menu()  # typed alone in a terminal, or the program double-clicked
         parser.print_help()
         return 1
     COMMANDS[arguments.command][0]()
