@@ -150,3 +150,7 @@ The log-spiral passive earth pressure calculator moved to its own repository, [g
 ## Engineering use
 
 These tools automate calculations; they do not replace engineering judgement. Check the results independently before using them for design, and read the limitations section of each guide.
+
+## License
+
+[MIT](LICENSE) © 2026 Nhel Harold Niegas. The software is provided as is, without warranty of any kind.
