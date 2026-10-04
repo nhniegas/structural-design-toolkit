@@ -825,6 +825,7 @@ def build_grid_column_model(
     progress=None,
     footing_depth: float = 0.0,
     ground_story: str = "GF",
+    copy_path: str | None = None,
 ):
     """Build or update the grids and columns without dialogs.
 
@@ -832,9 +833,12 @@ def build_grid_column_model(
     (see ``add_footing_level``).
 
     ``target`` is ``"open"`` (the model open in ETABS) or ``"new"`` (a blank
-    model saved at ``path``). ``confirm(building, changes)`` may return False
-    to stop before anything is changed. Returns ``(building, changes, log,
-    model path)``; ``log`` is None when it was stopped.
+    model saved at ``path``). With ``copy_path`` the open model is saved
+    there first and the copy is changed, so the model it came from stays as
+    it is on disk; its saved setup inputs go with it. ``confirm(building,
+    changes)`` may return False to stop before anything is changed. Returns
+    ``(building, changes, log, model path)``; ``log`` is None when it was
+    stopped.
     """
     if progress is not None:
         progress("Reading the framing plans")
@@ -871,10 +875,20 @@ def build_grid_column_model(
         os.makedirs(os.path.dirname(path), exist_ok=True)
         model.InitializeNewModel(ms.UNITS_N_MM)
         model.File.NewBlank()
+    elif copy_path:
+        source = path
+        path = os.path.splitext(os.path.normpath(os.path.abspath(copy_path)))[0] + ".EDB"
+        if os.path.normcase(path) != os.path.normcase(source):
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            inputs = ms.load_settings(ms.settings_path(source))
+            if inputs is not None:
+                ms.save_settings(inputs, ms.settings_path(path))
     if return_code(model.File.Save(path)) != 0:
         raise RuntimeError(f"ETABS could not save the model: {path}")
     log = apply_to_model(model, building, changes, concrete_ksi, rebar_ksi, progress)
-    model.File.Save(path)
+    if progress is not None:
+        progress("Saving and opening the model again")
+    ms.save_and_reopen(model, path, log)  # the wind patterns may have been rewritten
     try:
         model.View.RefreshView()
     except Exception:
@@ -955,11 +969,28 @@ def run_grid_column_model() -> str | None:
     ])
     if source is None:
         return None
-    path = None
+    path = copy_path = None
     if source.startswith("A new"):
         path = select_save_path("Save the new ETABS model as", "New Model", ".EDB", "ETABS model")
         if not path:
             return None
+    else:
+        where = select_option(title, "Where should the changes go?", [
+            "Into this model", "Into a copy (this model is left as it is)",
+        ])
+        if where is None:
+            return None
+        if where.startswith("Into a copy"):
+            try:
+                opened = str(ms._attach_or_start(start=False).GetModelFilename())
+            except RuntimeError as error:
+                show_warning(str(error), title=title)
+                return None
+            name = os.path.splitext(os.path.basename(opened))[0] or "Model"
+            copy_path = select_save_path(
+                "Save the copy as", f"{name} - REV", ".EDB", "ETABS model")
+            if not copy_path:
+                return None
 
     def confirm(building, changes) -> bool:
         counts = (
@@ -989,7 +1020,8 @@ def run_grid_column_model() -> str | None:
     try:
         building, changes, log, path = build_grid_column_model(
             dxf_path, concrete_ksi, rebar_ksi, "new" if path else "open", path, layers, confirm,
-            progress=window.update, footing_depth=footing_depth, ground_story=ground_story)
+            progress=window.update, footing_depth=footing_depth, ground_story=ground_story,
+            copy_path=copy_path)
     except (ValueError, RuntimeError) as error:
         window.stop()
         show_warning(str(error), title=title)
@@ -1001,11 +1033,26 @@ def run_grid_column_model() -> str | None:
     ms.save_settings({**layers, "concrete_ksi": concrete_ksi, "rebar_ksi": rebar_ksi,
                       "footing_depth": footing_depth, "ground_story": ground_story},
                      _defaults_path())
-    message = "Done:\n" + "\n".join(f"{count} {what}" for what, count in log.counts.items())
-    message += f"\n\nSaved as:\n{path}\n\nThe list of changes is in the text file beside it."
-    if log.problems:
-        message += f"\n\n{len(log.problems)} items failed:\n" + "\n".join(log.problems[:10])
-    show_warning(message, title=title)
+    from utilities.run_summary import RunSummary
+
+    summary = RunSummary("sdt grids", path)
+    summary.add("Drawing", os.path.basename(dxf_path))
+    summary.add("Stories", ", ".join(name for name, _ in building.stories))
+    summary.add("Columns", f"unchanged {len(changes.unchanged)}, moved {len(changes.moved)}, "
+                           f"updated {len(changes.updated)}, added {len(changes.added)}, "
+                           f"removed {len(changes.removed)}")
+    summary.add("Walls", f"unchanged {len(changes.walls_unchanged)}, updated "
+                         f"{len(changes.walls_updated)}, added {len(changes.walls_added)}, "
+                         f"removed {len(changes.walls_removed)}")
+    for what, count in log.counts.items():
+        summary.add(what[:1].upper() + what[1:], count)
+    for problem in log.problems:
+        summary.fail(problem)
+    for warning in building.warnings:
+        summary.note(warning)
+    summary.file("Model", path)
+    summary.file("List of changes", os.path.splitext(path)[0] + " - plan changes.txt")
+    summary.show(popup=True)
     return path
 
 

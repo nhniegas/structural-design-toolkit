@@ -10,7 +10,8 @@
 3. Report:
 
    * periods: the governing modal period in each direction against UBC 97
-     Method A, T_A = Ct hn^(3/4) (Ct in ft units, hn in ft), and its cap of
+     Method A, T_A = Ct hn^(3/4) (Ct in ft units, hn in ft, measured from the
+     ground level: elevation 0 when the base is below it), and its cap of
      1.3 T_A in zone 4 or 1.4 T_A in zones 1 to 3;
    * modal participating mass: a warning when the sum is below 90 % in X or Y;
    * weight: the seismic weight from the mass source against the base reaction
@@ -32,7 +33,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from design.code_config import NSCP  # noqa: E402
-from etabs_api.core.helpers import as_list  # noqa: E402
+from etabs_api.core.helpers import as_list, return_code  # noqa: E402
 
 G = NSCP.seismic.gravity  # mm/s2
 FT = 304.8   # mm
@@ -78,11 +79,14 @@ class AnalysisReport:
     governing_period: dict[str, float] = field(default_factory=dict)
     method_a: float | None = None
     cap: float | None = None
+    height: float | None = None                # mm, hn above the ground level
+    ground_elevation: float = 0.0              # mm
     mass_sum: dict[str, float] = field(default_factory=dict)
     seismic_weight: float | None = None        # N, from the mass source
     reaction_weight: float | None = None       # N, base reaction of the mass-source loads
     story_weights: pd.DataFrame = field(default_factory=pd.DataFrame)
     warnings: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)  # checks that do not apply to this model
 
     def text(self) -> str:
         """The report as terminal text."""
@@ -102,6 +106,9 @@ class AnalysisReport:
         lines += ["", "--- Periods ---"]
         for direction, period in self.governing_period.items():
             lines.append(f"Governing modal period {direction}: {period:.3f} s")
+        if self.height is not None:
+            lines.append(f"Height above the ground hn = {self.height / 1e3:.2f} m "
+                         f"(ground level at elevation {self.ground_elevation / 1e3:g} m)")
         if self.method_a is not None:
             lines.append(f"Method A, T_A = Ct hn^(3/4): {self.method_a:.3f} s; "
                          f"Method B cap {self.cap:.1f} T_A = {self.cap * self.method_a:.3f} s")
@@ -118,6 +125,8 @@ class AnalysisReport:
         if not self.story_weights.empty:
             lines.append(self.story_weights.to_string(index=False))
         lines += ["", "--- Warnings ---"] + (self.warnings or ["None."])
+        if self.notes:
+            lines += ["", "--- Not applicable to this model ---"] + self.notes
         lines.append("=" * 72)
         return "\n".join(lines)
 
@@ -253,10 +262,28 @@ def modal_periods(connector) -> pd.DataFrame:
     return table[keep].reset_index(drop=True)
 
 
+def ground_elevation(elevations: list[float]) -> float:
+    """Elevation hn is measured from: 0 when the base is below it (a footing
+    level or a basement), otherwise the base. ``elevations`` start at the base."""
+    base = float(elevations[0])
+    return 0.0 if base < -0.5 and float(elevations[-1]) > 0.5 else base
+
+
+def height_above_ground(elevations: list[float]) -> float:
+    """hn: from the ground level to the top level."""
+    return float(elevations[-1]) - ground_elevation(elevations)
+
+
+def story_elevations(connector) -> list[float]:
+    """Elevation of the base and of every story above it, mm."""
+    with connector.extraction_units():
+        stories = connector.sap_model.Story.GetStories()
+    return [float(z) for z in as_list(stories[2])]
+
+
 def building_height(connector) -> float:
-    """Height above the base, mm (sum of the story heights)."""
-    stories = _read(connector, "Story Definitions")
-    return float(pd.to_numeric(stories["Height"], errors="coerce").sum())
+    """hn, mm: the height of the top level above the ground level."""
+    return height_above_ground(story_elevations(connector))
 
 
 def story_weights(connector) -> pd.DataFrame:
@@ -325,6 +352,15 @@ def reset_spectrum_scale(connector) -> float | None:
     return base
 
 
+def reopen_model(connector) -> bool:
+    """Save the model and open it again from its EDB. True when that worked."""
+    model = connector.sap_model
+    path = os.path.splitext(os.path.normpath(str(model.GetModelFilename())))[0] + ".EDB"
+    if not os.path.isfile(path):
+        return False
+    return return_code(model.File.Save(path)) == 0 and return_code(model.File.OpenFile(path)) == 0
+
+
 def analyze_model(connector, zone_factor: float | None = None, ct: float | None = None,
                   scale: bool = True, progress=None) -> AnalysisReport:
     """Reset the spectrum to g I / R, run, scale it to the static base shear, run
@@ -333,16 +369,31 @@ def analyze_model(connector, zone_factor: float | None = None, ct: float | None 
     report = AnalysisReport(model_path=str(connector.sap_model.GetModelFilename()))
     if scale:
         say("Putting the response spectrum cases back to g I / R")
-        reset_spectrum_scale(connector)
+        if reset_spectrum_scale(connector) is None and spectrum_cases(connector):
+            report.notes.append(
+                "Reset of the spectrum scale to g I / R: not applicable (the model has no UBC 97 "
+                "seismic pattern to read I and R from). The spectrum cases were scaled up from "
+                "the factors they had.")
 
     def run():
-        connector.analysis.run()
+        try:
+            connector.analysis.run()
+        except RuntimeError:
+            # ETABS returns 1, with no log, for a model it holds from a text
+            # file: open it from its EDB and try once more.
+            if not reopen_model(connector):
+                raise
+            connector.analysis.run()
 
     say("Running every load case")
     run()
     if scale:
         say("Comparing the spectrum and static base shears")
         report.scaling = scale_spectrum_to_static(connector, run, say)
+        if not report.scaling:
+            report.notes.append(
+                "Scaling of the response spectrum to the static base shear: not applicable (it "
+                "needs a static seismic case and a response spectrum case in each direction).")
     for item in report.scaling:
         if item.spectrum_after < SCALE_TARGET * item.static_shear * (1 - SCALE_TOLERANCE):
             report.warnings.append(f"{item.spectrum_case} base shear is below the static base "
@@ -366,7 +417,10 @@ def analyze_model(connector, zone_factor: float | None = None, ct: float | None 
                         f"(below {NSCP.seismic.modal_mass * 100:g} %): add modes to the modal "
                         "case.")
     if ct and zone_factor:
-        report.method_a = method_a_period(ct, building_height(connector))
+        elevations = story_elevations(connector)
+        report.ground_elevation = ground_elevation(elevations)
+        report.height = height_above_ground(elevations)
+        report.method_a = method_a_period(ct, report.height)
         report.cap = period_cap(zone_factor)
         limit = report.cap * report.method_a
         for direction, period in report.governing_period.items():
@@ -395,23 +449,16 @@ def analyze_model(connector, zone_factor: float | None = None, ct: float | None 
 # =============================================================================
 def run_model_analysis() -> AnalysisReport | None:
     """Entry point: pick the model, run, scale the spectrum, and print the checks."""
-    import comtypes.client
+    from comtypes import COMError
 
-    from etabs_api.core.connection import ETABSConnector
+    from etabs_api.core.connection import attach_running_etabs
     from etabs_api.workflows.model_setup import load_settings, settings_path
     from utilities._gui_helpers import LoadingWindow, enter_values, select_option, show_warning
 
     title = "Analysis"
-    helper = comtypes.client.CreateObject("ETABSv1.Helper")
-    helper = helper.QueryInterface(comtypes.gen.ETABSv1.cHelper)
-    try:
-        etabs = helper.GetObject("CSI.ETABS.API.ETABSObject")
-    except Exception:
-        show_warning("ETABS is not running. Open the model in ETABS first.", title=title)
+    connector = attach_running_etabs(title)
+    if connector is None:
         return None
-    connector = ETABSConnector()
-    connector.etabs_object, connector.sap_model, connector.is_connected = (
-        etabs, etabs.SapModel, True)
     model = connector.sap_model
     path = os.path.splitext(os.path.normpath(str(model.GetModelFilename())))[0] + ".EDB"
     if not os.path.isfile(path):
@@ -429,12 +476,27 @@ def run_model_analysis() -> AnalysisReport | None:
             path, counter = f"{stem} - ANALYSIS ({counter}){extension}", counter + 1
         model.File.Save(path)
 
+    from etabs_api.workflows import model_inputs as mi
+
     saved = load_settings(settings_path(path)) or load_settings(
         settings_path(str(model.GetModelFilename()))) or {}
-    seismic = saved.get("seismic", {})
+    # The values of the model's own UBC 97 patterns come first; what was saved
+    # with the model (setup inputs, or an earlier answer) fills what they lack.
+    in_model = mi.read_seismic(connector)
+    seismic = {**saved.get("seismic", {}), **(saved.get(mi.MODEL_KEY, {}).get("seismic", {}))}
+    differ = mi.seismic_differences(in_model, seismic)
+    seismic = {**seismic, **in_model}
+    prompt = "For the Method A period check (UBC 97)."
+    if not in_model:
+        prompt += (" This model has no UBC 97 seismic pattern, so Z and Ct could not be read "
+                   "from it, and the spectrum is scaled only where static seismic cases exist.")
+    elif any(key in differ for key in ("zone_factor", "ct")):
+        prompt += " The model's values are shown; they differ from what was saved: " + ", ".join(
+            f"{mi.SEISMIC_FIELDS[key]} was {old:g}" for key, (_, old) in differ.items()
+            if key in ("zone_factor", "ct")) + "."
     labels = {"Seismic zone factor Z": seismic.get("zone_factor", 0.4),
               "Ct (ft units, 0.030 for concrete frames)": seismic.get("ct", 0.03)}
-    typed = enter_values(title, "For the Method A period check (UBC 97).", list(labels),
+    typed = enter_values(title, prompt, list(labels),
                          {k: f"{v:g}" for k, v in labels.items()})
     if typed is None:
         return None
@@ -443,14 +505,51 @@ def run_model_analysis() -> AnalysisReport | None:
     except ValueError:
         show_warning("The zone factor and Ct must be numbers.", title=title)
         return None
+    if not in_model:  # nowhere else to read them next time
+        mi.save(path, seismic={**saved.get(mi.MODEL_KEY, {}).get("seismic", {}),
+                               "zone_factor": zone, "ct": ct})
 
-    with LoadingWindow("Analysis") as window:
-        report = analyze_model(connector, zone, ct, progress=window.update)
+    try:
+        with LoadingWindow("Analysis") as window:
+            report = analyze_model(connector, zone, ct, progress=window.update)
+    except (RuntimeError, COMError) as error:  # COMError: ETABS stopped answering
+        show_warning(
+            f"ETABS could not finish the analysis:\n\n{error}\n\n"
+            "Run the analysis once in ETABS (Analyze > Run Analysis) to see its own message. "
+            "A model with no supports, or with members that are not connected, cannot be "
+            "analysed. If ETABS closed, open the model again.", title=title)
+        return None
     # Save() keeps the results; Save(path) drops them even for the same file
     model.File.Save()
     print(report.text())
     print(f"Saved: {path}")
+    analysis_summary(report, path).show(popup=True, echo=False)
     return report
+
+
+def analysis_summary(report: AnalysisReport, model_path: str | None = None):
+    """The closing summary of an analysis run: scaling, periods, mass, weight, warnings."""
+    from utilities.run_summary import RunSummary
+
+    summary = RunSummary("sdt analyze", model_path)
+    for item in report.scaling:
+        summary.add(f"{item.spectrum_case} to {item.static_case}",
+                    f"{item.spectrum_after / 1e3:,.0f} kN (x {item.factor:.3f})")
+    for direction, period in report.governing_period.items():
+        summary.add(f"Period {direction}", f"{period:.3f} s")
+    if report.method_a is not None and report.height is not None:
+        summary.add("Method A", f"T_A {report.method_a:.3f} s, hn {report.height / 1e3:.2f} m "
+                                f"above the ground; cap {report.cap * report.method_a:.3f} s")
+    for direction, total in report.mass_sum.items():
+        summary.add(f"Modal mass {direction}", f"{total * 100:.1f} %")
+    if report.seismic_weight is not None:
+        summary.add("Seismic weight", f"{report.seismic_weight / 1e3:,.0f} kN")
+    for warning in report.warnings:
+        summary.fail(warning)
+    for note in report.notes:
+        summary.note(note)
+    summary.file("Model (saved with its results)", model_path)
+    return summary
 
 
 if __name__ == "__main__":

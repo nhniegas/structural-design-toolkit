@@ -7,7 +7,7 @@
 From the project folder, with the environment active:
 
 ```powershell
-python main.py wind
+sdt wind
 ```
 
 1. A dialog asks for the inputs. Choices are listed in brackets beside the box (type one of them); boxes marked optional may be left blank. The values typed last time are filled in again.
@@ -40,7 +40,7 @@ Every design module run from the terminal offers the same names:
 | `calculate(values)` | runs the checks from a dict of the inputs, keyed as in `INPUTS` |
 | `summary_text(result)` | the results as plain text |
 | `export_pdf(result, path)` | writes the PDF report; returns its path, or `None` if LaTeX fails |
-| `run()` | the terminal workflow (`python main.py ...`) |
+| `run()` | the terminal workflow (`sdt wind`) |
 
 ## Calculation
 

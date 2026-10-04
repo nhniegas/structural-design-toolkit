@@ -334,8 +334,10 @@ def beam_spans(connectivity, members: list[str]) -> list[Span]:
     Segments of one line (same level, type and number: 2GX-1, 2GX-1A, ...)
     meeting at a joint with no column or wall continue one span. A span end
     is supported when a column, a wall or another member is there; it is free
-    when nothing else connects (a cantilever tip). Members without a tag are
-    spans of their own.
+    when nothing else connects (a cantilever tip). The line of a member comes
+    from the ``Line`` column of the table when it has one (the extraction
+    fills it: from the tag, or from the geometry for members with other
+    names); without it, members without a tag are spans of their own.
     """
     conn = connectivity.copy()
     conn["UniqueName"] = conn["UniqueName"].astype(str)
@@ -355,7 +357,14 @@ def beam_spans(connectivity, members: list[str]) -> list[Span]:
     length = {m: float(beams.at[m, "Length"]) if "Length" in beams.columns else 0.0
               for m in wanted}
 
+    line_of = {}
+    if "Line" in beams.columns:
+        line_of = {m: str(beams.at[m, "Line"]) for m in wanted
+                   if beams.at[m, "Line"] is not None and str(beams.at[m, "Line"]) != "nan"}
+
     def line(name: str) -> str:
+        if name in line_of:
+            return line_of[name]
         match = _MARK.match(name)
         return (match.group(1) + match.group(2) + "-" + match.group(3)).upper() if match else name
 

@@ -11,23 +11,30 @@
 sdt design
 ```
 
-(or `python main.py design`). The questions, asked once:
+(`python main.py design` does the same). The questions, asked once:
 
 | Question | Notes |
 |---|---|
-| Seismic combinations | Static (EQ), response spectrum (RSA) or both. Gravity and wind `ULS` combinations are always included |
+| What the model lacks | Only on a model not made with `sdt setup`: a dialog lists what was found and what is missing, then you pick the strength and deflection combinations and say what to do with untagged members. A second dialog lists the sections with other names, grouped as girders, beams, tie beams and columns. See [Working on a model the toolkit did not set up](existing_models.md) |
+| Seismic combinations | Static (EQ), response spectrum (RSA) or both. Gravity and wind `ULS` combinations are always included. Not asked when you picked the combinations yourself |
 | Live load reduction, tributary area method, pattern live load | As in the extraction (see the [concrete guide](concrete_beam_column_design.md#step-1-etabs-extraction)) |
 | Design inputs | SMRF on or off, the gravity combination for the beam seismic shear, beam bars and cover, column bars and cover (as in `sdt beams` / `sdt columns`) |
 | Column questions | Bottom-story cover and vertical bars carried down; asked once for every iteration |
+| Cover against earth | The floor levels whose beams get 75 mm cover, as in `sdt beams` |
+| Capacity-design checks by level | With SMRF on: whether BCC and joint shear are run at the topmost level, and BCC, joint shear and Ve at the foundation level, as in `sdt columns`. A level left out no longer drives the column sizes |
+| Interior ties of the column schedule | Crossties or closed inner hoops, as in `sdt columns`; used for the `Column_Schedule.dxf` of the final design |
 | Deflection limit | L/480 (partitions likely to be damaged) or L/240 |
-| Loop limits | Size increment past the setup ranges (50 mm), largest beam width and depth, largest column side, the downsizing threshold (0.7), the beam line similarity (30 %) and the number of rounds (5). Remembered for next time |
-| Drift of the final sizes | Where to read the drift, static and/or spectrum drift combinations, and the wind limit, as in [`sdt drift`](etabs_drift.md) |
+| Loop limits | One dialog, remembered for next time. **Shared:** size increment past the setup ranges (50 mm), the downsizing threshold (0.7), the number of rounds (5). **Beams:** largest width and depth, iterations in a round (10), the beam line similarity (30 %). **Columns:** largest side, largest side ratio long / short (2), iterations in a round (10). The largest sizes are real limits: a setup range that goes beyond them is cut there |
+| Drift of the final sizes | Where to read the drift, static and/or spectrum drift combinations, and the wind limit, as in [`sdt drift`](etabs_drift.md). Without `DRIFT` / `WDRIFT` combinations in the model, you pick the drift combinations |
 | Output folder | For the final results, calculations and schedules |
-| Size ranges | Only for section families that have none in the setup inputs (for example `FTB` tie beams); saved with the model's setup inputs |
+| Size ranges | For section families that have none in the setup inputs (for example `FTB` tie beams). When the model has no setup inputs of its own (no `<model>.setup.json` beside it), every family is shown with a range to confirm or change, since the loop makes members smaller down to the first size of the range. The dialog lists the sizes the model has now, and the range shown always holds them: the default range widened where needed, or, for a family with no default (circular columns), from the smallest size in the model to two steps above the largest. Saved with the model's setup inputs |
+| Seismic values | Z and Ct for the period cap are read from the model's UBC 97 seismic patterns. Asked only when the model has none, or when a value differs from the one saved before |
 
-The model is saved as `<model> - DESIGN.EDB` and the loop works on that copy; the original is not changed. At the end the final design is written to the output folder (results, calculations, schedules, as `sdt beams` and `sdt columns` do) and stored in `<model> - DESIGN - design data.pkl`, so `sdt columns` can be run again on it. The log `<model> - DESIGN log.txt` lists every iteration.
+The model is saved as `<model> - DESIGN.EDB` and the loop works on that copy; the original is not changed. At the end the final design is written to the output folder (results, calculations, schedules, as `sdt beams` and `sdt columns` do) and stored in `<model> - DESIGN - design data.pkl`, so `sdt columns` can be run again on it. The log `<model> - DESIGN log.txt` lists every iteration: each analysis, the spectrum scaling and every section change with its reason. The terminal lists the same lines as it runs. When the loop finishes, a separate window shows its summary, also saved as `<model> - DESIGN summary.txt` in the output folder: the status and the number of iterations, how many beams and columns were designed and fail, the net size changes (first size to final size, members grouped; a member that returned to its first size is not listed), what still fails, the drift result and the files.
 
 **Drift.** Drift depends on the final member sizes, so it is checked once at the end, with `sdt drift` on the final working copy, and saved as `<model> - DESIGN - Drift.txt` in the output folder. The sections are **not** resized for drift. If a check fails, the log and the terminal say so: reconfigure the model for drift (stiffer members or walls) and run `sdt design` again.
+
+**Section names.** The loop reads the size of every beam and column section from its name when it follows the setup naming, and from ETABS otherwise. A new size is always created under the setup name, with the concrete, rebar material and cover of the section it replaces and no stiffness modifiers on the section. The log names the model's own section in each change.
 
 ## One iteration
 
@@ -51,12 +58,14 @@ The loop stops when the final check changes nothing (converged) or after the num
 |---|---|---|
 | Beam | Bars do not fit in 3 layers, girder steel ratio above 2.5 %, SMRF moment ratios, deflection | Deeper first; wider when deeper would break width / depth >= 0.3 |
 | Beam | Stirrup spacing below the minimum (shear, torsion) | Wider first |
-| Column | Joint shear or beam-column strength in one direction | The side along that direction grows (from the column's local axes; a column more than 25 degrees off the axes grows square) |
-| Column | Flexure, axial load, no bar count within the 6 % limit, shear, SMRF dimension | Straight to the **first size that passes on the forces of the current analysis** (see below); the next analysis confirms it |
+| Column | Joint shear or beam-column strength in one direction | The side the joint is measured along grows, one step: the depth for the beams along the depth (Y, local 2), the width for those along the width (X, local 3). The report gives these per column axis, so the rotation of the column does not matter |
+| Column | Flexure, axial load, slenderness (δns above 1.4 or Pu at 0.75 Pc), no bar count within the 6 % limit, shear, SMRF dimension | Straight to the **first size that passes on the forces of the current analysis** (see below); the next analysis confirms it |
 
-- **Sizing on the current forces.** A column that fails flexure, axial load, the steel limit or shear is not grown one size per analysis. The candidate sizes (each the next "square" size up, as many as 12) are designed on the forces of the analysis just run: bar layout search on the interaction surface, transverse detailing, SMRF dimensions and the shear steel limit. The column goes to the first size that passes (or to the largest when none does). A larger column attracts more force, so the next analysis checks it again; usually it passes, and a column that needed three sizes takes one or two analyses instead of three. Joint shear and beam-column strength failures depend on the beams and the other columns at the joint, so they still grow one side one size. `LoopSettings.size_on_forces = False` restores the old one-step behaviour.
+- **Sizing on the current forces.** A column that fails flexure, axial load, the steel limit or shear is not grown one size per analysis. The candidate sizes (each the next "square" size up, as many as 12) are designed on the forces of the analysis just run: bar layout search on the interaction surface with the slenderness of the trial size (its own r and Ig, on the lu and k of the last design), transverse detailing, SMRF dimensions and the shear steel limit. The column goes to the first size that passes (or to the largest when none does). A larger column attracts more force, so the next analysis checks it again; usually it passes, and a column that needed three sizes takes one or two analyses instead of three. Joint shear and beam-column strength failures depend on the beams and the other columns at the joint, so they still grow one side one size. `LoopSettings.size_on_forces = False` restores the old one-step behaviour.
 - Members of one beam line (`2GX-3`, `2GX-3A`, ...) take the same size unless their lengths differ by more than the similarity limit.
 - A column is never smaller than the column above it.
+- With SMRF on, a column is not made smaller than 20 bar diameters of the beam main bar (ACI 18.8.2.3: 500 mm for 25 mm bars). Below that the joint fails its dimension rule, the column grows again and, having grown, can never be made smaller.
+- The log starts with the size ranges and limits in use.
 - Transverse detailing failures (tie spacing, confinement) do not resize a column: they are solved with ties, and are reported.
 - **Downsizing**: a passing member whose ratios are all below the threshold goes one size smaller and the next analysis confirms it. Beams: tension steel ratio, shear and deflection ratio; columns: flexure, shear and joint shear utilization, steel ratio, beam-column strength ratio at least 1.2 / threshold. A member that grew in this run is never made smaller again, and beams never go below the ACI 318-14 Table 9.3.1.1 depth (L/16, cantilevers L/8).
 - Sizes follow the setup ranges of the family, then grow by the increment up to the largest size given. Missing sections are created with the setup rebar data and no stiffness modifiers; the modifiers assigned to the frames stay with them when their section changes. Concrete and rebar never change.

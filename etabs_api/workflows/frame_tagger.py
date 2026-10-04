@@ -479,7 +479,7 @@ TAG_TARGETS = {
 
 
 def auto_tag_frames(prefixes: dict[str, str] | None = None,
-                    in_place: bool | None = None) -> str | None:
+                    in_place: bool | None = None, connector=None) -> str | None:
     """Tag every beam and column of the open ETABS model (``sdt tag``).
 
     ``in_place`` False (the default answer) saves the model as a tagged copy
@@ -491,9 +491,10 @@ def auto_tag_frames(prefixes: dict[str, str] | None = None,
 
     from etabs_api.core.connection import ETABSConnector
 
-    connector = ETABSConnector()
-    if not connector.connect():
-        return None
+    if connector is None:  # a command that offers the tagging passes its own
+        connector = ETABSConnector()
+        if not connector.connect():
+            return None
     model = connector.sap_model
     model_path = os.path.splitext(os.path.normpath(str(model.GetModelFilename())))[0] + ".EDB"
     if not os.path.isfile(model_path):
@@ -552,20 +553,23 @@ def auto_tag_frames(prefixes: dict[str, str] | None = None,
         model.File.Save(new_path)
         connector.refresh_view()
 
-    message = (
-        f"Tagged {len(tags) - len(failed)} beams and columns.\n\n"
-        + (f"Saved in the model itself:\n{new_path}" if in_place else
-           f"Saved as:\n{new_path}\n\nETABS now has this tagged copy open. "
-           "The original model was not changed.")
-    )
+    from utilities.run_summary import RunSummary, listed
+
+    summary = RunSummary("sdt tag", new_path)
+    summary.add("Beams", len(beams))
+    summary.add("Columns", len(columns))
+    summary.add("Tagged", len(tags) - len(failed))
+    summary.add("Target", "the model itself" if in_place else
+                "a tagged copy (the original model was not changed)")
     if clashes:
-        message += (
-            f"\n\n{len(clashes)} names were already used by members that are not "
-            "tagged; those were left as they are."
-        )
+        summary.fail(f"{len(clashes)} names were already used by members that are not tagged; "
+                     "those were left as they are: " + listed(sorted(clashes)))
     if failed:
-        message += f"\n\n{len(failed)} members could not be renamed."
-    show_warning(message, title="Auto Tagging")
+        summary.fail("Could not be renamed: " + listed(failed))
+    if not in_place:
+        summary.note("ETABS now has the tagged copy open.")
+    summary.file("Model", new_path)
+    summary.show(popup=True)
     return new_path
 
 

@@ -53,7 +53,6 @@ if __package__ in (None, ""):
 from etabs_api.workflows.sections import (  # noqa: E402
     Limits,
     Section,
-    depth_along_x,
     grow_beam,
     grow_column,
     parse_section,
@@ -88,10 +87,18 @@ class LoopSettings:
     downsize_ratio: float = 0.7
     span_similarity: float = 0.30
     max_rounds: int = 5
-    max_inner: int = 10
+    max_inner: int = 10          # beam iterations within a round
+    max_inner_columns: int = 10  # column iterations within a round
     zone_factor: float = 0.4
     ct: float = 0.03
     size_on_forces: bool = True  # failing columns jump to the first passing size
+    beam_earth_cover_stories: tuple = ()  # levels whose beams get the 75 mm earth cover
+    check_top_level: bool = True  # BCC and joint shear at the topmost joints
+    check_foundation_level: bool = True  # BCC, joint shear and Ve at the bottom-most story
+    inner_tie_style: str = "crossties"  # how the column schedule draws the interior ties
+    # {standard deflection combination: the model's combination for that role}
+    deflection_roles: dict | None = None
+    sources: object = None  # model_inputs.Sources: where the inputs of the run came from
 
 
 @dataclass
@@ -107,11 +114,172 @@ class Change:
 # =============================================================================
 # BEAM DECISIONS (no ETABS)
 # =============================================================================
-def _line(name: str) -> str:
+def _line(name: str, lines: dict[str, str] | None = None) -> str:
+    """Beam line of a member: from ``lines`` (the CONNECTIVITY ``Line`` column,
+    which covers members with any name) or from the tag in its name."""
+    if lines and str(name) in lines:
+        return lines[str(name)]
     from design.beam_deflection import _MARK
 
     match = _MARK.match(str(name))
     return (match.group(1) + match.group(2) + "-" + match.group(3)).upper() if match else name
+
+
+# =============================================================================
+# SECTIONS OF THE MODEL (any naming)
+# =============================================================================
+@dataclass
+class ModelSections:
+    """The section of every beam and column, whatever the model calls it.
+
+    A section named as ``sdt setup`` names it is read from its name. Any other
+    rectangular or circular concrete section is read from ETABS: its size
+    and materials, and its family from where the member is. New sizes are
+    always created under the setup names.
+    """
+
+    sections: dict[str, Section] = field(default_factory=dict)   # member -> size
+    actual: dict[str, str] = field(default_factory=dict)         # member -> the model's name
+    materials: dict[str, str] = field(default_factory=dict)      # grade tag -> model material
+    covers: dict[str, float] = field(default_factory=dict)       # member -> cover of its section
+    foreign: list[str] = field(default_factory=list)             # names outside the setup naming
+    skipped: dict[str, str] = field(default_factory=dict)        # section name -> why not resized
+    modified: list[str] = field(default_factory=list)            # sections with stiffness modifiers
+
+    def families(self) -> dict[str, int]:
+        """Number of members of each family (G, B, FTB, CR, C)."""
+        out: dict[str, int] = {}
+        for section in self.sections.values():
+            family = "C" if section.circular else section.family
+            out[family] = out.get(family, 0) + 1
+        return out
+
+
+def read_model_sections(connector) -> ModelSections:
+    """The sections of the open model's beams and columns (see ``ModelSections``)."""
+    from etabs_api.core.helpers import as_list
+    from etabs_api.workflows.analysis_forces import designed_names
+    from etabs_api.workflows.model_inputs import beam_family, grade_tag
+    from etabs_api.workflows.model_setup import KSI_TO_MPA, KSI_TO_MPA_CONCRETE
+
+    model = connector.sap_model
+
+    def table(name: str) -> pd.DataFrame:
+        tables = model.DatabaseTables
+        tables.SetLoadCasesSelectedForDisplay([])
+        tables.SetLoadCombinationsSelectedForDisplay([])
+        try:
+            return connector._read_database_table(name)
+        except Exception:
+            return pd.DataFrame()
+
+    out = ModelSections()
+    assigned = table("Frame Assignments - Section Properties")
+    if assigned.empty:
+        return out
+    members = designed_names(connector, assigned["UniqueName"].astype(str))
+    wanted = set(members)
+    prop_of = {str(n): str(p) for n, p in zip(assigned["UniqueName"], assigned["SectProp"])
+               if str(n) in wanted}
+    foreign = sorted({prop for prop in prop_of.values() if parse_section(prop) is None})
+    out.foreign = foreign
+    for name, prop in prop_of.items():
+        section = parse_section(prop)
+        if section is not None:
+            out.sections[name], out.actual[name] = section, prop
+    if not foreign:
+        return out
+
+    def by_name(frame: pd.DataFrame) -> dict[str, dict]:
+        if frame.empty or "Name" not in frame.columns:
+            return {}
+        return {str(row["Name"]): row for row in frame.to_dict("records")}
+
+    def number(value) -> float:
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            return 0.0
+        return value if math.isfinite(value) else 0.0
+
+    rectangles = by_name(table("Frame Section Property Definitions - Concrete Rectangular"))
+    circles = by_name(table("Frame Section Property Definitions - Concrete Circle"))
+    beam_rebar = by_name(table("Frame Section Property Definitions - Concrete Beam Reinforcing"))
+    column_rebar = by_name(
+        table("Frame Section Property Definitions - Concrete Column Reinforcing"))
+    concrete = table("Material Properties - Concrete Data")
+    rebar = table("Material Properties - Rebar Data")
+    fc_of = dict(zip(concrete.get("Material", pd.Series(dtype=str)).astype(str),
+                     pd.to_numeric(concrete.get("Fc"), errors="coerce"))) if not concrete.empty else {}
+    fy_of = dict(zip(rebar.get("Material", pd.Series(dtype=str)).astype(str),
+                     pd.to_numeric(rebar.get("Fy"), errors="coerce"))) if not rebar.empty else {}
+    default_rebar = next(iter(fy_of), "")
+
+    beams = table("Beam Object Connectivity")
+    columns = table("Column Object Connectivity")
+    column_names = set(columns.get("UniqueName", pd.Series(dtype=str)).astype(str))
+    column_joints = set()
+    for end in ("UniquePtI", "UniquePtJ"):
+        if end in columns.columns:
+            column_joints |= set(columns[end].astype(str))
+    stories = [str(n) for n in as_list(model.Story.GetStories()[1])]
+    bottom_level = stories[1] if len(stories) > 1 else ""
+    beam_info = {}
+    if not beams.empty:
+        for row in beams.to_dict("records"):
+            ends = {str(row.get("UniquePtI")), str(row.get("UniquePtJ"))}
+            beam_info[str(row["UniqueName"])] = (bool(ends & column_joints),
+                                                 str(row.get("Story")) == bottom_level)
+    try:
+        for prop in foreign:
+            modifiers = model.PropFrame.GetModifiers(prop, [])
+            values = [float(v) for v in as_list(modifiers[0])]
+            if any(abs(v - 1.0) > 1e-6 for v in values):
+                out.modified.append(prop)
+    except Exception:
+        pass
+
+    for name, prop in prop_of.items():
+        if name in out.sections:
+            continue
+        is_column = name in column_names
+        if prop in rectangles:
+            data = rectangles[prop]
+            width, depth = number(data.get("t2")), number(data.get("t3"))
+            circular = False
+        elif prop in circles:
+            data = circles[prop]
+            width = depth = number(circles[prop].get("t3"))
+            circular = True
+        else:
+            out.skipped[prop] = "not a rectangular or circular concrete section"
+            continue
+        if width <= 0 or depth <= 0:
+            out.skipped[prop] = "its size could not be read"
+            continue
+        if circular and not is_column:
+            out.skipped[prop] = "a circular section on a beam"
+            continue
+        material = str(data.get("Material"))
+        reinforcing = (column_rebar if is_column else beam_rebar).get(prop, {})
+        bar_material = str(reinforcing.get("RebarMatL") or default_rebar)
+        concrete_tag = grade_tag("C", number(fc_of.get(material)), KSI_TO_MPA_CONCRETE)
+        rebar_tag = grade_tag("G", number(fy_of.get(bar_material)), KSI_TO_MPA)
+        out.materials.setdefault(concrete_tag, material)
+        if bar_material:
+            out.materials.setdefault(rebar_tag, bar_material)
+        if is_column:
+            family = "C" if circular else "CR"
+            cover = number(reinforcing.get("Cover"))
+        else:
+            family = beam_family(*beam_info.get(name, (True, False)))
+            cover = number(reinforcing.get("TopCover"))
+        out.sections[name] = Section(family, int(round(width)), int(round(depth)),
+                                     concrete_tag, rebar_tag, circular)
+        out.actual[name] = prop
+        if cover > 0:
+            out.covers[name] = cover
+    return out
 
 
 def _beam_rho(row: pd.Series, zone: str) -> float:
@@ -157,7 +325,8 @@ def beam_comfortable(rows: pd.DataFrame, ratio: float, seismic: bool) -> bool:
 
 def beam_actions(results: pd.DataFrame, sections: dict[str, Section], lengths: dict[str, float],
                  grown: set[str], settings: LoopSettings, seismic: bool = True,
-                 allow_shrink: bool = True) -> dict[str, tuple[Section, str]]:
+                 allow_shrink: bool = True, lines: dict[str, str] | None = None
+                 ) -> dict[str, tuple[Section, str]]:
     """New sizes for the beams: grow the failing ones, shrink the comfortable ones.
 
     ``results`` is the beam design table with internal column names (two rows
@@ -199,7 +368,7 @@ def beam_actions(results: pd.DataFrame, sections: dict[str, Section], lengths: d
     by_line: dict[str, list[str]] = {}
     for name in sections:
         if sections[name].is_beam:
-            by_line.setdefault(_line(name), []).append(name)
+            by_line.setdefault(_line(name, lines), []).append(name)
 
     def similar(a: str, b: str) -> bool:
         la, lb = lengths.get(a, 0.0), lengths.get(b, 0.0)
@@ -211,7 +380,7 @@ def beam_actions(results: pd.DataFrame, sections: dict[str, Section], lengths: d
         if new == sections[name]:
             out[name] = (new, reason)  # reported, no change
             continue
-        for other in by_line.get(_line(name), [name]):
+        for other in by_line.get(_line(name, lines), [name]):
             if other != name and not similar(name, other):
                 continue
             current = out.get(other, (sections[other], ""))[0]
@@ -225,7 +394,7 @@ def beam_actions(results: pd.DataFrame, sections: dict[str, Section], lengths: d
     for name, smaller in shrinkable.items():
         if name in out:
             continue
-        group = [o for o in by_line.get(_line(name), [name]) if similar(name, o)]
+        group = [o for o in by_line.get(_line(name, lines), [name]) if similar(name, o)]
         if all(o in shrinkable and shrinkable[o] == smaller for o in group):
             out[name] = (smaller, "shrink (all ratios below the threshold)")
     return out
@@ -253,6 +422,7 @@ def column_needs(rows: pd.DataFrame) -> set[str]:
                 any(u is not None and u > 1.0 for u in joints):
             needs.add(axis)
     if "FAIL" in text("Flexure_Check") or "FAIL" in text("Axial_Check") \
+            or "FAIL" in text("Slenderness_Check") \
             or "FAIL" in text("Shear_Check") or "FAIL" in text("SMRF_Dimension_Check") \
             or "NO PASSING BAR COUNT" in text("Design_Status_Reason"):
         needs.add("square")
@@ -295,10 +465,61 @@ def growth_sizes(section: Section, settings: LoopSettings, count: int = MAX_SIZE
     return out
 
 
+def confirm_sections(found: ModelSections, title: str) -> bool:
+    """Show what the loop found for the sections it does not know by name.
+
+    Nothing is shown for a model whose sections all carry the setup names.
+    False when the user stops.
+    """
+    if not found.foreign:
+        return True
+    from utilities._gui_helpers import select_option
+
+    labels = {"G": "girders (frame into a column)", "B": "beams (on other beams)",
+              "FTB": "tie beams (bottom-most level)", "CR": "rectangular columns",
+              "C": "circular columns"}
+    lines = [f"{len(found.foreign)} sections are not named as sdt setup names them. Their size "
+             "and materials are read from ETABS. The members are grouped as:", ""]
+    lines += [f"  {count} {labels.get(family, family)}"
+              for family, count in sorted(found.families().items())]
+    lines += ["", "A new size is created under the setup name (for example "
+              "G_300X500_C04_G60), with the materials and cover of the section it replaces and "
+              "no stiffness modifiers."]
+    if found.skipped:
+        lines += ["", "Not resized:"] + [f"  {name}: {why}"
+                                         for name, why in sorted(found.skipped.items())[:8]]
+    if found.modified:
+        lines += ["", "These sections carry stiffness modifiers; a new size has none, so "
+                  "resizing such a member changes its stiffness: "
+                  + ", ".join(found.modified[:8])]
+    return select_option(title, "\n".join(lines), ["Continue", "Stop"]) == "Continue"
+
+
+def joint_min_side(settings: LoopSettings) -> float:
+    """The smallest column side the beam bars through a joint allow: 20 bar
+    diameters (ACI 18.8.2.3). Zero without seismic design."""
+    from design.code_config import CODE
+
+    if not settings.smrf:
+        return 0.0
+    return CODE.column_seismic.joint_bar_diameter_multiple * float(
+        settings.beam_bars.get("dm", 0.0))
+
+
 def column_actions(report: pd.DataFrame, sections: dict[str, Section], angles: dict[str, float],
                    above: dict[str, str], grown: set[str], settings: LoopSettings,
                    allow_shrink: bool = True, sizer=None) -> dict[str, tuple[Section, str]]:
     """New sizes for the columns, then lower columns at least the size of the one above.
+
+    The joint results are given per column axis: "X" for the beams along the
+    column width (local 3) and "Y" for those along its depth (local 2), as the
+    column report has them. A joint or beam-column strength failure in Y
+    therefore grows the depth, the side the joint is measured along, and in X
+    the width, whatever the rotation of the column (``angles`` is not needed).
+
+    A column is not made smaller than 20 bar diameters of the beam bars (ACI
+    18.8.2.3): below that the joint fails its dimension rule, the column grows
+    again and, having grown, is never made smaller.
 
     ``sizer(member, sizes)`` (optional) returns the index of the first size of
     ``sizes`` that passes the member checks on the forces of the current analysis,
@@ -328,16 +549,16 @@ def column_actions(report: pd.DataFrame, sections: dict[str, Section], angles: d
                         reason += "; no size within the limits passes on the current forces"
             else:
                 axis = next(iter(needs))
-                depth_x = depth_along_x(angles.get(name, 0.0))
-                along_depth = None if depth_x is None else (depth_x == (axis == "X"))
-                mode = "side" if along_depth is not None else "square"
-                new = grow_column(section, mode, settings.ranges, settings.limits, along_depth)
-                reason = f"grow (joint / beam-column strength in {axis})"
+                along_depth = axis == "Y"  # Y: the beams run along the depth (local 2)
+                new = grow_column(section, "side", settings.ranges, settings.limits, along_depth)
+                side = "depth" if along_depth else "width"
+                reason = f"grow the {side} (joint / beam-column strength in {axis})"
             out[name] = (new or section,
                          reason if new else reason + ": no larger size within the limits")
         elif allow_shrink and name not in grown and column_comfortable(rows,
                                                                        settings.downsize_ratio):
-            smaller = shrink_column(section, settings.ranges)
+            smaller = shrink_column(section, settings.ranges, joint_min_side(settings),
+                                    settings.limits.column_max_ratio)
             if smaller is not None:
                 out[name] = (smaller, "shrink (all ratios below the threshold)")
 
@@ -379,6 +600,9 @@ class Workbench:
         self.log_path = log_path
         self.progress = progress or (lambda text: None)
         self.existing_sections: set[str] | None = None
+        self.column_geometry: dict = {}      # lu and k per column, from the last column design
+        self.foundation_columns: set[str] = set()
+        self.verbose = True                  # the log lines are also printed in the terminal
         self.original_spectrum = self._spectrum_loads()
         self.stage = ""      # round, iteration and phase, shown in the loading window
         self.last = ""       # results of the last iteration
@@ -391,7 +615,9 @@ class Workbench:
 
     # ---- log ----
     def log(self, text: str = "") -> None:
-        print(text, flush=True)
+        """Write a line to the log file and, with ``verbose``, to the terminal."""
+        if getattr(self, "verbose", True):
+            print(text, flush=True)
         with open(self.log_path, "a", encoding="utf-8") as handle:
             handle.write(text + "\n")
 
@@ -405,17 +631,27 @@ class Workbench:
     def members(self) -> tuple[list[str], list[str]]:
         beams = self._table("Beam Object Connectivity")["UniqueName"].astype(str)
         columns = self._table("Column Object Connectivity")["UniqueName"].astype(str)
-        return ([n for n in beams if not n.isnumeric()],
-                [n for n in columns if not n.isnumeric()])
+        from etabs_api.workflows.analysis_forces import designed_names
+
+        return designed_names(self.connector, beams), designed_names(self.connector, columns)
 
     def sections(self) -> dict[str, Section]:
-        table = self._table("Frame Assignments - Section Properties")
-        out = {}
-        for name, prop in zip(table["UniqueName"].astype(str), table["SectProp"].astype(str)):
-            section = parse_section(prop)
-            if section is not None and not name.isnumeric():
-                out[name] = section
-        return out
+        """The section of every member; read from ETABS where the name does not say it."""
+        found = read_model_sections(self.connector)
+        self.model_sections = found
+        # the materials and covers of the sections being replaced stay known
+        # after their members have moved to setup-named sections
+        self.materials = {**found.materials, **getattr(self, "materials", {})}
+        self.covers = {**getattr(self, "covers", {}), **found.covers}
+        return found.sections
+
+    def lines(self) -> dict[str, str]:
+        """Beam line of every beam, from the extracted connectivity."""
+        table = self.tables.get("CONNECTIVITY")
+        if table is None or "Line" not in getattr(table, "columns", ()):
+            return {}
+        return {str(name): str(line) for name, line in zip(table["UniqueName"], table["Line"])
+                if line is not None and str(line) != "nan"}
 
     def lengths(self) -> dict[str, float]:
         table = self._table("Beam Object Connectivity")
@@ -487,7 +723,8 @@ class Workbench:
         self.show("Extraction", "forces, service loads, frame data, connectivity")
         beams, columns = self.members()
         self.tables, notes = extract(self.connector, self.settings.combos,
-                                     self.settings.force_options, beams + columns)
+                                     self.settings.force_options, beams + columns,
+                                     deflection_roles=self.settings.deflection_roles)
         for note in notes:
             self.log("  " + note)
 
@@ -500,7 +737,8 @@ class Workbench:
         beam_progress("starting")
         return design_beams(self.tables, self.settings.smrf, self.settings.gravity_combo,
                             self.settings.beam_bars, self.settings.long_limit,
-                            progress=beam_progress)
+                            progress=beam_progress,
+                            earth_cover_stories=self.settings.beam_earth_cover_stories)
 
     def design_columns(self, beams: pd.DataFrame) -> pd.DataFrame:
         from design.column_designer_aci318 import design_columns
@@ -514,7 +752,11 @@ class Workbench:
             self.tables, beams, self.settings.smrf, bars["dmain"], bars["dties"],
             bars["cover"], progress=column_progress,
             continuous_vertical_bars=self.settings.continuous_bars,
-            bottom_story_cover=self.settings.bottom_cover)
+            bottom_story_cover=self.settings.bottom_cover,
+            check_top_level=self.settings.check_top_level,
+            check_foundation_level=self.settings.check_foundation_level)
+        self.column_geometry = report.attrs.get("slenderness_geometry", {})
+        self.foundation_columns = set(report.attrs.get("foundation_columns", []))
         return report
 
     def column_sizer(self):
@@ -542,8 +784,10 @@ class Workbench:
                 else:
                     row["Width"], row["Depth"] = float(size.width), float(size.depth)
                 self.show("Column sizing on the current forces", f"{member}: {size.name}")
-                passes, _ = column_size_passes(row, forces[member], bars["dmain"],
-                                               bars["dties"], bars["cover"], self.settings.smrf)
+                passes, _ = column_size_passes(
+                    row, forces[member], bars["dmain"], bars["dties"], bars["cover"],
+                    self.settings.smrf, getattr(self, "column_geometry", {}).get(member),
+                    capacity_design=member not in getattr(self, "foundation_columns", ()))
                 if passes:
                     return index
             return None
@@ -566,14 +810,18 @@ class Workbench:
             if section == old:
                 self.log(f"  {name}: {old.name} - {reason}")
                 continue
-            if not ensure_section(self.model, section, self.existing_sections):
+            if not ensure_section(self.model, section, self.existing_sections,
+                                  getattr(self, "materials", {}),
+                                  getattr(self, "covers", {}).get(name)):
                 self.log(f"  {name}: could not create {section.name}")
                 continue
             if assign_section(self.model, name, section):
-                changes.append(Change(name, old.name, section.name, reason))
+                found = getattr(self, "model_sections", None)
+                was = found.actual.get(name, old.name) if found is not None else old.name
+                changes.append(Change(name, was, section.name, reason))
                 if section.area > old.area:
                     grown.add(name)
-                self.log(f"  {name}: {old.name} -> {section.name}  ({reason})")
+                self.log(f"  {name}: {was} -> {section.name}  ({reason})")
         self.model.File.Save()
         return changes
 
@@ -601,7 +849,7 @@ def run_design_loop(bench: Workbench) -> dict:
         column_report = bench.design_columns(beam_table) if columns else None
         sections = bench.sections()
         actions = beam_actions(beam_table, sections, bench.lengths(), grown, settings, seismic,
-                               allow_shrink)
+                               allow_shrink, bench.lines())
         if columns:
             _, column_names = bench.members()
             sizer = bench.column_sizer() if settings.size_on_forces else None
@@ -630,7 +878,7 @@ def run_design_loop(bench: Workbench) -> dict:
             changes, _, _ = step("beams", False, allow_shrink=True)
             if not any(parse_section(c.new).is_beam for c in changes):
                 break
-        for _ in range(settings.max_inner):  # columns
+        for _ in range(settings.max_inner_columns):  # columns
             changes, _, _ = step("columns", True, allow_shrink=True)
             if not changes:
                 break
@@ -659,9 +907,12 @@ LOOP_FIELDS = {
     "Size increment past the setup ranges (mm)": ("increment", 50),
     "Largest beam width (mm)": ("beam_max_width", 800),
     "Largest beam depth (mm)": ("beam_max_depth", 1200),
-    "Largest column side (mm)": ("column_max", 1200),
-    "Make smaller when every ratio is below": ("downsize_ratio", 0.7),
+    "Beam iterations in a round at most": ("max_inner", 10),
     "Beam line shares one size when lengths differ by at most (%)": ("span_similarity", 30),
+    "Largest column side (mm)": ("column_max", 1200),
+    "Largest column side ratio (long side / short side)": ("column_max_ratio", 2.0),
+    "Column iterations in a round at most": ("max_inner_columns", 10),
+    "Make smaller when every ratio is below": ("downsize_ratio", 0.7),
     "Rounds (beams, columns, final check) at most": ("max_rounds", 5),
 }
 
@@ -707,21 +958,74 @@ def uls_combinations(names: list[str], seismic: str) -> list[str]:
     return out
 
 
-def _ask_ranges(families: set[str], settings: dict, title: str) -> bool:
-    """Ask a size range for each family without one; False when cancelled."""
+def sizes_in_model(found: ModelSections | None) -> dict[str, dict[str, list[int]]]:
+    """Sizes the model has now, per family: {family: {width / depth / diameter / size: [..]}}."""
+    out: dict[str, dict[str, set[int]]] = {}
+    for section in (found.sections.values() if found is not None else ()):
+        if section.circular:
+            out.setdefault("C", {}).setdefault("diameter", set()).add(section.width)
+        elif section.family == "CR":
+            out.setdefault("CR", {}).setdefault("size", set()).update(
+                (section.width, section.depth))
+        else:
+            sizes = out.setdefault(section.family, {})
+            sizes.setdefault("width", set()).add(section.width)
+            sizes.setdefault("depth", set()).add(section.depth)
+    return {family: {key: sorted(values) for key, values in sizes.items()}
+            for family, sizes in out.items()}
+
+
+def suggested_range(current, present: list[int], step: float = 50.0) -> list[float]:
+    """The range to show for one dimension: the range there is, widened to hold
+    the sizes the model has now; without a range, from the smallest size in
+    the model to two steps above the largest."""
+    current = [float(v) for v in current or []]
+    if len(current) == 3:
+        if not present:
+            return current
+        return [min(current[0], min(present)), max(current[1], max(present)), current[2]]
+    if not present:
+        return []
+    return [float(min(present)), float(max(present)) + 2 * step, step]
+
+
+def _ask_ranges(families: set[str], settings: dict, title: str,
+                model_has_inputs: bool = True, found: ModelSections | None = None) -> bool:
+    """Ask the size range of each family; False when cancelled.
+
+    A family that has a range is shown with it, to confirm or change. With
+    ``model_has_inputs`` False the model has no setup inputs of its own and
+    the ranges shown are the defaults. ``found`` is what the model has now:
+    the ranges shown always hold those sizes, and the dialog lists them.
+    """
     from etabs_api.workflows.sections import BEAM_FAMILIES
     from utilities._gui_helpers import enter_values, show_warning
 
+    in_model = sizes_in_model(found)
     for family in sorted(families):
         if family in BEAM_FAMILIES:
             labels = {f"{family} widths: from, to, step (mm)": "width",
                       f"{family} depths: from, to, step (mm)": "depth"}
+        elif family == "C":
+            labels = {f"{family} diameters: from, to, step (mm)": "diameter"}
         else:
             labels = {f"{family} sides: from, to, step (mm)": "size"}
+        current = settings["sections"].get(family, {})
+        present = in_model.get(family, {})
+        shown = {label: ", ".join(f"{float(v):g}" for v in suggested_range(
+            current.get(key), present.get(key, []), 100.0 if family == "C" else 50.0))
+                 for label, key in labels.items()}
+        prompt = (f"{family} sections have no size range in the setup inputs. Sizes to "
+                  "iterate on:" if model_has_inputs else
+                  f"This model has no setup inputs of its own. Sizes of the {family} sections "
+                  "to iterate on (the loop makes members smaller down to the first size and "
+                  "larger up to the last):")
+        if present:
+            prompt += "\n\nIn the model now: " + "; ".join(
+                f"{key} " + ", ".join(str(v) for v in values)
+                for key, values in present.items()) + " mm. The range shown holds these sizes."
         while True:
-            typed = enter_values(title, f"{family} sections have no size range in the setup "
-                                 "inputs. Sizes to iterate on:", list(labels),
-                                 {label: "" for label in labels})
+            typed = enter_values(title, prompt, list(labels), shown)
             if typed is None:
                 return False
             try:
@@ -748,7 +1052,9 @@ def final_drift_check(bench: Workbench, options, folder: str, stem: str) -> dict
 
     bench.stage = "Final drift check (final sizes; no resizing for drift)"
     report = run_drift(bench.connector, options.reference, options.wind_denominator,
-                       progress=lambda text: bench.show(text), seismic=options.seismic)
+                       progress=lambda text: bench.show(text), seismic=options.seismic,
+                       combos=options.combos, drift_cases=options.drift_cases,
+                       r_factor=options.r_factor)
     path = save_report(report, os.path.join(folder, f"{stem} - Drift.txt"))
     failed = failures(report)
     bench.log("")
@@ -768,11 +1074,13 @@ def final_drift_check(bench: Workbench, options, folder: str, stem: str) -> dict
 
 def run_design_cli() -> dict | None:
     """Entry point: ask everything once, then run the loop on a working copy."""
-    import comtypes.client
-
-    from design.beam_designer_aci318 import ask_deflection_limit
-    from design.column_designer_aci318 import ask_column_design_options
-    from etabs_api.core.connection import ETABSConnector
+    from design.beam_designer_aci318 import ask_deflection_limit, ask_earth_cover_stories
+    from design.column_designer_aci318 import (
+        ask_capacity_check_levels,
+        ask_column_design_options,
+        ask_inner_tie_style,
+    )
+    from etabs_api.core.connection import attach_running_etabs
     from etabs_api.workflows.analysis_forces import ask_force_options
     from etabs_api.workflows.model_setup import load_settings, merge_settings, save_settings
     from etabs_api.workflows.model_setup import settings_path
@@ -780,16 +1088,9 @@ def run_design_cli() -> dict | None:
     from utilities._gui_helpers import LoadingWindow, enter_values, select_option, show_warning
 
     title = "Design Loop"
-    helper = comtypes.client.CreateObject("ETABSv1.Helper")
-    helper = helper.QueryInterface(comtypes.gen.ETABSv1.cHelper)
-    try:
-        etabs = helper.GetObject("CSI.ETABS.API.ETABSObject")
-    except Exception:
-        show_warning("ETABS is not running. Open the model in ETABS first.", title=title)
+    connector = attach_running_etabs(title)
+    if connector is None:
         return None
-    connector = ETABSConnector()
-    connector.etabs_object, connector.sap_model, connector.is_connected = (
-        etabs, etabs.SapModel, True)
     model = connector.sap_model
     original = os.path.splitext(os.path.normpath(str(model.GetModelFilename())))[0] + ".EDB"
     if not os.path.isfile(original):
@@ -798,28 +1099,32 @@ def run_design_cli() -> dict | None:
 
     # combinations, forces and the design inputs (as in sdt beams and sdt columns)
     from design.concrete_workflow import (
+        confirm_pdelta,
         BEAM_FIELDS,
         COLUMN_FIELDS,
         _ask_numbers,
-        _gravity_options,
         _last,
         _remember,
     )
     from utilities._gui_helpers import select_output_directory
 
+    if not confirm_pdelta(connector, title):
+        return None
     last = _last()
-    seismic = select_option(title, "Seismic combinations to design for "
-                            "(gravity and wind ULS combinations are always included):",
-                            ["Static (EQ)", "Response spectrum (RSA)", "Both"])
-    if seismic is None:
+    from design.concrete_workflow import prepare_model
+    from etabs_api.workflows import model_inputs as mi
+
+    ready = prepare_model(connector, original, title, "sdt design", last)
+    if ready is None:
         return None
-    combos_table = connector.get_data("Load Combination Definitions")
-    names = list(dict.fromkeys(combos_table["Name"].dropna().astype(str)))
-    combos = uls_combinations(names, {"Static (EQ)": "EQ", "Response spectrum (RSA)": "RSA",
-                                      "Both": "Both"}[seismic])
-    if not combos:
-        show_warning("The model has no ULS combinations.", title=title)
+    combos, sources = ready.combos, ready.sources
+    seismic = ready.seismic_key or "picked"
+    # sections the loop will resize, whatever the model calls them
+    found = read_model_sections(connector)
+    if not confirm_sections(found, title):
         return None
+    if found.foreign:
+        sources.model.append(f"sizes of {len(found.foreign)} sections read from ETABS")
     force_options = ask_force_options()
     if force_options is None:
         return None
@@ -831,7 +1136,7 @@ def run_design_cli() -> dict | None:
     smrf = smrf == "Yes"
     gravity = None
     if smrf:
-        choices = _gravity_options(combos)
+        choices = ready.gravity_choices[:24]  # what one choice dialog can show
         gravity = select_option(title, "Gravity combination for the beam seismic shear:",
                                 choices, default_index=choices.index(last["gravity_combo"])
                                 if last.get("gravity_combo") in choices else 0)
@@ -846,18 +1151,40 @@ def run_design_cli() -> dict | None:
     column_answers = ask_column_design_options(normal_cover=column_bars["cover"])
     if column_answers is None:
         return None
+    from design.concrete_workflow import beam_stories
+
+    earth_stories = ask_earth_cover_stories(beam_stories(connector), beam_bars["cc"],
+                                            last.get("beam_earth_cover_stories"))
+    if earth_stories is None:
+        return None
+    levels = ask_capacity_check_levels(smrf, last)
+    if levels is None:
+        return None
+    tie_style = ask_inner_tie_style()  # for the column schedule of the final design
+    if tie_style is None:
+        return None
     long_limit = ask_deflection_limit()
     if long_limit is None:
         return None
-    from etabs_api.workflows.drift_check import ask_drift_options
+    from etabs_api.workflows.drift_check import ask_drift_options, has_standard_combinations
 
-    drift_options = ask_drift_options(title + ": drift of the final sizes")
+    drift_options = ask_drift_options(title + ": drift of the final sizes",
+                                      has_standard_combinations(connector))
+    if drift_options is None:
+        return None
+    from etabs_api.workflows.drift_check import resolve_drift_combinations
+
+    drift_options = resolve_drift_combinations(connector, original,
+                                               title + ": drift of the final sizes",
+                                               drift_options)
     if drift_options is None:
         return None
     folder = select_output_directory("Folder for the final results, calculations and schedules")
     if not folder:
         return None
-    _remember({"smrf": smrf, "gravity_combo": gravity, **beam_bars, **column_bars})
+    _remember({"smrf": smrf, "gravity_combo": gravity, **beam_bars, **column_bars,
+               "beam_earth_cover_stories": earth_stories, "check_top_level": levels[0],
+               "check_foundation_level": levels[1]})
 
     # loop limits
     last = _saved("design_loop")
@@ -867,25 +1194,44 @@ def run_design_cli() -> dict | None:
         return None
     try:
         values = {key: float(typed[label]) for label, (key, _) in LOOP_FIELDS.items()}
+        if values["column_max_ratio"] < 1.0 or min(
+                values["max_inner"], values["max_inner_columns"], values["max_rounds"]) < 1:
+            raise ValueError
     except ValueError:
-        show_warning("Every loop setting must be a number.", title=title)
+        show_warning("Every loop setting must be a number; the side ratio at least 1 and the "
+                     "iterations and rounds at least 1.", title=title)
         return None
     _save("design_loop", values)
 
     # setup inputs: ranges and seismic values
     settings_file = settings_path(original)
-    setup = merge_settings(load_settings(settings_file))
-    families = set()
-    for name, prop in zip(*[connector.get_data("Frame Assignments - Section Properties")[c]
-                            .astype(str) for c in ("UniqueName", "SectProp")]):
-        section = parse_section(prop)
-        if section is not None and not name.isnumeric():
-            families.add("C" if section.circular else section.family)
+    saved_setup = load_settings(settings_file)
+    setup = merge_settings(saved_setup)
+    has_inputs = "sections" in (saved_setup or {})  # setup inputs, not only saved answers
+    families = set(found.families())
     missing = {f for f in families if not has_range(setup["sections"], f)}
+    if not has_inputs:
+        # No setup inputs beside this model: the default ranges would be used
+        # without the user seeing them, so every family is shown to confirm.
+        missing = set(families)
     if missing:
-        if not _ask_ranges(missing, setup, title):
+        if not _ask_ranges(missing, setup, title, model_has_inputs=has_inputs, found=found):
             return None
-        save_settings(setup, settings_file)
+        # a model without setup inputs keeps only what was asked: the ranges
+        save_settings(setup if has_inputs else
+                      {**(saved_setup or {}), "sections": setup["sections"]}, settings_file)
+        sources.answered.append("size ranges of " + ", ".join(sorted(missing)))
+    # Z and Ct: from the model's UBC 97 patterns; asked when they differ from
+    # what was saved, or when the model has no such pattern
+    # (an answer given on this model before stands over the setup inputs)
+    answer = mi.ask_seismic_values(
+        original, title, mi.read_seismic(connector),
+        {**((saved_setup or {}).get("seismic") or {}), **mi.load(original).get("seismic", {})})
+    if answer is None:
+        return None
+    seismic_values, seismic_sources = answer
+    for kind in ("model", "answered", "assumed"):
+        getattr(sources, kind).extend(getattr(seismic_sources, kind))
 
     settings = LoopSettings(
         combos=combos, force_options=force_options, gravity_combo=gravity, smrf=smrf,
@@ -893,11 +1239,16 @@ def run_design_cli() -> dict | None:
         continuous_bars=column_answers[0], bottom_cover=column_answers[1],
         long_limit=long_limit,
         limits=Limits(int(values["increment"]), int(values["beam_max_width"]),
-                      int(values["beam_max_depth"]), int(values["column_max"])),
+                      int(values["beam_max_depth"]), int(values["column_max"]),
+                      float(values["column_max_ratio"])),
         ranges=setup["sections"], downsize_ratio=values["downsize_ratio"],
         span_similarity=values["span_similarity"] / 100.0,
-        max_rounds=int(values["max_rounds"]),
-        zone_factor=setup["seismic"]["zone_factor"], ct=setup["seismic"]["ct"],
+        max_rounds=int(values["max_rounds"]), max_inner=int(values["max_inner"]),
+        max_inner_columns=int(values["max_inner_columns"]),
+        zone_factor=seismic_values["zone_factor"], ct=seismic_values["ct"],
+        beam_earth_cover_stories=tuple(earth_stories), check_top_level=levels[0],
+        check_foundation_level=levels[1], inner_tie_style=tie_style,
+        deflection_roles=ready.deflection_roles, sources=sources,
     )
 
     # the working copy: the original model is not changed
@@ -911,6 +1262,14 @@ def run_design_cli() -> dict | None:
     with LoadingWindow("Design loop: analysis, design and resizing") as window:
         bench = Workbench(connector, settings, log_path, window.update)
         bench.log(f"Combinations: {len(combos)} ULS ({seismic})")
+        bench.log("Size ranges (from, to, step): " + "; ".join(
+            f"{family} " + " x ".join(
+                "-".join(f"{float(v):g}" for v in span) for span in spans.values() if span)
+            for family, spans in sorted(setup["sections"].items()) if family in families))
+        bench.log(f"Limits: beams {settings.limits.beam_max_width} x "
+                  f"{settings.limits.beam_max_depth}, column side {settings.limits.column_max}, "
+                  f"side ratio {settings.limits.column_max_ratio:g}, smallest column side "
+                  f"{joint_min_side(settings):g} (20 beam bar diameters, ACI 18.8.2.3)")
         summary = run_design_loop(bench)
         window.update("Saving the final results, calculations and schedules")
         model.File.Save()  # the working copy; Save(path) would drop the analysis results
@@ -921,7 +1280,69 @@ def run_design_cli() -> dict | None:
     if summary["drift"]["failed"]:
         print("DRIFT FAILS: the sections were not resized for drift. Reconfigure the model "
               f"for drift and run sdt design again. See {summary['drift']['path']}")
+    loop_summary(summary, settings, original, working, log_path, folder).show(
+        os.path.join(folder, f"{os.path.splitext(os.path.basename(working))[0]} summary.txt"),
+        popup=True, echo=False)
     return summary
+
+
+def loop_summary(summary: dict, settings: LoopSettings, original: str, working: str,
+                 log_path: str, folder: str):
+    """The closing summary of the design loop, for its window. Every iteration is
+    in the terminal and in the log file."""
+    from utilities.run_summary import RunSummary, listed
+
+    out = RunSummary("sdt design", original)
+    changes = summary.get("changes", [])
+    final: dict[str, tuple[str, str]] = {}
+    for change in changes:  # first old size and last new size of every member
+        first = final.get(change.member, (change.old, change.new))[0]
+        final[change.member] = (first, change.new)
+    resized = {member: sizes for member, sizes in final.items() if sizes[0] != sizes[1]}
+    out.add("Status", f"{summary.get('status', '')} after {summary.get('iterations', 0)} "
+                      "iterations")
+    out.add("Combinations", len(settings.combos))
+    beams, columns = summary.get("beams"), summary.get("columns")
+    if beams is not None and len(beams):
+        failing = beams.groupby("UniqueName")["Design_Status"].apply(
+            lambda s: any(v != "OK" for v in s.astype(str))).sum()
+        out.add("Beams", f"{beams['UniqueName'].nunique()} designed, {int(failing)} failing")
+    if columns is not None and len(columns):
+        failing = columns.groupby("UniqueName")["Column_Design_Status"].apply(
+            lambda s: (s.astype(str) == "FAIL").any()).sum()
+        out.add("Columns", f"{columns['UniqueName'].nunique()} designed, {int(failing)} failing")
+    out.add("Section changes", f"{len(changes)} in all; {len(resized)} members end with "
+                               "another size")
+    by_size: dict[tuple[str, str], list[str]] = {}
+    for member, sizes in resized.items():
+        by_size.setdefault(sizes, []).append(member)
+    for (old, new), members in sorted(by_size.items()):
+        out.add(f"  {old} -> {new}", listed(sorted(members), 8))
+    drift = summary.get("drift") or {}
+    if drift:
+        out.add("Drift of the final sizes",
+                f"{len(drift.get('failed', []))} checks failing" if drift.get("failed")
+                else "every check passes")
+    if summary.get("failing"):
+        out.fail("Members still failing: " + listed(summary["failing"]))
+    if drift.get("failed"):
+        out.fail("Drift fails: the sections are not resized for drift. Reconfigure the model "
+                 "(stiffer members, walls) and run sdt design again.")
+    if settings.sources is not None:
+        settings.sources.add_to(out)
+    if settings.beam_earth_cover_stories:
+        out.note("75 mm beam cover on: " + ", ".join(settings.beam_earth_cover_stories))
+    if not settings.check_top_level:
+        out.note("BCC and joint shear were not checked at the topmost level (your choice).")
+    if not settings.check_foundation_level:
+        out.note("BCC, joint shear and Ve were not checked at the foundation level "
+                 "(your choice).")
+    out.file("Working copy", working)
+    out.file("Log (every iteration)", log_path)
+    out.file("Outputs", folder)
+    if drift.get("path"):
+        out.file("Drift report", drift["path"])
+    return out
 
 
 def save_final_design(bench: Workbench, summary: dict, working: str, folder: str) -> None:
@@ -946,6 +1367,10 @@ def save_final_design(bench: Workbench, summary: dict, working: str, folder: str
         "combos": settings.combos, "smrf": settings.smrf, "gravity_combo": settings.gravity_combo,
         "beam_bars": settings.beam_bars, "column_bars": settings.column_bars,
         "long_limit": settings.long_limit,
+        "beam_earth_cover_stories": list(settings.beam_earth_cover_stories),
+        "check_top_level": settings.check_top_level,
+        "check_foundation_level": settings.check_foundation_level,
+        "inner_tie_style": settings.inner_tie_style,
     })
     store.beam_results, store.column_report = beams, columns
     store.column_groups = getattr(bench, "column_groups", None)
@@ -966,7 +1391,7 @@ def save_final_design(bench: Workbench, summary: dict, working: str, folder: str
                                   os.path.join(folder, f"{stem} - Column Design.xlsx"))
         say("Saving the columns 2 of 3: schedule (.dxf)")
         export_column_cad_drawings(columns, folder, bars["dmain"], bars["cover"], settings.smrf,
-                                   "crossties", bench.tables["CONNECTIVITY"])
+                                   settings.inner_tie_style, bench.tables["CONNECTIVITY"])
         say("Saving the columns 3 of 3: calculation report (.pdf, LaTeX)")
         export_column_pdf(columns, os.path.join(folder, f"{stem} - Column Calculations.pdf"),
                           settings.smrf, bars["dmain"], bars["dties"], bars["cover"])

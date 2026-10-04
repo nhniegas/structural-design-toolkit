@@ -7,9 +7,10 @@ its local 2 axis.
 
 Sizes come from the setup ranges ``[minimum, maximum, step]`` of each family.
 Past the range a size grows by ``increment`` up to the maximum the user
-gives. Beams keep depth >= width and width / depth >= 0.3; rectangular
-columns keep the shorter side at least half the longer one. The concrete
-and rebar of a section never change.
+gives; a range that goes beyond that maximum is cut at it. Beams keep
+depth >= width and width / depth >= 0.3; rectangular columns keep the longer
+side at most ``column_max_ratio`` times the shorter one (2 by default). The
+concrete and rebar of a section never change.
 """
 
 from __future__ import annotations
@@ -77,6 +78,7 @@ class Limits:
     beam_max_width: int = 800
     beam_max_depth: int = 1200
     column_max: int = 1200
+    column_max_ratio: float = 1.0 / COLUMN_MIN_RATIO  # longer side / shorter side
 
 
 def _sizes(span) -> list[int]:
@@ -86,14 +88,19 @@ def _sizes(span) -> list[int]:
     return list(range(low, high + 1, step)) if step > 0 and high >= low else []
 
 
-def _extended(sizes: list[int], increment: int, maximum: int) -> list[int]:
-    """The range, then on by ``increment`` up to ``maximum``."""
-    out = sorted(set(sizes))
+def _extended(sizes: list[int], increment: int, maximum: int, keep: tuple = ()) -> list[int]:
+    """The range up to ``maximum``, then on by ``increment`` up to ``maximum``.
+
+    ``maximum`` is the user's limit: sizes of the range above it are left out.
+    ``keep`` are the sizes the member has now; they stay even above the limit,
+    so a member that is already larger is not forced to another size.
+    """
+    out = sorted({size for size in sizes if size <= maximum})
     last = out[-1] if out else 0
-    while last + increment <= maximum:
+    while out and last + increment <= maximum:
         last += increment
         out.append(last)
-    return out
+    return sorted(set(out) | set(keep))
 
 
 def has_range(ranges: dict, family: str) -> bool:
@@ -109,8 +116,10 @@ def _beam_ok(width: int, depth: int) -> bool:
     return depth >= width and width / depth >= BEAM_MIN_RATIO
 
 
-def _column_ok(width: int, depth: int) -> bool:
-    return min(width, depth) / max(width, depth) >= COLUMN_MIN_RATIO
+def _column_ok(width: int, depth: int, max_ratio: float | None = None) -> bool:
+    """Whether the side ratio is allowed: longer / shorter at most ``max_ratio``."""
+    limit = 1.0 / COLUMN_MIN_RATIO if max_ratio is None else max(float(max_ratio), 1.0)
+    return max(width, depth) / min(width, depth) <= limit + 1e-9
 
 
 # =============================================================================
@@ -123,9 +132,9 @@ def grow_beam(section: Section, mode: str, ranges: dict, limits: Limits) -> Sect
     """
     spans = ranges.get(section.family, {})
     widths = _extended(_sizes(spans.get("width")) or [section.width], limits.increment,
-                       limits.beam_max_width)
+                       limits.beam_max_width, (section.width,))
     depths = _extended(_sizes(spans.get("depth")) or [section.depth], limits.increment,
-                       limits.beam_max_depth)
+                       limits.beam_max_depth, (section.depth,))
     w, d = section.width, section.depth
 
     def deeper():
@@ -173,7 +182,8 @@ def _column_sides(ranges: dict, section: Section, limits: Limits) -> list[int]:
     key = "diameter" if section.circular else "size"
     family = "C" if section.circular else "CR"
     sides = _sizes(ranges.get(family, {}).get(key)) or [section.depth]
-    return _extended(sides + [section.width, section.depth], limits.increment, limits.column_max)
+    return _extended(sides, limits.increment, limits.column_max,
+                     (section.width, section.depth))
 
 
 def grow_column(section: Section, mode: str, ranges: dict, limits: Limits,
@@ -184,8 +194,14 @@ def grow_column(section: Section, mode: str, ranges: dict, limits: Limits,
     400 x 600 -> 500 x 700). "side": grow the side that is ``along_depth``
     (True: depth, False: width), keeping the side ratio. When neither fits,
     the smallest larger size with both sides at least the current ones.
+    No side goes above ``limits.column_max``.
     """
     sides = _column_sides(ranges, section, limits)
+    ratio = limits.column_max_ratio
+
+    def _column_ok(width: int, depth: int) -> bool:  # with the user's side ratio
+        return globals()["_column_ok"](width, depth, ratio)
+
     if section.circular:
         bigger = [s for s in sides if s > section.depth]
         return replace(section, width=bigger[0], depth=bigger[0]) if bigger else None
@@ -213,17 +229,23 @@ def grow_column(section: Section, mode: str, ranges: dict, limits: Limits,
     return replace(section, width=width, depth=depth)
 
 
-def shrink_column(section: Section, ranges: dict) -> Section | None:
-    """One size smaller: the largest smaller size with both sides at most the current ones."""
+def shrink_column(section: Section, ranges: dict, min_side: float = 0.0,
+                  max_ratio: float | None = None) -> Section | None:
+    """One size smaller: the largest smaller size with both sides at most the current ones.
+
+    No side goes below ``min_side`` (what the joints need, see the design
+    loop) nor below the smallest size of the range.
+    """
     family = "C" if section.circular else "CR"
     key = "diameter" if section.circular else "size"
     sides = sorted(set(_sizes(ranges.get(family, {}).get(key)) + [section.width, section.depth]))
+    sides = [s for s in sides if s >= min_side]
     if section.circular:
         smaller = [s for s in sides if s < section.depth]
         return replace(section, width=smaller[-1], depth=smaller[-1]) if smaller else None
     w, d = section.width, section.depth
     options = [(a, b) for a in sides for b in sides
-               if a <= w and b <= d and (a, b) != (w, d) and _column_ok(a, b)]
+               if a <= w and b <= d and (a, b) != (w, d) and _column_ok(a, b, max_ratio)]
     if not options:
         return None
     width, depth = max(options, key=lambda s: (s[0] * s[1], -abs(s[0] - s[1])))
@@ -246,16 +268,25 @@ def depth_along_x(angle_degrees: float) -> bool | None:
 # =============================================================================
 # ETABS
 # =============================================================================
-def ensure_section(model, section: Section, existing: set[str]) -> bool:
-    """Create the section in ETABS when it is missing (setup modifiers and rebar data)."""
+def ensure_section(model, section: Section, existing: set[str],
+                   materials: dict[str, str] | None = None, cover: float | None = None) -> bool:
+    """Create the section in ETABS when it is missing (no stiffness modifiers,
+    setup rebar data).
+
+    ``materials`` maps the grade tags of the name (``C04``, ``G60``) to the
+    model's own material names, for a model whose materials are named
+    otherwise; ``cover`` is the cover of the section it replaces.
+    """
     if section.name in existing:
         return True
     from etabs_api.workflows.model_setup import SetupLog, create_section
 
+    materials = materials or {}
     kind = "circle" if section.circular else ("beam" if section.is_beam else "column")
     created = create_section(model.PropFrame, {
         "name": section.name, "kind": kind, "width": section.width, "depth": section.depth,
-        "material": section.concrete, "rebar": section.rebar}, SetupLog())
+        "material": materials.get(section.concrete, section.concrete),
+        "rebar": materials.get(section.rebar, section.rebar), "cover": cover}, SetupLog())
     if created:
         existing.add(section.name)
     return created

@@ -97,6 +97,50 @@ def test_column_shrinks_to_the_largest_smaller_size():
     assert shrink_column(cr(400, 400), RANGES) is None
 
 
+def test_the_largest_column_side_also_cuts_the_setup_range():
+    """A setup range that goes to 1000 must not offer more than the 800 the user typed."""
+    limits = Limits(increment=100, beam_max_width=500, beam_max_depth=800, column_max=800)
+    size = cr(600, 600)
+    grown = []
+    while True:
+        size = grow_column(size, "side", RANGES, limits, along_depth=False)
+        if size is None:
+            break
+        grown.append(size)
+    assert max(max(s.width, s.depth) for s in grown) == 800
+    assert grow_column(cr(800, 800), "square", RANGES, limits) is None
+    # a column that is already larger keeps its size on offer and is not forced down
+    assert grow_column(cr(900, 900), "square", RANGES, limits) is None
+
+
+def test_the_largest_beam_size_also_cuts_the_setup_range():
+    limits = Limits(increment=100, beam_max_width=500, beam_max_depth=800, column_max=800)
+    size = g(300, 500)
+    sizes = []
+    while size is not None:
+        sizes.append(size)
+        size = grow_beam(size, "depth", RANGES, limits)
+    assert max(s.depth for s in sizes) == 800 and max(s.width for s in sizes) <= 500
+
+
+def test_the_column_side_ratio_is_the_users():
+    square = Limits(increment=100, column_max=1200, column_max_ratio=1.0)
+    assert grow_column(cr(500, 500), "side", RANGES, square, along_depth=True) == cr(600, 600)
+    slim = Limits(increment=100, column_max=1200, column_max_ratio=3.0)
+    assert grow_column(cr(400, 1000), "side", RANGES, slim, along_depth=True) == cr(400, 1100)
+    default = Limits(increment=100, column_max=1200)
+    grown = grow_column(cr(400, 800), "side", RANGES, default, along_depth=True)
+    assert grown.depth == 900 and grown.width >= 450       # 2.0: the width follows
+
+
+def test_a_column_does_not_shrink_below_the_smallest_side_asked():
+    assert shrink_column(cr(600, 600), RANGES, min_side=500) in (cr(500, 600), cr(600, 500))
+    assert shrink_column(cr(500, 500), RANGES, min_side=500) is None
+    circle = Section("C", 600, 600, "C05", "G60", circular=True)
+    assert shrink_column(circle, RANGES, min_side=600) is None
+    assert shrink_column(circle, RANGES, min_side=500).depth == 500
+
+
 def test_circular_column_grows_by_diameter():
     c = Section("C", 600, 600, "C05", "G60", circular=True)
     assert grow_column(c, "square", RANGES, LIMITS).depth == 700

@@ -11,7 +11,14 @@ class Results:
     """Extract selected ETABS analysis results as DataFrames.
 
     Every ETABS results call returns ``(count, array, array, ..., status)``.
+    Without a name the object queries return every object: ETABS takes no
+    empty name, so the group "All" is asked for instead.
     """
+
+    @staticmethod
+    def _target(name: str) -> tuple[str, int]:
+        """(name, item type) of a query: one object (0), or the group "All" (2)."""
+        return (name, 0) if name else ("All", 2)
 
     def __init__(self, connector):
         self.connector = connector
@@ -43,9 +50,9 @@ class Results:
             )
 
     def joint_displacements(self, name: str = "") -> pd.DataFrame:
-        """Extract joint displacement results for one joint."""
+        """Extract joint displacement results for one joint, or for every joint."""
         result = self.interface.JointDispl(
-            name, 0, 0, [], [], [], [], [], [], [], [], [], [], []
+            *self._target(name), 0, [], [], [], [], [], [], [], [], [], [], []
         )
         return self._result_dataframe(
             result,
@@ -54,9 +61,9 @@ class Results:
         )
 
     def frame_forces(self, name: str = "") -> pd.DataFrame:
-        """Extract frame-force results for one frame."""
+        """Extract frame-force results for one frame, or for every frame."""
         result = self.interface.FrameForce(
-            name, 0, 0, [], [], [], [], [], [], [], [], [], [], [], [], []
+            *self._target(name), 0, [], [], [], [], [], [], [], [], [], [], [], [], []
         )
         return self._result_dataframe(
             result,
@@ -65,9 +72,9 @@ class Results:
         )
 
     def joint_reactions(self, name: str = "") -> pd.DataFrame:
-        """Extract joint-reaction results for one joint."""
+        """Extract joint-reaction results for one joint, or for every joint."""
         result = self.interface.JointReact(
-            name, 0, 0, [], [], [], [], [], [], [], [], [], [], []
+            *self._target(name), 0, [], [], [], [], [], [], [], [], [], [], []
         )
         return self._result_dataframe(
             result,

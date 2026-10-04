@@ -86,3 +86,11 @@ edb/
 
 /.quarto/
 **/*.quarto_ipynb
+
+# --- Local tool settings and generated report sources ---
+.claude/
+main.tex
+main_files/
+
+# PyInstaller build description (build_exe.ps1 passes the options itself)
+*.spec

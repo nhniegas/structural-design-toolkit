@@ -12,7 +12,8 @@ ETABS keeps stiffness modifiers per member, not per load case. Drift with a diff
    - where to read the drift: the diaphragm centre of mass, or the four outer corners;
    - which seismic drift combinations to check: static (`EQXSD`, `EQYSD`), response spectrum (`RSAXD`, `RSAYD`), or both. With static only, the spectrum is not scaled, which saves one analysis per level. The wind drift combinations are always checked;
    - the wind drift limit, h / 400 by default;
-   - a confirmation, since it changes the model while it runs.
+   - a confirmation, since it changes the model while it runs;
+   - on a model with no `DRIFT` / `WDRIFT` combinations: which of the model's seismic and wind combinations to check the drift on, and R when the model has no UBC 97 seismic pattern to read it from. The choice is saved with the model. The static / response spectrum question above is then not asked. Where a seismic case in the picked combinations has the capped period of the strength design (NSCP 208.5.2.2), the drift is on larger forces than 208.6.5.2 requires, which is on the safe side; the report says so.
 2. Remembers the frame modifiers, the response spectrum scale factors, and whether the model had results.
 3. Judges your modifiers: effective I (frame × section) of 0.35 for beams and 0.70 for columns, and mass and weight at 1.
 4. For each stiffness level:
@@ -27,7 +28,7 @@ ETABS keeps stiffness modifiers per member, not per load case. Drift with a diff
    | Service | 0.49 | 0.98 | 1.4 times, at most the gross section, ACI 6.6.3.2.2 |
 
 5. Puts the modifiers and scale factors back and, if the model had results, analyses it again. It is left ready for the strength design.
-6. Prints the report and saves it beside the model as `<model> - Drift.txt`.
+6. Prints the report in the terminal and saves it beside the model as `<model> - Drift.txt`. A separate window then shows the summary: the checks and the failures of each stiffness level.
 
 `sdt design` runs the same check once at the end, on the final sizes (see [design loop](etabs_design_loop.md)).
 

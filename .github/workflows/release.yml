@@ -1,7 +1,8 @@
 name: Release
 
-# Push a tag such as v1.0.0 to publish a GitHub Release.
-# "Run workflow" (manual) builds the same package as a downloadable artifact only.
+# Push a tag such as v1.0.0 to publish a GitHub Release with the packaged
+# program (sdt.exe, no Python needed) and the source.
+# "Run workflow" (manual) builds the same packages as downloadable artifacts only.
 on:
   push:
     tags: ["v*"]
@@ -18,7 +19,7 @@ jobs:
     name: Build release package
     needs: test
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
 
     steps:
       - uses: actions/checkout@v4
@@ -26,6 +27,28 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      # dist/sdt-<version>-windows.zip: sdt.exe and its support files (PyInstaller).
+      # The script fails when the program does not start.
+      - name: Build the program
+        shell: pwsh
+        run: ./build_exe.ps1 -Zip
+
+      - name: Check the tag is the version of the program
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $version = (& dist/sdt/sdt.exe --version) -replace '.* ', ''
+          if ("v$version" -ne "${{ github.ref_name }}") {
+            throw "The tag is ${{ github.ref_name }} but the program says $version (pyproject.toml, main.py)."
+          }
 
       # Zip of the committed Python source and docs (git archive skips caches and ignored files).
       - name: Package the source
@@ -50,5 +73,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $files = Get-ChildItem dist -File | ForEach-Object { $_.FullName }
-          gh release create "${{ github.ref_name }}" @files --title "${{ github.ref_name }}" --generate-notes
+          $notes = "docs/releases/${{ github.ref_name }}.md"
+          if (Test-Path $notes) {
+            gh release create "${{ github.ref_name }}" @files --title "${{ github.ref_name }}" --notes-file $notes
+          } else {
+            gh release create "${{ github.ref_name }}" @files --title "${{ github.ref_name }}" --generate-notes
+          }
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

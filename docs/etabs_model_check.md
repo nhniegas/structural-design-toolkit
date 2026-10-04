@@ -1,6 +1,6 @@
 # Model check (`sdt check`)
 
-`sdt check` (or `python main.py check`) reads the model open in ETABS and prints a list of checks in the terminal. It doesn't change the model.
+`sdt check` (or `python main.py check`) reads the model open in ETABS and prints a list of checks in the terminal. A separate window then shows the summary: the count of each status and every FAIL. It doesn't change the model.
 
 ```
 [FAIL] Story range should be GF to RD: EQXPE 3F-RD   (NSCP 208.5.2.3)
@@ -39,7 +39,7 @@ Every story is included, those below the ground level too. A model set up before
 
 | Group | Check | NSCP 2015 |
 |---|---|---|
-| Model | Every frame tagged and on a setup section; floors with a diaphragm and a slab section; supports at the column bases; beams with a free end | 208.5.1.3 |
+| Model | Every frame tagged and on a setup section (warnings only: the design runs on untagged members and reads other sections from ETABS); floors with a diaphragm and a slab section; supports at the column bases; beams with a free end | 208.5.1.3 |
 | Loads | Gravity patterns with no loads; roof live assigned; self weight counted once; reducible live above 4.8 kPa | 205, 205.4, 205.5 |
 | Seismic | Story range from the ground level (the story at elevation 0 when there is a footing level) to the roof | 208.5.2.3 |
 | | Accidental eccentricity 0.05 | 208.5.1.3 |
@@ -57,7 +57,7 @@ Every story is included, those below the ground level too. A model set up before
 | | Modal participating mass at least 90 % | 208.5.3.5.2 |
 | | Drift ΔM = 0.7 R ΔS at most 0.025 h (T < 0.7 s) or 0.020 h, from the drift patterns and the spectrum drift cases (names ending in D) | 208.6.4.2, 208.6.5.1 |
 | Wind | Story range; speed, exposure, Kzt, G and Kd for you to confirm | 207 |
-| Combinations | Strength combinations exist; every combination refers to existing cases; seismic strength combinations carry Ev = 0.5 Ca I D on the dead load, (1.2 + Ev) D and (0.9 − Ev) D | 203.3.1, 208.6.1 |
+| Combinations | Strength combinations exist (a model whose combinations are not named `ULS` gets a warning, not a failure: the design commands ask which ones to design for, see [existing models](existing_models.md)); every combination refers to existing cases; seismic strength combinations carry Ev = 0.5 Ca I D on the dead load, (1.2 + Ev) D and (0.9 − Ev) D | 203.3.1, 208.6.1 |
 | Analysis | Linear static cases on preset P-Delta; the P-delta method | 208.6.3 |
 | | Mass source without double self weight | 208.6.1 |
 | | Effective cracked-section I, the member modifier times the section modifier as ETABS applies them, of 0.35 (beams) and 0.70 (columns). A modifier assigned to both the members and the sections is applied twice: 0.12 / 0.49 | 208.6.2, 406.6.3.1.1 |

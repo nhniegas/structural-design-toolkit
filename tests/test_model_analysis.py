@@ -59,3 +59,19 @@ def test_report_text_lists_scaling_periods_and_warnings():
     assert "1.3 T_A = 1.040 s" in text
     assert "Sum X: 95.0 %" in text
     assert "something" in text
+
+
+@pytest.mark.parametrize("elevations, ground, height", [
+    ([0, 4500, 8000, 11500], 0, 11500),          # base at the ground
+    ([-1000, 0, 4500, 8000, 11500], 0, 11500),   # footing level: hn from elevation 0
+    ([-6000, -3000, 0, 4000], 0, 4000),          # basement
+    ([1000, 4500, 8000], 1000, 7000),            # base above 0: hn from the base
+])
+def test_hn_is_measured_from_the_ground_level(elevations, ground, height):
+    assert ma.ground_elevation(elevations) == ground
+    assert ma.height_above_ground(elevations) == height
+
+
+def test_report_states_the_height_above_the_ground():
+    report = ma.AnalysisReport(method_a=0.5, cap=1.3, height=11500.0, ground_elevation=0.0)
+    assert "Height above the ground hn = 11.50 m" in report.text()

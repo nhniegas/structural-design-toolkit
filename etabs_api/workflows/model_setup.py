@@ -124,8 +124,10 @@ DEFAULT_SETTINGS = {
         "C": {"diameter": []},
     },
     # Slab and wall thicknesses in mm (lists) and their concrete (ksi); a
-    # concrete of None is the first frame section concrete.
-    "slabs": {"thickness": [100, 125, 150, 200], "type": "Membrane", "concrete_ksi": None},
+    # concrete of None is the first frame section concrete. "one_way" adds a
+    # one-way counterpart of every membrane slab.
+    "slabs": {"thickness": [100, 125, 150, 200], "type": "Membrane", "concrete_ksi": None,
+              "one_way": False},
     "walls": {"thickness": [150, 200, 250, 300], "concrete_ksi": None},
     "seismic": {
         "zone_factor": 0.4, "soil_type": "SD", "source_type": "A", "distance_km": 10.0,
@@ -206,6 +208,8 @@ def section_definitions(settings: dict) -> list[dict]:
 
 
 SLAB_SHELL_TYPES = {"Shell-Thin": 1, "Shell-Thick": 2, "Membrane": 3}  # eShellType
+ONE_WAY_SUFFIX = "_1W"  # S_150_C04_1W: the one-way counterpart of S_150_C04
+SLAB_TABLE = "Slab Property Definitions"
 
 
 def area_concrete_ksi(settings: dict, kind: str) -> float:
@@ -223,7 +227,10 @@ def area_concrete_ksi(settings: dict, kind: str) -> float:
 def area_section_definitions(settings: dict) -> list[dict]:
     """Slab and wall sections: ``S_<t>_<concrete>`` and ``SW_<t>_<concrete>_<rebar>``.
 
-    The wall name is the one ``sdt grids`` gives its walls, so they share it.
+    With ``slabs["one_way"]`` every membrane slab also gets a counterpart that
+    spans one way (``S_<t>_<concrete>_1W``); only a membrane has that option
+    in ETABS. The wall name is the one ``sdt grids`` gives its walls, so they
+    share it.
     """
     slab_concrete = grade_name("C", area_concrete_ksi(settings, "slabs"))
     wall_concrete = grade_name("C", area_concrete_ksi(settings, "walls"))
@@ -231,10 +238,13 @@ def area_section_definitions(settings: dict) -> list[dict]:
     slab_type = settings.get("slabs", {}).get("type", "Membrane")
     if slab_type not in SLAB_SHELL_TYPES:
         raise ValueError(f"Slab type must be one of {', '.join(SLAB_SHELL_TYPES)}.")
+    one_way = bool(settings.get("slabs", {}).get("one_way")) and slab_type == "Membrane"
     out = []
     for t in sorted({float(x) for x in settings.get("slabs", {}).get("thickness", [])}):
         out.append({"name": f"S_{t:g}_{slab_concrete}", "kind": "slab", "thickness": t,
                     "material": slab_concrete, "shell": slab_type})
+        if one_way:
+            out.append({**out[-1], "name": out[-1]["name"] + ONE_WAY_SUFFIX, "one_way": True})
     for t in sorted({float(x) for x in settings.get("walls", {}).get("thickness", [])}):
         out.append({"name": f"SW_{t:g}_{wall_concrete}_{rebar}", "kind": "wall", "thickness": t,
                     "material": wall_concrete, "shell": "Shell-Thin"})
@@ -463,9 +473,13 @@ def create_section(api, section: dict, log: SetupLog) -> bool:
     """Create one concrete frame section (modifiers 1.0) with its rebar data.
 
     ``section`` has name, kind ("beam", "column" or "circle"), width (t2),
-    depth (t3), material and rebar.
+    depth (t3), material and rebar, and optionally ``cover`` (mm; the setup
+    covers otherwise).
     """
     name, material, rebar = section["name"], section["material"], section["rebar"]
+    cover = section.get("cover")
+    beam_cover = float(cover) if cover else BEAM_COVER
+    column_cover = float(cover) if cover else COLUMN_COVER
     if section["kind"] == "circle":
         created = api.SetCircle(name, material, section["depth"])
     else:  # (name, material, depth t3, width t2)
@@ -475,14 +489,14 @@ def create_section(api, section: dict, log: SetupLog) -> bool:
     # 1.0: also clears modifiers an earlier setup put on an existing section
     log.check(api.SetModifiers(name, list(SECTION_MODIFIERS)), f"{name} stiffness modifiers")
     if section["kind"] == "beam":
-        log.check(api.SetRebarBeam(name, rebar, rebar, BEAM_COVER, BEAM_COVER, 0, 0, 0, 0),
+        log.check(api.SetRebarBeam(name, rebar, rebar, beam_cover, beam_cover, 0, 0, 0, 0),
                   f"{name} reinforcement data")
     else:
         circular = section["kind"] == "circle"
         # pattern 1 rectangular / 2 circular; confinement 1 ties / 2 spiral; to be designed
         log.check(
             api.SetRebarColumn(name, rebar, rebar, 2 if circular else 1,
-                               2 if circular else 1, COLUMN_COVER, 8 if circular else 0,
+                               2 if circular else 1, column_cover, 8 if circular else 0,
                                5, 3, "20", "10", 150.0, 3, 3, True),
             f"{name} reinforcement data",
         )
@@ -523,6 +537,47 @@ def define_area_sections(model, settings: dict, log: SetupLog) -> None:
                                section["thickness"])
         if log.check(done, f"{section['kind']} section {section['name']}"):
             log.done(f"{section['kind']} sections")
+    set_one_way_slabs(model, {s["name"]: bool(s.get("one_way"))
+                              for s in area_section_definitions(settings)
+                              if s["kind"] == "slab" and s["shell"] == "Membrane"}, log)
+
+
+def set_one_way_slabs(model, one_way: dict[str, bool], log: SetupLog) -> None:
+    """Set the load distribution of membrane slabs: one way (True) or two way.
+
+    The API has no call for it, so the slab table is edited. Rows of other
+    slabs are written back as they were read.
+    """
+    if not one_way:
+        return
+    tables = model.DatabaseTables
+    current = tables.GetTableForEditingArray(SLAB_TABLE, "", 0, [], 0, [])
+    fields = [str(name) for name in as_list(current[1])]
+    if "OneWayLoad" not in fields:
+        log.problems.append("one-way slabs: ETABS has no one-way field in the slab table")
+        return
+    width, flag = len(fields), fields.index("OneWayLoad")
+    values = ["" if v is None else str(v) for v in as_list(current[3])]
+    rows = [values[i:i + width] for i in range(0, len(values), width)]
+    changed = 0
+    for row in rows:
+        wanted = one_way.get(row[0])
+        if wanted is not None and row[flag] != ("Yes" if wanted else "No"):
+            row[flag] = "Yes" if wanted else "No"
+            changed += 1
+    if not changed:
+        return
+    flat = [value for row in rows for value in row]
+    if not log.check(tables.SetTableForEditingArray(SLAB_TABLE, 0, fields, len(rows), flat),
+                     "one-way slabs could not be staged"):
+        return
+    applied = tables.ApplyEditedTables(True, 0, 0, 0, 0, "")
+    if return_code(applied) != 0 or int(applied[0]) or int(applied[1]):
+        log.problems.append(f"one-way slabs: {str(applied[4]).strip()[:300]}")
+        return
+    count = sum(1 for wanted in one_way.values() if wanted)
+    if count:
+        log.done("one-way slab sections", count)
 
 
 def define_load_patterns(model, settings: dict, log: SetupLog) -> None:
@@ -621,6 +676,34 @@ def model_story_range(model) -> tuple[str, str]:
                                [float(z) for z in as_list(stories[2])])
 
 
+def keep_per_code_coefficients(fields: list[str], rows: list[list[str]]) -> int:
+    """Switch "Per Code" UBC 97 rows to "User Defined" with the Ca and Cv of their inputs.
+
+    Writing the seismic table makes ETABS put the source distance of every
+    "Per Code" pattern back to 15 km, which lowers Cv near a source. The
+    rows are as read before the edit, so their distance is still the right
+    one; the coefficients worked out from it are written instead. Returns
+    the number of rows switched.
+    """
+    needed = ("CoeffOpt", "SoilType", "Z", "SourceType", "SourceDist", "Ca", "Cv")
+    if any(name not in fields for name in needed):
+        return 0
+    at = {name: fields.index(name) for name in needed}
+    switched = 0
+    for row in rows:
+        if row[at["CoeffOpt"]] != "Per Code":
+            continue
+        try:
+            ca, cv = seismic_coefficients(float(row[at["Z"]]), row[at["SoilType"]],
+                                          row[at["SourceType"]], float(row[at["SourceDist"]]))
+        except ValueError:
+            continue
+        row[at["CoeffOpt"]] = "User Defined"
+        row[at["Ca"]], row[at["Cv"]] = f"{ca:.6g}", f"{cv:.6g}"
+        switched += 1
+    return switched
+
+
 def set_lateral_story_range(model, log: SetupLog) -> bool:
     """Put the bottom and top story of every seismic and wind pattern on the model's range.
 
@@ -648,6 +731,7 @@ def set_lateral_story_range(model, log: SetupLog) -> bool:
                 edits += 1
         if not edits:
             continue
+        kept = keep_per_code_coefficients(fields, rows) if key == SEISMIC_TABLE else 0
         flat = [value for row in rows for value in row]
         if not log.check(tables.SetTableForEditingArray(key, 0, fields, len(rows), flat),
                          f"table '{key}' could not be staged"):
@@ -657,8 +741,25 @@ def set_lateral_story_range(model, log: SetupLog) -> bool:
             log.problems.append(f"table '{key}': {str(applied[4]).strip()[:300]}")
             continue
         log.done("lateral patterns on the story range", edits)
+        if kept:
+            log.done("seismic patterns now on user-defined Ca and Cv (same values)", kept)
         changed = True
     return changed
+
+
+def save_and_reopen(model, path: str, log: SetupLog) -> bool:
+    """Save the model and open it again from its EDB.
+
+    Needed after the wind pattern table is written on a model that was
+    analysed before: ETABS keeps the wind loads it generated for the old
+    patterns, and its next save fails ("Error cleaning Wind Loads Arrays",
+    "Index was outside the bounds of the array") and deletes the EDB. The
+    first save after the edit still works, and opening that file clears
+    what ETABS kept.
+    """
+    if not log.check(model.File.Save(path), f"saving the model: {path}"):
+        return False
+    return log.check(model.File.OpenFile(path), "opening the saved model again")
 
 
 def define_lateral_loads(model, settings: dict, log: SetupLog) -> None:
@@ -692,8 +793,46 @@ def define_lateral_loads(model, settings: dict, log: SetupLog) -> None:
         }
         for name, angle in WIND_ANGLES.items()
     ]
-    if _edit_table(model, "Load Pattern Definitions - Auto Wind - ASCE 7-10", rows, log):
+    # Not written when it already holds these values: any write of this table
+    # makes ETABS drop the wind patterns it generated (see save_and_reopen).
+    # With "Create All" ETABS keeps no angle on the pattern itself (it reads back blank).
+    if (table_holds(model, WIND_TABLE, rows, ignore=("Angle",))
+            or _edit_table(model, WIND_TABLE, rows, log)):
         log.done("wind load patterns (ASCE 7-10)", len(rows))
+
+
+def table_holds(model, key: str, rows: list[dict], ignore: tuple = ()) -> bool:
+    """True when every row is in the table already, with the same values.
+
+    A row is found by its first field (the name); rows ETABS generated
+    itself (``IsAuto`` = Yes) are not looked at. Numbers are compared as
+    numbers, so 150 matches "150.0". Fields in ``ignore`` are not compared.
+    """
+    current = model.DatabaseTables.GetTableForEditingArray(key, "", 0, [], 0, [])
+    fields = [str(name) for name in as_list(current[1])]
+    values = as_list(current[3])
+    width = len(fields)
+    if not width:
+        return False
+    auto = fields.index("IsAuto") if "IsAuto" in fields else None
+    have: dict[str, list] = {}
+    for start in range(0, len(values), width):
+        row = ["" if value is None else str(value) for value in values[start:start + width]]
+        if auto is None or row[auto] != "Yes":
+            have.setdefault(row[0], row)  # the first row of a name holds its values
+
+    def same(a: str, b) -> bool:
+        try:
+            return abs(float(a) - float(b)) <= 1e-9 * max(1.0, abs(float(b)))
+        except (TypeError, ValueError):
+            return str(a).strip() == str(b).strip()
+
+    for row in rows:
+        held = have.get(str(row[fields[0]]))
+        if held is None or any(name not in fields or not same(held[fields.index(name)], value)
+                               for name, value in row.items() if name not in ignore):
+            return False
+    return True
 
 
 _SEISMIC_LINE = re.compile(
@@ -730,7 +869,9 @@ def make_seismic_per_code(model, path: str, settings: dict, log: SetupLog) -> bo
 
     ETABS only accepts the source distance through the model text file
     (``.$et``), which it writes on every save. The model is saved, the text is
-    edited and opened, and the result is saved over the model again.
+    edited and opened, and the result is saved over the model again. The
+    saved model is then opened: ETABS does not analyse a model it still holds
+    from a text file (RunAnalysis returns 1 and writes no log).
 
     Reloading from text gives every object a new unique name, so it is only
     done on a model without frames (a new blank model): on any other model the
@@ -759,7 +900,8 @@ def make_seismic_per_code(model, path: str, settings: dict, log: SetupLog) -> bo
         handle.write(text)
     try:
         opened = log.check(model.File.OpenFile(edited), "opening the edited model text file")
-        return opened and log.check(model.File.Save(path), "saving the per-code model")
+        return (opened and log.check(model.File.Save(path), "saving the per-code model")
+                and log.check(model.File.OpenFile(path), "opening the saved per-code model"))
     finally:
         if os.path.exists(edited):
             os.remove(edited)
@@ -933,7 +1075,8 @@ class SetupResult:
         if areas:
             out += [f"{h} Slab and wall sections", ""]
             out += table(["Section", "Kind", "Thickness (mm)", "Type"],
-                         [[a["name"], a["kind"], f"{a['thickness']:g}", a["shell"]]
+                         [[a["name"], a["kind"], f"{a['thickness']:g}",
+                           a["shell"] + (", one way" if a.get("one_way") else "")]
                           for a in areas])
         out += [f"{h} Load patterns", ""]
         out += table(["Pattern", "Type", "Self weight"],
@@ -967,17 +1110,19 @@ class SetupResult:
 
 def _attach_or_start(start: bool):
     """The running ETABS, or a new one when ``start`` is set and none is running."""
-    import comtypes.client
+    from etabs_api.core.connection import (
+        DEFAULT_ETABS_PROGRAM_PATH,
+        NOT_RUNNING,
+        etabs_helper,
+        running_etabs,
+    )
 
-    from etabs_api.core.connection import DEFAULT_ETABS_PROGRAM_PATH
-
-    helper = comtypes.client.CreateObject("ETABSv1.Helper")
-    helper = helper.QueryInterface(comtypes.gen.ETABSv1.cHelper)
-    try:
-        return helper.GetObject("CSI.ETABS.API.ETABSObject").SapModel
-    except Exception:
-        if not start:
-            raise RuntimeError("ETABS is not running. Open the model in ETABS first.") from None
+    helper = etabs_helper()
+    etabs = running_etabs(helper)
+    if etabs is not None:
+        return etabs.SapModel
+    if not start:
+        raise RuntimeError(NOT_RUNNING)
     etabs = helper.CreateObject(os.environ.get("ETABS_PROGRAM_PATH", DEFAULT_ETABS_PROGRAM_PATH))
     etabs.ApplicationStart()
     return etabs.SapModel
@@ -1028,7 +1173,7 @@ def setup_model(
     if new_model:
         remove_blank_model_defaults(model)
         make_seismic_per_code(model, path, settings, log)
-    model.File.Save(path)
+    save_and_reopen(model, path, log)
     save_settings(settings, settings_path(path))
     return SetupResult(settings, path, log)
 
@@ -1051,7 +1196,7 @@ def _join(values) -> str:
 
 def ask_settings(settings: dict) -> dict | None:
     """Ask for every input, starting from ``settings``. None when a dialog is closed."""
-    from utilities._gui_helpers import enter_values
+    from utilities._gui_helpers import enter_values, select_option
 
     settings = copy.deepcopy(settings)
 
@@ -1114,9 +1259,26 @@ def ask_settings(settings: dict) -> dict | None:
         return None
     slab_type = next((t for t in SLAB_SHELL_TYPES
                       if t.lower() == answers[slab_type_label].strip().lower()), "Membrane")
-    settings["slabs"] = {"thickness": _numbers(answers["Slab thicknesses (mm)"]),
+    one_way = False
+    slab_thicknesses = _numbers(answers["Slab thicknesses (mm)"])
+    if slab_type == "Membrane" and slab_thicknesses:
+        options = {
+            "Yes - add a one-way slab for each thickness "
+            f"(S_<t>_<concrete>{ONE_WAY_SUFFIX})": True,
+            "No - two-way slabs only": False,
+        }
+        chosen = select_option(
+            "Model Setup - Slab and Wall Sections",
+            "The slabs are membranes, which spread their load two ways. Also add a one-way "
+            "counterpart of each slab?", list(options),
+            default_index=0 if settings["slabs"].get("one_way") else 1)
+        if chosen is None:
+            return None
+        one_way = options[chosen]
+    settings["slabs"] = {"thickness": slab_thicknesses,
                          "type": slab_type,
-                         "concrete_ksi": _numbers(answers["Concrete of the slabs (ksi)"])[0]}
+                         "concrete_ksi": _numbers(answers["Concrete of the slabs (ksi)"])[0],
+                         "one_way": one_way}
     settings["walls"] = {"thickness": _numbers(answers["Wall thicknesses (mm)"]),
                          "concrete_ksi": _numbers(answers["Concrete of the walls (ksi)"])[0]}
     settings.pop("area_concrete_ksi", None)  # replaced by the two inputs above
@@ -1171,8 +1333,6 @@ def ask_settings(settings: dict) -> dict | None:
     settings["extra_reducible_live"] = _names(answers["Extra reducible live patterns"])
 
     # ---- mass source ----
-    from utilities._gui_helpers import select_option
-
     options = {
         f"Yes - include {REDUCIBLE_LIVE_MASS_FACTOR:.0%} of the reducible live load": True,
         "No - dead loads and non-reducible live load only": False,
@@ -1192,8 +1352,6 @@ def ask_settings(settings: dict) -> dict | None:
 
 def run_model_setup() -> str | None:
     """Entry point: connect to ETABS or make a blank model, ask the inputs, define everything."""
-    import comtypes.client
-
     from utilities._gui_helpers import (
         LoadingWindow,
         select_option,
@@ -1201,7 +1359,12 @@ def run_model_setup() -> str | None:
         show_warning,
     )
 
-    from etabs_api.core.connection import DEFAULT_ETABS_PROGRAM_PATH
+    from etabs_api.core.connection import (
+        DEFAULT_ETABS_PROGRAM_PATH,
+        NOT_RUNNING,
+        etabs_helper,
+        running_etabs,
+    )
 
     title = "Model Setup"
     source = select_option(title, "Which model should be set up?", [
@@ -1209,17 +1372,14 @@ def run_model_setup() -> str | None:
     ])
     if source is None:
         return None
-    helper = comtypes.client.CreateObject("ETABSv1.Helper")
-    helper = helper.QueryInterface(comtypes.gen.ETABSv1.cHelper)
+    helper = etabs_helper()
     new_model = source.startswith("A new")
-    try:
-        etabs = helper.GetObject("CSI.ETABS.API.ETABSObject")
+    etabs = running_etabs(helper)
+    if etabs is not None:
         model = etabs.SapModel
-    except Exception:
-        etabs = None
-    if etabs is None:
+    else:
         if not new_model:
-            show_warning("ETABS is not running. Open the model in ETABS first.", title=title)
+            show_warning(NOT_RUNNING, title=title)
             return None
         with LoadingWindow("Starting ETABS..."):
             etabs = helper.CreateObject(
@@ -1281,23 +1441,33 @@ def run_model_setup() -> str | None:
             remove_blank_model_defaults(model)
             # A new model holds nothing else yet, so reloading it from text is safe.
             make_seismic_per_code(model, path, settings, log)
-        model.File.Save(path)
+        window.update("Saving and opening the model again")
+        save_and_reopen(model, path, log)
     save_settings(settings, settings_path(path))
     save_settings(settings, defaults_path())
 
-    values = seismic_values(settings)
-    lines = [f"{count} {what}" for what, count in log.counts.items()]
-    message = (
-        "Defined:\n" + "\n".join(lines)
-        + f"\n\nCa = {values['ca']:.4f}, Cv = {values['cv']:.4f}, Ev = {values['ev']:.3f} D"
-        + f"\nResponse spectrum scale factor = {values['scale']:.1f} (g I / R, not yet scaled "
-        "to the static base shear)"
-        + f"\n\nSaved as:\n{path}"
-    )
-    if log.problems:
-        message += f"\n\n{len(log.problems)} items failed:\n" + "\n".join(log.problems[:12])
-    show_warning(message, title=title)
+    setup_summary(log, settings, path, new_model).show(popup=True)
     return path
+
+
+def setup_summary(log: SetupLog, settings: dict, path: str, new_model: bool = False):
+    """The closing summary of a model setup."""
+    from utilities.run_summary import RunSummary
+
+    values = seismic_values(settings)
+    summary = RunSummary("sdt setup", path)
+    summary.add("Model", "new blank model" if new_model else "the open model")
+    for what, count in log.counts.items():
+        summary.add(what[:1].upper() + what[1:], count)
+    summary.add("Seismic coefficients", f"Ca {values['ca']:.4f}, Cv {values['cv']:.4f}, "
+                                        f"Ev {values['ev']:.3f} D")
+    summary.add("Spectrum scale factor", f"{values['scale']:.1f} (g I / R; sdt analyze scales it "
+                                         "to the static base shear)")
+    for problem in log.problems:
+        summary.fail(problem)
+    summary.file("Model", path)
+    summary.file("Setup inputs", settings_path(path))
+    return summary
 
 
 if __name__ == "__main__":

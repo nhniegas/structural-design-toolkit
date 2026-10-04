@@ -424,6 +424,82 @@ class DualListboxSelector:
         return self.selected_items
 
 
+def run_loading_window(message: str) -> None:
+    """The progress window itself. It runs in a process of its own (see
+    ``LoadingWindow``) and shows the lines it reads from its standard input."""
+    import queue
+    import threading
+    from tkinter import ttk
+
+    root = tk.Tk()
+    root.title("Background Processing")
+
+    width, height = 380, 130
+    x = (root.winfo_screenwidth() // 2) - (width // 2)
+    y = (root.winfo_screenheight() // 2) - (height // 2)
+
+    root.geometry(f"{width}x{height}+{x}+{y}")
+    root.resizable(False, False)
+    root.attributes("-topmost", True)
+    root.protocol("WM_DELETE_WINDOW", lambda: None)
+
+    label = tk.Label(root, text=message, font=("Arial", 9, "bold"), wraplength=340)
+    label.pack(pady=(22, 10))
+
+    progress = ttk.Progressbar(root, mode="indeterminate", length=300)
+    progress.pack(pady=5)
+    progress.start(10)
+
+    # Progress lines sent by LoadingWindow.update() arrive on stdin, one per line.
+    detail = tk.Label(root, text="", font=("Arial", 9), wraplength=340, justify="center")
+    updates: queue.Queue = queue.Queue()
+
+    def read_updates():
+        try:
+            sys.stdin.reconfigure(encoding="utf-8")
+            for line in sys.stdin:
+                updates.put(line.rstrip("\n").replace("\t", "\n"))
+        except Exception:
+            pass
+
+    def show_updates():
+        text = None
+        while not updates.empty():
+            text = updates.get_nowait()
+        if text is not None:
+            if not detail.winfo_ismapped():
+                detail.pack(pady=(6, 0))
+            detail.config(text=text)
+            root.update_idletasks()
+            needed = height + detail.winfo_reqheight() + 16
+            if needed > root.winfo_height():
+                root.geometry(f"{width}x{needed}+{x}+{y}")
+        root.after(100, show_updates)
+
+    threading.Thread(target=read_updates, daemon=True).start()
+    root.after(100, show_updates)
+
+    root.lift()
+    root.focus_force()
+    root.mainloop()
+
+
+LOADING_WINDOW_FLAG = "--loading-window"  # main.py runs run_loading_window for it
+
+
+def loading_window_command(message: str) -> list[str]:
+    """The command that opens the progress window in a process of its own.
+
+    The packaged program has no separate Python, so it starts itself with a
+    hidden first argument that main.py turns into ``run_loading_window``.
+    """
+    if getattr(sys, "frozen", False):
+        return [sys.executable, LOADING_WINDOW_FLAG, message]
+    return [sys.executable, "-c",
+            "import sys; from utilities._gui_helpers import run_loading_window; "
+            "run_loading_window(sys.argv[1])", message]
+
+
 class LoadingWindow:
     """Displays a process-isolated loading window centered on screen during heavy ETABS tasks."""
 
@@ -442,80 +518,17 @@ class LoadingWindow:
 
     def start(self):
         """Starts the loading popup."""
-        gui_script = f"""import ctypes
-import queue
-import sys
-import threading
-import tkinter as tk
-from tkinter import ttk
-
-try:
-    ctypes.windll.shcore.SetProcessDpiAwareness(2)
-except Exception:
-    try:
-        ctypes.windll.shcore.SetProcessDpiAwareness(1)
-    except Exception:
-        pass
-
-root = tk.Tk()
-root.title("Background Processing")
-
-width, height = 380, 130
-screen_w = root.winfo_screenwidth()
-screen_h = root.winfo_screenheight()
-x = (screen_w // 2) - (width // 2)
-y = (screen_h // 2) - (height // 2)
-
-root.geometry(f"{{width}}x{{height}}+{{x}}+{{y}}")
-root.resizable(False, False)
-root.attributes("-topmost", True)
-root.protocol("WM_DELETE_WINDOW", lambda: None)
-
-label = tk.Label(root, text="{self.message}", font=("Arial", 9, "bold"), wraplength=340)
-label.pack(pady=(22, 10))
-
-progress = ttk.Progressbar(root, mode="indeterminate", length=300)
-progress.pack(pady=5)
-progress.start(10)
-
-# Progress lines sent by LoadingWindow.update() arrive on stdin, one per line.
-detail = tk.Label(root, text="", font=("Arial", 9), wraplength=340, justify="center")
-updates = queue.Queue()
-
-def read_updates():
-    try:
-        sys.stdin.reconfigure(encoding="utf-8")
-        for line in sys.stdin:
-            updates.put(line.rstrip("\\n").replace("\\t", "\\n"))
-    except Exception:
-        pass
-
-def show_updates():
-    text = None
-    while not updates.empty():
-        text = updates.get_nowait()
-    if text is not None:
-        if not detail.winfo_ismapped():
-            detail.pack(pady=(6, 0))
-        detail.config(text=text)
-        root.update_idletasks()
-        needed = height + detail.winfo_reqheight() + 16
-        if needed > root.winfo_height():
-            root.geometry(f"{{width}}x{{needed}}+{{x}}+{{y}}")
-    root.after(100, show_updates)
-
-threading.Thread(target=read_updates, daemon=True).start()
-root.after(100, show_updates)
-
-root.lift()
-root.focus_force()
-root.mainloop()
-"""
+        # the window's process must find this package wherever the command was typed
+        project = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        environment = dict(os.environ)
+        environment["PYTHONPATH"] = os.pathsep.join(
+            [project] + [p for p in environment.get("PYTHONPATH", "").split(os.pathsep) if p])
         self.proc = subprocess.Popen(
-            [sys.executable, "-c", gui_script],
+            loading_window_command(self.message),
             stdin=subprocess.PIPE,
             text=True,
             encoding="utf-8",
+            env=environment,
         )
         time.sleep(0.5)
 
@@ -542,6 +555,64 @@ root.mainloop()
         if self.proc:
             self.proc.terminate()
             self.proc = None
+
+
+def show_summary(text: str, title: str = "Summary") -> None:
+    """Show a command's closing summary in a window, until it is closed.
+
+    The text is shown in a fixed-width font so its columns line up, and can be
+    selected and copied. Enter, Escape or OK closes it.
+    """
+    lines = text.strip("\n").split("\n")
+    root = tk.Tk()
+    root.title(title)
+    root.attributes("-topmost", True)
+
+    def close(_event=None):
+        try:
+            root.quit()
+            root.destroy()
+        except tk.TclError:
+            pass
+
+    root.protocol("WM_DELETE_WINDOW", close)
+    frame = tk.Frame(root, padx=10, pady=10)
+    frame.pack(fill=tk.BOTH, expand=True)
+    columns = min(max(len(line) for line in lines) + 2, 150)
+    rows = min(len(lines) + 1, 38)
+    box = tk.Text(frame, width=columns, height=rows, wrap=tk.NONE, font=("Consolas", 10),
+                  relief=tk.FLAT, background=root.cget("background"))
+    vertical = tk.Scrollbar(frame, orient=tk.VERTICAL, command=box.yview)
+    horizontal = tk.Scrollbar(frame, orient=tk.HORIZONTAL, command=box.xview)
+    box.configure(yscrollcommand=vertical.set, xscrollcommand=horizontal.set)
+    box.tag_configure("attention", foreground="#C00000", font=("Consolas", 10, "bold"))
+    attention = False
+    for line in lines:
+        if line.startswith("Needs attention"):
+            attention = True
+        elif not line.strip():
+            attention = False
+        box.insert(tk.END, line + "\n", "attention" if attention else ())
+    box.configure(state=tk.DISABLED)  # read only; the text can still be selected and copied
+    box.grid(row=0, column=0, sticky="nsew")
+    if len(lines) + 1 > rows:
+        vertical.grid(row=0, column=1, sticky="ns")
+    if max(len(line) for line in lines) + 2 > columns:
+        horizontal.grid(row=1, column=0, sticky="ew")
+    frame.rowconfigure(0, weight=1)
+    frame.columnconfigure(0, weight=1)
+    button = tk.Button(frame, text="OK", width=12, command=close)
+    button.grid(row=2, column=0, columnspan=2, pady=(10, 0))
+    root.bind("<Return>", close)
+    root.bind("<Escape>", close)
+    root.update_idletasks()
+    width, height = root.winfo_reqwidth(), root.winfo_reqheight()
+    x = max((root.winfo_screenwidth() - width) // 2, 0)
+    y = max((root.winfo_screenheight() - height) // 3, 0)
+    root.geometry(f"+{x}+{y}")
+    button.focus_set()
+    root.lift()
+    root.mainloop()
 
 
 def show_warning(message: str, title: str = "Warning", topmost: bool = True) -> None:

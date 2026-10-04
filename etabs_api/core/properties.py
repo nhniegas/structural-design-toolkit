@@ -20,8 +20,14 @@ class Properties:
         return self._names(self.connector.sap_model.PropMaterial, "PropMaterial.GetNameList")
 
     def frame_sections(self) -> list[str]:
-        """Return frame-section property names."""
-        return self._names(self.connector.sap_model.PropFrame, "PropFrame.GetNameList")
+        """Return frame-section property names.
+
+        ``PropFrame.GetNameList`` lists one shape type at a time and nothing
+        for type 0, so every property is read instead.
+        """
+        result = self.connector.sap_model.PropFrame.GetAllFrameProperties_2()
+        ensure_success(result, "PropFrame.GetAllFrameProperties_2")
+        return [str(name) for name in as_list(result[1])]  # (count, names, ..., status)
 
     def area_sections(self) -> list[str]:
         """Return area-section property names."""

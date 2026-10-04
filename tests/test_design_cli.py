@@ -125,6 +125,9 @@ def dialogs(monkeypatch, tmp_path):
     monkeypatch.setattr(_gui_helpers, "select_option", lambda *a, **k: answers["option"])
     monkeypatch.setattr(_gui_helpers, "select_save_file", lambda **k: answers["save"])
     monkeypatch.setattr(_gui_helpers, "show_warning", lambda message, **k: warnings.append(message))
+    summaries = []
+    monkeypatch.setattr(_gui_helpers, "show_summary",
+                        lambda text, title="": summaries.append((title, text)))
 
     class _NoWindow:  # no loading window during the tests
         def __init__(self, *args, **kwargs):
@@ -141,6 +144,7 @@ def dialogs(monkeypatch, tmp_path):
 
     monkeypatch.setattr(_gui_helpers, "LoadingWindow", _NoWindow)
     answers["warnings"] = warnings
+    answers["summaries"] = summaries
     return answers
 
 
@@ -157,6 +161,8 @@ def test_run_prints_when_asked(dialogs, capsys):
     dialogs["option"] = "Print the results in the terminal"
     assert composite.run() is not None
     assert "phi Pn (kN)" in capsys.readouterr().out
+    title, text = dialogs["summaries"][-1]           # the closing summary window
+    assert title.startswith("Summary - sdt composite") and "printed in the terminal" in text
 
 
 def test_run_exports_when_asked(dialogs, monkeypatch, tmp_path, capsys):

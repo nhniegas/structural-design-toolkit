@@ -268,10 +268,12 @@ def deflection_combinations(pattern_types: dict[str, int]) -> list[Combination]:
     )
 
 
-def ensure_deflection_combinations(model) -> list[str]:
+def ensure_deflection_combinations(model, only=None) -> list[str]:
     """Add the deflection combinations a model does not have yet. Returns those added.
 
-    Adding combinations keeps the analysis results.
+    ``only`` limits it to those names (the roles the user asked the toolkit to
+    add); None adds every missing one. Adding combinations keeps the analysis
+    results.
     """
     patterns = model.LoadPatterns
     names = [str(n) for n in patterns.GetNameList(0, [])[1]]
@@ -280,7 +282,7 @@ def ensure_deflection_combinations(model) -> list[str]:
     existing = {str(n) for n in model.RespCombo.GetNameList(0, [])[1]}
     added = []
     for combo in deflection_combinations(types):
-        if combo.name in existing:
+        if combo.name in existing or (only is not None and combo.name not in only):
             continue
         model.RespCombo.Add(combo.name, 0)
         for case, factor in combo.cases:

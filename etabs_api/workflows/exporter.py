@@ -20,6 +20,9 @@ class ETABSDataExporter:
         self.etabs = etabs_instance
         self.last_forces = None  # FactoredForces of the last display_factored_loads
         self.tables: dict[str, pd.DataFrame] = {}
+        # {standard deflection combination: the model's combination for that role};
+        # None: the standard names (model_inputs.ask_deflection_roles)
+        self.deflection_roles: dict[str, str] | None = None
 
     def _write_dataframe_to_excel(self, df: pd.DataFrame, sheet_name: str, **_) -> None:
         """Keep a table under its name (the name of its old workbook sheet)."""
@@ -45,7 +48,9 @@ class ETABSDataExporter:
                 names += table["UniqueName"].astype(str).tolist()
         if not names:
             raise ValueError("The ETABS model has no beams or columns.")
-        return [m for m in dict.fromkeys(names) if not m.isnumeric()]
+        from etabs_api.workflows.analysis_forces import designed_names
+
+        return designed_names(self.etabs, dict.fromkeys(names))
 
     def display_factored_loads(
         self,
@@ -70,6 +75,8 @@ class ETABSDataExporter:
         if forces.empty:
             raise ValueError("No member forces were found for the chosen combinations.")
         forces[["P", "V2", "V3"]] = forces[["P", "V2", "V3"]] / 1000
+        if "P_sustained" in forces.columns:
+            forces["P_sustained"] = forces["P_sustained"] / 1000
         forces[["T", "M2", "M3"]] = forces[["T", "M2", "M3"]] / 1000000
         self._write_dataframe_to_excel(
             df=forces,
@@ -97,11 +104,16 @@ class ETABSDataExporter:
 
         from etabs_api.workflows.load_combinations import ensure_deflection_combinations
 
-        added = ensure_deflection_combinations(self.etabs.sap_model)
+        # Each role reads the model's own combination where the user picked one;
+        # a role mapped to its standard name is added when the model lacks it.
+        roles = self.deflection_roles or {name: name for name in DEFLECTION_COMBOS}
+        added = ensure_deflection_combinations(
+            self.etabs.sap_model, only={role for role, name in roles.items() if role == name})
         if added:
             print("Deflection combinations added to the model: " + ", ".join(added))
         combos = self.get_load_combinations()
-        present = [name for name in DEFLECTION_COMBOS if name in combos]
+        roles = {role: name for role, name in roles.items() if name in combos}
+        present = list(dict.fromkeys(roles.values()))
         if not present:
             return None
         beams = self.etabs.get_data("Beam Object Connectivity")
@@ -116,6 +128,15 @@ class ETABSDataExporter:
         table["M3"] = table["M3"] / 1e6
         table["V2"] = table["V2"] / 1e3
         table = table[["Story", "UniqueName", "Combo", "Station", "M3", "V2"]]
+        # The deflection check knows the roles by their standard names: the rows
+        # of the model's own combination are relabelled with the role they serve.
+        table["Model combination"] = table["Combo"].astype(str)
+        relabelled = [table[table["Combo"].astype(str).eq(name)].assign(Combo=role)
+                      for role, name in roles.items()]
+        table = pd.concat(relabelled, ignore_index=True)
+        if table.empty:
+            return None
+        actual_of = {role: name for role, name in roles.items()}
 
         # downward tip deflection from a rigid rotation of the support joint:
         # -(R x r)_z = -L (Rx dy - Ry dx), r from the support to the tip
@@ -127,9 +148,13 @@ class ETABSDataExporter:
         tables.SetLoadCombinationsSelectedForDisplay(present)
         moves = self.etabs._read_database_table("Joint Displacements")
         moves = moves[moves["OutputCase"].astype(str).isin(present)]
-        rotation = {(str(j), str(c)): (float(rx), float(ry)) for j, c, rx, ry in zip(
+        by_actual = {(str(j), str(c)): (float(rx), float(ry)) for j, c, rx, ry in zip(
             moves["UniqueName"], moves["OutputCase"], pd.to_numeric(moves["Rx"]),
             pd.to_numeric(moves["Ry"]))}
+        joints = {joint for joint, _ in by_actual}
+        rotation = {(joint, role): by_actual[(joint, actual)]
+                    for role, actual in actual_of.items() for joint in joints
+                    if (joint, actual) in by_actual}
         ends = {str(n): (str(i), str(j)) for n, i, j in zip(
             beams["UniqueName"], beams["UniquePtI"], beams["UniquePtJ"])}
 
@@ -312,12 +337,45 @@ class ETABSDataExporter:
             if connectivity_frames
             else pd.DataFrame()
         )
+        connectivity = self._with_beam_lines(connectivity)
         self._write_dataframe_to_excel(
             df=connectivity,
             sheet_name=sheet_name,
             start_cell=start_cell,
             header_color=header_color,
         )
+        return connectivity
+
+    def _with_beam_lines(self, connectivity: pd.DataFrame) -> pd.DataFrame:
+        """Add ``Line``: the beam line of every beam.
+
+        A tagged beam carries its line in the name (``2GX-1``, ``2GX-1A``).
+        For any other name the line is found from the geometry: beams in line
+        that meet at a joint with no column. The deflection check and the
+        design loop treat the beams of one line as one.
+        """
+        if connectivity.empty or "UniqueName" not in connectivity.columns:
+            return connectivity
+        from design.beam_deflection import _MARK
+        from etabs_api.workflows.model_inputs import geometric_lines
+
+        try:
+            points = self.etabs.get_data("Point Object Connectivity")
+        except RuntimeError:
+            points = None
+        geometric = geometric_lines(connectivity, points)
+        lines = []
+        for name, kind in zip(connectivity["UniqueName"].astype(str),
+                              connectivity["DesignType"].astype(str)):
+            match = _MARK.match(name)
+            if kind != "Beam":
+                lines.append(None)
+            elif match:
+                lines.append((match.group(1) + match.group(2) + "-" + match.group(3)).upper())
+            else:
+                lines.append(geometric.get(name, name))
+        connectivity = connectivity.copy()
+        connectivity["Line"] = lines
         return connectivity
 
     def display_orientation_data(self) -> None:
