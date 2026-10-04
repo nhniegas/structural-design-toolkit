@@ -111,3 +111,11 @@ dialog answers just before it.
 Model files (`.EDB`) are not needed. Text output and the `.xlsx` results are
 enough. Remove client names or project details if the models are
 confidential.
+
+---
+
+## Follow-up requests
+
+- `REQUEST_02.md`: drift story height, identical wind drift, short
+  footing-level columns, joint shear inputs, default deflection combinations,
+  earth cover crash, untagged default.
