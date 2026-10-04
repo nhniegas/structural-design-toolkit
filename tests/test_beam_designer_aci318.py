@@ -56,7 +56,7 @@ def _install_stand_ins_if_needed() -> None:
 _install_stand_ins_if_needed()
 
 from design import beam_designer_aci318 as beam  # noqa: E402
-from design.aci318_config import CODE, override  # noqa: E402
+from design.code_config import CODE, override  # noqa: E402
 
 # --------------------------------------------------------------------------
 # UNIT CONVERSIONS (published examples are in US units, the code works in SI)

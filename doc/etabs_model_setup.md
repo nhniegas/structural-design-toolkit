@@ -42,12 +42,13 @@ Everything after this happens in dialogs. Closing any dialog cancels the run and
 
 ### 3. Type the inputs
 
-Six dialogs follow. Each box already holds the value you used last time (or the default on the first run). Lists are separated by commas. Press Enter or **OK / Confirm** to go on.
+Seven dialogs follow. Each box already holds the value you used last time (or the default on the first run). Lists are separated by commas. Press Enter or **OK / Confirm** to go on.
 
 | Dialog | Boxes | Example |
 |---|---|---|
 | Materials | Concrete strengths (ksi); rebar grades (ksi) | `4, 5, 6` and `60` give C04, C05, C06 and G60 |
 | Frame Sections | Concrete and rebar of the sections; then for each kind of section a range as `min, max, step` in mm | Girders G: width `300, 600, 100`, depth `500, 1000, 100`. Leave a range blank to skip that kind |
+| Slab and Wall Sections | Slab thicknesses (mm); slab type (Membrane, Shell-Thin or Shell-Thick); concrete of the slabs (ksi); wall thicknesses (mm); concrete of the walls (ksi) | `100, 125, 150, 200`, `Membrane`, `4`, `150, 200, 250, 300`, `5`. Leave a list blank to skip it |
 | Seismic (UBC 97) | Zone factor Z, soil profile type, source type, distance (km), I, R, Ct, eccentricity ratio | `0.4`, `SD`, `A`, `8`, `1`, `8.5`, `0.03`, `0.05` |
 | Wind (ASCE 7-10) | Wind speed (as typed in ETABS, mph), exposure type, Kzt, gust factor, Kd | `150`, `B`, `1`, `0.85`, `0.85` |
 | Load Patterns | Extra super dead, live and reducible live patterns | `ELEVATOR DEAD, CONCRETE PAD` |
@@ -59,6 +60,7 @@ Notes on the section ranges:
 - Rectangular columns `CR` take one range for the side. Every pair of sides is made whose shorter side is at least half the longer one, in both orientations (`CR_800X600` and `CR_600X800`).
 - Circular columns `C` take a diameter range.
 - Each section is made once per concrete strength listed in "Concrete of the sections", so a long list multiplies the number of sections.
+- Slabs and walls each have their own concrete ("Concrete of the slabs", "Concrete of the walls"), the first frame section concrete by default. Both are always defined as materials, even when they are not in the Materials list.
 
 ### 4. Wait for the closing message
 
@@ -97,16 +99,19 @@ Anything with the same name as a definition the setup makes is overwritten. Ever
 |---|---|
 | Concrete | `C05` for 5 ksi: f'c = ksi / 0.145 MPa, E = 4700 sqrt(f'c), 23.56 kN/m3 |
 | Rebar | `G60` for grade 60: fy = 413.69 MPa, fu = 1.5 fy |
-| Beam sections | `G_`, `B_`, `FTB_` + `<width>X<depth>_<concrete>_<rebar>` from the size ranges. Depth is at least the width, and width / depth at least 0.3. Cover 60 mm, I22 and I33 x 0.35 |
-| Rectangular columns | `CR_<width>X<depth>_...`, shorter side at least half the longer one, both orientations. Cover 40 mm, I22 and I33 x 0.70, to be designed |
-| Circular columns | `C_<diameter>_...`, same modifiers |
+| Beam sections | `G_`, `B_`, `FTB_` + `<width>X<depth>_<concrete>_<rebar>` from the size ranges. Depth is at least the width, and width / depth at least 0.3. Cover 60 mm. No stiffness modifiers (1.0): assign the cracked-section modifiers to the frames in ETABS; `xs check` and `xs drift` check them |
+| Rectangular columns | `CR_<width>X<depth>_...`, shorter side at least half the longer one, both orientations. Cover 40 mm, to be designed. No stiffness modifiers (1.0) |
+| Circular columns | `C_<diameter>_...`, no stiffness modifiers |
+| Slabs | `S_<thickness>_<concrete>`, for example `S_150_C04`, of the type chosen (Membrane by default). Stiffness modifiers 1.0 |
+| Walls | `SW_<thickness>_<concrete>_<rebar>`, thin shell, the name `xs grids` gives its walls. Stiffness modifiers 1.0 |
 | Load patterns | The office standard set, plus extra super dead, live and reducible live patterns you type. Each gets its linear static load case. Only `SELFWEIGHT` carries self weight |
 | Seismic patterns | `EQXPE`, `EQXNE`, `EQXSD`, `EQYPE`, `EQYNE`, `EQYSD` as UBC 97, program-calculated period |
 | Wind patterns | `WX`, `WY` as ASCE 7-10 on the diaphragms |
 | Response spectrum | Function `RSUBC97`, 5 % damping |
-| Load cases | `Modal` (eigen, 3 modes per story, at least 12), `RSAX` (U1) and `RSAY` (U2): CQC, SRSS, 5 % eccentricity, scale factor g I / R |
+| Load cases | `Modal` (eigen, 3 modes per story, at least 12), `RSAX` (U1) and `RSAY` (U2): CQC, SRSS, 5 % eccentricity, scale factor g I / R. Also `RSAXD` and `RSAYD`, the same cases for the drift check: `xs analyze` scales them to the drift patterns `EQXSD` / `EQYSD` (period not capped, NSCP 208.6.5.2). They are in no combination: NSCP checks drift with E alone, ΔM = 0.7 R ΔS |
 | Mass source | From the load patterns only: every dead and super dead pattern at 1.0, `LIVENRED` at 1.0, and reducible live patterns at 0.20 when chosen. Element self mass and added mass are off, since `SELFWEIGHT` already carries the weight |
 | P-delta | Iterative, based on loads, tolerance 0.0001: every dead and super dead pattern at 1.0, `LIVENRED` at 1.0, and reducible live patterns at 0.50 (always) |
+| P-delta in the load cases | Every linear static case uses **Use Preset P-Delta Settings**. The cases ETABS makes with the load patterns start as "Use Nonlinear Case" (None) and are switched |
 | Load combinations | See below |
 
 A new blank model also has the default `Dead` and `Live` patterns of ETABS removed.
@@ -131,6 +136,8 @@ Names are `<set> <number> <expression>`, for example `ULS 107 (1.2 + Ev) DL + f 
 | `ULS` | Strength. These are the concrete design combinations |
 | `SLS` | Service checks |
 | `SSLC` | Special seismic combinations with Em = 2.8 Eh |
+| `DRIFT` | Seismic drift, NSCP 208.6.4.1, using the 203.3 combinations 203-5 and 203-7, `(1.2 + Ev) DL + f LL ± 1.0 E` and `(0.9 - Ev) DL ± 1.0 E`, with ρ = 1.0 (208.6.1). E is a drift case: `EQXSD` / `EQYSD` (period not capped), or `RSAXD` / `RSAYD` (no sign: the spectrum is an envelope). The scaling by `xs analyze` changes the cases, so the combinations follow it with no change. Envelope `ENVE_DRIFT` |
+| `WDRIFT` | Wind drift, 203-3, 203-4 and 203-6 on `WX` and `WY`. NSCP sets no limit; `xs check` asks for one (h/400 by default). Envelope `ENVE_WDRIFT` |
 | `DEF` | Deflection checks, unfactored: `DEF 100 1.0 DL`, `DEF 101 1.0 DL + 1.0 LL`, `DEF 102 1.0 DL + 0.25 LL` (sustained) and `DEF 103 1.0 DL + 1.0 Lr` |
 | `EQ_COMBO_01` to `08`, `RSA_COMBO_01` to `08` | The eight directional combinations: 100 % in one direction with 30 % in the other |
 | `ENVE_...` | Envelopes |

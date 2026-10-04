@@ -21,14 +21,17 @@ xs design
 | Column questions | Bottom-story cover and vertical bars carried down; asked once for every iteration |
 | Deflection limit | L/480 (partitions likely to be damaged) or L/240 |
 | Loop limits | Size increment past the setup ranges (50 mm), largest beam width and depth, largest column side, the downsizing threshold (0.7), the beam line similarity (30 %) and the number of rounds (5). Remembered for next time |
+| Drift of the final sizes | Where to read the drift, static and/or spectrum drift combinations, and the wind limit, as in [`xs drift`](etabs_drift.md) |
 | Output folder | For the final results, calculations and schedules |
 | Size ranges | Only for section families that have none in the setup inputs (for example `FTB` tie beams); saved with the model's setup inputs |
 
 The model is saved as `<model> - DESIGN.EDB` and the loop works on that copy; the original is not changed. At the end the final design is written to the output folder (results, calculations, schedules, as `xs beams` and `xs columns` do) and stored in `<model> - DESIGN - design data.pkl`, so `xs columns` can be run again on it. The log `<model> - DESIGN log.txt` lists every iteration.
 
+**Drift.** Drift depends on the final member sizes, so it is checked once at the end, with `xs drift` on the final working copy, and saved as `<model> - DESIGN - Drift.txt` in the output folder. The sections are **not** resized for drift. If a check fails, the log and the terminal say so: reconfigure the model for drift (stiffer members or walls) and run `xs design` again.
+
 ## One iteration
 
-1. Analysis, with the response spectrum scaled to 100 % of the static base shear. The scale factors start from their original values every time, so they follow the current stiffness.
+1. Analysis, with the response spectrum scaled to 100 % of the static base shear. The scale factors start from the unscaled spectrum, g I / R from the model's seismic patterns, every time. So they follow the current stiffness and do not carry over a scaling from an earlier `xs analyze`.
 2. Extraction: forces from the analysis results, service loads for the deflection checks, frame data and connectivity (in memory).
 3. Beam design, with the deflection checks.
 4. In the column phase, column design (it uses the beam bars at the joints).
@@ -55,15 +58,15 @@ The loop stops when the final check changes nothing (converged) or after the num
 - A column is never smaller than the column above it.
 - Transverse detailing failures (tie spacing, confinement) do not resize a column: they are solved with ties, and are reported.
 - **Downsizing**: a passing member whose ratios are all below the threshold goes one size smaller and the next analysis confirms it. Beams: tension steel ratio, shear and deflection ratio; columns: flexure, shear and joint shear utilization, steel ratio, beam-column strength ratio at least 1.2 / threshold. A member that grew in this run is never made smaller again, and beams never go below the ACI 318-14 Table 9.3.1.1 depth (L/16, cantilevers L/8).
-- Sizes follow the setup ranges of the family, then grow by the increment up to the largest size given. Missing sections are created with the setup stiffness modifiers and rebar data. Concrete and rebar never change.
+- Sizes follow the setup ranges of the family, then grow by the increment up to the largest size given. Missing sections are created with the setup rebar data and no stiffness modifiers; the modifiers assigned to the frames stay with them when their section changes. Concrete and rebar never change.
 
 ## Time
 
-The column design takes most of the time (about 10 minutes for the 44 columns of the test model). A round with several column iterations takes accordingly long.
+On the test model (103 beams, 47 columns) a beam iteration takes about 35 s and a column iteration about 1 to 1.5 minutes (analysis, extraction and column design, which is about 47 s). See the interaction surface in the [concrete guide](concrete_beam_column_design.md#column-strength-the-biaxial-interaction-surface).
 
 ## Not covered yet
 
-- Drift, irregularity and torsion checks (see [analysis checks](etabs_analysis.md)).
+- Resizing for drift (it is only checked and reported), and the irregularity and torsion checks.
 - Redesigning only the members that changed between column iterations.
 
 ## Tests

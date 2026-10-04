@@ -57,7 +57,7 @@ _install_stand_ins_if_needed()
 import ezdxf  # noqa: E402
 
 from design import column_designer_aci318 as col  # noqa: E402
-from design.aci318_config import CODE, override  # noqa: E402
+from design.code_config import CODE, override  # noqa: E402
 
 # --------------------------------------------------------------------------
 # UNIT CONVERSIONS
@@ -1515,3 +1515,15 @@ def test_schedule_floor_level_is_the_range_the_column_spans(tmp_path):
         report, str(target), 25.0, 40.0, True, story_order=["GF", "2F", "PD1"])
     texts = {entity.dxf.text for entity in ezdxf.readfile(target).modelspace().query("TEXT")}
     assert {"FDN TO GF", "GF TO 2F", "2F TO PD1"} <= texts
+
+
+def test_circular_smrf_spiral_detailing_passes():
+    """A spiral supports every bar: its 'N/A for continuous spiral' bar-support result
+    must not fail the detailing (it made every circular SMRF column fail)."""
+    engine = col.ColumnFlexureDesign(0, 0, 700.0, 27.6, 414, 414, 25, 12, 40,
+                                     shape="circular", is_smrf=True)
+    layout = next(lay for lay in col._enumerate_column_bar_layouts(engine, 24)
+                  if sum(c for _, _, c in lay) == 12)
+    passes, _, _ = col._column_transverse_candidate_passes(
+        pd.Series({"UniqueName": "C1C"}), pd.DataFrame(), engine, layout, 2.0e6, True)
+    assert passes is True

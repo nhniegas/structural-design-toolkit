@@ -52,7 +52,7 @@ Answers are remembered and offered again next time. Every named member (not a nu
 - `design/beam_designer_aci318.py`: beam design (`design_beams`), results file, beam schedule DXF and calculation report.
 - `design/beam_deflection.py`: deflection checks.
 - `design/column_designer_aci318.py`: column design and SMRF checks (`design_columns`), results file, column schedule DXF and calculation report.
-- `design/aci318_config.py`: every ACI constant used by both designers, each with its clause.
+- `design/code_config.py`: every code value, each with its clause: ACI 318M-14 (`CODE`, used by both designers) and NSCP 2015 chapter 2 (`NSCP`: loads, live load reduction, earthquake).
 - `etabs_api/workflows/exporter.py`, `analysis_forces.py`, `tributary.py`: the extraction and the factored forces from the analysis results.
 - `utilities/_gui_helpers.py`: dialogs and the loading window; `utilities/_calc_report.py`: the PDF layout.
 
@@ -62,7 +62,7 @@ Defining the materials, sections, loads and combinations of the ETABS model is a
 
 `xs tag` (or `python main.py tag`) gives every beam and column in the open ETABS model a unique name: beams as `<level><type>-<number><letter>`, for example `2GX-10B`, and columns as `<level>-<type><number><letter>`, for example `3-C5C`. The extraction only reads named members, so tag the model before `xs beams`.
 
-The model is first saved as `<model name> - TAGGED.EDB` in its own folder and the names are changed in that copy. The original file is not changed. ETABS has the tagged copy open afterwards.
+`xs tag` asks where the tags go: into a copy saved beside the model as `<model name> - TAGGED.EDB` (the default; the original file is not changed and ETABS has the tagged copy open afterwards), or into the model itself, which is then saved with the new names.
 
 | Part | Rule |
 |---|---|
@@ -85,7 +85,7 @@ The two questions:
 
 | Question | Yes means |
 |---|---|
-| Reduce the reducible live load (NSCP 2015 205.5)? | Each member's reducible live load (patterns of type Reducible Live) is multiplied by its own factor. A further question chooses the tributary area method. See below |
+| Reduce the reducible live load? | Each member's reducible live load (patterns of type Reducible Live) is multiplied by its own factor. Further questions choose the rule (NSCP 2015 205.5 or ASCE 7-10 4.7) and the tributary area method. See below |
 | Include pattern live load on the beams (ACI 318-14 6.4.2)? | Each beam span is also designed with its live load as a simple span (the largest sagging moment) and with fixed ends (the largest hogging moment), times the factor you type (default 0.75). A released end stays pinned. Cantilevers are left as analysed. Columns are not patterned |
 
 What is read:
@@ -114,15 +114,20 @@ One combination can stand for several sets of forces. `FACTORED LOADS` stores th
 - **Beams** take the envelope of all rows of a combination, so the maximum and minimum rows carry everything.
 - **Columns** are checked against every permutation separately. The report and the loading window show only the plain combination name. For flexure and axial load each report row shows the governing permutation (a failing one if there is one, otherwise the highest utilization). Shear and joint values are the worst across the permutations.
 
-### Live load reduction (NSCP 2015 205.5)
+### Live load reduction
 
-R = 0.86 (A - 14) percent, A the tributary area in m2, and at most:
+A dialog asks for the rule. NSCP 2015 governs; ASCE 7 is the alternate it allows (NSCP 205.6, and 405.2.3).
+
+**NSCP 2015 205.5.** R = 0.86 (A - 14) percent, with A the tributary area in m2. NSCP prints R = 0.08 (A - 15), which is the UBC 97 rate per ft2; 0.86 per m2 above 14 m2 is its metric form. R is at most:
 
 - 40 % for beams and for columns that receive load from one level only, 60 % for other columns;
-- 23.1 (1 + D/L) %, with D and L the member's dead and live load from the analysis;
-- none for a member supporting reducible live load above 4.8 kPa (more than 0.5 m2 of such floor), except 20 % for columns receiving load from more than one level.
+- 23.1 (1 + D/L) %, with D and L the member's dead and live load from the analysis.
 
-Only the patterns of type Reducible Live are reduced.
+**ASCE 7-10 4.7** (the same in 7-16). L = Lo (0.25 + 4.57 / sqrt(K_LL A_T)), where K_LL is 4 for columns and 2 for beams (interior members, and edge members without cantilever slabs). It applies only when K_LL A_T is at least 37.16 m2. L is at least 0.50 Lo for beams and one-level columns, and 0.40 Lo for other columns.
+
+**Both rules.** A member supporting reducible live load above 4.8 kPa (more than 0.5 m2 of such floor) gets no reduction. The exception is a column receiving load from more than one level, which gets 20 %; under ASCE, never more than its 4.7.2 reduction.
+
+Only the patterns of type Reducible Live are reduced. The `LIVE LOAD REDUCTION` results list the rule used for each member. Every value is in `design/code_config.py` (`NSCP.live_load_reduction`).
 
 **Tributary area.** When reduction is chosen, a third question asks how to find A:
 
@@ -264,6 +269,18 @@ Where bar positions are closer than about 110 mm, a hook extension leaving a cor
 
 The design calculation places each bundle as one equivalent bar at the layout position. The drawn bars are offset from that point by up to one bar diameter, which changes the capacity only slightly and is not fed back into the design.
 
+## Column strength: the biaxial interaction surface
+
+Axial load and biaxial bending are checked on the ACI 318M-14 design interaction surface (phi Pn, phi Mnx, phi Mny) of each layout, in `design/column_interaction.py`:
+
+- **The surface.** It is computed once per layout (shape, size, bars, cover, materials) and reused by every column, combination and iteration with that layout. The grid is 72 neutral-axis angles × 120 depths, using strain compatibility, the Whitney block and elastic-plastic bars (the same model as the exact solver it replaced). phi at each point comes from that point's steel strain, and the axial cap is phi 0.80 Po (tied) or phi 0.85 Po (spiral). The values match the exact solver; where they differ (at most about 0.1 %), the surface is on the safe side.
+- **A demand (Pu, Mu2, Mu3).** The surface is cut where phi Pn = Pu, and the capacity is read along the demand's moment direction. Utilization is |Mu| / phi Mn. Before October 2026, phi was applied to Mn at Pn = Pu, which overstated the capacity above the balance point.
+- **Bar search and the convex hull.** The demands of a column are checked first at the vertices of their convex hull, so a layout that cannot work is rejected after a few checks. The other demands are then confirmed, because the phi-scaled surface is not strictly convex where phi changes from 0.65 to 0.90. The final layout is reported for every combination at both ends.
+- **Strong column - weak beam.** It uses the nominal surface (phi = 1) at the factored axial load. Each column's Mn(P) along a fixed direction is concave, so the lowest sum of column strengths at a joint occurs at a vertex of the convex hull of the columns' axial loads over the combinations. Only those combinations are evaluated; the result is the same. The beam strengths and the joint shear do not depend on the combination.
+- **Capacity-design shear.** Mpr (1.25 fy) is read from the probable-strength surface along the principal axis, through a (P, Mn) table built once per direction.
+
+With these changes the 47 columns of the test model take about 47 s instead of about 10 minutes, with the same bars and ties.
+
 ## Calculation reports (PDF)
 
 `xs beams` and `xs columns` write an A4 PDF from the design results to the output folder. The report is one column wide and starts with the design basis and a summary table of all members; each member then has its own section of value tables. Equations are not written out.
@@ -278,7 +295,7 @@ Beam report, per beam:
 
 The design results hold the bars, legs and spacings; depths, strengths and ratios in the report are worked out again from them with the same design classes.
 
-Column report, per column: section and vertical bars, then the governing combination at each end for axial load and flexure, column shear, strong column-weak beam (per axis), then joint shear per axis (it does not depend on the load combination, so none is named), the transverse reinforcement values and the design status.
+Column report, per column: section and vertical bars, then the governing combination at each end for axial load and flexure, column shear, strong column-weak beam (per axis), then joint shear per axis (it does not depend on the load combination, so none is named), the transverse reinforcement values and the design status. Each column ends with a 3D figure of its layout's design interaction surface, with every combination at both ends, the hull vertices and the governing demand.
 
 The reports need a LaTeX install with `pdflatex` (MiKTeX or TeX Live), like the wind and composite reports.
 
@@ -297,7 +314,7 @@ In the report, X is the width direction (local 3) and Y the depth direction (loc
 
 ## Limitations
 
-- The biaxial check compares the resultant of M2 and M3 with the section capacity at that moment direction. It is not a full interaction surface.
+- Sections other than rectangles and circles with the rectangular stress block and lumped bars (L, T, walls) fall back to the per-demand exact solver.
 - Slenderness (second-order moment magnification) is not calculated; the ETABS forces must already include second-order effects.
 - Joint checks ignore slab reinforcement. Beams use local-axis angle 0 unless ETABS supplies one.
 - Crosstie spacing uses an assumed `hx` from the configuration, not the drawn layout.

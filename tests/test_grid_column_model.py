@@ -281,3 +281,25 @@ def test_thicker_wall_is_updated_and_a_moved_one_is_replaced(tmp_path):
     shifted = _wall_changes(tmp_path, [([(x + 500.0, y) for x, y in CORE[0]], 300.0, True)])
     assert len(shifted.walls_added) == 4 and len(shifted.walls_removed) == 4
     assert gc.wall_section_name(300, 5, 60) == "SW_300_C05_G60"
+
+
+def test_a_footing_level_puts_the_ground_at_zero():
+    building = gc.Building(
+        stories=[("2F", 4500.0), ("3F", 3500.0)],
+        columns=[gc.PlanColumn("2F", 0, 0, 400, 400), gc.PlanColumn("3F", 0, 0, 400, 400)],
+        walls=[gc.PlanWall("2F", 0, 0, 3000, 0, 200)],
+    )
+    footed = gc.add_footing_level(building, 1500, "GF")
+    assert footed.stories == [("GF", 1500.0), ("2F", 4500.0), ("3F", 3500.0)]
+    assert footed.base_elevation == -1500.0
+    assert [c.story for c in footed.columns] == ["GF", "2F", "3F"]
+    assert [w.story for w in footed.walls] == ["GF", "2F"]
+    assert building.base_elevation == 0.0  # the drawing itself is not changed
+
+
+def test_the_ground_level_name_must_be_new():
+    building = gc.Building(stories=[("GF", 4000.0)])
+    with pytest.raises(ValueError, match="already in the drawing"):
+        gc.add_footing_level(building, 1500, "GF")
+    with pytest.raises(ValueError, match="more than zero"):
+        gc.add_footing_level(gc.Building(stories=[("2F", 4000.0)]), 0)

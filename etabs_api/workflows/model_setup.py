@@ -37,7 +37,9 @@ if __package__ in (None, ""):
     sys.path.insert(
         0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from design.code_config import CODE, NSCP
 from etabs_api.core.helpers import as_list, return_code
+from etabs_api.workflows.load_combinations import DRIFT_SPECTRUM_CASES as lc_drift_cases
 from etabs_api.workflows.load_combinations import Combination, build_combinations
 from etabs_api.workflows.ubc97 import (
     response_spectrum_scale,
@@ -55,16 +57,24 @@ SPECTRUM_FUNCTION = "RSUBC97"
 MODAL_CASE = "Modal"
 MODES_PER_STORY = 3
 MINIMUM_MODES = 12  # a blank model has one story; three modes would be too few
-BEAM_MODIFIER = 0.35  # on I22 and I33
-COLUMN_MODIFIER = 0.70
+# Frame sections carry no stiffness modifiers (all 1.0): the cracked-section
+# modifiers are assigned to the frames in ETABS; xs check and xs drift judge them.
+SECTION_MODIFIERS = [1.0] * 8  # area, shear 2, shear 3, torsion, I22, I33, mass, weight
 BEAM_COVER = 60.0  # mm, to the bar centre, top and bottom
 COLUMN_COVER = 40.0  # mm
-BEAM_MIN_WIDTH_TO_DEPTH = 0.3
-COLUMN_MIN_SIDE_RATIO = 0.5
+BEAM_MIN_WIDTH_TO_DEPTH = CODE.beam_seismic.min_width_to_depth
+COLUMN_MIN_SIDE_RATIO = 0.5  # office rule, stricter than ACI 18.7.2.1(b)
 BEAM_PREFIXES = ("G", "B", "FTB")  # girders, beams, footing tie beams
-OMEGA0 = 2.8
-RHO = 1.0
-LIVE_FACTOR = 0.5  # f on live load in the seismic and wind combinations
+OMEGA0 = NSCP.load_factors.omega0
+RHO = NSCP.load_factors.rho
+LIVE_FACTOR = NSCP.load_factors.live_companion  # f on live load in the seismic and wind combinations
+# Response spectrum cases: (name, direction). The strength cases are scaled to
+# the static base shear; the drift cases (suffix DRIFT_SUFFIX) to the drift
+# patterns, whose period is not capped (NSCP 208.6.5.2).
+SPECTRUM_CASES = (("RSAX", "U1"), ("RSAY", "U2"))
+DRIFT_SUFFIX = "D"
+DRIFT_SPECTRUM_CASES = tuple((name + DRIFT_SUFFIX, direction) for name, direction in SPECTRUM_CASES)
+assert tuple(n for n, _ in DRIFT_SPECTRUM_CASES) == lc_drift_cases  # the drift combinations use them
 NON_REDUCIBLE_LIVE = "LIVENRED"  # always part of the seismic mass and the P-delta load
 NON_REDUCIBLE_LIVE_FACTOR = 1.0
 REDUCIBLE_LIVE_MASS_FACTOR = 0.20  # used when reducible live is included in the mass
@@ -113,9 +123,14 @@ DEFAULT_SETTINGS = {
         "CR": {"size": [400, 1000, 100]},
         "C": {"diameter": []},
     },
+    # Slab and wall thicknesses in mm (lists) and their concrete (ksi); a
+    # concrete of None is the first frame section concrete.
+    "slabs": {"thickness": [100, 125, 150, 200], "type": "Membrane", "concrete_ksi": None},
+    "walls": {"thickness": [150, 200, 250, 300], "concrete_ksi": None},
     "seismic": {
         "zone_factor": 0.4, "soil_type": "SD", "source_type": "A", "distance_km": 10.0,
-        "importance": 1.0, "r_factor": 8.5, "ct": 0.03, "eccentricity": 0.05,
+        "importance": 1.0, "r_factor": NSCP.seismic.smrf_r, "ct": 0.03,
+        "eccentricity": NSCP.seismic.eccentricity,
     },
     "wind": {"speed": 150.0, "exposure": "B", "kzt": 1.0, "gust": 0.85, "kd": 0.85},
     "extra_dead": [],
@@ -187,6 +202,42 @@ def section_definitions(settings: dict) -> list[dict]:
         for diameter in _sizes(ranges.get("C", {}).get("diameter", [])):
             out.append({"name": f"C_{diameter}_{tail}", "kind": "circle", "width": diameter,
                         "depth": diameter, "material": concrete, "rebar": rebar})
+    return out
+
+
+SLAB_SHELL_TYPES = {"Shell-Thin": 1, "Shell-Thick": 2, "Membrane": 3}  # eShellType
+
+
+def area_concrete_ksi(settings: dict, kind: str) -> float:
+    """Concrete of the slabs (``kind`` "slabs") or the walls ("walls"), in ksi.
+
+    Falls back to an older single slab-and-wall setting, then to the first
+    frame section concrete.
+    """
+    for value in (settings.get(kind, {}).get("concrete_ksi"), settings.get("area_concrete_ksi")):
+        if value not in (None, ""):
+            return float(value)
+    return float(settings["section_concrete_ksi"][0])
+
+
+def area_section_definitions(settings: dict) -> list[dict]:
+    """Slab and wall sections: ``S_<t>_<concrete>`` and ``SW_<t>_<concrete>_<rebar>``.
+
+    The wall name is the one ``xs grids`` gives its walls, so they share it.
+    """
+    slab_concrete = grade_name("C", area_concrete_ksi(settings, "slabs"))
+    wall_concrete = grade_name("C", area_concrete_ksi(settings, "walls"))
+    rebar = grade_name("G", settings["section_rebar_ksi"])
+    slab_type = settings.get("slabs", {}).get("type", "Membrane")
+    if slab_type not in SLAB_SHELL_TYPES:
+        raise ValueError(f"Slab type must be one of {', '.join(SLAB_SHELL_TYPES)}.")
+    out = []
+    for t in sorted({float(x) for x in settings.get("slabs", {}).get("thickness", [])}):
+        out.append({"name": f"S_{t:g}_{slab_concrete}", "kind": "slab", "thickness": t,
+                    "material": slab_concrete, "shell": slab_type})
+    for t in sorted({float(x) for x in settings.get("walls", {}).get("thickness", [])}):
+        out.append({"name": f"SW_{t:g}_{wall_concrete}_{rebar}", "kind": "wall", "thickness": t,
+                    "material": wall_concrete, "shell": "Shell-Thin"})
     return out
 
 
@@ -367,9 +418,18 @@ def _pattern_type(kind: str) -> int:
     raise ValueError(f"ETABS has no load pattern type for '{kind}'.")
 
 
+def concrete_grades(settings: dict) -> list[float]:
+    """The concrete materials to define: the listed ones plus the slab and wall grades."""
+    grades = [float(k) for k in settings["concrete_ksi"]]
+    for kind in ("slabs", "walls"):
+        if settings.get(kind, {}).get("thickness"):
+            grades.append(area_concrete_ksi(settings, kind))
+    return sorted(set(grades))
+
+
 def define_materials(model, settings: dict, log: SetupLog) -> None:
     api = model.PropMaterial
-    for ksi in settings["concrete_ksi"]:
+    for ksi in concrete_grades(settings):
         p = concrete_properties(ksi)
         name = p["name"]
         ok = log.check(api.SetMaterial(name, 2), f"concrete {name}")  # eMatType_Concrete
@@ -398,7 +458,7 @@ def define_materials(model, settings: dict, log: SetupLog) -> None:
 
 
 def create_section(api, section: dict, log: SetupLog) -> bool:
-    """Create one concrete frame section with its stiffness modifiers and rebar data.
+    """Create one concrete frame section (modifiers 1.0) with its rebar data.
 
     ``section`` has name, kind ("beam", "column" or "circle"), width (t2),
     depth (t3), material and rebar.
@@ -410,10 +470,8 @@ def create_section(api, section: dict, log: SetupLog) -> bool:
         created = api.SetRectangle(name, material, section["depth"], section["width"])
     if not log.check(created, f"section {name}"):
         return False
-    factor = BEAM_MODIFIER if section["kind"] == "beam" else COLUMN_MODIFIER
-    # area, shear 2, shear 3, torsion, I22, I33, mass, weight
-    log.check(api.SetModifiers(name, [1.0, 1.0, 1.0, 1.0, factor, factor, 1.0, 1.0]),
-              f"{name} stiffness modifiers")
+    # 1.0: also clears modifiers an earlier setup put on an existing section
+    log.check(api.SetModifiers(name, list(SECTION_MODIFIERS)), f"{name} stiffness modifiers")
     if section["kind"] == "beam":
         log.check(api.SetRebarBeam(name, rebar, rebar, BEAM_COVER, BEAM_COVER, 0, 0, 0, 0),
                   f"{name} reinforcement data")
@@ -450,6 +508,21 @@ def remove_blank_model_defaults(model) -> None:
             model.LoadPatterns.Delete(name)
 
 
+def define_area_sections(model, settings: dict, log: SetupLog) -> None:
+    """Slab and wall sections (stiffness modifiers stay at 1.0)."""
+    api = model.PropArea
+    for section in area_section_definitions(settings):
+        shell = SLAB_SHELL_TYPES[section["shell"]]
+        if section["kind"] == "slab":  # (name, slab type: slab, shell type, material, t)
+            done = api.SetSlab(section["name"], 0, shell, section["material"],
+                               section["thickness"])
+        else:  # (name, specified wall, thin shell, material, t)
+            done = api.SetWall(section["name"], 1, shell, section["material"],
+                               section["thickness"])
+        if log.check(done, f"{section['kind']} section {section['name']}"):
+            log.done(f"{section['kind']} sections")
+
+
 def define_load_patterns(model, settings: dict, log: SetupLog) -> None:
     api = model.LoadPatterns
     existing = {str(name) for name in as_list(api.GetNameList()[1])}
@@ -462,6 +535,40 @@ def define_load_patterns(model, settings: dict, log: SetupLog) -> None:
             ok = log.check(api.Add(name, code, self_weight, True), f"load pattern {name}")
         if ok:
             log.done("load patterns")
+
+
+def use_preset_pdelta(model, log: SetupLog) -> None:
+    """Every linear static case uses the preset P-delta settings, not a nonlinear case.
+
+    The cases ETABS makes with the load patterns start as "Use Nonlinear Case"
+    (None); they are switched to "Use Preset P-Delta Settings".
+    """
+    key = "Load Case Definitions - Linear Static"
+    tables = model.DatabaseTables
+    current = tables.GetTableForEditingArray(key, "", 0, [], 0, [])
+    fields = [str(name) for name in as_list(current[1])]
+    if "StiffType" not in fields:
+        return
+    width = len(fields)
+    values = ["" if v is None else str(v) for v in as_list(current[3])]
+    rows = [values[i:i + width] for i in range(0, len(values), width)]
+    stiff, nonlinear = fields.index("StiffType"), fields.index("NonlinCase")
+    changed = 0
+    for row in rows:
+        if row[stiff] == "Nonlinear Case":
+            row[stiff], row[nonlinear] = "P-Delta", ""
+            changed += 1
+    if not changed:
+        return
+    flat = [value for row in rows for value in row]
+    if not log.check(tables.SetTableForEditingArray(key, 0, fields, len(rows), flat),
+                     "linear static cases could not be staged"):
+        return
+    applied = tables.ApplyEditedTables(True, 0, 0, 0, 0, "")
+    if return_code(applied) != 0 or int(applied[0]) or int(applied[1]):
+        log.problems.append(f"preset P-delta in the load cases: {str(applied[4]).strip()[:300]}")
+        return
+    log.done("load cases on preset P-delta", changed)
 
 
 def define_mass_source(model, settings: dict, log: SetupLog) -> None:
@@ -487,10 +594,74 @@ def define_pdelta(model, settings: dict, log: SetupLog) -> None:
         log.done("P-delta loads", len(rows))
 
 
+SEISMIC_TABLE = "Load Pattern Definitions - Auto Seismic - UBC 97"
+WIND_TABLE = "Load Pattern Definitions - Auto Wind - ASCE 7-10"
+
+
+def lateral_story_range(names: list[str], elevations: list[float]) -> tuple[str, str]:
+    """(bottom, top) story of the seismic and wind loads.
+
+    ``names`` and ``elevations`` are as ETABS lists them, the base first. The
+    bottom is the ground level: the story at elevation 0 when the base is
+    below it (a footing level), otherwise the base.
+    """
+    bottom = names[0]
+    if elevations and elevations[0] < -0.5:
+        ground = [n for n, z in zip(names[1:], elevations[1:]) if abs(z) <= 0.5]
+        if ground:
+            bottom = ground[0]
+    return bottom, names[-1]
+
+
+def model_story_range(model) -> tuple[str, str]:
+    stories = model.Story.GetStories()
+    return lateral_story_range([str(n) for n in as_list(stories[1])],
+                               [float(z) for z in as_list(stories[2])])
+
+
+def set_lateral_story_range(model, log: SetupLog) -> bool:
+    """Put the bottom and top story of every seismic and wind pattern on the model's range.
+
+    Run after the stories change, so the lateral loads always cover every
+    level above the ground. Returns True when something was changed.
+    """
+    bottom, top = model_story_range(model)
+    changed = False
+    tables = model.DatabaseTables
+    for key in (SEISMIC_TABLE, WIND_TABLE):
+        current = tables.GetTableForEditingArray(key, "", 0, [], 0, [])
+        fields = [str(name) for name in as_list(current[1])]
+        if "BotStory" not in fields:
+            continue
+        width = len(fields)
+        values = ["" if v is None else str(v) for v in as_list(current[3])]
+        rows = [values[i:i + width] for i in range(0, len(values), width)]
+        auto = fields.index("IsAuto") if "IsAuto" in fields else None
+        rows = [r for r in rows if auto is None or r[auto] != "Yes"]  # ETABS makes these again
+        bot, topi = fields.index("BotStory"), fields.index("TopStory")
+        edits = 0
+        for row in rows:
+            if row[bot] and (row[bot], row[topi]) != (bottom, top):
+                row[bot], row[topi] = bottom, top
+                edits += 1
+        if not edits:
+            continue
+        flat = [value for row in rows for value in row]
+        if not log.check(tables.SetTableForEditingArray(key, 0, fields, len(rows), flat),
+                         f"table '{key}' could not be staged"):
+            continue
+        applied = tables.ApplyEditedTables(True, 0, 0, 0, 0, "")
+        if return_code(applied) != 0 or int(applied[0]) or int(applied[1]):
+            log.problems.append(f"table '{key}': {str(applied[4]).strip()[:300]}")
+            continue
+        log.done("lateral patterns on the story range", edits)
+        changed = True
+    return changed
+
+
 def define_lateral_loads(model, settings: dict, log: SetupLog) -> None:
     """UBC 97 seismic and ASCE 7-10 wind parameters of the lateral patterns."""
-    stories = [str(name) for name in as_list(model.Story.GetStories()[1])]
-    base, top = stories[0], stories[-1]
+    base, top = model_story_range(model)
     s, values = settings["seismic"], seismic_values(settings)
     rows = []
     for name, directions in SEISMIC_DIRECTIONS.items():
@@ -558,7 +729,17 @@ def make_seismic_per_code(model, path: str, settings: dict, log: SetupLog) -> bo
     ETABS only accepts the source distance through the model text file
     (``.$et``), which it writes on every save. The model is saved, the text is
     edited and opened, and the result is saved over the model again.
+
+    Reloading from text gives every object a new unique name, so it is only
+    done on a model without frames (a new blank model): on any other model the
+    frame tags would be lost. Such models keep the user-defined Ca and Cv,
+    which give ETABS the same coefficients.
     """
+    frames = int(model.FrameObj.Count())
+    if frames:
+        log.problems.append(f"per-code seismic skipped: the model has {frames} frames and a "
+                            "reload from text would rename them (Ca and Cv stay user defined)")
+        return False
     if not log.check(model.File.Save(path), "saving before the per-code seismic step"):
         return False
     text_path = os.path.splitext(path)[0] + ".$et"
@@ -585,7 +766,7 @@ def make_seismic_per_code(model, path: str, settings: dict, log: SetupLog) -> bo
 def define_spectrum_and_cases(model, settings: dict, log: SetupLog) -> None:
     values = seismic_values(settings)
     function = [{"Name": SPECTRUM_FUNCTION, "Ca": values["ca"], "Cv": values["cv"],
-                 "DampRatio": 0.05}]
+                 "DampRatio": NSCP.seismic.damping}]
     if _edit_table(model, "Functions - Response Spectrum - UBC 97", function, log):
         log.done("response spectrum function")
 
@@ -597,7 +778,7 @@ def define_spectrum_and_cases(model, settings: dict, log: SetupLog) -> None:
         log.done("modal case")
 
     spectrum = model.LoadCases.ResponseSpectrum
-    for name, direction in (("RSAX", "U1"), ("RSAY", "U2")):
+    for name, direction in SPECTRUM_CASES + DRIFT_SPECTRUM_CASES:
         ok = log.check(spectrum.SetCase(name), f"response spectrum case {name}")
         ok = ok and log.check(
             spectrum.SetLoads(name, 1, [direction], [SPECTRUM_FUNCTION], [values["scale"]],
@@ -655,11 +836,13 @@ def apply_model_setup(model, settings: dict, progress=None) -> SetupLog:
         for label, step in (
             ("Materials", lambda: define_materials(model, settings, log)),
             ("Frame sections", lambda: define_sections(model, settings, log, progress)),
+            ("Slab and wall sections", lambda: define_area_sections(model, settings, log)),
             ("Load patterns", lambda: define_load_patterns(model, settings, log)),
             ("Mass source", lambda: define_mass_source(model, settings, log)),
             ("P-delta", lambda: define_pdelta(model, settings, log)),
             ("Seismic and wind", lambda: define_lateral_loads(model, settings, log)),
             ("Response spectrum", lambda: define_spectrum_and_cases(model, settings, log)),
+            ("Preset P-delta in the load cases", lambda: use_preset_pdelta(model, log)),
             ("Load combinations", lambda: define_combinations(model, settings, log, progress)),
         ):
             if progress is not None:
@@ -727,7 +910,7 @@ class SetupResult:
         out += table(
             ["Material", "Type", "Strength (MPa)", "E (MPa)"],
             [[p["name"], "Concrete", f"{p['fc']:.2f}", f"{p['E']:.0f}"]
-             for p in map(concrete_properties, settings["concrete_ksi"])]
+             for p in map(concrete_properties, concrete_grades(settings))]
             + [[p["name"], "Rebar", f"{p['fy']:.2f}", f"{REBAR_MODULUS:.0f}"]
                for p in map(rebar_properties, settings["rebar_ksi"])],
         )
@@ -739,11 +922,17 @@ class SetupResult:
             if group:
                 widths = sorted({x["width"] for x in group})
                 depths = sorted({x["depth"] for x in group})
-                modifier = BEAM_MODIFIER if group[0]["kind"] == "beam" else COLUMN_MODIFIER
                 rows.append([label, f"`{prefix}_`", len(group), f"{widths[0]} to {widths[-1]}",
-                             f"{depths[0]} to {depths[-1]}", f"{modifier:g}"])
-        out += table(["Kind", "Prefix", "Sections", "Width (mm)", "Depth (mm)",
-                      "I22, I33 modifier"], rows)
+                             f"{depths[0]} to {depths[-1]}"])
+        out += table(["Kind", "Prefix", "Sections", "Width (mm)", "Depth (mm)"], rows)
+        out += ["", "The sections carry no stiffness modifiers: assign the cracked-section "
+                "modifiers to the frames in ETABS (xs check and xs drift check them).", ""]
+        areas = area_section_definitions(settings)
+        if areas:
+            out += [f"{h} Slab and wall sections", ""]
+            out += table(["Section", "Kind", "Thickness (mm)", "Type"],
+                         [[a["name"], a["kind"], f"{a['thickness']:g}", a["shell"]]
+                          for a in areas])
         out += [f"{h} Load patterns", ""]
         out += table(["Pattern", "Type", "Self weight"],
                      [[name, kind, f"{sw:g}"] for name, kind, sw in patterns])
@@ -907,6 +1096,28 @@ def ask_settings(settings: dict) -> dict | None:
     settings["section_rebar_ksi"] = _numbers(answers["Rebar of the sections (ksi)"])[0]
     for label, (prefix, part) in keys.items():
         ranges.setdefault(prefix, {})[part] = _numbers(answers[label])
+
+    # ---- slabs and walls ----
+    slab_type_label = f"Slab type ({', '.join(SLAB_SHELL_TYPES)})"
+    fields = {
+        "Slab thicknesses (mm)": _join(settings["slabs"].get("thickness", [])),
+        slab_type_label: settings["slabs"].get("type", "Membrane"),
+        "Concrete of the slabs (ksi)": f"{area_concrete_ksi(settings, 'slabs'):g}",
+        "Wall thicknesses (mm)": _join(settings["walls"].get("thickness", [])),
+        "Concrete of the walls (ksi)": f"{area_concrete_ksi(settings, 'walls'):g}",
+    }
+    answers = ask("Slab and Wall Sections", "Thicknesses separated by commas. Leave a list "
+                  "blank to skip those sections. Walls are thin shells.", fields)
+    if answers is None:
+        return None
+    slab_type = next((t for t in SLAB_SHELL_TYPES
+                      if t.lower() == answers[slab_type_label].strip().lower()), "Membrane")
+    settings["slabs"] = {"thickness": _numbers(answers["Slab thicknesses (mm)"]),
+                         "type": slab_type,
+                         "concrete_ksi": _numbers(answers["Concrete of the slabs (ksi)"])[0]}
+    settings["walls"] = {"thickness": _numbers(answers["Wall thicknesses (mm)"]),
+                         "concrete_ksi": _numbers(answers["Concrete of the walls (ksi)"])[0]}
+    settings.pop("area_concrete_ksi", None)  # replaced by the two inputs above
 
     # ---- seismic ----
     s = settings["seismic"]

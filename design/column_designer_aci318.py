@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 import ezdxf
 from dataclasses import dataclass
-from design.aci318_config import CODE, AciCode
+from design.code_config import CODE, AciCode
 from scipy.optimize import brentq
 from shapely.geometry import LineString, Polygon
 from shapely.ops import unary_union
@@ -76,7 +76,7 @@ class ColumnFlexureDesign:
             axial_load: Optional applied axial force in N; compression is positive.
             shape: Either ``"rectangular"`` or ``"circular"``.
             is_smrf: Whether ACI Chapter 18 SMRF column detailing applies.
-            code: ACI constants (see aci318_config.py).
+            code: ACI constants (see code_config.py).
         """
         self.code = code
         self.width = width
@@ -1100,6 +1100,24 @@ def _build_column_section(
     height = 0.0 if is_circular else _numeric(row["Depth"], "Depth", member)
     diameter_value = _numeric(diameter, "Diameter", member) if is_circular else 0.0
 
+    # The section depends only on its size, materials, bars and cover: build each
+    # one once (meshing is slow) and share it between members, joints and checks.
+    key = (width, height, diameter_value, _numeric(row["f'c"], "f'c", member),
+           _numeric(row["fy"], "fy", member), _numeric(row["fys"], "fys", member),
+           float(dmain), float(dties), float(cover), bool(is_smrf), int(n_bars),
+           tuple(tuple(float(x) for x in item) for item in (bundle_layout or ())))
+    if key not in _SECTION_CACHE:
+        _SECTION_CACHE[key] = _new_column_section(
+            width, height, diameter_value, is_circular, row, member, n_bars, dmain, dties,
+            cover, is_smrf, bundle_layout)
+    return _SECTION_CACHE[key]
+
+
+_SECTION_CACHE: dict[tuple, tuple] = {}
+
+
+def _new_column_section(width, height, diameter_value, is_circular, row, member, n_bars,
+                        dmain, dties, cover, is_smrf, bundle_layout):
     engine = ColumnFlexureDesign(
         width=width,
         height=height,
@@ -1385,11 +1403,13 @@ def _end_force_rows(forces: pd.DataFrame) -> dict:
     table = forces.copy()
     table["Station"] = stations
     names = table["Combo"].astype(str)
-    index: dict = {}
-    for combo, group in table.groupby(names, sort=False):
-        valid = group.dropna(subset=["Station"])
-        index[combo] = None if valid.empty else (
-            valid.loc[valid["Station"].idxmin()], valid.loc[valid["Station"].idxmax()])
+    index: dict = {combo: None for combo in names.unique()}
+    valid = table[stations.notna()]
+    if not valid.empty:
+        grouped = valid["Station"].groupby(names[valid.index], sort=False)
+        lowest, highest = grouped.idxmin(), grouped.idxmax()
+        for combo in lowest.index:
+            index[combo] = (valid.loc[lowest[combo]], valid.loc[highest[combo]])
     _END_FORCE_INDEX[id(forces)] = (forces, index)
     return index
 
@@ -1444,6 +1464,13 @@ def _evaluate_column_candidate(
     strength_limits = engine.check_reinforcement_limits(n_bars)
     if strength_limits["status"] != "Pass":
         return False, [], strength_limits
+
+    from design.column_interaction import surface_for
+
+    surface = surface_for(engine, section, bar_layout) if USE_INTERACTION_SURFACE else None
+    if surface is not None:
+        return _evaluate_on_surface(member, force_rows, surface, engine, n_bars, dmain,
+                                    stop_at_first_failure, progress, strength_limits)
 
     checks: list[dict] = []
     passed = True
@@ -1532,6 +1559,108 @@ def _evaluate_column_candidate(
             if stop_at_first_failure and not passed:
                 return False, checks, strength_limits
     return passed, checks, strength_limits
+
+
+USE_INTERACTION_SURFACE = True  # False: the per-demand solver (Mn at Pn = Pu, then phi)
+
+
+def column_demands(member: str, force_rows: pd.DataFrame) -> list[tuple[str, str, float, float, float]]:
+    """(combo, end, Pu kN, Mu2 kN-m, Mu3 kN-m) of every combination at both ends."""
+    out = []
+    for combo in sorted(force_rows["Combo"].dropna().astype(str).unique()):
+        for endpoint, at_i in (("I", True), ("J", False)):
+            force = _column_force_at_end(force_rows, combo, at_i)
+            out.append((combo, endpoint, _numeric(force["P"], "P", member),
+                        _numeric(force["M2"], "M2", member), _numeric(force["M3"], "M3", member)))
+    return out
+
+
+def _evaluate_on_surface(member, force_rows, surface, engine, n_bars, dmain,
+                         stop_at_first_failure, progress, strength_limits):
+    """Flexure and axial checks on the layout's interaction surface (ACI design
+    surface, phi Pn = Pu). While searching for a layout (``stop_at_first_failure``)
+    the convex hull vertices of the demands are checked first: they are the
+    demands most likely to fail, so a layout that cannot work is rejected after a
+    few checks. The other demands are then confirmed, because the phi-scaled
+    surface is not strictly convex where phi changes from 0.65 to 0.90. Otherwise
+    every demand is checked and reported."""
+    from design.column_interaction import demand_moments, hull_vertices
+
+    demands = column_demands(member, force_rows)
+    points = np.array([[p * 1e3, *demand_moments(m2 * 1e6, m3 * 1e6)]
+                       for _, _, p, m2, m3 in demands], dtype=float).reshape(-1, 3)
+    if stop_at_first_failure:
+        hull = hull_vertices(points)
+        rest = np.setdiff1d(np.arange(len(demands)), hull)
+        indices = np.concatenate([hull, rest]).astype(int)
+    else:
+        indices = np.arange(len(demands))
+    tension_capacity = (engine.code.strength.tension_controlled * n_bars * math.pi * dmain**2
+                        / 4.0 * engine.fy / 1000.0)
+    checks, passed = [], True
+    for index in indices:
+        combo, endpoint, axial_kN, m2_kNm, m3_kNm = demands[int(index)]
+        if progress is not None:
+            progress(member, endpoint, "Flexure and axial (P-M)", combo)
+        pu, mx, my = points[int(index)]
+        capacity, phi = surface.capacity(pu, mx, my)
+        moment_demand = math.hypot(m2_kNm, m3_kNm)
+        capacity_kNm = capacity / 1e6
+        utilization = (moment_demand / capacity_kNm if capacity_kNm > 0
+                       else (0.0 if moment_demand <= 1e-9 and phi == phi else math.inf))
+        moment_pass = bool(utilization <= 1.0)
+        axial_pass = bool(pu <= surface.p_cap if axial_kN >= 0
+                          else abs(axial_kN) <= tension_capacity)
+        checks.append({
+            "UniqueName": member, "Combo": combo, "End": endpoint, "Pu_kN": axial_kN,
+            "Mu2_kNm": m2_kNm, "Mu3_kNm": m3_kNm, "Mu_resultant_kNm": moment_demand,
+            "Mn_kNm": capacity_kNm / phi if phi == phi and phi > 0 else np.nan,
+            "phi_Mn_kNm": capacity_kNm, "Phi": phi,
+            "phi_Pn_max_kN": surface.p_cap / 1000.0, "phi_Pn_tension_kN": tension_capacity,
+            "Flexure_Utilization": utilization,
+            "Axial_Check": "PASS" if axial_pass else "FAIL",
+            "Flexure_Check": "PASS" if moment_pass else "FAIL",
+            "Strength_Check": "PASS" if moment_pass and axial_pass else "FAIL",
+        })
+        passed = passed and moment_pass and axial_pass
+        if stop_at_first_failure and not passed:
+            return False, checks, strength_limits
+    return passed, checks, strength_limits
+
+
+def _strong_column_hull_combos(combos: list[str], columns: list[str], joint: str,
+                               force_groups: dict, get_end_info) -> list[str]:
+    """The combinations that can give a joint its lowest sum of column strengths.
+
+    At a joint, for one frame direction, the sum of the column nominal strengths
+    depends on the combination only through each column's axial load, and each
+    column's Mn(P) along a fixed direction is concave (the nominal interaction
+    surface is convex). The sum is therefore concave in (P_1, P_2) and its minimum
+    over the combinations lies at a vertex of their convex hull: one or two
+    columns give 2 or a few combinations instead of all of them. The beam strengths
+    and the joint shear do not depend on the combination. Every combination is
+    kept when an axial load cannot be read (the loop then reports what is missing).
+    """
+    from design.column_interaction import hull_vertices
+
+    if len(combos) <= 3 or not columns:
+        return list(combos)
+    points = []
+    try:
+        ends = {column: get_end_info(column, joint, False)[0] == "I" for column in columns}
+        for combo in combos:
+            points.append([
+                _numeric(_column_force_at_end(force_groups[column], combo, ends[column])["P"],
+                         "P", column)
+                for column in columns])
+    except (KeyError, ValueError, IndexError):
+        return list(combos)
+    points = np.asarray(points, dtype=float)
+    if points.shape[1] == 1:  # one column: the smallest and largest axial load
+        keep = {int(np.argmin(points[:, 0])), int(np.argmax(points[:, 0]))}
+    else:
+        keep = set(int(i) for i in hull_vertices(points))
+    return [combo for index, combo in enumerate(combos) if index in keep]
 
 
 def _smrf_so_limit(code: AciCode, hx: float | None = None) -> float:
@@ -1638,7 +1767,8 @@ def _column_transverse_candidate_passes(
             and short_dimension / long_dimension >= seismic_cfg.min_aspect_ratio
             and confinement_passes
             and transverse["Transverse_Spacing_Check"] == "PASS"
-            and support_check.startswith("PASS")
+            # "N/A for continuous spiral": a spiral supports every bar
+            and support_check.startswith(("PASS", "N/A"))
             and engine.dties >= minimum_tie_diameter
         )
     )
@@ -2124,6 +2254,12 @@ def _column_shear_checks(
         bundle_layout=bundle_layout,
     )
 
+    probable_surface = None
+    if USE_INTERACTION_SURFACE:
+        from design.column_interaction import demand_moments, surface_for
+
+        probable_surface = surface_for(probable_engine, probable_section, bundle_layout)
+
     # Find one transverse-leg count that satisfies every combo/end/direction.
     for combo in sorted(forces["Combo"].dropna().astype(str).unique()):
         end_forces = {
@@ -2145,11 +2281,17 @@ def _column_shear_checks(
                         member, end, f"Column shear, {shear_name} (capacity design)", combo
                     )
                 axial = _numeric(end_forces[end]["P"], "P", member) * 1000.0
-                probable_mn, _, _, _, _ = probable_engine.solve_moment_capacity(
-                    probable_section,
-                    axial_load=axial,
-                    bending_angle=moment_theta,
-                )
+                if probable_surface is not None:
+                    # Mpr along the principal axis at this axial load (1.25 fy section)
+                    m2_unit, m3_unit = (0.0, 1.0) if moment_name == "M3" else (1.0, 0.0)
+                    probable_mn = probable_surface.nominal_capacity_fast(
+                        axial, *demand_moments(m2_unit, m3_unit))
+                else:
+                    probable_mn, _, _, _, _ = probable_engine.solve_moment_capacity(
+                        probable_section,
+                        axial_load=axial,
+                        bending_angle=moment_theta,
+                    )
                 probable_moments.append(abs(float(probable_mn)) / 1e6)
             # Capacity-based Ve is the probable end-moment sum divided by clear span.
             capacity_shear_kN = (
@@ -2375,10 +2517,25 @@ def _evaluate_smrf_joints(
             )
         return "; ".join(summaries) if summaries else "N/A"
 
+    end_info_cache: dict[tuple[str, str, bool], tuple[str, str, np.ndarray, float]] = {}
+
     def get_end_info(
         member: str, joint: str, require_force_data: bool = True
     ) -> tuple[str, str, np.ndarray, float]:
-        """Return joint end, far endpoint, outward vector, and member length."""
+        """Return joint end, far endpoint, outward vector, and member length.
+
+        It depends only on the member and the joint, so it is worked out once:
+        the joint checks ask for it hundreds of thousands of times.
+        """
+        key = (member, joint, require_force_data)
+        if key not in end_info_cache:
+            end_info_cache[key] = _end_info(member, joint, require_force_data)
+        end, far_point, outward, length = end_info_cache[key]
+        return end, far_point, outward.copy(), length
+
+    def _end_info(
+        member: str, joint: str, require_force_data: bool
+    ) -> tuple[str, str, np.ndarray, float]:
         connection = connection_by_name.loc[member]
         if _normalize_object_name(connection["UniquePtI"]) == joint:
             end, far_point = "I", _normalize_object_name(connection["UniquePtJ"])
@@ -2441,6 +2598,14 @@ def _evaluate_smrf_joints(
                 bundle_layout=column_layouts.get(member),
             )
         engine, section = column_sections[section_key]
+        if USE_INTERACTION_SURFACE:
+            from design.column_interaction import demand_moments, surface_for
+
+            surface = surface_for(engine, section, column_layouts.get(member))
+            if surface is not None:
+                nominal = surface.nominal_capacity_fast(
+                    axial, *demand_moments(m2_direction, m3_direction))
+                return float(nominal) / 1e6, axial
         nominal, _, _, _, _ = engine.solve_moment_capacity(
             section, axial_load=axial, bending_angle=theta
         )
@@ -2555,6 +2720,9 @@ def _evaluate_smrf_joints(
                 if other_group is not group
                 for item in other_group
             ]
+            if USE_INTERACTION_SURFACE:
+                combo_names = _strong_column_hull_combos(
+                    combo_names, connected_columns, joint, force_groups, get_end_info)
             for combo in combo_names:
                 missing_column_forces = sorted(
                     column
@@ -3847,6 +4015,10 @@ def design_columns(
                                          "Frame Assignments - Local Axes")
         point_table = _as_etabs_dataframe(tables.get("POINTS"), "Point Object Connectivity")
         frame_angles = _extract_frame_angles(local_axes)
+        # ETABS lists only frames with an assigned angle; the others have the default 0
+        if "UniqueName" in connectivity.columns:
+            for name in connectivity["UniqueName"].dropna():
+                frame_angles.setdefault(name, 0.0)
         point_coordinates = _extract_point_coordinates(point_table)
     else:
         frame_angles = {}
@@ -6218,8 +6390,9 @@ def _column_calc_member(rows: pd.DataFrame) -> MemberReport:
             ["End", "Combination", Tex("$P_u$"), Tex("$M_{u2}$"), Tex("$M_{u3}$"),
              Tex(r"$\phi M_n$"), Tex(r"$M_u/\phi M_n$"), "Axial", "Flexure"],
             flexure_rows, "l" + combo + "rrrrrll",
-            "Forces in kN, moments in kN-m. The resultant of Mu2 and Mu3 is compared with the "
-            "section strength in that direction at the same axial load.",
+            "Forces in kN, moments in kN-m. phi Mn is the design strength along the direction of "
+            "the Mu2-Mu3 resultant where phi Pn = Pu, read from the section's biaxial "
+            "interaction surface (figure below).",
         ),
         ReportTable(
             "Column shear - governing combination at each end",
@@ -6302,22 +6475,89 @@ def _column_calc_member(rows: pd.DataFrame) -> MemberReport:
     )
 
 
-def build_column_calc_report(report: pd.DataFrame, filepath: str, information: list) -> str | None:
-    """Write the column calculation PDF from the report (internal field names)."""
-    members = [
-        _column_calc_member(rows)
-        for _, rows in report.groupby("UniqueName", sort=False)
-    ]
+def column_interaction_figure(rows: pd.DataFrame, path: str, dmain: float, dties: float,
+                              cover: float, is_smrf: bool) -> str | None:
+    """Save the 3D P-Mx-My surface of a column's final layout with its demands (PNG).
+
+    The demands are every combination at both ends; the hull vertices and the
+    governing demand are marked. None when the layout has no surface.
+    """
+    from design.column_interaction import (
+        demand_moments,
+        hull_vertices,
+        plot_surface,
+        surface_for,
+    )
+
+    first = rows.iloc[0]
+    layout = _decode_bar_layout(first.get("Bar_Layout_Data"))
+    frame = pd.Series({
+        "UniqueName": first["UniqueName"], "Width": first.get("Width_mm"),
+        "Depth": first.get("Depth_mm"), "Diameter": first.get("Diameter_mm"),
+        "f'c": first.get("f'c_MPa"), "fy": first.get("fy_MPa"), "fys": first.get("fyt_MPa"),
+        "DesignCover": first.get("DesignCover"),
+    })
+    try:
+        bars = int(first["Longitudinal_Bars"])
+        engine, section = _build_column_section(frame, bars, dmain, dties, cover, is_smrf,
+                                                bundle_layout=layout)
+        surface = surface_for(engine, section, layout)
+    except (ValueError, KeyError, TypeError):
+        return None
+    if surface is None:
+        return None
+    forces = pd.DataFrame({key: pd.to_numeric(rows.get(key), errors="coerce")
+                           for key in ("Pu_kN", "Mu2_kNm", "Mu3_kNm")}).dropna()
+    points = np.array([[p * 1e3, *demand_moments(m2 * 1e6, m3 * 1e6)]
+                       for p, m2, m3 in forces.itertuples(index=False)]).reshape(-1, 3)
+    hull = hull_vertices(points) if len(points) else np.array([], dtype=int)
+    utilization = [surface.utilization(*point) for point in points]
+    governing = int(np.argmax(utilization)) if utilization else None
+    title = f"{first['UniqueName']} - {first.get('Section')} - {bars} bars"
+    return plot_surface(surface, points, path, title, hull, governing)
+
+
+def build_column_calc_report(report: pd.DataFrame, filepath: str, information: list,
+                             figure_options: dict | None = None) -> str | None:
+    """Write the column calculation PDF from the report (internal field names).
+
+    ``figure_options`` (dmain, dties, cover, is_smrf) adds each column's 3D
+    interaction surface with its demands.
+    """
+    import shutil
+
+    folder = os.path.dirname(os.path.abspath(filepath))
+    figure_dir = "figures_tmp"
+    figures: dict[str, tuple[str, str]] = {}
+    if figure_options:
+        os.makedirs(os.path.join(folder, figure_dir), exist_ok=True)
+        for name, rows in report.groupby("UniqueName", sort=False):
+            safe = re.sub(r"[^A-Za-z0-9_-]", "_", str(name))
+            relative = f"{figure_dir}/{safe}.png"
+            if column_interaction_figure(rows, os.path.join(folder, relative), **figure_options):
+                figures[name] = (relative, "Design interaction surface (phi Pn, phi Mnx, phi "
+                                 "Mny) of the final bar layout with every combination at both "
+                                 "ends; the hull vertices decide the check, the star governs.")
+    members = []
+    for name, rows in report.groupby("UniqueName", sort=False):
+        member = _column_calc_member(rows)
+        if name in figures:
+            member.figures.append(figures[name])
+        members.append(member)
     if not members:
         raise ValueError("COLUMN DESIGN contains no designed columns to report.")
-    return build_calc_report(
-        "Concrete Column Design Calculations (ACI 318M-14)",
-        list(information) + [("Columns reported", len(members))],
-        ["Mark", "Column", "Story", "Size (mm)", "Bars", "Flexure D/C", "Shear D/C", "Status"],
-        members,
-        filepath,
-        "p{1.5cm}p{3cm}p{1.4cm}p{2.4cm}p{1.2cm}p{2cm}p{2cm}p{2.8cm}",
-    )
+    try:
+        return build_calc_report(
+            "Concrete Column Design Calculations (ACI 318M-14)",
+            list(information) + [("Columns reported", len(members))],
+            ["Mark", "Column", "Story", "Size (mm)", "Bars", "Flexure D/C", "Shear D/C",
+             "Status"],
+            members,
+            filepath,
+            "p{1.5cm}p{3cm}p{1.4cm}p{2.4cm}p{1.2cm}p{2cm}p{2cm}p{2.8cm}",
+        )
+    finally:
+        shutil.rmtree(os.path.join(folder, figure_dir), ignore_errors=True)
 
 
 def export_column_pdf(report: pd.DataFrame, path: str, is_smrf: bool, dmain: float,
@@ -6330,8 +6570,11 @@ def export_column_pdf(report: pd.DataFrame, path: str, is_smrf: bool, dmain: flo
         ("Tie bar diameter (mm)", number(dties, 0)),
         ("Concrete cover (mm)", number(cover, 0)),
         ("Values shown", "Governing load combination at each end of each column"),
+        ("Flexure and axial", "ACI design surface (phi Pn, phi Mnx, phi Mny), capacity along "
+                              "the demand's moment direction at phi Pn = Pu"),
     ]
-    return build_column_calc_report(report, path, information)
+    return build_column_calc_report(report, path, information, {
+        "dmain": dmain, "dties": dties, "cover": cover, "is_smrf": is_smrf})
 
 
 if __name__ == "__main__":

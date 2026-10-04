@@ -1,4 +1,10 @@
-"""ACI 318M-14 code constants shared by the beam and column designers.
+"""Structural code constants: ACI 318M-14, NSCP 2015, ASCE 7-10 and UBC 97.
+
+* ``CODE`` (``AciCode``): ACI 318M-14, used by the beam and column designers
+  (NSCP 2015 chapter 4 follows it: ACI clause X is NSCP clause 4X).
+* ``NSCP`` (``NscpCode``): NSCP 2015 chapter 2, the loads, load combinations,
+  live load reduction (with the ASCE 7-10 alternate) and earthquake provisions
+  (with the UBC 97 tables that ETABS uses, which NSCP 208 follows).
 
 WHY A PYTHON MODULE (instead of JSON / YAML / Excel)?
     * Every value carries the code clause it comes from, right next to the number.
@@ -12,7 +18,9 @@ WHY A PYTHON MODULE (instead of JSON / YAML / Excel)?
 
 WHAT DOES NOT BELONG HERE
     Project inputs that change from job to job (bar sizes, cover, fc', fy, SMRF
-    toggle) are asked by ``xs beams`` / ``xs columns`` or come from the ETABS model.
+    toggle, seismic zone, soil) are asked by the commands or come from the ETABS
+    model. Office conventions (pattern names, mass fractions) stay in the
+    workflow that uses them.
 
 UNITS: N, mm, MPa unless a field name says otherwise.
 """
@@ -172,6 +180,17 @@ class BeamSeismicConfig:
     hoop_spacing_abs: float = 150.0  # mm                                      ACI 18.6.4.4
     vc_zero_shear_fraction: float = 0.5  # earthquake shear >= 1/2 max         ACI 18.6.5.2
     vc_zero_axial_divisor: float = 20.0  # Pu < Ag*fc'/20                      ACI 18.6.5.2
+    min_width: float = 250.0  # mm, bw >= smaller of 0.3h and 250 mm           ACI 18.6.2.1(b)
+    min_width_to_depth: float = 0.3  #                                         ACI 18.6.2.1(b)
+    min_clear_span_to_depth: float = 4.0  # ln >= 4d                           ACI 18.6.2.1(a)
+
+
+@dataclass(frozen=True)
+class SeismicMaterialConfig:
+    """Materials of special moment frames and special structural walls."""
+
+    min_fc: float = 21.0  # MPa                                     ACI 18.2.5.1, Table 19.2.1.1
+    max_fy: float = 420.0  # MPa, longitudinal bars                ACI 18.2.6.1, 20.2.2.5
 
 
 # =============================================================================
@@ -302,6 +321,7 @@ class AciCode:
     beam_torsion: BeamTorsionConfig = field(default_factory=BeamTorsionConfig)
     beam_detailing: BeamDetailingConfig = field(default_factory=BeamDetailingConfig)
     beam_seismic: BeamSeismicConfig = field(default_factory=BeamSeismicConfig)
+    seismic_material: SeismicMaterialConfig = field(default_factory=SeismicMaterialConfig)
     column_strength: ColumnStrengthConfig = field(default_factory=ColumnStrengthConfig)
     column_transverse: ColumnTransverseConfig = field(default_factory=ColumnTransverseConfig)
     column_seismic: ColumnSeismicConfig = field(default_factory=ColumnSeismicConfig)
@@ -339,7 +359,174 @@ class AciCode:
 CODE = AciCode()
 
 
-def override(code: AciCode, **changes: Any) -> AciCode:
+# =============================================================================
+# NSCP 2015 CHAPTER 2: LOAD COMBINATIONS  (Section 203)
+# =============================================================================
+@dataclass(frozen=True)
+class LoadFactorConfig:
+    """Load factors of the strength (203.3) and allowable stress (203.4) combinations."""
+
+    dead_only: float = 1.4  # 1.4 D                                    NSCP 203-1
+    dead: float = 1.2  # 1.2 D                                         NSCP 203-2 to 203-5
+    live: float = 1.6  # 1.6 L                                         NSCP 203-2
+    roof_live: float = 1.6  # 1.6 Lr                                   NSCP 203-3
+    roof_live_companion: float = 0.5  # 0.5 Lr                         NSCP 203-2, 203-4
+    live_companion: float = 0.5  # f1 for other live loads             NSCP 203.3.1
+    live_companion_heavy: float = 1.0  # f1: assembly, > 4.8 kPa, garages  NSCP 203.3.1
+    wind_with_roof: float = 0.5  # 0.5 W                               NSCP 203-3
+    wind: float = 1.0  # 1.0 W                                         NSCP 203-4, 203-6
+    seismic: float = 1.0  # 1.0 E, 1.0 Em                              NSCP 203-5, 203-7, 203-19
+    dead_minimum: float = 0.9  # 0.9 D                                 NSCP 203-6, 203-7, 203-20
+    service: float = 1.0  # D, L, Lr                                   NSCP 203-8 to 203-18
+    service_companion: float = 0.75  # 0.75 [L + Lr + ...]             NSCP 203-11, 203-13
+    service_wind: float = 0.6  # 0.6 W                                 NSCP 203-12 to 203-17
+    service_seismic_divisor: float = 1.4  # E / 1.4                    NSCP 203-12 to 203-18
+    service_dead_minimum: float = 0.6  # 0.6 D                         NSCP 203-14, 203-15
+    sustained_live: float = 0.25  # D + 0.25 L for long-term deflection (practice)
+    vertical_effect: float = 0.5  # Ev = 0.5 Ca I D                    NSCP 208.6.1
+    orthogonal: float = 0.3  # 100 % one direction + 30 % the other    NSCP 208.7.1
+    omega0: float = 2.8  # Em = Omega0 Eh, concrete systems            NSCP Table 208-11A
+    rho: float = 1.0  # redundancy (1.0 <= rho <= 1.25 for SMRF)        NSCP 208.6.1
+    drift_rho: float = 1.0  # rho when calculating drift              NSCP 208.6.1
+
+
+# =============================================================================
+# NSCP 2015 SECTION 205 / ASCE 7-10 4.7: LIVE LOAD REDUCTION
+# =============================================================================
+@dataclass(frozen=True)
+class LiveLoadReductionConfig:
+    """Live load reduction by NSCP 205.5 or by ASCE 7-10 4.7 (NSCP 205.6, 405.2.3).
+
+    NSCP 205.5 prints R = r (A - 15), r = 0.08: the UBC 97 rate per ft2. Its
+    metric form, used here, is r = 0.86 % per m2 above 14 m2.
+    """
+
+    nscp_rate: float = 0.86  # % per m2                                NSCP 205.5 Eq. 205-1 (metric)
+    nscp_area_offset: float = 14.0  # m2                               NSCP 205.5 Eq. 205-1 (metric)
+    max_one_level: float = 40.0  # %                                   NSCP 205.5
+    max_other: float = 60.0  # %                                       NSCP 205.5
+    dead_live_coeff: float = 23.1  # R <= 23.1 (1 + D/L)              NSCP 205.5 Eq. 205-2
+    heavy_kpa: float = 4.8  # no reduction above                       NSCP 205.5, ASCE 4.7.3
+    heavy_multi_floor: float = 20.0  # % for members on two or more floors  NSCP 205.5, ASCE 4.7.3
+    # ASCE 4.7: the same in 7-10 and 7-16 (KLL: Table 4-2 in 7-10, Table 4.7-1 in 7-16)
+    heavy_tolerance_m2: float = 0.5  # floor above 4.8 kPa a member may carry (project rule)
+    asce_min_influence: float = 37.16  # m2, KLL AT >= 400 ft2         ASCE 4.7.2
+    asce_constant: float = 0.25  # L = Lo (0.25 + 4.57 / sqrt(KLL AT)) ASCE Eq. 4.7-1
+    asce_coeff: float = 4.57  #                                        ASCE Eq. 4.7-1
+    asce_min_one_level: float = 0.50  # L >= 0.50 Lo                   ASCE 4.7.2
+    asce_min_other: float = 0.40  # L >= 0.40 Lo                       ASCE 4.7.2
+    kll_column: float = 4.0  # interior / exterior without cantilever  ASCE Table 4-2
+    kll_beam: float = 2.0  # interior / edge without cantilever       ASCE Table 4-2
+
+
+# =============================================================================
+# NSCP 2015 SECTION 208 (UBC 97): EARTHQUAKE
+# =============================================================================
+@dataclass(frozen=True)
+class SeismicConfig:
+    """Earthquake loads: NSCP 208, with the UBC 97 tables ETABS uses."""
+
+    # zone factors: NSCP has zones 2 and 4 only; ETABS (UBC 97) lists all five
+    nscp_zone_factors: tuple = (0.2, 0.4)  #                          NSCP Table 208-3
+    ubc_zone_factors: tuple = (0.075, 0.15, 0.2, 0.3, 0.4)  #          UBC Table 16-I
+    zone4_factor: float = 0.4
+    # Ca and Cv per soil, one value per UBC zone factor; zone 4 times Na / Nv
+    ca: dict = field(default_factory=lambda: {  #                      NSCP Table 208-7, UBC 16-Q
+        "SA": (0.06, 0.12, 0.16, 0.24, 0.32), "SB": (0.08, 0.15, 0.20, 0.30, 0.40),
+        "SC": (0.09, 0.18, 0.24, 0.33, 0.40), "SD": (0.12, 0.22, 0.28, 0.36, 0.44),
+        "SE": (0.19, 0.30, 0.34, 0.36, 0.36)})
+    cv: dict = field(default_factory=lambda: {  #                      NSCP Table 208-8, UBC 16-R
+        "SA": (0.06, 0.12, 0.16, 0.24, 0.32), "SB": (0.08, 0.15, 0.20, 0.30, 0.40),
+        "SC": (0.13, 0.25, 0.32, 0.45, 0.56), "SD": (0.18, 0.32, 0.40, 0.54, 0.64),
+        "SE": (0.26, 0.50, 0.64, 0.84, 0.96)})
+    # (distance km, factor); linear in between, constant outside
+    na: dict = field(default_factory=lambda: {  #                      NSCP Table 208-5
+        "A": ((2.0, 1.5), (5.0, 1.2), (10.0, 1.0)),
+        "B": ((2.0, 1.3), (5.0, 1.0), (10.0, 1.0)),
+        "C": ((2.0, 1.0), (5.0, 1.0), (10.0, 1.0))})
+    nv: dict = field(default_factory=lambda: {  #                      NSCP Table 208-6
+        "A": ((2.0, 2.0), (5.0, 1.6), (10.0, 1.2), (15.0, 1.0)),
+        "B": ((2.0, 1.6), (5.0, 1.2), (10.0, 1.0), (15.0, 1.0)),
+        "C": ((2.0, 1.0), (5.0, 1.0), (10.0, 1.0), (15.0, 1.0))})
+    na_cap: float = 1.1  # Na may be capped when regular, SMRF, rho 1.0  NSCP 208.4.4.3
+    near_fault_km: float = 2.0  # site-specific spectrum recommended   NSCP 208.4.4.3
+    importance_factors: tuple = (1.0, 1.25, 1.5)  #                    NSCP Table 208-1
+    # R -> (system, permitted in zone 4), concrete                     NSCP Table 208-11A
+    concrete_r: dict = field(default_factory=lambda: {
+        8.5: ("special moment frame (or dual system with special walls)", True),
+        6.5: ("dual system: ordinary walls, or special walls with IMRF", True),
+        5.6: ("building frame: ordinary walls", False),
+        5.5: ("intermediate moment frame / shear wall-frame interaction", False),
+        5.0: ("building frame: special walls", True),
+        4.5: ("bearing wall: special walls", True),
+        4.2: ("shear wall-frame interactive with ordinary frames", False),
+        3.5: ("ordinary moment frame", False),
+        2.2: ("cantilevered column", True),
+    })
+    smrf_r: float = 8.5  #                                             NSCP Table 208-11A
+    # Method A, Ct in ft units (ETABS) -> (system, Ct in m units)      NSCP 208.5.2.2 Eq. 208-12
+    ct: dict = field(default_factory=lambda: {
+        0.035: ("steel moment frames", 0.0853), 0.03: ("concrete moment frames", 0.0731),
+        0.02: ("all other buildings", 0.0488)})
+    period_exponent: float = 0.75  # T = Ct hn^(3/4)                   NSCP Eq. 208-12
+    period_cap_zone4: float = 1.3  # Method B <= 1.3 T_A               NSCP 208.5.2.2
+    period_cap_other: float = 1.4  #                                   NSCP 208.5.2.2
+    # base shear V / W                                                 NSCP 208.5.2.1
+    plateau: float = 2.5  # V <= 2.5 Ca I / R W                        NSCP Eq. 208-9
+    minimum: float = 0.11  # V >= 0.11 Ca I W                          NSCP Eq. 208-10
+    zone4_minimum: float = 0.8  # V >= 0.8 Z Nv I / R W                NSCP Eq. 208-11
+    eccentricity: float = 0.05  # accidental                           NSCP 208.5.1.3
+    # dynamic analysis
+    scaling_regular: float = 0.90  # of the static base shear          NSCP 208.5.3.5.4
+    scaling_irregular: float = 1.00  #                                 NSCP 208.5.3.5.4
+    modal_mass: float = 0.90  #                                        NSCP 208.5.3.5.2
+    dynamic_height_mm: float = 75_000.0  # dynamic procedure required  NSCP 208.4.8.3
+    damping: float = 0.05  # spectrum damping ratio                    NSCP 208.5.3.2
+    gravity: float = 9806.65  # mm/s2 as ETABS (NSCP 208.5.3.2 prints 9.815 m/s2)
+    # drift                                                            NSCP 208.6.4, 208.6.5
+    drift_amplification: float = 0.7  # Delta_M = 0.7 R Delta_S        NSCP Eq. 208-21
+    drift_limit_short: float = 0.025  # T < 0.7 s                      NSCP 208.6.5.1
+    drift_limit_long: float = 0.020  #                                 NSCP 208.6.5.1
+    drift_period: float = 0.7  # s                                     NSCP 208.6.5.1
+
+
+@dataclass(frozen=True)
+class WindConfig:
+    """Wind serviceability (NSCP 207 sets no drift limit: an office default)."""
+
+    drift_limit_denominator: float = 400.0  # storey drift <= h/400 under the 203.3 wind combinations (practice)
+
+
+@dataclass(frozen=True)
+class AnalysisModelConfig:
+    """Modelling requirements of the analysis."""
+
+    beam_inertia: float = 0.35  # cracked I of beams                  NSCP 208.6.2, 406.6.3.1.1
+    column_inertia: float = 0.70  # cracked I of columns              NSCP 208.6.2, 406.6.3.1.1
+    service_stiffness_factor: float = 1.4  # service-level I = 1.4 x strength-level  ACI 6.6.3.2.2
+    max_inertia: float = 1.0  # the service-level I is at most the gross section
+    modifier_tolerance: float = 0.05  # accepted difference (project rule)
+    rigid_zone_typical: float = 0.5  # rigid end zone factor (practice; NSCP 406.6.2.3(b))
+    storage_live_mass: float = 0.25  # of storage live in W            NSCP 208.6.1
+    partition_mass_kpa: float = 0.5  # minimum partition load in W     NSCP 208.6.1
+
+
+@dataclass(frozen=True)
+class NscpCode:
+    """NSCP 2015 chapter 2 constants, grouped by topic."""
+
+    name: str = "NSCP 2015"
+    load_factors: LoadFactorConfig = field(default_factory=LoadFactorConfig)
+    live_load_reduction: LiveLoadReductionConfig = field(default_factory=LiveLoadReductionConfig)
+    seismic: SeismicConfig = field(default_factory=SeismicConfig)
+    wind: WindConfig = field(default_factory=WindConfig)
+    analysis: AnalysisModelConfig = field(default_factory=AnalysisModelConfig)
+
+
+NSCP = NscpCode()
+
+
+def override(code: Any, **changes: Any) -> Any:
     """Return a copy of ``code`` with selected fields changed.
 
     Use dotted names with double underscores, e.g.::
@@ -363,7 +550,7 @@ def override(code: AciCode, **changes: Any) -> AciCode:
 
 
 if __name__ == "__main__":
-    # Quick self-check: python design/aci318_config.py
+    # Quick self-check: python design/code_config.py
     print(CODE.name, "beta1(28)=", CODE.beta1(28.0), "beta1(60)=", CODE.beta1(60.0))
     print("phi at eps_t=0.0035, fy=415:", round(CODE.phi_flexure(0.0035, 415.0), 3))
     print("crack spacing, fy=415, clear cover 50:", round(CODE.crack_control_spacing(415.0, 50.0), 1))

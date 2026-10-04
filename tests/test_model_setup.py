@@ -112,7 +112,8 @@ def test_static_and_spectrum_sets_share_one_number_and_one_format():
     for number in (107, 110):
         assert sum(n.startswith(f"ULS {number} ") and " EQ" in n for n in names) == 8
         assert sum(n.startswith(f"ULS {number} ") and " RSA" in n for n in names) == 8
-    assert not any(" - " in n and not ("(0.9 - Ev)" in n or "(0.6 - " in n or "- 1.0 Em" in n)
+    assert not any(" - " in n and not ("(0.9 - Ev)" in n or "(0.6 - " in n or "- 1.0 Em" in n
+                                       or n.startswith("DRIFT "))
                    for n in names)
 
 
@@ -134,7 +135,21 @@ def test_combinations_only_use_what_was_created_before_them():
     for combo in lc.build_combinations(PATTERNS, 0.4):
         assert all(name in seen for name, _ in combo.combos), combo.name
         seen.add(combo.name)
-    assert len(seen) == 152
+    assert len(seen) == 168
+
+
+def test_drift_combinations_follow_203_with_rho_one():
+    """NSCP 208.6.4.1: drift from the 203.3 combinations, E from the drift cases, rho 1.0."""
+    combos = _combos()
+    up = combos["DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 EQXSD"]
+    assert dict(up.cases)["SELFWEIGHT"] == pytest.approx(1.2 + 0.5 * 0.4 * 1.0)
+    assert dict(up.cases)["EQXSD"] == 1.0 and not up.design
+    assert dict(combos["DRIFT 103 (0.9 - Ev) DL - 1.0 EQXSD"].cases)["EQXSD"] == -1.0
+    assert "DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 RSAXD" in combos
+    assert not any(n.startswith("DRIFT 101") and "RSA" in n for n in combos)  # no sign on RSA
+    wind = combos["WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WX"]
+    assert dict(wind.cases)["WX"] == 1.0
+    assert combos["ENVE_DRIFT"].envelope and combos["ENVE_WDRIFT"].envelope
 
 
 def test_deflection_combinations_are_unfactored_and_not_designed():
@@ -323,3 +338,62 @@ def test_deflection_combinations_come_from_the_pattern_types():
     assert combos["DEF 103 1.0 DL + 1.0 Lr"]["LIVEROOF"] == 1.0
     assert "LIVENRED" not in combos["DEF 103 1.0 DL + 1.0 Lr"]
     assert all("WX" not in c for c in combos.values())
+
+
+def test_slab_and_wall_sections_have_their_own_concrete():
+    settings = ms.merge_settings({
+        "section_concrete_ksi": [5], "section_rebar_ksi": 60,
+        "slabs": {"thickness": [150, 100], "type": "Membrane", "concrete_ksi": 4},
+        "walls": {"thickness": [200], "concrete_ksi": 6}})
+    areas = ms.area_section_definitions(settings)
+    assert [a["name"] for a in areas] == ["S_100_C04", "S_150_C04", "SW_200_C06_G60"]
+    assert [a["material"] for a in areas] == ["C04", "C04", "C06"]
+    assert [a["shell"] for a in areas] == ["Membrane", "Membrane", "Shell-Thin"]
+    grades = ms.concrete_grades(settings)
+    assert 4.0 in grades and 6.0 in grades  # both are always defined
+
+
+def test_slab_and_wall_concrete_default_to_the_frame_grade():
+    settings = ms.merge_settings({"section_concrete_ksi": [5]})
+    assert ms.area_concrete_ksi(settings, "slabs") == 5.0
+    assert ms.area_concrete_ksi(settings, "walls") == 5.0
+    assert ms.area_section_definitions(settings)[0]["name"] == "S_100_C05"
+
+
+def test_an_older_single_slab_and_wall_concrete_still_applies():
+    settings = ms.merge_settings({"section_concrete_ksi": [5], "area_concrete_ksi": 4})
+    assert ms.area_concrete_ksi(settings, "slabs") == 4.0
+    assert ms.area_concrete_ksi(settings, "walls") == 4.0
+
+
+def test_the_wall_name_matches_xs_grids():
+    from etabs_api.workflows.grid_column_model import wall_section_name
+
+    settings = ms.merge_settings({"section_concrete_ksi": [5], "walls": {"thickness": [250]},
+                                  "slabs": {"thickness": []}})
+    assert ms.area_section_definitions(settings)[0]["name"] == wall_section_name(250, 5, 60)
+
+
+@pytest.mark.parametrize("names, elevations, expected", [
+    (["Base", "2F", "3F", "RD"], [0, 4500, 8000, 11500], ("Base", "RD")),
+    (["Base", "GF", "2F", "RD"], [-1500, 0, 4500, 8000], ("GF", "RD")),   # footing level
+    (["Base", "B1", "GF", "RD"], [-6000, -3000, 0, 4000], ("GF", "RD")),  # basement
+])
+def test_lateral_loads_start_at_the_ground_level(names, elevations, expected):
+    assert ms.lateral_story_range(names, elevations) == expected
+
+
+
+def test_per_code_text_reload_is_refused_on_a_model_with_frames():
+    """Reloading from the .$et text renames every object: never on a tagged model."""
+    class Frames:
+        @staticmethod
+        def Count():
+            return 150
+
+    class Model:
+        FrameObj = Frames()
+
+    log = ms.SetupLog()
+    assert ms.make_seismic_per_code(Model(), "x.EDB", ms.merge_settings({}), log) is False
+    assert "150 frames" in log.problems[0]

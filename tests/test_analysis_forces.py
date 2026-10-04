@@ -187,6 +187,37 @@ def test_nscp_reduction_limits(area, kpa, ratio, one_level, percent, limit):
     assert result.limit == limit
 
 
+@pytest.mark.parametrize("area, kpa, kind, one_level, percent, limit", [
+    (50.0, 0.0, "beam", True, 0.0, "no reducible live"),
+    (18.0, 2.4, "beam", True, 0.0, "KLL AT < 37.16 m2"),        # 2 x 18 = 36 m2
+    (30.0, 2.4, "beam", True, (1 - (0.25 + 4.57 / 60 ** 0.5)) * 100, "0.25 + 4.57 / sqrt(KLL AT)"),
+    (30.0, 2.4, "column", False, (1 - (0.25 + 4.57 / 120 ** 0.5)) * 100,
+     "0.25 + 4.57 / sqrt(KLL AT)"),
+    (500.0, 2.4, "beam", True, 50.0, "50 % (one level)"),       # L >= 0.50 Lo
+    (500.0, 2.4, "column", False, 60.0, "60 %"),                # L >= 0.40 Lo
+    (200.0, 7.2, "column", False, 20.0, "L > 4.8 kPa"),
+    (8.0, 7.2, "column", False, 0.0, "L > 4.8 kPa"),            # 4 x 8 < 37.16: not below 4.7.2
+    (200.0, 7.2, "beam", True, 0.0, "L > 4.8 kPa"),
+])
+def test_asce_reduction_limits(area, kpa, kind, one_level, percent, limit):
+    result = af.asce_reduction(area, kpa, kind, one_level)
+    assert result.percent == pytest.approx(percent, abs=1e-3)
+    assert result.limit == limit
+    assert result.code == "ASCE"
+
+
+def test_live_load_reduction_uses_the_chosen_code():
+    width = 5000.0
+    forces = af.case_forces(element_table({
+        "LRED": beam_case(2.4e-3 * width, 0.0, 0.0), "DEAD": beam_case(6e-3 * width, 0.0, 0.0),
+    }), "Beam")
+    areas = {"B1": af.Tributary(area_m2=30.0, load_kn=30.0 * 2.4)}
+    nscp = af.live_load_reduction(forces, "beam", areas, ["DEAD"], ["LRED"])["B1"]
+    asce = af.live_load_reduction(forces, "beam", areas, ["DEAD"], ["LRED"], code="ASCE")["B1"]
+    assert nscp.percent == pytest.approx(0.86 * 16)
+    assert asce.percent == pytest.approx((1 - (0.25 + 4.57 / 60 ** 0.5)) * 100, abs=1e-3)
+
+
 def test_load_share_area_comes_from_the_unit_load():
     width = 5000.0  # tributary width: 1 kPa = 0.001 N/mm2 over 5 m
     unit = beam_case(1e-3 * width, 0.0, 0.0)

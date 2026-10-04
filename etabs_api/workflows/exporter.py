@@ -161,11 +161,12 @@ class ETABSDataExporter:
     def display_live_load_reduction(
         self, reductions: dict, sheet_name: str = "LIVE LOAD REDUCTION", start_cell: str = "B2"
     ) -> pd.DataFrame:
-        """Write the NSCP live load reduction of every member to its own sheet."""
+        """Write the live load reduction of every member to its own sheet."""
         table = pd.DataFrame(
             [
                 {
                     "UniqueName": member,
+                    "Code": getattr(r, "code", "NSCP"),
                     "Tributary method": r.method,
                     "Tributary area (m2)": round(r.area_m2, 2),
                     "Reducible live (kPa)": round(r.reducible_kpa, 2),

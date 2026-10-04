@@ -25,12 +25,16 @@ Forces are in N and moments in N-mm, as read from ETABS.
 from __future__ import annotations
 
 import itertools
+import math
 from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
 
-from etabs_api.workflows.tributary import HEAVY_KPA, HEAVY_TOLERANCE_M2, Tributary
+from design.code_config import NSCP
+from etabs_api.workflows.tributary import HEAVY_TOLERANCE_M2, Tributary
+
+_LLR = NSCP.live_load_reduction
 
 FORCES = ("P", "V2", "V3", "T", "M2", "M3")
 KEY = ("Story", "Label", "UniqueName", "Element", "ElemStation", "Station")
@@ -270,6 +274,7 @@ class Reduction:
     heavy_m2: float = 0.0
     levels: int = 1
     method: str = ""
+    code: str = "NSCP"
 
     @property
     def factor(self) -> float:
@@ -277,31 +282,77 @@ class Reduction:
 
 
 def nscp_reduction(area_m2: float, reducible_kpa: float, dead_over_live: float,
-                   one_level: bool, r: float = 0.86, heavy: bool | None = None) -> Reduction:
+                   one_level: bool, r: float | None = None,
+                   heavy: bool | None = None) -> Reduction:
     """NSCP 2015 205.5: R = r (A - 14) percent, A the tributary area in m2.
 
     R is at most 40 % for horizontal members and members receiving load from
     one level only, 60 % for other members, and 23.1 (1 + D/L) %. Reducible
     live loads above 4.8 kPa are not reduced, except by 20 % for members
     supporting more than one floor. ``heavy`` says whether the member supports
-    such a load (by default: when ``reducible_kpa`` is above 4.8).
+    such a load (by default: when ``reducible_kpa`` is above 4.8). The values
+    are those of ``NSCP.live_load_reduction`` (design/code_config.py).
     """
+    k = _LLR
+    r = k.nscp_rate if r is None else r
     if heavy is None:
-        heavy = reducible_kpa > HEAVY_KPA
+        heavy = reducible_kpa > k.heavy_kpa
     if reducible_kpa <= 0:
         return Reduction(area_m2, reducible_kpa, 0.0, "no reducible live")
-    if area_m2 <= 14.0:
-        return Reduction(area_m2, reducible_kpa, 0.0, "A <= 14 m2")
+    if area_m2 <= k.nscp_area_offset:
+        return Reduction(area_m2, reducible_kpa, 0.0, f"A <= {k.nscp_area_offset:g} m2")
     if heavy:
-        percent = 0.0 if one_level else 20.0
-        return Reduction(area_m2, reducible_kpa, percent, "L > 4.8 kPa")
+        percent = 0.0 if one_level else k.heavy_multi_floor
+        return Reduction(area_m2, reducible_kpa, percent, f"L > {k.heavy_kpa:g} kPa")
+    cap = (f"{k.max_one_level:g} % (one level)", k.max_one_level) if one_level else \
+        (f"{k.max_other:g} %", k.max_other)
     limits = {
-        "r (A - 14)": r * (area_m2 - 14.0),
-        "40 % (one level)" if one_level else "60 %": 40.0 if one_level else 60.0,
-        "23.1 (1 + D/L)": 23.1 * (1.0 + max(dead_over_live, 0.0)),
+        f"r (A - {k.nscp_area_offset:g})": r * (area_m2 - k.nscp_area_offset),
+        cap[0]: cap[1],
+        f"{k.dead_live_coeff:g} (1 + D/L)": k.dead_live_coeff * (1.0 + max(dead_over_live, 0.0)),
     }
     limit = min(limits, key=limits.get)
     return Reduction(area_m2, reducible_kpa, round(limits[limit], 3), limit)
+
+
+def asce_reduction(area_m2: float, reducible_kpa: float, kind: str, one_level: bool,
+                   heavy: bool | None = None) -> Reduction:
+    """ASCE 7-10 4.7 (NSCP 2015 205.6): L = Lo (0.25 + 4.57 / sqrt(KLL AT)).
+
+    KLL is 4 for columns and 2 for beams (Table 4-2; interior members and
+    edge members without cantilever slabs). No reduction when KLL AT is
+    below 37.16 m2. L is at least 0.50 Lo for members receiving load from one
+    level, 0.40 Lo for others. Live loads above 4.8 kPa are not reduced,
+    except by 20 % for members supporting more than one floor (4.7.3). The
+    values are those of ``NSCP.live_load_reduction``.
+    """
+    k = _LLR
+    code = "ASCE"
+    if heavy is None:
+        heavy = reducible_kpa > k.heavy_kpa
+    if reducible_kpa <= 0:
+        return Reduction(area_m2, reducible_kpa, 0.0, "no reducible live", code=code)
+    if heavy:
+        if one_level:
+            return Reduction(area_m2, reducible_kpa, 0.0, f"L > {k.heavy_kpa:g} kPa", code=code)
+        # at most 20 %, and L not below the 4.7.2 value (ASCE 4.7.3 exception)
+        normal = asce_reduction(area_m2, reducible_kpa, kind, one_level, heavy=False)
+        return Reduction(area_m2, reducible_kpa, min(k.heavy_multi_floor, normal.percent),
+                         f"L > {k.heavy_kpa:g} kPa", code=code)
+    kll = {"column": k.kll_column, "beam": k.kll_beam}.get(kind, 1.0)
+    influence = kll * area_m2
+    if influence < k.asce_min_influence:
+        return Reduction(area_m2, reducible_kpa, 0.0, f"KLL AT < {k.asce_min_influence:g} m2",
+                         code=code)
+    factor = k.asce_constant + k.asce_coeff / math.sqrt(influence)
+    floor = k.asce_min_one_level if one_level else k.asce_min_other
+    limit = f"{k.asce_constant:g} + {k.asce_coeff:g} / sqrt(KLL AT)"
+    if factor < floor:
+        factor = floor
+        cut = f"{(1 - floor) * 100:g} %"
+        limit = f"{cut} (one level)" if one_level else cut
+    return Reduction(area_m2, reducible_kpa, round((1.0 - min(factor, 1.0)) * 100.0, 3), limit,
+                     code=code)
 
 
 def load_share_tributary(
@@ -344,8 +395,12 @@ def live_load_reduction(
     dead_cases: list[str],
     live_cases: list[str],
     method: str = "geometric",
+    code: str = "NSCP",
 ) -> dict[str, Reduction]:
-    """NSCP reduction of every member, from its tributary area.
+    """Live load reduction of every member, from its tributary area.
+
+    ``code`` is "NSCP" (NSCP 2015 205.5) or "ASCE" (ASCE 7-10 4.7, the
+    alternate of NSCP 205.6 and the reference of NSCP 405.2.3).
 
     D/L is the member's dead load over its live load, both from the analysis.
     A beam receives load from one level; a column from as many levels as
@@ -365,8 +420,12 @@ def live_load_reduction(
         live_load = float(live.get(member, 0.0)) if len(live) else 0.0
         ratio = float(dead.get(member, 0.0)) / live_load if live_load > 0 else 0.0
         one_level = kind == "beam" or area.levels <= 1
-        result = nscp_reduction(area.area_m2, area.reducible_kpa, ratio, one_level,
-                                heavy=area.heavy_m2 > HEAVY_TOLERANCE_M2)
+        heavy = area.heavy_m2 > HEAVY_TOLERANCE_M2
+        if code == "ASCE":
+            result = asce_reduction(area.area_m2, area.reducible_kpa, kind, one_level, heavy)
+        else:
+            result = nscp_reduction(area.area_m2, area.reducible_kpa, ratio, one_level,
+                                    heavy=heavy)
         result.heavy_m2, result.levels, result.method = area.heavy_m2, area.levels, method
         if result.limit == "L > 4.8 kPa" and area.sources:
             result.limit = "L > 4.8 kPa (" + ", ".join(sorted(area.sources))[:60] + ")"
@@ -477,14 +536,15 @@ PATTERN_LIVE_FACTOR = 0.75
 class ForceOptions:
     """What is added to the analysis results.
 
-    ``reduce_live``: NSCP 2015 205.5 live load reduction of the reducible live
-    patterns. ``pattern_factor``: pattern live load on the beams with this
+    ``reduce_live``: live load reduction of the reducible live patterns, by
+    ``code``: "NSCP" (NSCP 2015 205.5) or "ASCE" (ASCE 7-10 4.7). ``pattern_factor``: pattern live load on the beams with this
     factor on the live load (ACI 318-14 6.4.2), or None for no pattern.
     """
 
     reduce_live: bool = False
     pattern_factor: float | None = None
     tributary: str = "geometric"   # or "load share"
+    code: str = "NSCP"             # or "ASCE"
 
 
 @dataclass
@@ -526,6 +586,10 @@ def ensure_unit_pattern(connector) -> bool:
     with connector.extraction_units():  # N-mm: 1 kPa = 0.001 N/mm2
         for name in floors["UniqueName"].astype(str):
             connector.loads.assign_area_uniform_load(name, UNIT_PATTERN, UNIT_KPA * 1e-3)
+    # its new load case starts on "Use Nonlinear Case": put it on preset P-delta like the others
+    from etabs_api.workflows.model_setup import SetupLog, use_preset_pdelta
+
+    use_preset_pdelta(model, SetupLog())
     return True
 
 
@@ -623,7 +687,7 @@ def factored_forces(
                 above = columns_above(connector) if kind == "column" else None
                 areas = load_share_tributary(forces, kind, UNIT_PATTERN, UNIT_KPA, areas, above)
             member_reductions = live_load_reduction(forces, kind, areas, dead, live,
-                                                    options.tributary)
+                                                    options.tributary, options.code)
             reductions.update(member_reductions)
         out.append(combine(forces, combos, kind, live, reducible, member_reductions,
                            options.pattern_factor if kind == "beam" else None, releases))
@@ -638,17 +702,36 @@ def ask_force_options() -> ForceOptions | None:
     title = "Factored Forces"
     reduce = select_option(
         title,
-        "Reduce the reducible live load (NSCP 2015 205.5)?",
+        "Reduce the reducible live load?",
         ["Yes", "No"],
     )
     if reduce is None:
         return None
-    method = "geometric"
+    method, code = "geometric", "NSCP"
     if reduce == "Yes":
+        k = _LLR
+        rule = select_option(
+            title,
+            "Live load reduction rule:\n\n"
+            f"NSCP 2015 205.5: R = r (A - {k.nscp_area_offset:g}) %, r = {k.nscp_rate:g} per "
+            f"m2 (the metric form of UBC's 0.08 per ft2), at most {k.max_one_level:g} % (one "
+            f"level) / {k.max_other:g} % and {k.dead_live_coeff:g} (1 + D/L) %.\n\n"
+            f"ASCE 7-10 4.7 (NSCP 205.6 alternate, and NSCP 405.2.3): L = Lo "
+            f"({k.asce_constant:g} + {k.asce_coeff:g} / sqrt(KLL AT)), KLL {k.kll_column:g} "
+            f"for columns and {k.kll_beam:g} for beams, when KLL AT is at least "
+            f"{k.asce_min_influence:g} m2; L at least {k.asce_min_one_level:.2f} Lo (one "
+            f"level) / {k.asce_min_other:.2f} Lo.\n\n"
+            f"Both: no reduction above {k.heavy_kpa:g} kPa, except {k.heavy_multi_floor:g} % "
+            "for members supporting more than one floor.",
+            ["NSCP 2015 205.5", "ASCE 7-10 4.7"],
+        )
+        if rule is None:
+            return None
+        code = "ASCE" if rule.startswith("ASCE") else "NSCP"
         chosen = select_option(
             title,
             "Tributary area for the live load reduction:",
-            ["Geometric: halfway lines (NSCP 205.5, as ETABS)",
+            ["Geometric: halfway lines (as ETABS)",
              "Analysis load share: 1 kPa on every floor, as the frame carries it"],
         )
         if chosen is None:
@@ -677,4 +760,5 @@ def ask_force_options() -> ForceOptions | None:
             break
         except ValueError:
             show_warning("The factor must be a number above 0 and at most 1.", title=title)
-    return ForceOptions(reduce_live=reduce == "Yes", pattern_factor=factor, tributary=method)
+    return ForceOptions(reduce_live=reduce == "Yes", pattern_factor=factor, tributary=method,
+                        code=code)

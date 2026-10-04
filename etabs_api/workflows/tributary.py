@@ -31,8 +31,10 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-HEAVY_KPA = 4.8
-HEAVY_TOLERANCE_M2 = 0.5
+from design.code_config import NSCP
+
+HEAVY_KPA = NSCP.live_load_reduction.heavy_kpa
+HEAVY_TOLERANCE_M2 = NSCP.live_load_reduction.heavy_tolerance_m2
 LEVEL_TOLERANCE = 10.0  # mm
 MAX_POINTS_PER_LEVEL = 400_000
 

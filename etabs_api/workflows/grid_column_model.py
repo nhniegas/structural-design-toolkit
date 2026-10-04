@@ -17,7 +17,10 @@ The drawing rules (see ``edb/plan dxf`` for samples), all in millimetres:
                 wall thickness (one polyline can trace a whole core), or
                 a closed rectangle around one wall (the short side is the thickness)
 
-The columns of a plan are the ones below that level. Run on a model that
+The columns of a plan are the ones below that level. Optionally a footing
+level is added: the base drops to minus the embedment depth, a ground story
+(``GF``) ends at elevation 0 below the lowest plan, and the columns and walls
+of the lowest plan continue down to the footings. Run on a model that
 already has columns, the script updates it: columns that did not change are
 left alone, moved ones are moved with the beams framing into them, and the
 rest are added or removed. A wall that changed is removed and drawn again.
@@ -107,6 +110,37 @@ class Building:
     columns: list[PlanColumn] = field(default_factory=list)
     walls: list[PlanWall] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    base_elevation: float = 0.0  # mm; negative with a footing level
+
+
+def add_footing_level(building: Building, depth: float, ground: str = "GF") -> Building:
+    """The building with a ground story below its lowest plan, ``depth`` deep.
+
+    The base goes to ``-depth``, so the ground level (``ground``) is at
+    elevation 0 and the lowest plan keeps its height above it. The columns and
+    walls of the lowest plan are repeated in the ground story, from the
+    footings up to the ground level.
+    """
+    from dataclasses import replace
+
+    if depth <= 0:
+        raise ValueError("The embedment depth must be more than zero.")
+    if not building.stories:
+        raise ValueError("The drawing has no stories.")
+    if ground in dict(building.stories):
+        raise ValueError(f"Story {ground} is already in the drawing; choose another name "
+                         "for the ground level.")
+    lowest = building.stories[0][0]
+    return Building(
+        stories=[(ground, float(depth))] + list(building.stories),
+        grids=list(building.grids),
+        columns=[replace(c, story=ground) for c in building.columns if c.story == lowest]
+        + list(building.columns),
+        walls=[replace(w, story=ground) for w in building.walls if w.story == lowest]
+        + list(building.walls),
+        warnings=list(building.warnings),
+        base_elevation=-float(depth),
+    )
 
 
 def rectangle_column(story: str, corners: list[tuple[float, float]]) -> PlanColumn:
@@ -540,12 +574,39 @@ def read_model(model) -> tuple[list[ExistingColumn], list[GridLine], list[tuple[
     return columns, grids, [(str(n), float(h)) for n, h in zip(names, heights)]
 
 
+def update_story_heights(model, building: Building, current: list[tuple[str, float]],
+                         log) -> bool:
+    """Set the base elevation and the story heights of a model that has members.
+
+    The stories must have the same names as in the drawing; ETABS moves the
+    levels above, with their members, when a height changes. A story that is
+    new or missing cannot be inserted under existing members.
+    """
+    if [n for n, _ in current] != [n for n, _ in building.stories]:
+        log.problems.append(
+            "The stories of the drawing differ in name from the model, which already has "
+            "members, so they were not changed (start from a new model to add or remove "
+            f"stories): drawing {[n for n, _ in building.stories]}, model "
+            f"{[n for n, _ in current]}")
+        return False
+    ok = log.check(model.Story.SetElevation("Base", building.base_elevation), "base elevation")
+    for (name, height), (_, old) in zip(building.stories, current):
+        if abs(height - old) > 0.5:
+            ok = log.check(model.Story.SetHeight(name, height), f"story {name} height") and ok
+    return ok
+
+
 def apply_to_model(
     model, building: Building, changes: Changes, concrete_ksi: float, rebar_ksi: float,
     progress=None,
 ) -> ms.SetupLog:
     """Stories, grids and the column changes. The caller saves the model."""
     log = ms.SetupLog()
+
+    def say(text: str) -> None:
+        if progress is not None:
+            progress(text)
+
     if model.GetModelIsLocked():
         model.SetModelIsLocked(False)
     units = int(model.GetPresentUnits())
@@ -553,25 +614,31 @@ def apply_to_model(
     try:
         existing, _, stories = read_model(model)
         # ---- stories ----
-        if stories != building.stories:
+        say("Stories and levels")
+        before = model.Story.GetStories()
+        base_now = float(as_list(before[2])[0]) if as_list(before[2]) else 0.0
+        if stories != building.stories or abs(base_now - building.base_elevation) > 0.5:
             if existing or _table(model, "Beam Object Connectivity"):
-                log.problems.append(
-                    "The stories of the drawing differ from the model. They were not "
-                    "changed because the model already has members: "
-                    f"drawing {building.stories}, model {stories}")
+                # Members exist: change the heights in place; ETABS moves the
+                # levels above with their members.
+                if update_story_heights(model, building, stories, log):
+                    log.done("story levels updated", len(building.stories))
             else:
                 count = len(building.stories)
                 done = model.Story.SetStories_2(
-                    0.0, count, [n for n, _ in building.stories],
+                    building.base_elevation, count, [n for n, _ in building.stories],
                     [h for _, h in building.stories], [False] * count, ["None"] * count,
                     [False] * count, [0.0] * count, [0] * count)
                 if log.check(done, "stories"):
                     log.done("stories", count)
+        # the seismic and wind patterns follow the stories (bottom = ground level)
+        ms.set_lateral_story_range(model, log)
         levels = model.Story.GetStories()
         top_of = dict(zip((str(n) for n in as_list(levels[1])), as_list(levels[2])))
         height_of = dict(zip((str(n) for n in as_list(levels[1])), as_list(levels[3])))
 
         # ---- grids: the drawing replaces the grid lines of the first grid system ----
+        say("Grid lines")
         systems = _table(model, "Grid Definitions - General")
         system = str(systems[0]["Name"]) if systems else "G1"
         rows = [{"Name": system, "LineType": "General (Cartesian)", "ID": g.label,
@@ -582,6 +649,7 @@ def apply_to_model(
             log.done("grid lines", len(rows))
 
         # ---- materials and the sections the columns need ----
+        say("Materials and column sections")
         needed = {}
         for column in building.columns:
             section = section_of(column, concrete_ksi, rebar_ksi)
@@ -615,11 +683,13 @@ def apply_to_model(
             return log.check(frames.SetLocalAxes(str(made[0]), column.angle), "new column: angle")
 
         # ---- removed ----
+        say("Removing columns")
         for old in changes.removed:
             if log.check(frames.Delete(old.name), f"removing {old.name}"):
                 log.done("columns removed")
 
         # ---- moved: shift the joints, so the beams on them follow ----
+        say("Moving columns (the beams follow)")
         target: dict[str, tuple[float, float]] = {}
         clash: set[str] = set()
         for old, _ in changes.unchanged + changes.updated:  # these joints must stay
@@ -663,11 +733,13 @@ def apply_to_model(
                 log.done("columns replaced (joint shared with a column that stays)")
 
         # ---- updated in place ----
+        say("Updating column sections and angles")
         for old, new in changes.updated:
             if restyle(old.name, new, "column"):
                 log.done("columns updated")
 
         # ---- walls ----
+        say("Walls")
         areas = model.AreaObj
         made_wall_sections = set()
 
@@ -704,6 +776,7 @@ def apply_to_model(
                 log.done("walls added")
 
         # ---- added ----
+        say("Adding columns")
         for index, new in enumerate(changes.added):
             if progress is not None and index % 25 == 0:
                 progress(f"Column {index + 1} of {len(changes.added)}")
@@ -720,7 +793,8 @@ def apply_to_model(
 def report_text(dxf_path: str, building: Building, changes: Changes, log=None) -> str:
     lines = [
         f"Drawing: {dxf_path}",
-        "Stories (lowest first): " + ", ".join(f"{n} ({h:g})" for n, h in building.stories),
+        "Stories (lowest first): " + ", ".join(f"{n} ({h:g})" for n, h in building.stories)
+        + (f"; base at {building.base_elevation:g} mm" if building.base_elevation else ""),
         f"Grid lines: {len(building.grids)} | Columns drawn: {len(building.columns)}",
         f"Unchanged: {len(changes.unchanged)} | Moved: {len(changes.moved)} | "
         f"Updated: {len(changes.updated)} | Added: {len(changes.added)} | "
@@ -749,15 +823,24 @@ def build_grid_column_model(
     layers: dict | None = None,
     confirm=None,
     progress=None,
+    footing_depth: float = 0.0,
+    ground_story: str = "GF",
 ):
     """Build or update the grids and columns without dialogs.
+
+    With ``footing_depth`` (mm) a footing level is added below the lowest plan
+    (see ``add_footing_level``).
 
     ``target`` is ``"open"`` (the model open in ETABS) or ``"new"`` (a blank
     model saved at ``path``). ``confirm(building, changes)`` may return False
     to stop before anything is changed. Returns ``(building, changes, log,
     model path)``; ``log`` is None when it was stopped.
     """
+    if progress is not None:
+        progress("Reading the framing plans")
     building = read_framing_plans(dxf_path, layers)
+    if footing_depth:
+        building = add_footing_level(building, footing_depth, ground_story)
     new_model = target == "new"
     if new_model and not path:
         raise ValueError("A new model needs the path to save it at.")
@@ -771,11 +854,15 @@ def build_grid_column_model(
             raise RuntimeError("Save the ETABS model first: it has no file yet.")
         units = int(model.GetPresentUnits())
         model.SetPresentUnits(ms.UNITS_N_MM)  # the drawing is in millimetres
+        if progress is not None:
+            progress("Reading the columns, walls and grids of the model")
         try:
             existing, old_grids, _ = read_model(model)
             old_walls = read_model_walls(model)
         finally:
             model.SetPresentUnits(units)
+    if progress is not None:
+        progress("Working out what changed")
     changes = plan_changes(existing, old_grids, building, concrete_ksi, rebar_ksi)
     wall_changes(old_walls, building, changes, concrete_ksi, rebar_ksi)
     if confirm is not None and not confirm(building, changes):
@@ -804,6 +891,7 @@ def _defaults_path() -> str:
 def run_grid_column_model() -> str | None:
     """Entry point: ask for the drawing and the inputs, confirm the changes, apply them."""
     from utilities._gui_helpers import (
+        LoadingWindow,
         enter_values,
         select_open_path,
         select_option,
@@ -834,6 +922,32 @@ def run_grid_column_model() -> str | None:
     layers = dict(zip(("story", "origin", "grid", "column", "wall"), values[:5]))
     concrete_ksi, rebar_ksi = float(values[5]), float(values[6])
 
+    footing = select_option(
+        title, "Add a footing level below the lowest plan? The ground level becomes "
+        "elevation 0, the base goes down by the embedment depth, and the columns and walls "
+        "of the lowest plan continue down to the footings.",
+        ["Yes, add a footing level", "No"],
+        default_index=0 if saved.get("footing_depth") else 1)
+    if footing is None:
+        return None
+    footing_depth, ground_story = 0.0, saved.get("ground_story", "GF")
+    if footing.startswith("Yes"):
+        labels = {"Embedment depth below the ground level (mm)": "footing_depth",
+                  "Name of the ground level": "ground_story"}
+        typed = enter_values(title, "Footing level.", list(labels), {
+            "Embedment depth below the ground level (mm)": f"{saved.get('footing_depth') or 1500:g}",
+            "Name of the ground level": ground_story})
+        if typed is None:
+            return None
+        try:
+            footing_depth = float(typed["Embedment depth below the ground level (mm)"])
+            if footing_depth <= 0:
+                raise ValueError
+        except ValueError:
+            show_warning("The embedment depth must be a number above zero.", title=title)
+            return None
+        ground_story = typed["Name of the ground level"].strip() or "GF"
+
     source = select_option(title, "Which model should get the grids and columns?", [
         "The model that is open in ETABS", "A new blank model",
     ])
@@ -847,7 +961,9 @@ def run_grid_column_model() -> str | None:
 
     def confirm(building, changes) -> bool:
         counts = (
-            f"Stories: {', '.join(n for n, _ in building.stories)}\n"
+            f"Stories: {', '.join(n for n, _ in building.stories)}"
+            + (f"  (base at {building.base_elevation:g} mm)" if building.base_elevation else "")
+            + "\n"
             f"Grid lines: {len(building.grids)}   Columns drawn: {len(building.columns)}   "
             f"Walls drawn: {len(building.walls)}\n\n"
             f"Columns: unchanged {len(changes.unchanged)},  moved {len(changes.moved)},  "
@@ -858,18 +974,30 @@ def run_grid_column_model() -> str | None:
             f"{len(changes.walls_removed)}\n\n"
         )
         listed = "\n".join(describe_changes(changes, building, limit=18))
+        window.stop()  # the confirmation dialog takes the screen
         answer = select_option(title, counts + listed, ["Apply these changes", "Cancel"])
-        return bool(answer) and answer.startswith("Apply")
+        apply = bool(answer) and answer.startswith("Apply")
+        if apply:
+            window.start()
+            window.update("Applying the changes")
+        return apply
 
+    window = LoadingWindow("Grids, columns and walls from the DXF")
+    window.start()
     try:
         building, changes, log, path = build_grid_column_model(
-            dxf_path, concrete_ksi, rebar_ksi, "new" if path else "open", path, layers, confirm)
+            dxf_path, concrete_ksi, rebar_ksi, "new" if path else "open", path, layers, confirm,
+            progress=window.update, footing_depth=footing_depth, ground_story=ground_story)
     except (ValueError, RuntimeError) as error:
+        window.stop()
         show_warning(str(error), title=title)
         return None
+    finally:
+        window.stop()
     if log is None:
         return None
-    ms.save_settings({**layers, "concrete_ksi": concrete_ksi, "rebar_ksi": rebar_ksi},
+    ms.save_settings({**layers, "concrete_ksi": concrete_ksi, "rebar_ksi": rebar_ksi,
+                      "footing_depth": footing_depth, "ground_story": ground_story},
                      _defaults_path())
     message = "Done:\n" + "\n".join(f"{count} {what}" for what, count in log.counts.items())
     message += f"\n\nSaved as:\n{path}\n\nThe list of changes is in the text file beside it."

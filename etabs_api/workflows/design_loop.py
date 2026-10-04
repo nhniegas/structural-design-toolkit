@@ -124,8 +124,11 @@ def _beam_rho(row: pd.Series, zone: str) -> float:
 
 def _tension_controlled_rho(fc: float, fy: float) -> float:
     """Steel ratio at a net tensile strain of 0.005 (ACI 21.2.2): 0.85 b1 fc/fy * 3/8."""
-    beta1 = 0.85 if fc <= 28 else max(0.65, 0.85 - 0.05 * (fc - 28) / 7)
-    return 0.85 * beta1 * fc / fy * 0.375
+    from design.code_config import CODE
+
+    ecu = CODE.material.concrete_ultimate_strain
+    depth_ratio = ecu / (ecu + CODE.strength.tension_controlled_strain)  # c/d = 3/8
+    return CODE.material.stress_block_alpha * CODE.beta1(fc) * fc / fy * depth_ratio
 
 
 def beam_comfortable(rows: pd.DataFrame, ratio: float, seismic: bool) -> bool:
@@ -394,10 +397,27 @@ class Workbench:
 
     # ---- response spectrum ----
     def _spectrum_loads(self) -> dict[str, tuple]:
+        """The spectrum loads, with every scale factor at its base value g I / R (from the
+        model's seismic patterns), so each iteration scales from the unscaled spectrum
+        and not from factors an earlier xs analyze left in the model."""
+        from etabs_api.core.helpers import as_list
         from etabs_api.workflows.model_analysis import spectrum_cases
 
         api = self.model.LoadCases.ResponseSpectrum
-        return {case: tuple(api.GetLoads(case)[:6]) for case in spectrum_cases(self.connector)}
+        base = self._base_scale()
+        out = {}
+        for case in spectrum_cases(self.connector):
+            count, directions, functions, scales, systems, angles = api.GetLoads(case)[:6]
+            if base is not None:
+                scales = [base] * len(as_list(scales))
+            out[case] = (count, directions, functions, scales, systems, angles)
+        return out
+
+    def _base_scale(self) -> float | None:
+        """g I / R of the strength seismic patterns, or None when they cannot be read."""
+        from etabs_api.workflows.model_analysis import base_spectrum_scale
+
+        return base_spectrum_scale(self.connector)
 
     def _restore_spectrum(self) -> None:
         from etabs_api.core.helpers import as_list
@@ -416,7 +436,8 @@ class Workbench:
         if self.model.GetModelIsLocked():
             self.model.SetModelIsLocked(False)
         self._restore_spectrum()
-        report = analyze_model(self.connector, self.settings.zone_factor, self.settings.ct)
+        report = analyze_model(self.connector, self.settings.zone_factor, self.settings.ct,
+                               progress=lambda text: self.show("Analysis", text))
         for item in report.scaling:
             self.log(f"  {item.direction}: static {item.static_shear / 1e3:,.0f} kN, "
                      f"{item.spectrum_case} x {item.factor:.3f}")
@@ -642,6 +663,34 @@ def _ask_ranges(families: set[str], settings: dict, title: str) -> bool:
     return True
 
 
+def final_drift_check(bench: Workbench, options, folder: str, stem: str) -> dict:
+    """Drift of the final sizes (xs drift), saved to ``<stem> - Drift.txt``.
+
+    The sections are not resized for drift: a failure is reported, and the
+    model is to be reconfigured (stiffer members, walls) and designed again.
+    """
+    from etabs_api.workflows.drift_check import failures, run_drift, save_report
+
+    bench.stage = "Final drift check (final sizes; no resizing for drift)"
+    report = run_drift(bench.connector, options.reference, options.wind_denominator,
+                       progress=lambda text: bench.show(text), seismic=options.seismic)
+    path = save_report(report, os.path.join(folder, f"{stem} - Drift.txt"))
+    failed = failures(report)
+    bench.log("")
+    bench.log("##### Drift of the final sizes #####")
+    bench.log(report.text())
+    if failed:
+        bench.log(f"DRIFT FAILS ({len(failed)} checks). The sections were not resized for drift: "
+                  "reconfigure the model (larger columns or beams, walls) and run xs design "
+                  "again.")
+        for level, finding in failed:
+            bench.log(f"  {level}: {finding.text}")
+    else:
+        bench.log("Drift: every check passes.")
+    bench.log(f"Drift report: {path}")
+    return {"report": report, "failed": failed, "path": path}
+
+
 def run_design_cli() -> dict | None:
     """Entry point: ask everything once, then run the loop on a working copy."""
     import comtypes.client
@@ -725,6 +774,11 @@ def run_design_cli() -> dict | None:
     long_limit = ask_deflection_limit()
     if long_limit is None:
         return None
+    from etabs_api.workflows.drift_check import ask_drift_options
+
+    drift_options = ask_drift_options(title + ": drift of the final sizes")
+    if drift_options is None:
+        return None
     folder = select_output_directory("Folder for the final results, calculations and schedules")
     if not folder:
         return None
@@ -784,14 +838,20 @@ def run_design_cli() -> dict | None:
         bench.log(f"Combinations: {len(combos)} ULS ({seismic})")
         summary = run_design_loop(bench)
         window.update("Saving the final results, calculations and schedules")
-        model.File.Save(working)
+        model.File.Save()  # the working copy; Save(path) would drop the analysis results
         save_final_design(bench, summary, working, folder)
+        summary["drift"] = final_drift_check(bench, drift_options, folder,
+                                             os.path.splitext(os.path.basename(working))[0])
     print(f"Working copy: {working}\nLog: {log_path}\nOutputs: {folder}")
+    if summary["drift"]["failed"]:
+        print("DRIFT FAILS: the sections were not resized for drift. Reconfigure the model "
+              f"for drift and run xs design again. See {summary['drift']['path']}")
     return summary
 
 
 def save_final_design(bench: Workbench, summary: dict, working: str, folder: str) -> None:
     """Store the final design for xs columns and write the result files."""
+    say = bench.progress
     from design.beam_designer_aci318 import (
         export_beam_dxf,
         export_beam_pdf,
@@ -814,18 +874,25 @@ def save_final_design(bench: Workbench, summary: dict, working: str, folder: str
     })
     store.beam_results, store.column_report = beams, columns
     store.column_groups = getattr(bench, "column_groups", None)
+    say("Saving the design data for xs columns")
     store.save()
     if beams is not None and len(beams):
+        say("Saving the beams 1 of 3: results workbook (.xlsx)")
         write_beam_results_xlsx(beams, os.path.join(folder, f"{stem} - Beam Design.xlsx"))
+        say("Saving the beams 2 of 3: schedules (.dxf)")
         export_beam_dxf(beams, folder)
+        say("Saving the beams 3 of 3: calculation report (.pdf, LaTeX)")
         export_beam_pdf(beams, os.path.join(folder, f"{stem} - Beam Calculations.pdf"),
                         settings.smrf, settings.gravity_combo)
     if columns is not None and len(columns) and store.column_groups:
         bars = settings.column_bars
+        say("Saving the columns 1 of 3: results workbook (.xlsx)")
         write_column_results_xlsx(columns, store.column_groups,
                                   os.path.join(folder, f"{stem} - Column Design.xlsx"))
+        say("Saving the columns 2 of 3: schedule (.dxf)")
         export_column_cad_drawings(columns, folder, bars["dmain"], bars["cover"], settings.smrf,
                                    "crossties", bench.tables["CONNECTIVITY"])
+        say("Saving the columns 3 of 3: calculation report (.pdf, LaTeX)")
         export_column_pdf(columns, os.path.join(folder, f"{stem} - Column Calculations.pdf"),
                           settings.smrf, bars["dmain"], bars["dties"], bars["cover"])
 

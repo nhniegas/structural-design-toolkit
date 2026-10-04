@@ -96,7 +96,13 @@ def run_design(module, title: str, name: str, report_name: str):
 
     ``name`` keys the saved inputs; ``report_name`` is the suggested PDF file name.
     """
-    from utilities._gui_helpers import enter_values, select_option, select_save_file, show_warning
+    from utilities._gui_helpers import (
+        LoadingWindow,
+        enter_values,
+        select_option,
+        select_save_file,
+        show_warning,
+    )
 
     fields = module.INPUTS
     saved = _load(name)
@@ -131,7 +137,8 @@ def run_design(module, title: str, name: str, report_name: str):
         if path:
             if not path.lower().endswith(".pdf"):
                 path += ".pdf"
-            saved_pdf = module.export_pdf(result, path)
+            with LoadingWindow(f"{title}: writing the PDF report"):
+                saved_pdf = module.export_pdf(result, path)
             if saved_pdf:
                 print(f"PDF report saved: {saved_pdf}")
             else:
