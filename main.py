@@ -55,7 +55,7 @@ import argparse
 import sys
 from pathlib import Path
 
-VERSION = "0.1.0"  # the same as in pyproject.toml (tests/test_main.py checks it)
+VERSION = "0.1.1"  # the same as in pyproject.toml (tests/test_main.py checks it)
 # Hidden first argument: this process is the progress window of another one
 # (utilities/_gui_helpers.LoadingWindow). It is how the packaged program,
 # which has no separate Python to start, opens that window.

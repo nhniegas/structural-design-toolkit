@@ -307,3 +307,66 @@ def test_without_joint_coordinates_the_length_and_k_one_are_used():
     geometry = cs.simple_geometry(3500.0, 500.0)
     assert geometry["3"].lu == pytest.approx(3000.0) and geometry["2"].k == 1.0
     assert "not available" in geometry["3"].k_basis
+
+
+# --------------------------------------------------------------------------
+# THE BASE: FIXED OR PINNED AS THE MODEL HAS IT
+# --------------------------------------------------------------------------
+def with_supports(supports) -> cs.FrameModel:
+    model = frame()
+    return cs.FrameModel(model.columns, model.beams, supports=supports)
+
+
+def test_supports_are_read_from_the_restraint_table():
+    table = pd.DataFrame({
+        "UniqueName": [1.0, "2", "3"], "UX": ["Yes", "Yes", "No"], "UY": ["Yes", "Yes", "No"],
+        "UZ": ["Yes", "Yes", "Yes"], "RX": ["Yes", "No", "No"], "RY": ["Yes", "No", "No"],
+        "RZ": ["Yes", "No", "No"]})
+    assert cs.supports_from_table(table) == {
+        "1": (True, True, True), "2": (True, False, False), "3": (False, False, False)}
+    assert cs.supports_from_table(pd.DataFrame()) == {}   # a model with no restraint
+    assert cs.supports_from_table(None) is None           # the supports were not read
+
+
+def test_a_fixed_support_gives_psi_one_and_a_pinned_one_psi_ten():
+    fixed = with_supports({"j0": (True, True, True)}).axis_geometry("C1", "3")
+    pinned = with_supports({"j0": (True, False, False)}).axis_geometry("C1", "3")
+    assert fixed.psi_bottom == pytest.approx(1.0) and "Fixed support in the model" in fixed.base
+    assert pinned.psi_bottom == pytest.approx(10.0)
+    assert "Pinned support in the model" in pinned.base
+    assert pinned.k > fixed.k                       # a pinned base: a longer effective length
+    assert pinned.k == pytest.approx(cs.braced_k(10.0, pinned.psi_top))
+
+
+def test_a_support_held_about_one_axis_is_fixed_for_that_bending_only():
+    # rotation about global Y held: bending in the X-Z plane (about local 3 here) is fixed
+    model = with_supports({"j0": (True, False, True)})
+    assert model.axis_geometry("C1", "3").psi_bottom == pytest.approx(1.0)
+    assert model.axis_geometry("C1", "2").psi_bottom == pytest.approx(10.0)
+    text = cs.base_text(model.geometry("C1"))
+    assert "about 3: Fixed" in text and "about 2: Pinned" in text
+
+
+def test_a_footing_with_no_support_in_the_model_is_taken_as_pinned():
+    geometry = with_supports({}).axis_geometry("C1", "3")
+    assert geometry.psi_bottom == pytest.approx(10.0) and "No support" in geometry.base
+
+
+def test_without_the_supports_the_base_is_assumed_fixed_and_says_so():
+    geometry = frame().axis_geometry("C1", "3")
+    assert geometry.psi_bottom == pytest.approx(1.0) and "assumed" in geometry.base
+
+
+def test_a_column_on_another_column_has_no_base_text():
+    model = with_supports({"j0": (True, False, False)})
+    assert model.axis_geometry("C2", "3").base == ""
+    assert cs.base_text(model.geometry("C2")) == cs.NOT_ON_A_SUPPORT
+
+
+def test_the_base_is_in_the_slenderness_record():
+    geometry = with_supports({"j0": (True, False, False)}).geometry("C1")
+    table = forces({"U1": ((600.0, 0.0, 80.0), (600.0, 0.0, 100.0))}, length=3000.0)
+    out = cs.magnify_member(table, SECTION, geometry)
+    record = next(iter(out.records.values()))
+    assert "Pinned support in the model" in record["Slender_base"]
+    assert "Slender_base" in cs.SLENDERNESS_REPORT_FIELDS

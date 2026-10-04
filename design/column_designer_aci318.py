@@ -4022,6 +4022,7 @@ COLUMN_REPORT_LABELS = {
     "Mu2_analysis_kNm": "Mᵤ₂ from analysis (kN·m)",
     "Slender_beta_dns": "βdns",
     "Slender_beta_basis": "βdns basis",
+    "Slender_base": "Base of the column (ψ at the support)",
     "Slenderness_Check": "Slenderness Check",
     "Analysis_Vu_kN": "Analysis Vᵤ (kN)",
     "Probable_Ve_kN": "Probable Vₑ (kN)",
@@ -4373,8 +4374,12 @@ def design_columns(
     slender_results: dict[str, MemberSlenderness] = {}
     slender_geometry: dict[str, dict] = {}
     if slenderness:
+        from design.column_slenderness import supports_from_table
+
+        supports = tables.get("SUPPORTS")
         frame_model = _slenderness_frame_model(
-            frame_data, connection_by_name, slender_points, slender_angles)
+            frame_data, connection_by_name, slender_points, slender_angles,
+            supports_from_table(supports if isinstance(supports, pd.DataFrame) else None))
         for _, row in column_rows.iterrows():
             member = str(row["UniqueName"])
             if member not in force_frames:
@@ -5411,8 +5416,12 @@ def _slenderness_section(engine: ColumnFlexureDesign) -> ColumnSection:
 
 
 def _slenderness_frame_model(frame_data: pd.DataFrame, connection_by_name: pd.DataFrame,
-                             point_coordinates: dict, frame_angles: dict) -> FrameModel | None:
-    """The columns and beams with their joints, or None without joint coordinates."""
+                             point_coordinates: dict, frame_angles: dict,
+                             supports: dict | None = None) -> FrameModel | None:
+    """The columns and beams with their joints, or None without joint coordinates.
+
+    ``supports`` is the model's joint restraints (``supports_from_table``);
+    None when they were not read."""
     if not point_coordinates:
         return None
     data = frame_data.drop_duplicates("UniqueName").set_index("UniqueName")
@@ -5458,7 +5467,7 @@ def _slenderness_frame_model(frame_data: pd.DataFrame, connection_by_name: pd.Da
         elif kind == "beam":
             beams[member] = FrameBeam(member, point_i, point_j, length, number(row.get("Width")),
                                       number(row.get("Depth")), fc, plan_direction(end - start))
-    return FrameModel(columns, beams) if columns else None
+    return FrameModel(columns, beams, supports=supports) if columns else None
 
 
 def _slenderness_geometry(member: str, frame_model: FrameModel | None, forces: pd.DataFrame,
@@ -7155,7 +7164,9 @@ def _column_slenderness_table(rows: pd.DataFrame) -> ReportTable | None:
         "table above are the magnified design moments. Limit = 34 + 12 M1/M2, at most 40; "
         "k from the alignment chart of a braced column, at most 1.0; (EI)eff = 0.4 Ec Ig / "
         f"(1 + beta_dns), beta_dns up to {number(beta.max() if not beta.empty else 0.6, 2)}. "
-        f"Check: {status}.",
+        + (f"Base: {rows['Slender_base'].astype(str).iloc[0]}. "
+           if "Slender_base" in rows.columns else "")
+        + f"Check: {status}.",
     )
 
 

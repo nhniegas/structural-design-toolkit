@@ -182,7 +182,6 @@ Not in this version, and planned for later ones:
 
 - **Shear wall design.** Walls are counted and reported as not designed.
 - **Drift in the design loop.** Drift is checked on the final sizes and reported; members are not resized for it.
-- **Column base fixity from the model.** Reading the support restraints of ETABS for the slenderness of the bottom columns.
 - **Steel and composite members from the ETABS model.** `sdt steel` and `sdt composite` are standalone checks with typed inputs.
 - **Flanged beams.** The design loop resizes rectangular beams and rectangular or circular columns only.
 - **Seismic checks for other codes.** The period, base shear and spectrum scaling checks read UBC 97 seismic patterns; other patterns are designed for but those checks are reported as not applicable.
