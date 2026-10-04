@@ -384,6 +384,15 @@ class ETABSDataExporter:
             df=self.etabs.get_data("Frame Assignments - Local Axes"), sheet_name="LOCAL AXES")
         self._write_dataframe_to_excel(
             df=self.etabs.get_data("Point Object Connectivity"), sheet_name="POINTS")
+        # The supports of the model: the column slenderness takes a footing as
+        # fixed or pinned from them. A model with no restraint has no table.
+        try:
+            supports = self.etabs.get_data("Joint Assignments - Restraints")
+        except RuntimeError:
+            supports = None
+        if supports is None or "UniqueName" not in getattr(supports, "columns", ()):
+            supports = pd.DataFrame(columns=["UniqueName", "UX", "UY", "UZ", "RX", "RY", "RZ"])
+        self._write_dataframe_to_excel(df=supports, sheet_name="SUPPORTS")
 
     def extract_all(self, load_combos: list, members: list | None,
                     options: ForceOptions | None) -> list[str]:

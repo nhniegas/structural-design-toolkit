@@ -314,6 +314,8 @@ class ColumnSlendernessConfig:
     k_min_base: float = 0.85
     k_min_coeff: float = 0.05
     k_max: float = 1.0
+    # A footing takes the support of the analysis model: fixed when the rotation
+    # is restrained there, pinned otherwise (design/column_slenderness.py).
     psi_fixed_base: float = 1.0  # a footing built to resist moment              ACI R6.2.5
     psi_pinned_base: float = 10.0  #                                             ACI R6.2.5
     column_inertia_factor: float = 0.70  # cracked I for psi                     ACI Table 6.6.3.1.1(a)

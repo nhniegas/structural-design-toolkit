@@ -115,6 +115,7 @@ class AxisGeometry:
     k_basis: str = "k = 1.0"  # how k was found, for the report
     psi_bottom: float = math.nan
     psi_top: float = math.nan
+    base: str = ""            # the support under the column, when it stands on one
 
 
 @dataclass(frozen=True)
@@ -230,6 +231,20 @@ class MemberSlenderness:
     slender: bool = False
 
 
+NOT_ON_A_SUPPORT = "Not on a support (beams or a column below restrain the bottom)"
+
+
+def base_text(geometry: dict[str, AxisGeometry]) -> str:
+    """The base of a column for the report: one text when both axes agree."""
+    bases = {axis: geometry[axis].base for axis in AXES if axis in geometry}
+    texts = [text for text in bases.values() if text]
+    if not texts:
+        return NOT_ON_A_SUPPORT
+    if len(set(bases.values())) == 1:
+        return texts[0]
+    return "; ".join(f"about {axis}: {text or NOT_ON_A_SUPPORT}" for axis, text in bases.items())
+
+
 def _fields(axis: str, geometry: AxisGeometry, result: AxisResult, analysis: float) -> dict:
     slender = result.slender
     reason = result.status if not slender else ""
@@ -283,7 +298,8 @@ def magnify_member(forces: pd.DataFrame, section: ColumnSection,
             if math.isfinite(sustained):
                 beta = min(max(sustained / pu, 0.0), 1.0)
                 beta_basis = "dead load share of Pu"
-        shared = {"Slender_beta_dns": beta, "Slender_beta_basis": beta_basis}
+        shared = {"Slender_beta_dns": beta, "Slender_beta_basis": beta_basis,
+                  "Slender_base": base_text(geometry)}
         statuses = []
         per_end = {end: dict(shared) for end in ends}
         for axis in AXES:
@@ -343,11 +359,19 @@ class FrameModel:
 
     ``columns`` and ``beams`` are keyed by name. A column's bottom joint with
     no column and no beam on it is its footing.
+
+    ``supports`` is what the analysis model has at its joints: joint ->
+    (translation restrained, rotation about X restrained, about Y restrained).
+    A footing is then fixed or pinned as the model has it. None when the
+    supports were not read: every footing is taken as fixed, and the report
+    says it is an assumption.
     """
 
     def __init__(self, columns: dict[str, FrameColumn], beams: dict[str, FrameBeam],
-                 code: AciCode = CODE):
+                 code: AciCode = CODE,
+                 supports: dict[str, tuple[bool, bool, bool]] | None = None):
         self.columns, self.beams, self.code = columns, beams, code
+        self.supports = supports
         self.columns_at: dict[str, list[str]] = {}
         self.beams_at: dict[str, list[str]] = {}
         self.column_above: dict[str, str] = {}
@@ -445,9 +469,31 @@ class FrameModel:
     def braced(self, joint: str, direction: tuple[float, float]) -> bool:
         return self.is_footing(joint) or self.beam_stiffness(joint, direction) > 0.0
 
+    def base(self, joint: str, direction: tuple[float, float]) -> tuple[float, str]:
+        """psi of a footing for bending in the vertical plane along ``direction``,
+        and the words for it. Bending along (dx, dy) turns the joint about the
+        horizontal axis (-dy, dx), so that rotation must be restrained for a
+        fixed base (ACI R6.2.5: psi = 1.0 fixed, 10 pinned)."""
+        cfg = self.code.column_slenderness
+        if self.supports is None:
+            return cfg.psi_fixed_base, (
+                f"Fixed base assumed, psi = {cfg.psi_fixed_base:g} (the supports of the "
+                "model were not read)")
+        support = self.supports.get(joint)
+        if support is None or not support[0]:
+            return cfg.psi_pinned_base, (
+                f"No support in the model at this joint: taken as pinned, psi = "
+                f"{cfg.psi_pinned_base:g}")
+        _, about_x, about_y = support
+        held = (direction[1] ** 2 if about_x else 0.0) + (direction[0] ** 2 if about_y else 0.0)
+        if held >= 0.5:
+            return cfg.psi_fixed_base, f"Fixed support in the model, psi = {cfg.psi_fixed_base:g}"
+        return cfg.psi_pinned_base, (
+            f"Pinned support in the model, psi = {cfg.psi_pinned_base:g}")
+
     def psi(self, joint: str, direction: tuple[float, float]) -> float:
         if self.is_footing(joint):
-            return self.code.column_slenderness.psi_fixed_base
+            return self.base(joint, direction)[0]
         beams = self.beam_stiffness(joint, direction)
         if beams <= 0:
             return math.inf
@@ -477,12 +523,14 @@ class FrameModel:
             top = self.columns[upper].top
         lu = max(length - self.beam_depth(top, direction), 0.0)
         psi_bottom, psi_top = self.psi(bottom, direction), self.psi(top, direction)
+        base = self.base(bottom, direction)[1] if self.is_footing(bottom) else ""
         if not self.braced(top, direction) or not self.braced(bottom, direction):
             return AxisGeometry(lu, self.code.column_slenderness.k_max,
                                 "k = 1.0: no beam in this direction at an end",
-                                psi_bottom, psi_top)
+                                psi_bottom, psi_top, base)
         k = braced_k(psi_bottom, psi_top, self.code)
-        return AxisGeometry(lu, k, "alignment chart (ACI R6.2.5), braced", psi_bottom, psi_top)
+        return AxisGeometry(lu, k, "alignment chart (ACI R6.2.5), braced", psi_bottom, psi_top,
+                            base)
 
     def geometry(self, name: str) -> dict[str, AxisGeometry]:
         return {axis: self.axis_geometry(name, axis) for axis in AXES}
@@ -508,15 +556,37 @@ SLENDERNESS_REPORT_FIELDS = [
     "Slender_Pc3_kN", "Slender_delta3", "Slender_Mmin3_kNm", "Mu3_analysis_kNm",
     "Slender_lu2_mm", "Slender_k2", "Slender_ratio2", "Slender_limit2", "Slender_Cm2",
     "Slender_Pc2_kN", "Slender_delta2", "Slender_Mmin2_kNm", "Mu2_analysis_kNm",
-    "Slender_beta_dns", "Slender_beta_basis", "Slenderness_Check",
+    "Slender_beta_dns", "Slender_beta_basis", "Slender_base", "Slenderness_Check",
 ]
+
+
+def supports_from_table(table: pd.DataFrame | None) -> dict[str, tuple[bool, bool, bool]] | None:
+    """Joint -> (translation, rotation about X, rotation about Y restrained), from
+    the ETABS table "Joint Assignments - Restraints". None when there is no
+    table (the supports were not read); empty when the model has no restraint."""
+    if table is None:
+        return None
+    if table.empty or "UniqueName" not in table.columns:
+        return {}
+
+    def yes(value) -> bool:
+        return str(value).strip().casefold() == "yes"
+
+    out = {}
+    for row in table.to_dict("records"):
+        name = row["UniqueName"]
+        if isinstance(name, float) and name.is_integer():
+            name = int(name)
+        translation = yes(row.get("UX")) and yes(row.get("UY")) and yes(row.get("UZ"))
+        out[str(name).strip()] = (translation, yes(row.get("RX")), yes(row.get("RY")))
+    return out
 
 __all__ = [
     "AXES", "AxisGeometry", "AxisResult", "ColumnSection", "FrameBeam", "FrameColumn",
     "FrameModel", "MemberSlenderness", "SLENDERNESS_REPORT_FIELDS", "axis_result", "braced_k",
     "cm_factor", "concrete_modulus", "critical_load", "gross_inertia", "magnify_member",
     "minimum_moment", "plan_direction", "radius_of_gyration", "simple_geometry",
-    "slenderness_limit",
+    "slenderness_limit", "supports_from_table", "base_text",
 ]
 
 # numpy is imported for callers that pass arrays as vectors to plan_direction

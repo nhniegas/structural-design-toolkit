@@ -1271,7 +1271,9 @@ class WindLoadCalculatorDirectionalASCE7:
         except subprocess.CalledProcessError as e:
             print(f"PDF EXPORT FAILED - LaTeX syntax error: {e}")
         except FileNotFoundError as e:
-            print(f"PDF EXPORT FAILED - LaTeX compiler not found: {e}")
+            from utilities.latex_help import INSTALL_HINT
+
+            print(f"PDF EXPORT FAILED - LaTeX compiler not found: {e}\n{INSTALL_HINT}")
         return None
 
     @staticmethod

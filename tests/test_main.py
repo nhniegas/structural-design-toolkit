@@ -167,3 +167,23 @@ def test_doctor_loads_the_module_of_every_command():
 
     status, _, found = doctor.check_modules()
     assert status == doctor.OK, found
+
+
+def test_a_missing_pdf_says_why_and_how_to_get_latex(monkeypatch):
+    from utilities import latex_help
+
+    monkeypatch.setattr(latex_help.shutil, "which", lambda name: None)
+    missing = latex_help.missing_pdf_reason()
+    assert "not installed" in missing and latex_help.INSTALL_COMMAND in missing
+    assert "results and schedules were written" in missing
+    monkeypatch.setattr(latex_help.shutil, "which", lambda name: r"C:\miktex\pdflatex.exe")
+    failed = latex_help.missing_pdf_reason()
+    assert "stopped with an error" in failed and latex_help.INSTALL_COMMAND not in failed
+
+
+def test_doctor_gives_the_install_command_when_latex_is_missing(monkeypatch):
+    from utilities import doctor, latex_help
+
+    monkeypatch.setattr(latex_help.shutil, "which", lambda name: None)
+    status, _, found = doctor.check_latex()
+    assert status == doctor.WARN and latex_help.INSTALL_COMMAND in found

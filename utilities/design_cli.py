@@ -153,10 +153,11 @@ def run_design(module, title: str, name: str, report_name: str):
                 print(f"PDF report saved: {saved_pdf}")
                 summary.file("PDF report", saved_pdf)
             else:
-                summary.fail("The PDF could not be written. Check that LaTeX (pdflatex) "
-                             "is installed.")
-                show_warning("The PDF could not be written. Check that LaTeX (pdflatex) "
-                             "is installed.", title=title)
+                from utilities.latex_help import missing_pdf_reason
+
+                reason = "The PDF report was " + missing_pdf_reason()
+                summary.fail(reason)
+                show_warning(reason, title=title)
         else:
             summary.add("PDF report", "not saved (no file was chosen)")
     summary.show(popup=True, echo=False)
