@@ -84,6 +84,16 @@ class FakeInterface:
     def GetNameList(self, *_):
         return (1, ("P1",), 0)
 
+    def GetAllFrameProperties_2(self):
+        return (2, ("G_300X600_C04_G60", "W14X500"), (8, 1), (), (), (), (), (), (), (), 0)
+
+    def JointDispl(self, name, item_type, *_):
+        self.calls.append(("JointDispl", name, item_type))
+        if not name:
+            return (0, (), (), (), (), (), (), (), (), (), (), (), 1)  # ETABS takes no empty name
+        return (1, ("5",), ("5",), ("DEAD",), ("",), (0.0,),
+                (0.1,), (0.2,), (0.3,), (0.0,), (0.0,), (0.0,), 0)
+
     def SetSection(self, *args):
         return 0
 
@@ -413,3 +423,58 @@ def test_load_service_defines_and_assigns():
     assert loads.get_patterns() == ["P1"]
     assert loads.define_pattern("DEAD", 1, 1.0) == "DEAD"
     assert loads.assign_point_load("P1", "DEAD", [1, 2, 3, 4, 5, 6]) == "P1"
+
+
+def test_no_running_etabs_gives_none_and_not_an_attribute_error(monkeypatch):
+    """Helper.GetObject returns None, without raising, when ETABS is not running."""
+    from etabs_api.core import connection
+
+    class Helper:
+        @staticmethod
+        def GetObject(_name):
+            return None
+
+    monkeypatch.setattr(connection, "_etabs_process_ids", lambda: [])
+    assert connection.running_etabs(Helper()) is None
+    shown = []
+    monkeypatch.setattr(connection, "running_etabs", lambda helper=None: None)
+    monkeypatch.setattr("utilities._gui_helpers.show_warning",
+                        lambda message, title="": shown.append((title, message)))
+    assert connection.attach_running_etabs("Analysis") is None
+    assert shown == [("Analysis", connection.NOT_RUNNING)]
+
+
+def test_a_session_missed_by_get_object_is_found_by_its_process(monkeypatch):
+    from etabs_api.core import connection
+
+    session = SimpleNamespace(SapModel="model")
+
+    class Helper:
+        @staticmethod
+        def GetObject(_name):
+            return None
+
+        @staticmethod
+        def GetObjectProcess(_name, process_id):
+            return session if process_id == 42 else None
+
+    monkeypatch.setattr(connection, "_etabs_process_ids", lambda: [7, 42])
+    assert connection.running_etabs(Helper()) is session
+
+
+def test_results_of_every_object_ask_for_the_group_all():
+    """ETABS returns code 1 for an empty object name."""
+    connector = fake_connector()
+    results = Results(connector)
+    everything = results.joint_displacements()
+    assert connector.sap_model.Results.calls[-1] == ("JointDispl", "All", 2)
+    assert everything["U3"].tolist() == [0.3]
+    results.joint_displacements("5")
+    assert connector.sap_model.Results.calls[-1] == ("JointDispl", "5", 0)
+
+
+def test_frame_sections_are_read_for_every_shape_type():
+    """PropFrame.GetNameList gives nothing without a shape type."""
+    from etabs_api.core.properties import Properties
+
+    assert Properties(fake_connector()).frame_sections() == ["G_300X600_C04_G60", "W14X500"]

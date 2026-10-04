@@ -28,7 +28,6 @@ import os
 import pickle
 import re
 import sys
-import time
 from dataclasses import dataclass, field
 
 import pandas as pd
@@ -105,11 +104,17 @@ class DesignStore:
 
 
 def extract(connector, combos: list[str], options, members: list[str] | None = None,
-            progress=None) -> tuple[dict[str, pd.DataFrame], list[str]]:
-    """Every table the beam and column design need, from the open model."""
+            progress=None, deflection_roles: dict[str, str] | None = None
+            ) -> tuple[dict[str, pd.DataFrame], list[str]]:
+    """Every table the beam and column design need, from the open model.
+
+    ``deflection_roles`` maps each standard deflection combination to the
+    model's own combination for that role (``model_inputs.ask_deflection_roles``).
+    """
     from etabs_api.workflows.exporter import ETABSDataExporter
 
     exporter = ETABSDataExporter(connector)
+    exporter.deflection_roles = deflection_roles
     if members is None:
         members = exporter.get_available_members()
     if progress:
@@ -177,22 +182,42 @@ def _ask_numbers(title: str, prompt: str, fields: dict, last: dict) -> dict | No
 
 def attach_etabs():
     """The ETABS session that is running, as a connector; None with a message."""
-    import comtypes.client
+    from etabs_api.core.connection import attach_running_etabs
 
-    from etabs_api.core.connection import ETABSConnector
-    from utilities._gui_helpers import show_warning
+    return attach_running_etabs("Design")
 
-    helper = comtypes.client.CreateObject("ETABSv1.Helper")
-    helper = helper.QueryInterface(comtypes.gen.ETABSv1.cHelper)
+
+def pdelta_method(connector) -> str:
+    """The P-delta option of the open model ("None" when it is off, "" when it
+    cannot be read)."""
     try:
-        etabs = helper.GetObject("CSI.ETABS.API.ETABSObject")
-    except Exception:
-        show_warning("ETABS is not running. Open the model in ETABS first.", title="Design")
-        return None
-    connector = ETABSConnector()
-    connector.etabs_object, connector.sap_model, connector.is_connected = (
-        etabs, etabs.SapModel, True)
-    return connector
+        table = connector.get_data("P-Delta Option Definition")
+    except RuntimeError:
+        return ""
+    if table is None or "AutoMethod" not in getattr(table, "columns", ()):
+        return ""
+    methods = table["AutoMethod"].dropna().astype(str)
+    return methods.iloc[0] if len(methods) else "None"
+
+
+def confirm_pdelta(connector, title: str) -> bool:
+    """False when the user stops because P-delta is off in the model.
+
+    The column slenderness adds only the member effect; the sway effect must
+    be in the analysis forces (ACI 6.7).
+    """
+    from utilities._gui_helpers import select_option
+
+    method = pdelta_method(connector)
+    if not method or "iterative" in method.lower():
+        return True
+    chosen = select_option(
+        title, f"P-delta is off in this model (P-Delta option: {method}). The column "
+        "slenderness adds the member effect only; the sway of the storeys must come from a "
+        "P-delta analysis, or the second-order moments are understated. sdt setup defines it.",
+        ["Stop (turn P-delta on, analyse and run sdt beams again)",
+         "Continue without the sway effect"])
+    return bool(chosen) and chosen.startswith("Continue")
 
 
 def model_path_of(connector) -> str | None:
@@ -214,13 +239,13 @@ def run_beams() -> DesignStore | None:
     """Extract, design the beams and save the results, the calculations and the schedules."""
     from design.beam_designer_aci318 import (
         ask_deflection_limit,
+        ask_earth_cover_stories,
         design_beams,
         export_beam_dxf,
         export_beam_pdf,
         write_beam_results_xlsx,
     )
     from etabs_api.workflows.analysis_forces import ask_force_options
-    from etabs_api.workflows.design_loop import uls_combinations
     from utilities._gui_helpers import (
         LoadingWindow,
         select_option,
@@ -238,19 +263,10 @@ def run_beams() -> DesignStore | None:
         return None
     last = _last()
 
-    seismic = select_option(title, "Seismic combinations to design for (gravity and wind ULS "
-                            "combinations are always included):",
-                            ["Static (EQ)", "Response spectrum (RSA)", "Both"],
-                            default_index=["EQ", "RSA", "Both"].index(last.get("seismic", "RSA")))
-    if seismic is None:
+    ready = prepare_model(connector, model_path, title, "sdt beams", last)
+    if ready is None:
         return None
-    seismic_key = {"Static (EQ)": "EQ", "Response spectrum (RSA)": "RSA", "Both": "Both"}[seismic]
-    names = list(dict.fromkeys(
-        connector.get_data("Load Combination Definitions")["Name"].dropna().astype(str)))
-    combos = uls_combinations(names, seismic_key)
-    if not combos:
-        show_warning("The model has no ULS combinations.", title=title)
-        return None
+    combos, seismic_key = ready.combos, ready.seismic_key
     options = ask_force_options()
     if options is None:
         return None
@@ -262,7 +278,7 @@ def run_beams() -> DesignStore | None:
     smrf = smrf == "Yes"
     gravity = None
     if smrf:
-        choices = _gravity_options(combos)
+        choices = ready.gravity_choices[:24]  # what one choice dialog can show
         previous = last.get("gravity_combo")
         gravity = select_option(title, "Gravity combination for the beam seismic shear:",
                                 choices, default_index=choices.index(previous)
@@ -272,23 +288,34 @@ def run_beams() -> DesignStore | None:
     bars = _ask_numbers(title, "Beam bars and cover.", BEAM_FIELDS, last)
     if bars is None:
         return None
+    earth_stories = ask_earth_cover_stories(beam_stories(connector), bars["cc"],
+                                            last.get("beam_earth_cover_stories"))
+    if earth_stories is None:
+        return None
     divisor = ask_deflection_limit()
     if divisor is None:
         return None
     folder = select_output_directory("Folder for the beam results, calculations and schedules")
     if not folder:
         return None
-    _remember({"seismic": seismic_key, "smrf": smrf, "gravity_combo": gravity, **bars})
+    _remember({**({"seismic": seismic_key} if seismic_key else {}), "smrf": smrf,
+               "gravity_combo": gravity, **bars, "beam_earth_cover_stories": earth_stories})
 
     stem = os.path.splitext(os.path.basename(model_path))[0]
     with LoadingWindow("Beam design") as window:
-        start = time.time()
-        tables, notes = extract(connector, combos, options, progress=window.update)
+        tables, notes = extract(connector, combos, options, progress=window.update,
+                                deflection_roles=ready.deflection_roles)
         store = DesignStore(model_path, os.path.getmtime(model_path), tables, {
             "combos": combos, "seismic": seismic_key, "smrf": smrf, "gravity_combo": gravity,
             "beam_bars": bars, "long_limit": divisor,
+            "beam_earth_cover_stories": earth_stories,
+            "deflection_roles": ready.deflection_roles,
+            "sources": {"model": list(ready.sources.model),
+                        "answered": list(ready.sources.answered),
+                        "assumed": list(ready.sources.assumed)},
         })
-        results = design_beams(tables, smrf, gravity, bars, divisor, progress=window.update)
+        results = design_beams(tables, smrf, gravity, bars, divisor, progress=window.update,
+                               earth_cover_stories=earth_stories)
         store.beam_results = results
         store.save()
         window.update("Saving 1 of 3: the results workbook (.xlsx)")
@@ -298,17 +325,200 @@ def run_beams() -> DesignStore | None:
         window.update("Saving 3 of 3: the calculation report (.pdf, LaTeX)")
         pdf = export_beam_pdf(results, os.path.join(folder, f"{stem} - Beam Calculations.pdf"),
                               smrf, gravity)
+    summary = beam_summary(results, "sdt beams", model_path, len(combos), earth_stories)
+    ready.sources.add_to(summary)
     for note in notes:
-        print(note)
-    status = results.groupby("UniqueName")["Design_Status"].apply(
-        lambda s: "OK" if (s.astype(str) == "OK").all() else "FAILED")
-    print(f"Beams: {len(status)} designed, {(status == 'FAILED').sum()} failing "
-          f"({time.time() - start:.0f} s)")
-    print(f"Results: {xlsx}")
-    print("Schedules: " + ", ".join(os.path.basename(p) for p in dxf))
-    print(f"Calculations: {pdf}" if pdf else "Calculations: not written (check LaTeX)")
-    print(f"Design data for the column step: {store.path}")
+        summary.note(note)
+    summary.file("Results", xlsx)
+    summary.file("Schedules", ", ".join(os.path.basename(p) for p in dxf))
+    summary.file("Calculations", pdf or "not written (check LaTeX)")
+    summary.file("Design data", store.path)
+    summary.show(os.path.join(folder, f"{stem} - Beam Design summary.txt"), popup=True)
     return store
+
+
+@dataclass
+class ModelReady:
+    """What a design command settled about the model before its own questions."""
+
+    combos: list[str]
+    seismic_key: str | None          # EQ / RSA / Both for the ULS names; None when picked
+    gravity_choices: list[str]
+    deflection_roles: dict[str, str]
+    sources: object                  # model_inputs.Sources
+
+
+SEISMIC_CHOICES = {"Static (EQ)": "EQ", "Response spectrum (RSA)": "RSA", "Both": "Both"}
+UNNAMED_OPTIONS = {
+    "Tag them now, in this model (sdt tag)": "tag",
+    "Design them as they are, with their ETABS numbers": "numbers",
+    "Leave the unnamed members out": "skip",
+}
+
+
+def member_names(connector) -> list[str]:
+    """Every beam and column of the open model, named or not."""
+    names = []
+    for table_name in ("Beam Object Connectivity", "Column Object Connectivity"):
+        try:
+            table = connector.get_data(table_name)
+        except RuntimeError:
+            continue
+        if table is not None and "UniqueName" in getattr(table, "columns", ()):
+            names += table["UniqueName"].astype(str).tolist()
+    return list(dict.fromkeys(names))
+
+
+def prepare_model(connector, model_path: str, title: str, command: str,
+                  last: dict | None = None) -> ModelReady | None:
+    """Settle what the design needs from the model before the command's own questions.
+
+    On a model set up by ``sdt setup`` and tagged this only asks which seismic
+    combinations to design for, as before. On any other model it first shows
+    what was found and what is missing, then asks for it: the strength
+    combinations, the deflection combinations, and what to do with members
+    that still have their ETABS number. The answers are saved with the model.
+    None when a dialog is closed or the user stops.
+    """
+    from etabs_api.workflows import model_inputs as mi
+    from utilities._gui_helpers import select_option
+
+    last = last or {}
+    combinations = mi.read_combinations(connector)
+    names = combinations.names
+    standard = mi.standard_strength(names)
+    saved = mi.load(model_path)
+    roles_now = mi.deflection_roles(names, saved.get("deflection"))
+    members = member_names(connector)
+    unnamed = mi.unnamed_members(members)
+    walls = mi.wall_count(connector)
+    sources = mi.Sources()
+
+    ready = mi.Readiness(command)
+    if standard:
+        ready.found.append(f"{len(standard)} strength combinations named ULS")
+    else:
+        ready.missing.append(
+            "strength combinations: none is named ULS. You pick them from the model's "
+            f"{len(combinations.linear)} linear combinations"
+            + (f" ({len(combinations.envelopes)} envelopes cannot be designed for)"
+               if combinations.envelopes else ""))
+    absent = [mi.DEFLECTION_ROLES[role] for role, name in roles_now.items() if name is None]
+    if absent:
+        ready.missing.append("deflection combinations for: " + ", ".join(absent)
+                             + ". You pick an existing one for each, or let the toolkit add it")
+    else:
+        ready.found.append("the four deflection combinations")
+    if unnamed:
+        ready.missing.append(
+            f"names: {len(unnamed)} of {len(members)} beams and columns still have their "
+            "ETABS number. You choose to tag them, design them as they are, or leave them out")
+    else:
+        ready.found.append(f"{len(members)} named beams and columns")
+    if walls:
+        ready.warnings.append(f"{walls} wall panels are in the model: walls are not designed")
+    method = pdelta_method(connector)
+    if method and "iterative" not in method.lower():
+        ready.warnings.append(f"P-delta is off (option: {method}): the column slenderness "
+                              "needs the sway effect from a P-delta analysis")
+    if not ready.confirm(title):
+        return None
+
+    # ---- members without a name ----
+    if unnamed:
+        options = [text for text, key in UNNAMED_OPTIONS.items()
+                   if key != "skip" or len(unnamed) < len(members)]
+        chosen = select_option(
+            title, f"{len(unnamed)} of {len(members)} beams and columns still have the number "
+            "ETABS gave them. Tagging gives each its level, type and number (2GX-1, 3-C5), "
+            "which the schedules use. Without tags the design still runs: beam lines are then "
+            "found from the geometry.", options)
+        if chosen is None:
+            return None
+        choice = UNNAMED_OPTIONS[chosen]
+        if choice == "tag":
+            from etabs_api.workflows.frame_tagger import auto_tag_frames
+
+            if auto_tag_frames(in_place=True, connector=connector) is None:
+                return None
+            sources.answered.append("members tagged now")
+        elif choice == "numbers":
+            connector.include_numeric_members = True
+            sources.answered.append(f"{len(unnamed)} members designed with their ETABS numbers")
+        else:
+            sources.answered.append(f"{len(unnamed)} unnamed members left out")
+
+    # ---- strength combinations ----
+    seismic_key = None
+    if standard:
+        default = ["EQ", "RSA", "Both"].index(last.get("seismic", "RSA")) \
+            if last.get("seismic", "RSA") in ("EQ", "RSA", "Both") else 1
+        seismic = select_option(title, "Seismic combinations to design for (gravity and wind "
+                                "ULS combinations are always included):",
+                                list(SEISMIC_CHOICES), default_index=default)
+        if seismic is None:
+            return None
+        seismic_key = SEISMIC_CHOICES[seismic]
+        combos = mi.standard_strength(names, seismic_key)
+        sources.model.append(f"{len(combos)} strength combinations (ULS names)")
+    else:
+        picked = mi.ask_strength_combinations(connector, model_path, title, combinations)
+        if picked is None:
+            return None
+        combos, origin = picked
+        sources.answered.append(f"{len(combos)} strength combinations ({origin})")
+    if not combos:
+        return None
+
+    # ---- deflection combinations ----
+    roles = mi.ask_deflection_roles(connector, model_path, title, combinations)
+    if roles is None:
+        return None
+    own = [role for role, name in roles.items() if name != role]
+    added = [role for role, name in roles.items() if name == role and role not in names]
+    if own:
+        sources.answered.append(
+            "deflection: " + ", ".join(f"{mi.DEFLECTION_ROLES[r]} = {roles[r]}" for r in own))
+    if added:
+        sources.assumed.append("deflection combinations added by the toolkit from the pattern "
+                               "types: " + ", ".join(added))
+    if not own and not added:
+        sources.model.append("deflection combinations (DEF names)")
+    return ModelReady(combos, seismic_key, mi.gravity_options(combinations, combos), roles,
+                      sources)
+
+
+def beam_stories(connector) -> list[str]:
+    """The story of every beam of the open model, in the order ETABS lists them."""
+    table = connector.get_data("Beam Object Connectivity")
+    if table is None or "Story" not in getattr(table, "columns", ()):
+        return []
+    return list(dict.fromkeys(table["Story"].dropna().astype(str)))
+
+
+def beam_summary(results: pd.DataFrame, command: str, model_path: str | None = None,
+                 combos: int | None = None, earth_stories=()):
+    """The closing summary of a beam design: counts and what fails, by reason."""
+    from utilities.run_summary import RunSummary, listed
+
+    summary = RunSummary(command, model_path)
+    status = results.groupby(results["UniqueName"].astype(str))["Design_Status"].apply(
+        lambda s: next((v for v in s.astype(str) if v != "OK"), "OK"))
+    failed = status[status != "OK"]
+    summary.add("Beams designed", len(status))
+    if combos is not None:
+        summary.add("Combinations", combos)
+    summary.add("Passing", int((status == "OK").sum()))
+    summary.add("Failing", len(failed))
+    if earth_stories:
+        summary.add("75 mm cover on", ", ".join(map(str, earth_stories)))
+    if "Deflection_Check" in results.columns:
+        checks = results.drop_duplicates("UniqueName")["Deflection_Check"].astype(str)
+        summary.add("Deflection", f"{int(checks.str.startswith('FAIL').sum())} failing of "
+                                  f"{len(checks)}")
+    for reason, names in failed.groupby(failed).groups.items():
+        summary.fail(f"{reason}: {listed(names)}")
+    return summary
 
 
 # =============================================================================
@@ -377,6 +587,13 @@ def run_deflection() -> pd.DataFrame | None:
         show_warning(f"No beam design for {stem}: the deflection needs the beam bars. "
                      "Run sdt beams first.", title=title)
         return None
+    from etabs_api.workflows import model_inputs as mi
+
+    roles = mi.ask_deflection_roles(connector, model_path, title)
+    if roles is None:
+        return None
+    if any(str(name).isnumeric() for name in store.beam_results["UniqueName"].astype(str)):
+        connector.include_numeric_members = True  # the beams were designed with their numbers
     divisor = ask_deflection_limit()
     if divisor is None:
         return None
@@ -384,8 +601,9 @@ def run_deflection() -> pd.DataFrame | None:
     if not folder:
         return None
     with LoadingWindow("Deflection check") as window:
-        window.update("Reading the service moments (DEF 100 to DEF 103) from ETABS")
+        window.update("Reading the service moments of the deflection combinations from ETABS")
         exporter = ETABSDataExporter(connector)
+        exporter.deflection_roles = roles
         beams = list(store.beam_results["UniqueName"].astype(str).unique())
         service = exporter.display_service_loads(beams)
         exporter.display_connectivity_data()
@@ -402,10 +620,22 @@ def run_deflection() -> pd.DataFrame | None:
         table = deflection_table(checked)
         window.update("Saving the deflection workbook (.xlsx)")
         path = write_deflection_xlsx(table, os.path.join(folder, f"{stem} - Deflection.xlsx"))
+    from utilities.run_summary import RunSummary, listed
+
     status = table["Deflection check"].astype(str)
-    print(f"Deflection: {len(table)} beams, {int((status == 'FAIL').sum())} failing "
-          f"(limit L/360 live, L/{divisor} after partitions)")
-    print(f"Results: {path}")
+    failing = table.loc[status.str.startswith("FAIL"), "UniqueName"].astype(str).tolist() \
+        if "UniqueName" in table.columns else []
+    summary = RunSummary("sdt deflection", model_path)
+    summary.add("Beams checked", len(table))
+    summary.add("Limits", f"L/360 live, L/{divisor} after partitions")
+    summary.add("Failing", int(status.str.startswith("FAIL").sum()))
+    own = [f"{mi.DEFLECTION_ROLES[role]} = {name}" for role, name in roles.items()
+           if name != role]
+    summary.add("Combinations", "; ".join(own) if own else "the DEF names of the model")
+    if failing:
+        summary.fail("Deflection (ACI 24.2.2): " + listed(failing))
+    summary.file("Results", path)
+    summary.show(popup=True)
     return table
 
 
@@ -415,6 +645,7 @@ def run_deflection() -> pd.DataFrame | None:
 def run_columns() -> DesignStore | None:
     """Design the columns from the stored beam step and save the outputs."""
     from design.column_designer_aci318 import (
+        ask_capacity_check_levels,
         ask_column_design_options,
         ask_inner_tie_style,
         design_columns,
@@ -442,6 +673,8 @@ def run_columns() -> DesignStore | None:
     if store is None or store.beam_results is None or store.beam_results.empty:
         show_warning(f"No beam design for {stem}. Run sdt beams first.", title=title)
         return None
+    if not confirm_pdelta(connector, title):
+        return None
     if store.is_stale():
         go_on = select_option(title, f"The model was saved after the beam design of {stem}. "
                               "The stored forces may be out of date.",
@@ -455,24 +688,28 @@ def run_columns() -> DesignStore | None:
     answers = ask_column_design_options(normal_cover=bars["cover"])
     if answers is None:
         return None
+    smrf = bool(store.inputs.get("smrf", True))
+    levels = ask_capacity_check_levels(smrf, last)
+    if levels is None:
+        return None
     tie_style = ask_inner_tie_style()
     if tie_style is None:
         return None
     folder = select_output_directory("Folder for the column results, calculations and schedule")
     if not folder:
         return None
-    _remember(bars)
-    smrf = bool(store.inputs.get("smrf", True))
+    _remember({**bars, "check_top_level": levels[0], "check_foundation_level": levels[1]})
 
     with LoadingWindow("Column design") as window:
-        start = time.time()
         report, groups, joints = design_columns(
             store.tables, store.beam_results, smrf, bars["dmain"], bars["dties"], bars["cover"],
             progress=window.update, continuous_vertical_bars=answers[0],
-            bottom_story_cover=answers[1])
+            bottom_story_cover=answers[1], check_top_level=levels[0],
+            check_foundation_level=levels[1])
         store.column_report, store.column_groups, store.joint_results = report, groups, joints
         store.inputs.update({"column_bars": bars, "continuous_bars": answers[0],
-                             "bottom_cover": answers[1]})
+                             "bottom_cover": answers[1], "check_top_level": levels[0],
+                             "check_foundation_level": levels[1]})
         store.save()
         window.update("Saving 1 of 3: the results workbook (.xlsx)")
         xlsx = write_column_results_xlsx(report, groups,
@@ -483,14 +720,71 @@ def run_columns() -> DesignStore | None:
         window.update("Saving 3 of 3: the calculation report (.pdf, LaTeX)")
         pdf = export_column_pdf(report, os.path.join(folder, f"{stem} - Column Calculations.pdf"),
                                 smrf, bars["dmain"], bars["dties"], bars["cover"])
-    failing = report.groupby("UniqueName")["Column_Design_Status"].apply(
-        lambda s: (s.astype(str) == "FAIL").any())
-    print(f"Columns: {len(failing)} designed, {int(failing.sum())} failing "
-          f"({time.time() - start:.0f} s)")
-    print(f"Results: {xlsx}")
-    print("Schedule: " + ", ".join(os.path.basename(p) for p in dxf))
-    print(f"Calculations: {pdf}" if pdf else "Calculations: not written (check LaTeX)")
+    summary = column_summary(report, "sdt columns", model_path, levels[0], levels[1])
+    from etabs_api.workflows import model_inputs as mi
+
+    # the forces are those of the beam step: so are the inputs they came from
+    mi.Sources(**(store.inputs.get("sources") or {})).add_to(summary)
+    walls = mi.wall_count(connector)
+    if walls:
+        summary.note(f"{walls} wall panels are in the model: walls are not designed.")
+    summary.file("Results", xlsx)
+    summary.file("Schedule", ", ".join(os.path.basename(p) for p in dxf))
+    summary.file("Calculations", pdf or "not written (check LaTeX)")
+    summary.show(os.path.join(folder, f"{stem} - Column Design summary.txt"), popup=True)
     return store
+
+
+# What a failing column fails in, from its report rows: (label, column, text that fails).
+_COLUMN_FAILURES = (
+    ("Flexure / axial", "Flexure_Check", "FAIL"),
+    ("Flexure / axial", "Axial_Check", "FAIL"),
+    ("Slenderness (ACI 6.2.6)", "Slenderness_Check", "FAIL"),
+    ("Column shear", "Shear_Check", "FAIL"),
+    ("Strong column - weak beam (BCC)", "BCC_Status", "FAIL"),
+    ("Joint shear", "Joint_Shear_Status", "FAIL"),
+    ("Transverse detailing", "Transverse_Reinforcement_Check", "FAIL"),
+    ("SMRF dimensions", "SMRF_Dimension_Check", "FAIL"),
+)
+
+
+def column_summary(report: pd.DataFrame, command: str, model_path: str | None = None,
+                   check_top_level: bool = True, check_foundation_level: bool = True):
+    """The closing summary of a column design: counts and what fails, by check."""
+    from utilities.run_summary import RunSummary, listed
+
+    summary = RunSummary(command, model_path)
+    names = report["UniqueName"].astype(str)
+    failing = report.loc[report["Column_Design_Status"].astype(str) == "FAIL"]
+    failed_names = sorted(set(failing["UniqueName"].astype(str)))
+    summary.add("Columns designed", names.nunique())
+    summary.add("Combinations", report["Combo"].astype(str).nunique())
+    summary.add("Passing", names.nunique() - len(failed_names))
+    summary.add("Failing", len(failed_names))
+    if "Slenderness_Check" in report.columns:
+        slender = report.loc[report["Slenderness_Check"].astype(str).str.contains(
+            "slender, moments magnified|FAIL", regex=True), "UniqueName"].astype(str).nunique()
+        summary.add("Slender columns", f"{slender} (member effects, ACI 6.6.4.5; sway effects "
+                                       "from the ETABS P-delta analysis)")
+    if not check_top_level:
+        summary.note("BCC and joint shear were not checked at the topmost level (your choice).")
+    if not check_foundation_level:
+        summary.note("BCC, joint shear and the probable-moment shear Ve were not checked at "
+                     "the foundation level (your choice): those columns use the analysis shear.")
+    seen: dict[str, set[str]] = {}
+    for label, column, text in _COLUMN_FAILURES:
+        if column not in failing.columns:
+            continue
+        hit = failing.loc[failing[column].astype(str).str.upper().str.startswith(text),
+                          "UniqueName"].astype(str)
+        if len(hit):
+            seen.setdefault(label, set()).update(hit)
+    for label, members in seen.items():
+        summary.fail(f"{label}: {listed(sorted(members))}")
+    other = [name for name in failed_names if not any(name in m for m in seen.values())]
+    if other:
+        summary.fail(f"Other (see the Design Status Reason column): {listed(other)}")
+    return summary
 
 
 if __name__ == "__main__":

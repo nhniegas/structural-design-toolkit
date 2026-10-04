@@ -16,6 +16,7 @@ from etabs_api.workflows.design_loop import (  # noqa: E402
     LoopSettings,
     beam_actions,
     column_actions,
+    joint_min_side,
     column_needs,
     uls_combinations,
 )
@@ -118,13 +119,48 @@ def test_column_needs():
     assert column_needs(pd.DataFrame(column_rows("C"))) == set()
 
 
-def test_column_grows_along_the_failing_direction():
-    report = pd.DataFrame(column_rows("2-C1", Joint_Shear_Utilization_X=1.3))
-    sections = {"2-C1": cr(400, 400)}
-    along_x = column_actions(report, sections, {"2-C1": 0.0}, {}, set(), SETTINGS)
-    assert along_x["2-C1"][0] == cr(400, 500)  # depth (local 2) runs along X
-    rotated = column_actions(report, sections, {"2-C1": 90.0}, {}, set(), SETTINGS)
-    assert rotated["2-C1"][0] == cr(500, 400)
+def test_column_grows_the_side_the_failing_joint_is_measured_along():
+    """The report's X and Y are the column's own axes: X the beams along its width
+    (local 3), Y those along its depth (local 2). The joint depth is the column
+    side along the beams, so that side grows, whatever the column's rotation."""
+    sections = {"2-C1": cr(500, 500)}
+    in_x = pd.DataFrame(column_rows("2-C1", Joint_Shear_Utilization_X=1.3))
+    in_y = pd.DataFrame(column_rows("2-C1", Joint_Shear_Utilization_Y=1.3))
+    for angle in (0.0, 90.0, 30.0):
+        grown_x = column_actions(in_x, sections, {"2-C1": angle}, {}, set(), SETTINGS)
+        grown_y = column_actions(in_y, sections, {"2-C1": angle}, {}, set(), SETTINGS)
+        assert grown_x["2-C1"][0] == cr(600, 500)      # the width
+        assert grown_y["2-C1"][0] == cr(500, 600)      # the depth
+    assert "grow the depth" in grown_y["2-C1"][1]
+
+
+def test_a_column_is_not_made_smaller_than_the_joint_needs():
+    """20 bar diameters of the beam bars (ACI 18.8.2.3): 25 mm bars need 500 mm.
+
+    Shrinking to 400 would fail the joint, grow the column again and, having
+    grown, keep it from ever being made smaller."""
+    comfortable = column_rows("2-C1", Flexure_Utilization=0.2, Shear_Utilization=0.2,
+                              BCC_Ratio_X=5.0, BCC_Ratio_Y=5.0,
+                              Joint_Shear_Utilization_X=0.3, Joint_Shear_Utilization_Y=0.3,
+                              Reinforcement_Ratio=0.011)
+    report = pd.DataFrame(comfortable)
+    smrf = LoopSettings(combos=[], limits=Limits(), ranges=RANGES, smrf=True,
+                        beam_bars={"dm": 25.0})
+    assert joint_min_side(smrf) == 500.0
+    assert column_actions(report, {"2-C1": cr(600, 600)}, {}, {}, set(), smrf)["2-C1"][0]         in (cr(500, 600), cr(600, 500))
+    assert "2-C1" not in column_actions(report, {"2-C1": cr(500, 500)}, {}, {}, set(), smrf)
+    gravity = LoopSettings(combos=[], limits=Limits(), ranges=RANGES, smrf=False)
+    assert joint_min_side(gravity) == 0.0
+    assert column_actions(report, {"2-C1": cr(500, 500)}, {}, {}, set(), gravity)["2-C1"][0]         in (cr(400, 500), cr(500, 400))
+
+
+def test_the_loop_dialog_has_boxes_for_the_columns_and_the_iterations():
+    from etabs_api.workflows.design_loop import LOOP_FIELDS
+
+    keys = [key for key, _ in LOOP_FIELDS.values()]
+    for key in ("column_max", "column_max_ratio", "max_inner", "max_inner_columns"):
+        assert key in keys
+    assert dict(LOOP_FIELDS.values())["column_max_ratio"] == 2.0
 
 
 def test_a_lower_column_is_never_smaller_than_the_one_above():
@@ -184,7 +220,7 @@ def test_joint_failures_still_grow_one_side_one_step():
     report = pd.DataFrame(column_rows("2-C1", Joint_Shear_Utilization_X=1.3))
     actions = column_actions(report, {"2-C1": cr(400, 400)}, {"2-C1": 0.0}, {}, set(),
                              SETTINGS, sizer=lambda member, sizes: 3)
-    assert actions["2-C1"][0] == cr(400, 500)
+    assert actions["2-C1"][0] == cr(500, 400)  # X: the width, one step
 
 
 def test_column_size_passes_on_real_forces():
@@ -230,3 +266,23 @@ def test_workbench_sizer_tries_the_sizes_on_the_extracted_forces():
     index = sizer("2-C1", [cr(350, 350), cr(400, 400), cr(500, 500), cr(600, 600)])
     assert index in (1, 2)  # 400 or 500: the first that carries 4000 kN
     assert sizer("missing", [cr(400, 400)]) is None
+
+
+def test_the_range_shown_holds_the_sizes_the_model_has():
+    from etabs_api.workflows.design_loop import ModelSections, sizes_in_model, suggested_range
+    from etabs_api.workflows.sections import Section
+
+    found = ModelSections(sections={
+        "1": Section("G", 500, 500, "C04", "G60"), "2": Section("G", 300, 700, "C04", "G60"),
+        "3": Section("CR", 600, 800, "C04", "G60"),
+        "4": Section("C", 600, 600, "C04", "G60", True),
+        "5": Section("C", 700, 700, "C04", "G60", True)})
+    present = sizes_in_model(found)
+    assert present == {"G": {"width": [300, 500], "depth": [500, 700]},
+                       "CR": {"size": [600, 800]}, "C": {"diameter": [600, 700]}}
+    # a default range is widened to hold the model's sizes, and otherwise kept
+    assert suggested_range([250, 400, 50], [300, 500]) == [250, 500, 50]
+    assert suggested_range([250, 400, 50], []) == [250, 400, 50]
+    # no default range (circular columns): from the model's sizes
+    assert suggested_range(None, [600, 700], 100) == [600, 900, 100]
+    assert suggested_range(None, []) == []

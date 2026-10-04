@@ -17,6 +17,7 @@ import json
 import os
 from dataclasses import dataclass
 
+COMMAND_OF = {"composite_column": "composite", "steel_section": "steel", "wind_loads": "wind"}
 OUTPUT_OPTIONS = {
     "Print the results in the terminal": (True, False),
     "Export a PDF calculation report": (False, True),
@@ -128,12 +129,19 @@ def run_design(module, title: str, name: str, report_name: str):
             show_warning(f"The check could not run:\n\n{error}", title=title)
     _save(name, values)
 
+    from utilities.run_summary import RunSummary
+
+    summary = RunSummary(f"sdt {COMMAND_OF.get(name, name)} - {title}")
+    summary.add("Inputs", f"{len(values)} values (remembered for next time)")
     choice = select_option(title, "What should be done with the results?", list(OUTPUT_OPTIONS))
     if choice is None:
+        summary.add("Results", "calculated; not printed or exported (the dialog was closed)")
+        summary.show(popup=True, echo=False)
         return result
     show, export = OUTPUT_OPTIONS[choice]
     if show:
         print(module.summary_text(result))
+    summary.add("Results", "printed in the terminal" if show else "not printed (PDF only)")
     if export:
         path = select_save_file(default_name=report_name)
         if path:
@@ -143,7 +151,13 @@ def run_design(module, title: str, name: str, report_name: str):
                 saved_pdf = module.export_pdf(result, path)
             if saved_pdf:
                 print(f"PDF report saved: {saved_pdf}")
+                summary.file("PDF report", saved_pdf)
             else:
+                summary.fail("The PDF could not be written. Check that LaTeX (pdflatex) "
+                             "is installed.")
                 show_warning("The PDF could not be written. Check that LaTeX (pdflatex) "
                              "is installed.", title=title)
+        else:
+            summary.add("PDF report", "not saved (no file was chosen)")
+    summary.show(popup=True, echo=False)
     return result

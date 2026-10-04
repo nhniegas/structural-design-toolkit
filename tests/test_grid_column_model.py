@@ -303,3 +303,54 @@ def test_the_ground_level_name_must_be_new():
         gc.add_footing_level(building, 1500, "GF")
     with pytest.raises(ValueError, match="more than zero"):
         gc.add_footing_level(gc.Building(stories=[("2F", 4000.0)]), 0)
+
+
+def test_changes_go_into_a_copy_that_keeps_the_setup_inputs(tmp_path, monkeypatch):
+    """With copy_path the open model is saved as the copy before anything changes."""
+    import ezdxf
+
+    from etabs_api.workflows import grid_column_model as module
+    from etabs_api.workflows import model_setup as setup
+
+    drawing = ezdxf.new()
+    space = drawing.modelspace()
+    space.add_lwpolyline([(0, 0), (9000, 0), (9000, 9000), (0, 9000)], close=True,
+                         dxfattribs={"layer": "S-STORY"})
+    space.add_text("STORY 2F   HEIGHT 4500", dxfattribs={"layer": "S-STORY", "insert": (100, 100)})
+    space.add_point((1000, 1000), dxfattribs={"layer": "S-ORIGIN"})
+    dxf = str(tmp_path / "plans.dxf")
+    drawing.saveas(dxf)
+
+    source = str(tmp_path / "rev01.EDB")
+    open(source, "w").close()
+    setup.save_settings({"seismic": {"ct": 0.03}}, setup.settings_path(source))
+    saved, opened = [], []
+
+    class Model:
+        File = type("File", (), {"Save": staticmethod(lambda path: saved.append(path) or 0),
+                                 "OpenFile": staticmethod(lambda path: opened.append(path) or 0)})()
+        View = type("View", (), {"RefreshView": staticmethod(lambda: 0)})()
+
+        @staticmethod
+        def GetModelFilename():
+            return source
+
+        @staticmethod
+        def GetPresentUnits():
+            return 9
+
+        @staticmethod
+        def SetPresentUnits(_units):
+            return 0
+
+    monkeypatch.setattr(setup, "_attach_or_start", lambda start: Model())
+    monkeypatch.setattr(module, "read_model", lambda model: ([], [], []))
+    monkeypatch.setattr(module, "read_model_walls", lambda model: [])
+    monkeypatch.setattr(module, "apply_to_model", lambda *a, **k: setup.SetupLog())
+
+    copy = str(tmp_path / "rev02.EDB")
+    _, _, log, path = module.build_grid_column_model(dxf, 4, 60, "open", copy_path=copy)
+    assert log is not None and path == copy and opened == [copy]
+    assert saved and set(saved) == {copy}          # the open model's own file is never saved
+    assert setup.load_settings(setup.settings_path(copy)) == {"seismic": {"ct": 0.03}}
+    assert (tmp_path / "rev02 - plan changes.txt").is_file()

@@ -86,3 +86,8 @@ edb/
 
 /.quarto/
 **/*.quarto_ipynb
+
+# --- Local tool settings and generated report sources ---
+.claude/
+main.tex
+main_files/

@@ -1,6 +1,6 @@
 # ETABS Model Setup
 
-`python main.py setup` defines the standard parameters of an ETABS concrete model. The frame geometry is still built by hand; this step covers the definitions under the ETABS *Define* menu.
+`sdt setup` (or `python main.py setup`) defines the standard parameters of an ETABS concrete model. The frame geometry is still built by hand; this step covers the definitions under the ETABS *Define* menu.
 
 Code: `etabs_api/workflows/model_setup.py`, `etabs_api/workflows/ubc97.py`, `etabs_api/workflows/load_combinations.py`.
 
@@ -18,7 +18,7 @@ Open PowerShell (or the VS Code terminal), go to the project folder, and run:
 ```powershell
 cd "C:\path\to\xlwings_spreadsheet_structural"
 .venv\Scripts\Activate.ps1
-python main.py setup
+sdt setup
 ```
 
 The second line switches to the project's Python environment. It is needed once per terminal session; `(.venv)` at the start of the prompt shows it is active.
@@ -29,7 +29,9 @@ If PowerShell refuses to run `Activate.ps1` because scripts are disabled, skip t
 .venv\Scripts\python.exe main.py setup
 ```
 
-`python etabs_api/workflows/model_setup.py` does the same. `python main.py --help` lists the other workflows.
+(or `.venv\Scripts\sdt.exe setup`).
+
+`python main.py setup` and `python etabs_api/workflows/model_setup.py` do the same. `sdt --help` lists the other commands.
 
 Everything after this happens in dialogs. Closing any dialog cancels the run and changes nothing.
 
@@ -42,13 +44,13 @@ Everything after this happens in dialogs. Closing any dialog cancels the run and
 
 ### 3. Type the inputs
 
-Seven dialogs follow. Each box already holds the value you used last time (or the default on the first run). Lists are separated by commas. Press Enter or **OK / Confirm** to go on.
+Seven dialogs follow (eight with membrane slabs). Each box already holds the value you used last time (or the default on the first run). Lists are separated by commas. Press Enter or **OK / Confirm** to go on.
 
 | Dialog | Boxes | Example |
 |---|---|---|
 | Materials | Concrete strengths (ksi); rebar grades (ksi) | `4, 5, 6` and `60` give C04, C05, C06 and G60 |
 | Frame Sections | Concrete and rebar of the sections; then for each kind of section a range as `min, max, step` in mm | Girders G: width `300, 600, 100`, depth `500, 1000, 100`. Leave a range blank to skip that kind |
-| Slab and Wall Sections | Slab thicknesses (mm); slab type (Membrane, Shell-Thin or Shell-Thick); concrete of the slabs (ksi); wall thicknesses (mm); concrete of the walls (ksi) | `100, 125, 150, 200`, `Membrane`, `4`, `150, 200, 250, 300`, `5`. Leave a list blank to skip it |
+| Slab and Wall Sections | Slab thicknesses (mm); slab type (Membrane, Shell-Thin or Shell-Thick); concrete of the slabs (ksi); wall thicknesses (mm); concrete of the walls (ksi). When the type is Membrane, a second dialog asks whether to add a one-way counterpart of each slab | `100, 125, 150, 200`, `Membrane`, `4`, `150, 200, 250, 300`, `5`. Leave a list blank to skip it |
 | Seismic (UBC 97) | Zone factor Z, soil profile type, source type, distance (km), I, R, Ct, eccentricity ratio | `0.4`, `SD`, `A`, `8`, `1`, `8.5`, `0.03`, `0.05` |
 | Wind (ASCE 7-10) | Wind speed (as typed in ETABS, mph), exposure type, Kzt, gust factor, Kd | `150`, `B`, `1`, `0.85`, `0.85` |
 | Load Patterns | Extra super dead, live and reducible live patterns | `ELEVATOR DEAD, CONCRETE PAD` |
@@ -64,7 +66,7 @@ Notes on the section ranges:
 
 ### 4. Wait for the closing message
 
-A loading window shows the progress. A blank model takes about one to two minutes. The closing message lists how many of each item were defined, the Ca, Cv and Ev used, the response spectrum scale factor, where the model was saved, and anything that failed.
+A loading window shows the progress. A blank model takes about one to two minutes. The closing summary, shown in a window and printed in the terminal, lists how many of each item were defined, the Ca, Cv and Ev used, the response spectrum scale factor, where the model was saved, and anything that failed.
 
 ### 5. Continue in ETABS
 
@@ -91,6 +93,8 @@ print(result.report())    # what was defined, as Markdown
 
 The inputs are saved beside the model as `<name>.setup.json`. When you run the script on that model again, it asks whether to **use the saved inputs** or **review and change them**. Run it again after adding stories, so the number of modes and the top story of the lateral loads are updated.
 
+At the end the model is saved and opened again from its `.EDB`, and the wind patterns are only rewritten when their values changed. Writing the wind pattern table makes ETABS drop the wind patterns it generated in an earlier analysis (`WX(1/12)` and so on); if it then analyses in the same session, its save fails with "Error cleaning Wind Loads Arrays" / "Index was outside the bounds of the array" and the `.EDB` is deleted. Opening the saved file clears that. `sdt grids` saves and reopens the same way.
+
 Anything with the same name as a definition the setup makes is overwritten. Everything else in the model is left alone. Deleting the `.setup.json` file makes the script ask everything from the last used values.
 
 ## What is defined
@@ -103,6 +107,7 @@ Anything with the same name as a definition the setup makes is overwritten. Ever
 | Rectangular columns | `CR_<width>X<depth>_...`, shorter side at least half the longer one, both orientations. Cover 40 mm, to be designed. No stiffness modifiers (1.0) |
 | Circular columns | `C_<diameter>_...`, no stiffness modifiers |
 | Slabs | `S_<thickness>_<concrete>`, for example `S_150_C04`, of the type chosen (Membrane by default). Stiffness modifiers 1.0 |
+| One-way slabs | Only for membrane slabs, when chosen: `S_<thickness>_<concrete>_1W`, for example `S_150_C04_1W`, the same slab with one-way load distribution. The two-way slab is always made too |
 | Walls | `SW_<thickness>_<concrete>_<rebar>`, thin shell, the name `sdt grids` gives its walls. Stiffness modifiers 1.0 |
 | Load patterns | The office standard set, plus extra super dead, live and reducible live patterns you type. Each gets its linear static load case. Only `SELFWEIGHT` carries self weight |
 | Seismic patterns | `EQXPE`, `EQXNE`, `EQXSD`, `EQYPE`, `EQYNE`, `EQYSD` as UBC 97, program-calculated period |
@@ -122,7 +127,8 @@ One set of seismic inputs is typed per project: zone factor, soil profile type, 
 
 How the seismic patterns hold these inputs depends on the model:
 
-- **New blank model:** "Per Code" in ETABS, with the soil type, zone factor, source type and distance. ETABS only accepts the source distance through its model text file, so the new model is saved, its text file is edited and reopened, and the result is saved again.
+- **New blank model:** "Per Code" in ETABS, with the soil type, zone factor, source type and distance. ETABS only accepts the source distance through its model text file, so the new model is saved, its text file is edited and reopened, and the result is saved again. The saved model is then opened from its `.EDB`: ETABS does not analyse a model it still holds from a text file (the analysis stops at once, with no log).
+- **After `sdt grids`:** "User Defined" again. ETABS puts the source distance of a "Per Code" pattern back to 15 km whenever the seismic table is written, and `sdt grids` writes it to set the bottom and top story. So it writes the Ca and Cv of the pattern's own inputs instead of leaving "Per Code" with the wrong distance.
 - **Model that was already open:** "User Defined", with the Ca and Cv worked out here. The values are the same; the model is not reloaded from text.
 
 The response spectrum scale factor is g I / R. Scaling to the static base shear is not done yet.

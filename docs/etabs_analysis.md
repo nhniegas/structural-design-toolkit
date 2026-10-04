@@ -10,12 +10,14 @@ With the model open and saved in ETABS, from the project folder:
 sdt analyze
 ```
 
-(or `python main.py analyze`). Two dialogs:
+(`python main.py analyze` does the same). Two dialogs:
 
 1. **Which model:** this model, or a copy saved beside it as `<model> - ANALYSIS.EDB`. The scaling changes the response spectrum cases, so choose the copy to keep the original as it is.
-2. **Seismic zone factor Z and Ct** (ft units, 0.030 for concrete frames), for the Method A period. They are filled in from the model's saved setup inputs (`<model>.setup.json`) when there are any.
+2. **Seismic zone factor Z and Ct** (ft units, 0.030 for concrete frames), for the Method A period. They are filled in from the model's own UBC 97 seismic patterns; when a value differs from the one saved with the model (`<model>.setup.json`), the dialog says so. On a model with no UBC 97 seismic pattern they are filled in from what was saved, or typed, and then saved with the model.
 
-The report is printed in the terminal and the model is saved.
+On a model whose seismic loads are not UBC 97 patterns, the report lists what does not apply: the reset of the spectrum to g I / R, and the scaling when there is no static seismic case to scale to.
+
+The report is printed in the terminal and the model is saved. A separate window then shows the summary: the scaling, the periods, the modal mass, the weight and every warning. If ETABS cannot run the analysis, a message says so and nothing is saved.
 
 ## What it does
 
@@ -25,7 +27,7 @@ The report is printed in the terminal and the model is saved.
 
 | Check | Rule |
 |---|---|
-| Periods | The modal period with the largest mass in X and in Y, against NSCP 208.5.2.2 Method A, T_A = Ct hn^(3/4) (Ct and hn in ft units, as UBC 97 and ETABS; the height above the base), and the Method B cap: 1.3 T_A in zone 4, 1.4 T_A in zone 2. A longer modal period is reported: the static seismic cases use the capped period |
+| Periods | The modal period with the largest mass in X and in Y, against NSCP 208.5.2.2 Method A, T_A = Ct hn^(3/4) (Ct and hn in ft units, as UBC 97 and ETABS). hn is the height of the top level above the ground level: elevation 0 when the base is below it (a footing level or a basement), otherwise the base. It is printed with the periods, and the Method B cap: 1.3 T_A in zone 4, 1.4 T_A in zone 2. A longer modal period is reported: the static seismic cases use the capped period |
 | Modal mass | The sum of the modal participating mass in X and Y; a warning below 90 % (add modes) |
 | Weight | The seismic weight from the mass source (Mass Summary by Story), against the vertical base reaction of the mass-source load patterns with their multipliers. A difference above 1 % is reported: element self mass or added mass in the mass source, or loads on the base |
 

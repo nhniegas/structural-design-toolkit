@@ -15,6 +15,17 @@ import ezdxf
 from dataclasses import dataclass
 from design.code_config import CODE, AciCode
 from design.column_interaction import clip_moments, section_rings
+from design.column_slenderness import (
+    SLENDERNESS_REPORT_FIELDS,
+    ColumnSection,
+    FrameBeam,
+    FrameColumn,
+    FrameModel,
+    MemberSlenderness,
+    magnify_member,
+    plan_direction,
+    simple_geometry,
+)
 from scipy.optimize import brentq
 from shapely.geometry import LineString
 from shapely.ops import unary_union
@@ -988,6 +999,8 @@ def _to_compression_positive(
     converted = factored_loads.copy()
     if code.conventions.etabs_compression_is_negative:
         converted["P"] = -pd.to_numeric(converted["P"], errors="coerce")
+        if "P_sustained" in converted.columns:  # the dead-load share, for beta_dns
+            converted["P_sustained"] = -pd.to_numeric(converted["P_sustained"], errors="coerce")
     return converted
 
 
@@ -2221,8 +2234,13 @@ def _column_shear_checks(
     progress=None,
     clear_height: float | None = None,
     beam_moment_limits: dict[tuple[str, str], float] | None = None,
+    capacity_design: bool = True,
 ) -> tuple[list[dict], int]:
     """Check column shear in both local directions and size transverse legs.
+
+    ``capacity_design`` False leaves out the probable-moment shear Ve of a
+    special moment frame column and designs for the analysis shear (the user's
+    choice for the short foundation-level columns); Vc is still taken as zero.
 
     ``clear_height`` is the clear height lu between the beams (mm) for the
     capacity shear Ve of a special moment frame column. ``beam_moment_limits``
@@ -2295,7 +2313,8 @@ def _column_shear_checks(
     # direction and end, so it is built once and only the axial load changes.
     # Capacity design applies to special moment frames only (ACI 18.7.6.1).
     probable_surface = probable_engine = probable_section = None
-    if is_smrf:
+    use_capacity = is_smrf and capacity_design
+    if use_capacity:
         probable_row = row.copy()
         probable_row["UniqueName"] = member
         probable_row["fy"] = engine.fy * seismic_cfg.probable_stress_factor
@@ -2328,7 +2347,7 @@ def _column_shear_checks(
                 else _section_bending_angle(1.0, 0.0)
             )
             capacity_shear_kN = 0.0
-            if is_smrf:
+            if use_capacity:
                 probable_moments = []
                 for end in ("I", "J"):
                     if progress is not None:
@@ -2413,6 +2432,8 @@ def _column_shear_checks(
                         "Shear_Direction": shear_name,
                         "Analysis_Shear_kN": analysis_shear,
                         "Capacity_Based_Ve_kN": capacity_shear_kN,
+                        "Capacity_Shear_Note": (
+                            "" if use_capacity or not is_smrf else CAPACITY_SHEAR_SKIPPED),
                         "Design_Shear_kN": design_shear,
                         "Vc_kN": shear_concrete / 1000.0,
                         "Concrete_Shear_Strength_Neglected": is_smrf,
@@ -3226,6 +3247,32 @@ def _evaluate_smrf_joints(
 
 BCC_EXEMPT_TEXT = ("N/A - ACI 18.7.3.1: the column stops at this joint and "
                    "Pu < 0.1 Ag fc'")
+# Capacity-design checks the user chose not to run at a level (sdt columns asks).
+TOP_LEVEL_SKIPPED = "Not checked - topmost level (user choice)"
+FOUNDATION_LEVEL_SKIPPED = "Not checked - foundation level (user choice)"
+CAPACITY_SHEAR_SKIPPED = "Not used - foundation level (user choice): analysis shear"
+
+
+def _skip_joint_checks(joints: pd.DataFrame, reasons: dict[str, str]) -> pd.DataFrame:
+    """Mark the strong column - weak beam and joint shear checks of the joints in
+    ``reasons`` (joint -> text) as not checked. Their values are kept out of the
+    report and they never ask for more column bars or a larger section."""
+    if joints.empty or not reasons or "Joint_Point" not in joints.columns:
+        return joints
+    joints = joints.copy()
+    for column in ("Strong_Column_Check", "Joint_Shear_Check", "Joint_Check_Reason"):
+        if column in joints.columns:
+            joints[column] = joints[column].astype(object)
+    skipped = joints["Joint_Point"].astype(str).map(reasons)
+    rows = skipped.notna()
+    if not rows.any():
+        return joints
+    joints.loc[rows, "BCC_Exempt"] = True
+    joints.loc[rows, "Column_Beam_Ratio"] = np.nan
+    joints.loc[rows, "Joint_Shear_Utilization"] = np.nan
+    for column in ("Strong_Column_Check", "Joint_Shear_Check", "Joint_Check_Reason"):
+        joints.loc[rows, column] = skipped[rows]
+    return joints
 
 
 # Per-end report fields of the joint checks. X is the column's width direction
@@ -3252,6 +3299,11 @@ JOINT_SHEAR_REPORT_FIELDS = [
     "Joint_Shear_Utilization_Y",
     "Joint_Shear_Status",
 ]
+
+
+SLENDERNESS_NOT_RUN = "N/A - slenderness not run"
+JOINT_OTHER_COMBINATION = ("N/A - the joint is checked in the combinations that govern it "
+                           "(see the other rows of this end)")
 
 
 def _build_consolidated_column_report(
@@ -3324,6 +3376,10 @@ def _build_consolidated_column_report(
                     f"Flexure_Check_{end}",
                 ],
             )
+        )
+    for end in ("I", "J"):
+        groups.append(
+            (f"SLENDERNESS - {end}", [f"{name}_{end}" for name in SLENDERNESS_REPORT_FIELDS])
         )
     for end in ("I", "J"):
         groups.append(
@@ -3418,6 +3474,8 @@ def _build_consolidated_column_report(
             phi_Vn_kN=("phi_Vn_kN", "min"),
             Shear_Utilization=("Shear_Utilization", "max"),
             passes=("_passes", "all"),
+            **({"note": ("Capacity_Shear_Note", "max")}
+               if "Capacity_Shear_Note" in table.columns else {}),
         )
         shear_groups = {key: values for key, values in zip(
             reduced.index, reduced.to_dict("records"))}
@@ -3436,6 +3494,9 @@ def _build_consolidated_column_report(
                 else:
                     continue
                 joint_groups.setdefault((member, combo, end, axis), []).append(joint_row)
+    # Ends that have a joint check in some combination: where another combination
+    # has none, that is because only the governing ones are evaluated.
+    joint_ends = {(member, end) for member, _combo, end, _axis in joint_groups}
 
     def number(item, key: str) -> float:
         """Read a numeric joint value; NaN when it is missing or text."""
@@ -3562,6 +3623,9 @@ def _build_consolidated_column_report(
                     (f"Flexure_Check_{end}", "Flexure_Check"),
                 ):
                     report_row[key] = force.get(source) if force is not None else "N/A"
+                for name in SLENDERNESS_REPORT_FIELDS:
+                    report_row[f"{name}_{end}"] = (
+                        force.get(name, SLENDERNESS_NOT_RUN) if force is not None else "N/A")
 
                 shear_rows = shear_groups.get((member, combo, end))
                 if shear_rows is None:
@@ -3578,7 +3642,8 @@ def _build_consolidated_column_report(
                         report_row[f"{prefix}_{end}"] = "N/A"
                 else:
                     report_row[f"Analysis_Vu_kN_{end}"] = shear_rows["Analysis_Shear_kN"]
-                    report_row[f"Probable_Ve_kN_{end}"] = shear_rows["Capacity_Based_Ve_kN"]
+                    report_row[f"Probable_Ve_kN_{end}"] = (
+                        shear_rows.get("note") or shear_rows["Capacity_Based_Ve_kN"])
                     report_row[f"Design_Vu_kN_{end}"] = shear_rows["Design_Shear_kN"]
                     report_row[f"Vc_kN_{end}"] = shear_rows["Vc_kN"]
                     report_row[f"Concrete_Shear_Neglected_{end}"] = (
@@ -3668,8 +3733,10 @@ def _build_consolidated_column_report(
                         [str(item.get("Joint_Shear_Check", "N/A")) for item in end_rows]
                     )
                 else:
+                    reason = (JOINT_OTHER_COMBINATION if (member, end) in joint_ends
+                              else joint_na_reason)
                     for name in BCC_REPORT_FIELDS + JOINT_SHEAR_REPORT_FIELDS:
-                        report_row[f"{name}_{end}"] = joint_na_reason
+                        report_row[f"{name}_{end}"] = reason
             report_rows.append(report_row)
 
     report = pd.DataFrame(
@@ -3722,6 +3789,7 @@ def _expand_column_report_hierarchy(
             "Axial_Check",
             "Flexure_Check",
         ],
+        "SLENDERNESS": list(SLENDERNESS_REPORT_FIELDS),
         "COLUMN SHEAR": [
             "Analysis_Vu_kN",
             "Probable_Ve_kN",
@@ -3804,6 +3872,7 @@ def _expand_column_report_hierarchy(
                 for name in (
                     "Flexure_Check",
                     "Axial_Check",
+                    "Slenderness_Check",
                     "Shear_Check",
                     "BCC_Status",
                     "Joint_Shear_Status",
@@ -3927,12 +3996,33 @@ COLUMN_REPORT_LABELS = {
     "Reinforcement_Ratio": "ρ Longitudinal",
     "Reinforcement_Ratio_Limit": "ρ Limit",
     "Pu_kN": "Pᵤ (kN)",
-    "Mu2_kNm": "Mᵤ₂ (kN·m)",
-    "Mu3_kNm": "Mᵤ₃ (kN·m)",
+    "Mu2_kNm": "Mᵤ₂ design (kN·m)",
+    "Mu3_kNm": "Mᵤ₃ design (kN·m)",
     "phi_Mn_kNm": "ϕMₙ (kN·m)",
     "Flexure_Utilization": "Flexure Utilization",
     "Axial_Check": "Axial Check",
     "Flexure_Check": "Flexure Check",
+    "Slender_lu3_mm": "lᵤ, about 3 (mm)",
+    "Slender_k3": "k, about 3",
+    "Slender_ratio3": "k lᵤ / r, about 3",
+    "Slender_limit3": "Limit 34 + 12 M₁/M₂ ≤ 40, about 3",
+    "Slender_Cm3": "Cₘ, about 3",
+    "Slender_Pc3_kN": "P꜀, about 3 (kN)",
+    "Slender_delta3": "δₙₛ, about 3",
+    "Slender_Mmin3_kNm": "M₂,min, about 3 (kN·m)",
+    "Mu3_analysis_kNm": "Mᵤ₃ from analysis (kN·m)",
+    "Slender_lu2_mm": "lᵤ, about 2 (mm)",
+    "Slender_k2": "k, about 2",
+    "Slender_ratio2": "k lᵤ / r, about 2",
+    "Slender_limit2": "Limit 34 + 12 M₁/M₂ ≤ 40, about 2",
+    "Slender_Cm2": "Cₘ, about 2",
+    "Slender_Pc2_kN": "P꜀, about 2 (kN)",
+    "Slender_delta2": "δₙₛ, about 2",
+    "Slender_Mmin2_kNm": "M₂,min, about 2 (kN·m)",
+    "Mu2_analysis_kNm": "Mᵤ₂ from analysis (kN·m)",
+    "Slender_beta_dns": "βdns",
+    "Slender_beta_basis": "βdns basis",
+    "Slenderness_Check": "Slenderness Check",
     "Analysis_Vu_kN": "Analysis Vᵤ (kN)",
     "Probable_Ve_kN": "Probable Vₑ (kN)",
     "Design_Vu_kN": "Design Vᵤ (kN)",
@@ -3985,12 +4075,47 @@ _COLUMN_GROUP_FILLS = {
     "COLUMN LABEL / LEVEL": "BDD7EE",
     "SECTION / LONGITUDINAL REINFORCEMENT": "E2EFDA",
     "FLEXURE / AXIAL": "E2EFDA",
+    "SLENDERNESS": "EDEDED",
     "COLUMN SHEAR": "FFF2CC",
     "BEAM-COLUMN CAPACITY": "FCE4D6",
     "JOINT SHEAR": "FCE4D6",
     "TRANSVERSE REINFORCEMENT DETAILING": "DEEBF7",
     "DESIGN STATUS": "D9D2E9",
 }
+
+
+# Dimensionless ratios far below 1: two decimals would round them to 0.01 or 0.00.
+_COLUMN_FOUR_DECIMALS = {
+    "Reinforcement_Ratio", "Reinforcement_Ratio_Limit", "Confinement_18_7_5_a",
+    "Confinement_18_7_5_b", "Confinement_18_7_5_c", "Confinement_18_7_5_d",
+    "Confinement_18_7_5_e", "Confinement_18_7_5_f", "Required_Ash_s_Ratio_X",
+    "Provided_Ash_s_Ratio_X", "Required_Ash_s_Ratio_Y", "Provided_Ash_s_Ratio_Y",
+}
+_LOW_AXIAL = "N/A - Pu <= 0.3 Ag f'c and f'c <= 70 MPa"
+
+
+def column_blank_reason(name: str, row: dict) -> str:
+    """Why a cell of the column report has no value."""
+    circular = str(row.get("Shape", "")).strip().casefold() == "circular"
+    if str(row.get("Confinement_Check", "")).startswith("N/A - non-SMRF") and (
+            name.startswith(("Confinement_18_7_5", "Required_Ash", "Provided_Ash"))
+            or name in ("Kf", "Kn")):
+        return "N/A - seismic design is off"
+    if name in ("Width_mm", "Depth_mm", "Bars_X_Edge", "Bars_Y_Edge"):
+        return "N/A - circular column" if circular else "N/A"
+    if name == "Diameter_mm":
+        return "N/A - rectangular column"
+    if name in ("Confinement_18_7_5_a", "Confinement_18_7_5_b", "Kn"):
+        return "N/A - spiral column: 18.7.5(d) to (f) apply" if circular else "N/A"
+    if name == "Confinement_18_7_5_c":
+        return "N/A - spiral column: 18.7.5(d) to (f) apply" if circular else _LOW_AXIAL
+    if name in ("Confinement_18_7_5_d", "Confinement_18_7_5_e"):
+        return "N/A" if circular else "N/A - rectangular hoops: 18.7.5(a) to (c) apply"
+    if name == "Confinement_18_7_5_f":
+        return _LOW_AXIAL if circular else "N/A - rectangular hoops: 18.7.5(a) to (c) apply"
+    if name == "Kf":
+        return _LOW_AXIAL
+    return "N/A"
 
 
 def column_report_display(report: pd.DataFrame) -> pd.DataFrame:
@@ -4042,7 +4167,17 @@ def write_column_results_xlsx(report: pd.DataFrame, groups: list[tuple[str, list
         cell.border = Border(bottom=thin)
         sheet.column_dimensions[get_column_letter(index)].width = min(
             max(12, len(str(name)) * 0.9), 30)
-    values = clean.astype(object).where(pd.notna(clean), None).values.tolist()
+    from utilities._xlsx_values import cell_value, is_blank
+
+    # Rounded numbers, and a stated reason wherever a value does not apply.
+    values = []
+    for record, shown in zip(report[ordered].to_dict("records"),
+                             clean.astype(object).values.tolist()):
+        values.append([
+            cell_value(value, 4 if name in _COLUMN_FOUR_DECIMALS else 2,
+                       column_blank_reason(name, record) if is_blank(value) else "")
+            for name, value in zip(ordered, shown)
+        ])
     names = clean["Unique Name"].tolist() if "Unique Name" in clean.columns else []
     grey = PatternFill("solid", fgColor="F2F2F2")
     shade, previous = False, None
@@ -4076,8 +4211,23 @@ def design_columns(
     progress=None,
     continuous_vertical_bars: bool = False,
     bottom_story_cover: str = "none",
+    slenderness: bool = True,
+    check_top_level: bool = True,
+    check_foundation_level: bool = True,
 ) -> tuple[pd.DataFrame, list, pd.DataFrame]:
     """Design every column and run the SMRF checks.
+
+    ``slenderness`` adds the member slenderness of ACI 6.6.4.5 (see
+    ``design/column_slenderness.py``): the moments at the column ends are
+    magnified before the bars are chosen. The sway effects must be in the
+    forces already (the ETABS P-delta analysis).
+
+    ``check_top_level`` False leaves out the strong column - weak beam and
+    joint shear checks at the joints on top of the columns (no column above).
+    ``check_foundation_level`` False leaves them out at the joints of the
+    bottom-most story columns, whose shear is then designed for the analysis
+    shear instead of the probable-moment shear Ve. Both are asked by
+    ``sdt columns``; what is left out is stated in the report.
 
     ``tables`` holds FRAME DATA, CONNECTIVITY and FACTORED LOADS, and for SMRF
     LOCAL AXES and POINTS (the column orientation). ``beam_design`` is the beam
@@ -4143,6 +4293,18 @@ def design_columns(
     else:
         frame_angles = {}
         point_coordinates = {}
+    # The slenderness needs the frame around each column (lu and k) whether or
+    # not the seismic checks are on; without the joint coordinates it uses the
+    # joint to joint length and k = 1.0.
+    slender_angles, slender_points = frame_angles, point_coordinates
+    if slenderness and not is_smrf:
+        try:
+            slender_points = _extract_point_coordinates(
+                _as_etabs_dataframe(tables.get("POINTS"), "Point Object Connectivity"))
+            slender_angles = _extract_frame_angles(
+                _as_etabs_dataframe(tables.get("LOCAL AXES"), "Frame Assignments - Local Axes"))
+        except (ValueError, KeyError, TypeError):
+            slender_angles, slender_points = {}, {}
     # The mark comes from the unique name, so every column has one whether or
     # not ETABS is connected and whatever its local-axis angle is.
     frame_labels = {
@@ -4208,6 +4370,22 @@ def design_columns(
         for member, rows in factored_loads.groupby("UniqueName", dropna=True)
     }
     connection_by_name = connectivity.drop_duplicates("UniqueName").set_index("UniqueName")
+    slender_results: dict[str, MemberSlenderness] = {}
+    slender_geometry: dict[str, dict] = {}
+    if slenderness:
+        frame_model = _slenderness_frame_model(
+            frame_data, connection_by_name, slender_points, slender_angles)
+        for _, row in column_rows.iterrows():
+            member = str(row["UniqueName"])
+            if member not in force_frames:
+                continue
+            geometry = _slenderness_geometry(member, frame_model, force_frames[member],
+                                             frame_data, connection_by_name)
+            engine, _ = _build_column_section(row, 4, dmain, dties, cover, is_smrf)
+            result = magnify_member(force_frames[member], _slenderness_section(engine), geometry)
+            slender_results[member] = result
+            slender_geometry[member] = geometry
+            force_frames[member] = result.forces
     level_elevations: dict[str, float] = {}
     for member in column_rows["UniqueName"].astype(str):
         if member not in connection_by_name.index:
@@ -4439,6 +4617,25 @@ def design_columns(
     for state in column_candidates.values():
         state["initial_index"] = state["selected_index"]
 
+    # Levels where the user chose not to run the capacity-design checks.
+    skipped_joints: dict[str, str] = {}
+    foundation_columns: set[str] = set()
+    if is_smrf and not (check_top_level and check_foundation_level):
+        ends_of = {member: column_ends(member) for member in column_candidates}
+        if not check_top_level:
+            bottoms = {bottom for bottom, _ in ends_of.values()}
+            for _, top in ends_of.values():
+                if top not in bottoms:
+                    skipped_joints[top] = TOP_LEVEL_SKIPPED
+        if not check_foundation_level:
+            story_of = {str(member): str(story) for member, story in story_by_member.items()}
+            order = _story_order_from_stacks(connectivity, story_of)
+            for member, (bottom, top) in ends_of.items():
+                if order and story_of.get(member) == order[0]:
+                    foundation_columns.add(member)
+                    skipped_joints[bottom] = FOUNDATION_LEVEL_SKIPPED
+                    skipped_joints[top] = FOUNDATION_LEVEL_SKIPPED
+
     if is_smrf:
         column_members_at_joint: dict[str, list[str]] = {}
         for member, connection in connection_by_name.iterrows():
@@ -4603,6 +4800,7 @@ def design_columns(
             },
             progress=report_progress,
         )
+        initial_joints = _skip_joint_checks(initial_joints, skipped_joints)
 
         while not initial_joints.empty:
             exempt = (initial_joints["BCC_Exempt"].eq(True)
@@ -4976,6 +5174,7 @@ def design_columns(
                 progress=report_progress,
                 clear_height=clear_heights.get(member),
                 beam_moment_limits=beam_moment_limits.get(member),
+                capacity_design=member not in foundation_columns,
             )
             return checks
 
@@ -5045,6 +5244,13 @@ def design_columns(
             status = "FAIL: column shear strength"
         shear_check_rows.extend(member_shear_checks)
 
+        member_slenderness = slender_results.get(member)
+        if member_slenderness is not None:
+            for check in selected_checks:
+                check.update(member_slenderness.records.get(
+                    (str(check["Combo"]), str(check["End"])), {}))
+            if member_slenderness.failed:
+                status = "FAIL: column slenderness (ACI 6.2.6) - enlarge the section"
         force_check_rows.extend(selected_checks)
         layout_summary = _column_layout_summary(selected_layout)
         transverse_summary = (
@@ -5191,7 +5397,93 @@ def design_columns(
         ),
     )
     _clear_end_force_index()
+    # lu and k of every column, for sizing trial sections on the same forces
+    report.attrs["slenderness_geometry"] = slender_geometry
+    report.attrs["foundation_columns"] = sorted(foundation_columns)
+    report.attrs["skipped_joints"] = dict(skipped_joints)
     return report, report_groups, joint_results
+
+
+def _slenderness_section(engine: ColumnFlexureDesign) -> ColumnSection:
+    if engine.shape == "circular":
+        return ColumnSection(engine.diameter, engine.diameter, True, engine.fc)
+    return ColumnSection(engine.width, engine.height, False, engine.fc)
+
+
+def _slenderness_frame_model(frame_data: pd.DataFrame, connection_by_name: pd.DataFrame,
+                             point_coordinates: dict, frame_angles: dict) -> FrameModel | None:
+    """The columns and beams with their joints, or None without joint coordinates."""
+    if not point_coordinates:
+        return None
+    data = frame_data.drop_duplicates("UniqueName").set_index("UniqueName")
+    columns: dict[str, FrameColumn] = {}
+    beams: dict[str, FrameBeam] = {}
+
+    def number(value) -> float:
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            return 0.0
+        return value if math.isfinite(value) else 0.0
+
+    for member, connection in connection_by_name.iterrows():
+        member = str(member)
+        if member not in data.index:
+            continue
+        row = data.loc[member]
+        point_i = _normalize_object_name(connection["UniquePtI"])
+        point_j = _normalize_object_name(connection["UniquePtJ"])
+        if point_i not in point_coordinates or point_j not in point_coordinates:
+            continue
+        start, end = point_coordinates[point_i], point_coordinates[point_j]
+        length = float(np.linalg.norm(end - start))
+        if length <= 0:
+            continue
+        kind = str(connection["DesignType"]).strip().casefold()
+        fc = number(row.get("f'c"))
+        if kind == "column":
+            if start[2] > end[2]:
+                point_i, point_j, start, end = point_j, point_i, end, start
+            diameter = number(row.get("Diameter"))
+            width, depth = number(row.get("Width")), number(row.get("Depth"))
+            circular = diameter > 0 and not (width > 0 and depth > 0)
+            section = (ColumnSection(diameter, diameter, True, fc) if circular
+                       else ColumnSection(width, depth, False, fc))
+            try:
+                _, local_2, _ = _frame_local_axes(start, end, frame_angles.get(member, 0.0))
+            except ValueError:
+                local_2 = np.array([1.0, 0.0, 0.0])
+            columns[member] = FrameColumn(member, point_i, point_j, length, section,
+                                          plan_direction(local_2))
+        elif kind == "beam":
+            beams[member] = FrameBeam(member, point_i, point_j, length, number(row.get("Width")),
+                                      number(row.get("Depth")), fc, plan_direction(end - start))
+    return FrameModel(columns, beams) if columns else None
+
+
+def _slenderness_geometry(member: str, frame_model: FrameModel | None, forces: pd.DataFrame,
+                          frame_data: pd.DataFrame, connection_by_name: pd.DataFrame) -> dict:
+    """lu and k of a column about its two axes."""
+    if frame_model is not None and member in frame_model.columns:
+        return frame_model.geometry(member)
+    stations = pd.to_numeric(forces["Station"], errors="coerce").dropna()
+    length = float(stations.max() - stations.min()) if not stations.empty else 0.0
+    top_depth = 0.0
+    if member in connection_by_name.index and {"Depth", "DesignType"} <= set(frame_data.columns):
+        top = _normalize_object_name(connection_by_name.loc[member]["UniquePtJ"])
+        beams = frame_data.loc[
+            frame_data["DesignType"].astype(str).str.strip().str.casefold().eq("beam"),
+            ["UniqueName", "Depth"]]
+        depth_of = dict(zip(beams["UniqueName"].astype(str),
+                            pd.to_numeric(beams["Depth"], errors="coerce")))
+        for name, connection in connection_by_name.iterrows():
+            if str(name) in depth_of and top in (
+                    _normalize_object_name(connection["UniquePtI"]),
+                    _normalize_object_name(connection["UniquePtJ"])):
+                depth = depth_of[str(name)]
+                if depth == depth:
+                    top_depth = max(top_depth, float(depth))
+    return simple_geometry(length, top_depth)
 
 
 def column_size_passes(
@@ -5201,8 +5493,16 @@ def column_size_passes(
     dties: float,
     cover: float,
     is_smrf: bool,
+    slenderness_geometry: dict | None = None,
+    capacity_design: bool = True,
 ) -> tuple[bool, str]:
     """Whether a column section can be reinforced for its forces, and why not.
+
+    ``slenderness_geometry`` is the column's lu and k per axis from the last
+    design (``report.attrs["slenderness_geometry"]``): the trial section is
+    then checked with its own slenderness. ``capacity_design`` False designs the
+    shear for the analysis shear (a foundation-level column the user chose
+    not to check for Ve).
 
     The same member checks as ``design_columns`` that depend on the section size
     alone: a bar layout within the steel limit that passes flexure and axial load
@@ -5217,6 +5517,11 @@ def column_size_passes(
     row = frame_row.copy()
     row["UniqueName"] = _normalize_object_name(row["UniqueName"])
     engine, _ = _build_column_section(row, 4, dmain, dties, cover, is_smrf)
+    if slenderness_geometry:
+        magnified = magnify_member(forces, _slenderness_section(engine), slenderness_geometry)
+        if magnified.failed:
+            return False, "slenderness (ACI 6.2.6)"
+        forces = magnified.forces
     if is_smrf:
         seismic = engine.code.column_seismic
         sides = ((engine.diameter, engine.diameter) if engine.shape == "circular"
@@ -5255,7 +5560,8 @@ def column_size_passes(
                     layout_engine, len(layout), max_compression, spacing
                 )["Transverse_Spacing_Provided_mm"])
             shear, _ = _column_shear_checks(
-                row, forces, layout_engine, bars, spacing, 2, is_smrf, bundle_layout=layout)
+                row, forces, layout_engine, bars, spacing, 2, is_smrf, bundle_layout=layout,
+                capacity_design=capacity_design)
             if all(check["Shear_Check"] == "PASS" for check in shear):
                 return True, "passes"
             return False, "column shear (section too small for the shear steel)"
@@ -5382,6 +5688,52 @@ def ask_column_design_options(
             return None
         continuous_vertical_bars = VERTICAL_BAR_OPTIONS[chosen]
     return continuous_vertical_bars, bottom_story_cover
+
+
+TOP_LEVEL_OPTIONS = {
+    "Yes - check them (ACI 18.7.3, 18.8)": True,
+    "No - leave them out at the topmost level": False,
+}
+FOUNDATION_LEVEL_OPTIONS = {
+    "Yes - check them (ACI 18.7.3, 18.7.6, 18.8)": True,
+    "No - leave them out; design these columns for the analysis shear": False,
+}
+
+
+def ask_capacity_check_levels(is_smrf: bool, last: dict | None = None
+                              ) -> tuple[bool, bool] | None:
+    """Ask whether the capacity-design checks are run at the two levels where
+    they usually fail for reasons of geometry.
+
+    Returns ``(check_top_level, check_foundation_level)``, or None when a
+    dialog is closed. Without seismic design there is nothing to ask.
+    """
+    if not is_smrf:
+        return True, True
+    from utilities._gui_helpers import select_option
+
+    last = last or {}
+    chosen = select_option(
+        "Column Design - Topmost Level",
+        "Run the strong column - weak beam (BCC) and joint shear checks at the joints on top "
+        "of the columns (roof level)? No column stands above these joints, so one column "
+        "alone must be 1.2 times stronger than the beams and the check often fails.",
+        list(TOP_LEVEL_OPTIONS),
+        default_index=0 if last.get("check_top_level", True) else 1)
+    if chosen is None:
+        return None
+    top = TOP_LEVEL_OPTIONS[chosen]
+    chosen = select_option(
+        "Column Design - Foundation Level",
+        "Run the BCC, joint shear and probable-moment shear (Ve) checks on the columns of the "
+        "bottom-most story (foundation to ground level)? These columns are short, so "
+        "Ve = sum of Mpr / clear height becomes very large and a larger section does not "
+        "help: the probable moment grows with the section.",
+        list(FOUNDATION_LEVEL_OPTIONS),
+        default_index=0 if last.get("check_foundation_level", True) else 1)
+    if chosen is None:
+        return None
+    return top, FOUNDATION_LEVEL_OPTIONS[chosen]
 
 
 def _column_story_sort_key(story: object) -> tuple[int, str]:
@@ -6692,6 +7044,10 @@ def _column_calc_member(rows: pd.DataFrame) -> MemberReport:
         ),
     ]
 
+    slenderness = _column_slenderness_table(rows)
+    if slenderness is not None:
+        tables.insert(2, slenderness)
+
     confinement = [
         [f"Required steel ratio, 18.7.5({letter})", number(first.get(f"Confinement_18_7_5_{letter}"), 4)]
         for letter in "abcdef"
@@ -6747,6 +7103,79 @@ def _column_calc_member(rows: pd.DataFrame) -> MemberReport:
                  number(worst_shear), status],
         tables=tables,
     )
+
+
+def _numbers_of(rows: pd.DataFrame, column: str) -> pd.Series:
+    if column not in rows.columns:
+        return pd.Series(dtype=float)
+    return pd.to_numeric(rows[column], errors="coerce").dropna()
+
+
+def _column_slenderness_table(rows: pd.DataFrame) -> ReportTable | None:
+    """The slenderness of one column about each axis: the largest magnifier of
+    all its combinations, with the values behind it."""
+    if "Slenderness_Check" not in rows.columns:
+        return None
+    body = []
+    for axis, label in (("3", "About 3 (over the depth)"), ("2", "About 2 (over the width)")):
+        ratio = _numbers_of(rows, f"Slender_ratio{axis}")
+        if ratio.empty:
+            continue
+        delta = _numbers_of(rows, f"Slender_delta{axis}")
+        limit = _numbers_of(rows, f"Slender_limit{axis}")
+        worst = rows.loc[delta.idxmax()] if not delta.empty else rows.iloc[0]
+        unstable = rows[f"Slender_delta{axis}"].astype(str).eq("Unstable").any()
+        slender = (ratio.max() > limit.min() + 1e-9) if not limit.empty else False
+        body.append([
+            label,
+            number(worst.get(f"Slender_lu{axis}_mm"), 0),
+            number(worst.get(f"Slender_k{axis}"), 2),
+            number(ratio.max(), 1),
+            number(limit.min(), 1) if not limit.empty else "--",
+            "Yes" if slender else "No",
+            number(worst.get(f"Slender_Cm{axis}"), 2) if slender else "--",
+            number(worst.get(f"Slender_Pc{axis}_kN"), 0) if slender else "--",
+            "Unstable" if unstable else number(delta.max() if not delta.empty else 1.0, 2),
+        ])
+    if not body:
+        return None
+    checks = rows["Slenderness_Check"].astype(str)
+    failing = checks[checks.str.startswith("FAIL")]
+    status = failing.iloc[0] if len(failing) else (
+        "PASS - slender, moments magnified" if checks.str.contains("magnified").any()
+        else "PASS - not slender")
+    beta = _numbers_of(rows, "Slender_beta_dns")
+    return ReportTable(
+        "Slenderness (ACI 6.2.5, 6.6.4.5)",
+        ["Axis", Tex("$l_u$ (mm)"), Tex("$k$"), Tex("$k l_u/r$"), "Limit", "Slender",
+         Tex("$C_m$"), Tex("$P_c$ (kN)"), Tex(r"$\delta_{ns}$")],
+        body, "lrrrrlrrr",
+        "Sway (P-Delta) effects are in the forces of the ETABS P-delta analysis (ACI 6.7). "
+        "Member (P-delta) effects are added here by moment magnification: Mu2 and Mu3 in the "
+        "table above are the magnified design moments. Limit = 34 + 12 M1/M2, at most 40; "
+        "k from the alignment chart of a braced column, at most 1.0; (EI)eff = 0.4 Ec Ig / "
+        f"(1 + beta_dns), beta_dns up to {number(beta.max() if not beta.empty else 0.6, 2)}. "
+        f"Check: {status}.",
+    )
+
+
+def _bcc_caption(rows: pd.DataFrame) -> str:
+    """One line on the strong column - weak beam check, for under the interaction plot."""
+    parts = []
+    for axis in ("X", "Y"):
+        ratios = _numbers_of(rows, f"BCC_Ratio_{axis}")
+        if not ratios.empty:
+            parts.append(f"along {axis} {ratios.min():.2f}")
+    status = rows.get("BCC_Status", pd.Series(dtype=str)).astype(str)
+    failing = status.str.startswith("FAIL").any()
+    required = CODE.column_seismic.strong_column_ratio
+    if parts:
+        return (" Strong column - weak beam is a separate check at the joints, on nominal "
+                f"strengths, and is not drawn here: lowest sum Mnc / sum Mnb {', '.join(parts)} "
+                f"(required {required:g}): {'FAIL' if failing else 'PASS'}; see the table above.")
+    reason = next((text for text in status if text and text.lower() != "nan"), "")
+    return (" Strong column - weak beam is a separate check at the joints and is not drawn "
+            f"here: {reason or 'no ratio for this column'}.")
 
 
 def column_interaction_figure(rows: pd.DataFrame, path: str, dmain: float, dties: float,
@@ -6811,7 +7240,8 @@ def build_column_calc_report(report: pd.DataFrame, filepath: str, information: l
             if column_interaction_figure(rows, os.path.join(folder, relative), **figure_options):
                 figures[name] = (relative, "Design interaction surface (phi Pn, phi Mnx, phi "
                                  "Mny) of the final bar layout with every combination at both "
-                                 "ends; the hull vertices decide the check, the star governs.")
+                                 "ends; the hull vertices decide the check, the star governs."
+                                 + _bcc_caption(rows))
     members = []
     for name, rows in report.groupby("UniqueName", sort=False):
         member = _column_calc_member(rows)
@@ -6846,6 +7276,9 @@ def export_column_pdf(report: pd.DataFrame, path: str, is_smrf: bool, dmain: flo
         ("Values shown", "Governing load combination at each end of each column"),
         ("Flexure and axial", "ACI design surface (phi Pn, phi Mnx, phi Mny), capacity along "
                               "the demand's moment direction at phi Pn = Pu"),
+        ("Second-order effects", "Sway: ETABS P-delta analysis (ACI 6.7). Member: moment "
+                                 "magnification (ACI 6.6.4.5)"
+         if "Slenderness_Check" in report.columns else "Not included: the forces must hold them"),
     ]
     return build_column_calc_report(report, path, information, {
         "dmain": dmain, "dties": dties, "cover": cover, "is_smrf": is_smrf})

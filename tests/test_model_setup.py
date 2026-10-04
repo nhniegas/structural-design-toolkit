@@ -397,3 +397,151 @@ def test_per_code_text_reload_is_refused_on_a_model_with_frames():
     log = ms.SetupLog()
     assert ms.make_seismic_per_code(Model(), "x.EDB", ms.merge_settings({}), log) is False
     assert "150 frames" in log.problems[0]
+
+
+def test_membrane_slabs_get_a_one_way_counterpart_when_chosen():
+    settings = ms.merge_settings({
+        "section_concrete_ksi": [4], "walls": {"thickness": []},
+        "slabs": {"thickness": [100, 150], "type": "Membrane", "one_way": True}})
+    slabs = ms.area_section_definitions(settings)
+    assert [s["name"] for s in slabs] == ["S_100_C04", "S_100_C04_1W", "S_150_C04", "S_150_C04_1W"]
+    assert [bool(s.get("one_way")) for s in slabs] == [False, True, False, True]
+    assert {s["shell"] for s in slabs} == {"Membrane"}
+
+
+def test_only_membrane_slabs_have_a_one_way_counterpart():
+    settings = ms.merge_settings({
+        "section_concrete_ksi": [4], "walls": {"thickness": []},
+        "slabs": {"thickness": [150], "type": "Shell-Thin", "one_way": True}})
+    assert [s["name"] for s in ms.area_section_definitions(settings)] == ["S_150_C04"]
+    assert ms.merge_settings({})["slabs"]["one_way"] is False  # off unless chosen
+
+
+class _SlabTables:
+    """Stands in for DatabaseTables with the slab table of a blank model."""
+
+    FIELDS = ("Name", "ModelType", "OneWayLoad", "Thickness")
+
+    def __init__(self):
+        self.rows = [["S_150_C04", "Membrane", "No", "150"],
+                     ["S_150_C04_1W", "Membrane", "No", "150"],
+                     ["Slab1", "Shell-Thin", None, "200"]]
+        self.applied = 0
+
+    def GetTableForEditingArray(self, key, *_):
+        assert key == ms.SLAB_TABLE
+        return (0, self.FIELDS, len(self.rows), tuple(v for row in self.rows for v in row), 0)
+
+    def SetTableForEditingArray(self, key, version, fields, count, values):
+        width = len(fields)
+        self.rows = [list(values[i:i + width]) for i in range(0, len(values), width)]
+        return 0
+
+    def ApplyEditedTables(self, *_):
+        self.applied += 1
+        return (0, 0, 0, 0, "", 0)
+
+
+def test_one_way_load_is_set_in_the_slab_table_and_other_rows_are_kept():
+    from types import SimpleNamespace
+
+    tables = _SlabTables()
+    log = ms.SetupLog()
+    ms.set_one_way_slabs(SimpleNamespace(DatabaseTables=tables),
+                         {"S_150_C04": False, "S_150_C04_1W": True}, log)
+    assert [row[2] for row in tables.rows] == ["No", "Yes", ""]
+    assert log.counts == {"one-way slab sections": 1} and not log.problems
+    ms.set_one_way_slabs(SimpleNamespace(DatabaseTables=tables),
+                         {"S_150_C04": False, "S_150_C04_1W": True}, log)
+    assert tables.applied == 1  # nothing to change the second time
+
+
+def test_a_new_per_code_model_is_opened_again_from_its_edb(tmp_path):
+    """ETABS does not analyse a model it still holds from the text file."""
+    path = str(tmp_path / "M.EDB")
+    settings = ms.merge_settings({})
+    lines = [f'  SEISMIC "{name}"  "UBC 97"    DIR "X"  CT 0.03  COEFFTYPE "USER"  CA 0.44  '
+             f'CV 0.64  I 1  R 8.5' for name in ms.SEISMIC_DIRECTIONS]
+    calls = []
+
+    class File:
+        @staticmethod
+        def Save(target):
+            calls.append(("Save", target))
+            with open(str(tmp_path / "M.$et"), "w", encoding="utf-8") as handle:
+                handle.write("\n".join(lines) + "\n")
+            return 0
+
+        @staticmethod
+        def OpenFile(target):
+            calls.append(("OpenFile", target))
+            return 0
+
+    class Model:
+        FrameObj = type("Frames", (), {"Count": staticmethod(lambda: 0)})()
+
+    Model.File = File()
+    log = ms.SetupLog()
+    assert ms.make_seismic_per_code(Model(), path, settings, log) is True, log.problems
+    assert [c[0] for c in calls] == ["Save", "OpenFile", "Save", "OpenFile"]
+    assert calls[-1] == ("OpenFile", path)
+
+
+def test_per_code_patterns_keep_their_coefficients_through_a_table_edit():
+    """ETABS resets the source distance to 15 km when the seismic table is written."""
+    fields = ["Name", "CoeffOpt", "SoilType", "Z", "Ca", "Cv", "SourceType", "SourceDist"]
+    rows = [["EQXPE", "Per Code", "SD", "0.4", "0.4", "0.56", "A", "10"],   # placeholders
+            ["EQYPE", "User Defined", "", "", "0.44", "0.768", "", ""]]
+    assert ms.keep_per_code_coefficients(fields, rows) == 1
+    ca, cv = ubc97.seismic_coefficients(0.4, "SD", "A", 10)
+    assert rows[0][1] == "User Defined"
+    assert (float(rows[0][4]), float(rows[0][5])) == pytest.approx((ca, cv))
+    assert cv == pytest.approx(0.768)                   # 0.64 at the 15 km ETABS falls back to
+    assert rows[1] == ["EQYPE", "User Defined", "", "", "0.44", "0.768", "", ""]
+
+
+def test_the_model_is_opened_again_from_its_edb_after_it_is_saved():
+    """Writing the wind table on an analysed model breaks the next save unless
+    ETABS opens the saved file again."""
+    calls = []
+
+    class File:
+        @staticmethod
+        def Save(path):
+            calls.append(("Save", path))
+            return 0
+
+        @staticmethod
+        def OpenFile(path):
+            calls.append(("OpenFile", path))
+            return 0
+
+    class Model:
+        pass
+
+    Model.File = File()
+    log = ms.SetupLog()
+    assert ms.save_and_reopen(Model(), "M.EDB", log) is True
+    assert calls == [("Save", "M.EDB"), ("OpenFile", "M.EDB")] and not log.problems
+
+
+def test_the_wind_table_is_not_written_when_it_already_holds_the_values():
+    """Any write of the wind table makes ETABS drop its generated wind patterns."""
+    from types import SimpleNamespace
+
+    fields = ("Name", "IsAuto", "WindSpeed", "ExpType", "Angle")
+    held = ("WX", "No", "150", "B", "0",
+            "WX", "No", None, None, None,              # continuation row of the same pattern
+            "WX(1/12)", "Yes", "150", "B", "0",
+            "WY", "No", "150", "B", "90")
+    tables = SimpleNamespace(GetTableForEditingArray=lambda *_: (0, fields, 4, held, 0))
+    model = SimpleNamespace(DatabaseTables=tables)
+    wanted = [{"Name": "WX", "IsAuto": "No", "WindSpeed": 150.0, "ExpType": "B", "Angle": 0.0},
+              {"Name": "WY", "IsAuto": "No", "WindSpeed": 150.0, "ExpType": "B", "Angle": 90.0}]
+    assert ms.table_holds(model, ms.WIND_TABLE, wanted) is True
+    wanted[1]["WindSpeed"] = 160.0
+    assert ms.table_holds(model, ms.WIND_TABLE, wanted) is False
+    assert ms.table_holds(model, ms.WIND_TABLE, [{"Name": "WZ", "IsAuto": "No"}]) is False
+    blank = [{"Name": "WX", "Angle": ""}, {"Name": "WY", "Angle": 0.0}]
+    assert ms.table_holds(model, ms.WIND_TABLE, blank) is False
+    assert ms.table_holds(model, ms.WIND_TABLE, blank, ignore=("Angle",)) is True

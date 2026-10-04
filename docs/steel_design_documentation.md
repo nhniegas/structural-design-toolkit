@@ -1,6 +1,6 @@
 # Steel and Composite Design Modules
 
-Two modules: the rectangular filled composite column designer (`python main.py composite`) and the general steel section designer (`python main.py steel`). Both run from the terminal; neither needs Excel.
+Two modules: the rectangular filled composite column designer (`sdt composite`) and the general steel section designer (`python main.py steel`). Both run from the terminal; neither needs Excel.
 
 Every design module run from the terminal offers the same names:
 
@@ -10,7 +10,7 @@ Every design module run from the terminal offers the same names:
 | `calculate(values)` | runs the checks from a dict of the inputs, keyed as in `INPUTS` |
 | `summary_text(result)` | the results as plain text |
 | `export_pdf(result, path)` | writes the PDF report; returns its path, or `None` if LaTeX fails |
-| `run()` | the terminal workflow (`python main.py ...`) |
+| `run()` | the terminal workflow (`sdt composite`, `sdt steel`) |
 
 
 ## Composite column: `design/composite_column_designer_aiscDG06.py`
@@ -22,7 +22,7 @@ Rectangular or square concrete-filled steel box members, LRFD, per AISC Design G
 From the project folder, with the environment active:
 
 ```powershell
-python main.py composite
+sdt composite
 ```
 
 1. A dialog asks for the inputs. Choices are listed in brackets beside the box (type one of them); boxes marked optional may be left blank. The values typed last time are filled in again.
@@ -74,7 +74,7 @@ AISC 360-22 capacity checks for doubly symmetric I-shapes, LRFD or ASD, with a o
 From the project folder, with the environment active:
 
 ```powershell
-python main.py steel
+sdt steel
 ```
 
 1. A dialog asks for the inputs. Choices are listed in brackets beside the box (type one of them); boxes marked optional may be left blank. The values typed last time are filled in again.

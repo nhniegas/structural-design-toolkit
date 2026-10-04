@@ -544,6 +544,64 @@ root.mainloop()
             self.proc = None
 
 
+def show_summary(text: str, title: str = "Summary") -> None:
+    """Show a command's closing summary in a window, until it is closed.
+
+    The text is shown in a fixed-width font so its columns line up, and can be
+    selected and copied. Enter, Escape or OK closes it.
+    """
+    lines = text.strip("\n").split("\n")
+    root = tk.Tk()
+    root.title(title)
+    root.attributes("-topmost", True)
+
+    def close(_event=None):
+        try:
+            root.quit()
+            root.destroy()
+        except tk.TclError:
+            pass
+
+    root.protocol("WM_DELETE_WINDOW", close)
+    frame = tk.Frame(root, padx=10, pady=10)
+    frame.pack(fill=tk.BOTH, expand=True)
+    columns = min(max(len(line) for line in lines) + 2, 150)
+    rows = min(len(lines) + 1, 38)
+    box = tk.Text(frame, width=columns, height=rows, wrap=tk.NONE, font=("Consolas", 10),
+                  relief=tk.FLAT, background=root.cget("background"))
+    vertical = tk.Scrollbar(frame, orient=tk.VERTICAL, command=box.yview)
+    horizontal = tk.Scrollbar(frame, orient=tk.HORIZONTAL, command=box.xview)
+    box.configure(yscrollcommand=vertical.set, xscrollcommand=horizontal.set)
+    box.tag_configure("attention", foreground="#C00000", font=("Consolas", 10, "bold"))
+    attention = False
+    for line in lines:
+        if line.startswith("Needs attention"):
+            attention = True
+        elif not line.strip():
+            attention = False
+        box.insert(tk.END, line + "\n", "attention" if attention else ())
+    box.configure(state=tk.DISABLED)  # read only; the text can still be selected and copied
+    box.grid(row=0, column=0, sticky="nsew")
+    if len(lines) + 1 > rows:
+        vertical.grid(row=0, column=1, sticky="ns")
+    if max(len(line) for line in lines) + 2 > columns:
+        horizontal.grid(row=1, column=0, sticky="ew")
+    frame.rowconfigure(0, weight=1)
+    frame.columnconfigure(0, weight=1)
+    button = tk.Button(frame, text="OK", width=12, command=close)
+    button.grid(row=2, column=0, columnspan=2, pady=(10, 0))
+    root.bind("<Return>", close)
+    root.bind("<Escape>", close)
+    root.update_idletasks()
+    width, height = root.winfo_reqwidth(), root.winfo_reqheight()
+    x = max((root.winfo_screenwidth() - width) // 2, 0)
+    y = max((root.winfo_screenheight() - height) // 3, 0)
+    root.geometry(f"+{x}+{y}")
+    button.focus_set()
+    root.lift()
+    root.mainloop()
+
+
 def show_warning(message: str, title: str = "Warning", topmost: bool = True) -> None:
     """Displays a GUI warning popup box with a custom message and title."""
     root = tk.Tk()

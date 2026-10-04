@@ -445,12 +445,18 @@ def combine(
     reductions: dict[str, Reduction] | None = None,
     pattern_factor: float | None = None,
     releases: dict[str, tuple[bool, bool]] | None = None,
+    sustained_cases: list[str] = (),
 ) -> pd.DataFrame:
     """Factored forces of ``combos`` in the ``FACTORED LOADS`` layout.
 
     ``kind`` is "beam" or "column". ``reductions`` scales the reducible live
     cases of each member. ``pattern_factor`` (beams only) adds the pattern
     live load arrangements, with the live load multiplied by it.
+
+    Columns get two more columns for the slenderness check (ACI 6.6.4.4.4):
+    ``P_sustained``, the factored axial force of the ``sustained_cases`` (the
+    dead loads) in the combination, and ``Spectral``, whether the combination
+    holds a response spectrum case (its end moments then have no sign).
     """
     rows = forces.rows
     names = rows["UniqueName"].to_numpy()
@@ -489,6 +495,8 @@ def combine(
         static = sum((f * case_values(c) for c, f in single.items()), np.zeros((n, 6)))
         spectral = sum((abs(f) * np.abs(case_values(c)) for c, f in combo.spectral.items()),
                        np.zeros((n, 6)))
+        sustained = sum((f * case_values(c) for c, f in single.items() if c in sustained_cases),
+                        np.zeros((n, 6)))
         variants = [static]
         live_in = {c: f for c, f in single.items() if c in patterns}
         if live_in:
@@ -517,6 +525,9 @@ def combine(
             frame.insert(3, "Combo", combo.name)
             frame.insert(4, "Permutation", number)
             frame[list(FORCES)] = values
+            if kind == "column":
+                frame["P_sustained"] = sustained[:, 0]
+                frame["Spectral"] = bool(spectral.any())
             frames.append(frame)
     if not frames:
         return pd.DataFrame(columns=[*KEY[:3], "Combo", "Permutation", *KEY[3:], *FORCES])
@@ -554,6 +565,24 @@ class FactoredForces:
     table: pd.DataFrame                       # FACTORED LOADS layout, N and N-mm
     reductions: dict[str, Reduction] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
+
+
+def designs_unnamed(connector) -> bool:
+    """Whether members that still have their ETABS number are designed too.
+
+    The commands skip them by default (a tagged model keeps its secondary
+    numbering out of the design); the user can choose to design a model as
+    it is, without tagging it (``connector.include_numeric_members``).
+    """
+    return bool(getattr(connector, "include_numeric_members", False))
+
+
+def designed_names(connector, names) -> list[str]:
+    """The member names a command designs, in the order given."""
+    names = [str(name) for name in names]
+    if designs_unnamed(connector):
+        return names
+    return [name for name in names if not name.isnumeric()]
 
 
 def _read(connector, name: str, cases: list[str] | None = None) -> pd.DataFrame:
@@ -676,7 +705,8 @@ def factored_forces(
             continue
         if members:
             table = table[table["UniqueName"].astype(str).isin(set(members))]
-        table = table[~table["UniqueName"].astype(str).str.isnumeric()]
+        if not designs_unnamed(connector):
+            table = table[~table["UniqueName"].astype(str).str.isnumeric()]
         if table.empty:
             continue
         forces = case_forces(table, label)
@@ -690,7 +720,8 @@ def factored_forces(
                                                     options.tributary, options.code)
             reductions.update(member_reductions)
         out.append(combine(forces, combos, kind, live, reducible, member_reductions,
-                           options.pattern_factor if kind == "beam" else None, releases))
+                           options.pattern_factor if kind == "beam" else None, releases,
+                           sustained_cases=dead))
     table = pd.concat(out, ignore_index=True) if out else pd.DataFrame()
     return FactoredForces(table, reductions, notes)
 

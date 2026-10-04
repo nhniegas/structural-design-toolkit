@@ -149,11 +149,19 @@ def center_drifts(table: pd.DataFrame, base_elevation: float) -> dict[str, tuple
 
 
 def level_findings(drifts: dict[str, tuple[float, str]], seismic: pd.DataFrame,
-                   pattern_types: dict[str, int], wind_denominator: float) -> list[mc.Finding]:
-    """The NSCP seismic and the wind drift checks of one stiffness level."""
+                   pattern_types: dict[str, int], wind_denominator: float,
+                   drift_cases: dict[str, tuple[str, bool]] | None = None,
+                   r_factor: float | None = None) -> list[mc.Finding]:
+    """The NSCP seismic and the wind drift checks of one stiffness level.
+
+    ``drift_cases`` is for combinations the user picked on a model without
+    the DRIFT / WDRIFT names: combination -> (lateral case, is wind).
+    ``r_factor`` is used when no UBC 97 pattern gives R.
+    """
     d = mc.ModelData(pattern_types=dict(pattern_types), drifts=dict(drifts),
                      drift_from="combinations", wind_drift_denominator=wind_denominator,
-                     tables={SEISMIC_TABLE: seismic})
+                     tables={SEISMIC_TABLE: seismic}, drift_case_of=dict(drift_cases or {}),
+                     r_factor=r_factor)
     return mc._check_drift(d, seismic) + mc.check_wind_drift(d)
 
 
@@ -170,6 +178,7 @@ class DriftReport:
         default_factory=list)
     restored: bool = False
     notes: list[str] = field(default_factory=list)
+    picked: list[str] = field(default_factory=list)  # combinations the user picked, if any
     modifiers: list[mc.Finding] = field(default_factory=list)  # your modifiers, judged
     modelled: str = ""  # the effective I of your modifiers, as text
 
@@ -179,10 +188,13 @@ class DriftReport:
         which = {STATIC: "static drift patterns (EQXSD, EQYSD)",
                  SPECTRUM: "spectrum drift cases (RSAXD, RSAYD)",
                  BOTH: "static drift patterns and spectrum drift cases"}[self.seismic]
+        combinations = (f"{len(self.picked)} combinations you picked ("
+                        + ", ".join(self.picked[:6]) + (", ..." if len(self.picked) > 6 else "")
+                        + ")" if self.picked else
+                        f"DRIFT combinations (203.3, rho 1.0) on the {which}; WDRIFT combinations")
         lines = ["", "=" * 96, "STORY DRIFT (NSCP 208.6.4, 208.6.5)", "=" * 96,
-                 f"Model: {self.model_path}", f"Drift read at the {where}; DRIFT combinations "
-                 f"(203.3, rho 1.0) on the {which}; WDRIFT combinations, wind limit "
-                 f"h/{self.wind_denominator:g}"]
+                 f"Model: {self.model_path}", f"Drift read at the {where}; {combinations}, "
+                 f"wind limit h/{self.wind_denominator:g}"]
         if self.modifiers:
             lines += ["", "--- Your modifiers (frame x section, as ETABS uses them) ---"]
             lines += [f"[{f.status:>4}] {f.text}   ({f.ref})" for f in self.modifiers]
@@ -285,12 +297,17 @@ def _read(connector, name: str, combos: list[str]) -> pd.DataFrame:
 def run_drift(connector, reference: str = CENTER,
               wind_denominator: float = NSCP.wind.drift_limit_denominator,
               levels: list[StiffnessLevel] | None = None, progress=None,
-              seismic: str = BOTH) -> DriftReport:
+              seismic: str = BOTH, combos: list[str] | None = None,
+              drift_cases: dict[str, tuple[str, bool]] | None = None,
+              r_factor: float | None = None) -> DriftReport:
     """Drift at each stiffness level on the open model, then restore it (see the module).
 
     ``seismic`` picks the seismic drift combinations: on the static drift
     patterns, on the spectrum drift cases, or both. Without spectrum ones, the
     spectrum is not scaled (one analysis less per level).
+
+    ``combos`` with ``drift_cases`` are the combinations the user picked on a
+    model that has no DRIFT / WDRIFT combinations (``resolve_drift_combinations``).
     """
     from etabs_api.workflows.model_analysis import scale_spectrum_to_static
 
@@ -298,9 +315,19 @@ def run_drift(connector, reference: str = CENTER,
     say = progress or (lambda text: None)
     report = DriftReport(model_path=str(model.GetModelFilename()), reference=reference,
                          wind_denominator=wind_denominator, seismic=seismic)
-    combos = _drift_combinations(model, seismic)
+    picked = bool(combos)
+    combos = list(combos) if combos else _drift_combinations(model, seismic)
     if not combos:
-        raise RuntimeError("The model has no DRIFT / WDRIFT combinations: run sdt setup first.")
+        raise RuntimeError("The model has no DRIFT / WDRIFT combinations and none was picked: "
+                           "run sdt drift to pick them, or sdt setup to add the standard ones.")
+    if picked:
+        report.picked = list(combos)
+        report.notes.append(
+            "The drift is on combinations you picked: their factors and load cases are yours "
+            "to confirm (NSCP 208.6.4.1 uses the 203.3 combinations with rho = 1.0). Where a "
+            "seismic case in them uses the capped period of the strength design (NSCP "
+            "208.5.2.2), the drift is on larger forces than 208.6.5.2 requires, which is on "
+            "the safe side.")
     had_results = mc._has_results(connector)
     names, columns, section_of = _frames(connector)
     original = {n: list(model.FrameObj.GetModifiers(n, [])[0]) for n in names}
@@ -356,7 +383,12 @@ def run_drift(connector, reference: str = CENTER,
                     base_elevation)
             # the pattern definitions read only with the patterns selected for display
             model.DatabaseTables.SetLoadPatternsSelectedForDisplay(patterns)
-            pattern_table = connector._read_database_table(SEISMIC_TABLE)
+            try:
+                pattern_table = connector._read_database_table(SEISMIC_TABLE)
+            except Exception:  # no UBC 97 seismic pattern in this model
+                pattern_table = pd.DataFrame()
+            if pattern_table.empty or "Name" not in pattern_table.columns:
+                pattern_table = pd.DataFrame({"Name": pd.Series(dtype=str)})
             periods = {}
             for _, r in pattern_table.iterrows():
                 parent = str(r["Name"]).split("(")[0]
@@ -364,8 +396,9 @@ def run_drift(connector, reference: str = CENTER,
                     period = mc._num(r.get("TUsed"))
                     if period == period:
                         periods[parent] = max(period, periods.get(parent, 0.0))
-            report.levels.append((level, level_findings(drifts, pattern_table, pattern_types,
-                                                        wind_denominator), periods))
+            report.levels.append((level, level_findings(
+                drifts, pattern_table, pattern_types, wind_denominator, drift_cases, r_factor),
+                periods))
     finally:
         say("Restoring the strength modifiers and spectrum scale factors")
         model.SetModelIsLocked(False)
@@ -389,10 +422,55 @@ class DriftOptions:
     reference: str = CENTER
     seismic: str = BOTH
     wind_denominator: float = NSCP.wind.drift_limit_denominator
+    # set by resolve_drift_combinations on a model without the DRIFT / WDRIFT names
+    combos: list[str] | None = None
+    drift_cases: dict[str, tuple[str, bool]] | None = None
+    r_factor: float | None = None
 
 
-def ask_drift_options(title: str) -> DriftOptions | None:
-    """Where to read the drift, which seismic combinations and the wind limit. None if cancelled."""
+def resolve_drift_combinations(connector, model_path: str, title: str,
+                               options: DriftOptions) -> DriftOptions | None:
+    """Fill ``options`` with the drift combinations to use.
+
+    A model with the DRIFT / WDRIFT combinations of ``sdt setup`` needs
+    nothing. On any other model the user picks the combinations from the
+    model's own; R comes from the UBC 97 patterns or is asked. None when a
+    dialog is closed.
+    """
+    from etabs_api.workflows import model_inputs as mi
+
+    if _drift_combinations(connector.sap_model, options.seismic):
+        return options
+    combinations = mi.read_combinations(connector)
+    picked = mi.ask_drift_combinations(connector, model_path, title, combinations)
+    if picked is None:
+        return None
+    options.combos = picked
+    options.drift_cases = mi.drift_cases(combinations, picked)
+    # the spectrum is scaled only when a picked combination has a spectrum case
+    spectral = any(combinations.terms[name].spectral for name in picked)
+    options.seismic = BOTH if spectral else STATIC
+    model_values = mi.read_seismic(connector)
+    answer = mi.ask_seismic_values(model_path, title, model_values,
+                                   mi.load(model_path).get("seismic", {}), ("r_factor",))
+    if answer is None:
+        return None
+    options.r_factor = answer[0]["r_factor"]
+    return options
+
+
+def has_standard_combinations(connector) -> bool:
+    """Whether the model has the DRIFT / WDRIFT combinations of ``sdt setup``."""
+    return bool(_drift_combinations(connector.sap_model, BOTH))
+
+
+def ask_drift_options(title: str, standard: bool = True) -> DriftOptions | None:
+    """Where to read the drift, which seismic combinations and the wind limit. None if cancelled.
+
+    ``standard`` is False for a model without the DRIFT / WDRIFT combinations:
+    the static / spectrum question is then left out, since the user picks the
+    combinations (``resolve_drift_combinations``).
+    """
     from utilities._gui_helpers import enter_values, select_option, show_warning
 
     where = select_option(title, "Where should the drift be read?",
@@ -400,10 +478,12 @@ def ask_drift_options(title: str) -> DriftOptions | None:
                            "Outer four corners (extreme column joints of each story)"])
     if where is None:
         return None
-    which = select_option(title, "Seismic drift combinations to check (NSCP 208.6.4.1):",
-                          ["Static: EQXSD / EQYSD (period not capped)",
-                           "Response spectrum: RSAXD / RSAYD (scaled to the drift patterns)",
-                           "Both"])
+    which = "Both"
+    if standard:
+        which = select_option(title, "Seismic drift combinations to check (NSCP 208.6.4.1):",
+                              ["Static: EQXSD / EQYSD (period not capped)",
+                               "Response spectrum: RSAXD / RSAYD (scaled to the drift patterns)",
+                               "Both"])
     if which is None:
         return None
     label = "Wind drift limit: h /"
@@ -453,7 +533,10 @@ def run_drift_check() -> DriftReport | None:
     if not os.path.isfile(path):
         show_warning("Save the ETABS model first: it has no file yet.", title=title)
         return None
-    options = ask_drift_options(title)
+    options = ask_drift_options(title, has_standard_combinations(connector))
+    if options is None:
+        return None
+    options = resolve_drift_combinations(connector, path, title, options)
     if options is None:
         return None
     levels = stiffness_levels()
@@ -470,14 +553,39 @@ def run_drift_check() -> DriftReport | None:
     try:
         with LoadingWindow("Story drift") as window:
             report = run_drift(connector, options.reference, options.wind_denominator, levels,
-                               window.update, options.seismic)
+                               window.update, options.seismic, options.combos,
+                               options.drift_cases, options.r_factor)
     except RuntimeError as error:
         show_warning(str(error), title=title)
         return None
     print(report.text())
     saved = save_report(report, os.path.splitext(path)[0] + " - Drift.txt")
     print(f"Saved: {saved}")
+    drift_summary(report, path, saved).show(popup=True, echo=False)
     return report
+
+
+def drift_summary(report: DriftReport, model_path: str | None = None, saved: str | None = None):
+    """The closing summary of a drift check: the levels run and every failing check."""
+    from utilities.run_summary import RunSummary
+
+    summary = RunSummary("sdt drift", model_path)
+    summary.add("Drift read at", "diaphragm centre of mass" if report.reference == CENTER
+                else "outer four corners")
+    summary.add("Seismic combinations", f"{len(report.picked)} combinations picked by you"
+                if report.picked else report.seismic)
+    summary.add("Wind limit", f"h / {report.wind_denominator:g}")
+    for level, findings, _ in report.levels:
+        failing = sum(1 for f in findings if f.status == mc.FAIL)
+        summary.add(level.name, f"{len(findings)} checks, {failing} failing")
+    summary.add("Model restored", "yes, and analysed again" if report.restored
+                else "yes (it had no results before)")
+    for level, finding in failures(report):
+        summary.fail(f"{level}: {finding.text}")
+    for note in report.notes:
+        summary.note(note)
+    summary.file("Report", saved)
+    return summary
 
 
 if __name__ == "__main__":

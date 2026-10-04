@@ -42,6 +42,74 @@ UNIT_NAMES = {
 }
 EXTRACTION_UNITS = 9  # N, mm, C
 
+ETABS_OBJECT = "CSI.ETABS.API.ETABSObject"
+NOT_RUNNING = (
+    "No running ETABS could be reached. Open the model in ETABS first. If ETABS is "
+    "open, it may have stopped responding (close and reopen it), or it runs as "
+    "administrator while this terminal does not (start both the same way)."
+)
+
+
+def _etabs_process_ids() -> list[int]:
+    import subprocess
+
+    try:
+        listed = subprocess.run(
+            ["tasklist", "/FI", "IMAGENAME eq ETABS.exe", "/FO", "CSV", "/NH"],
+            capture_output=True, text=True, timeout=15, check=False).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    ids = []
+    for line in listed.splitlines():
+        parts = [part.strip('"') for part in line.split('","')]
+        if len(parts) > 1 and parts[1].isdigit():
+            ids.append(int(parts[1]))
+    return ids
+
+
+def etabs_helper():
+    helper = comtypes.client.CreateObject("ETABSv1.Helper")
+    return helper.QueryInterface(comtypes.gen.ETABSv1.cHelper)
+
+
+def running_etabs(helper=None):
+    """The ETABS session that is running (its ETABS object), or None.
+
+    ``Helper.GetObject`` returns None, without raising, when it finds no
+    session, so its result is checked. A session it misses is looked for
+    again by its process.
+    """
+    helper = helper or etabs_helper()
+    try:
+        etabs = helper.GetObject(ETABS_OBJECT)
+    except Exception:
+        etabs = None
+    if etabs is not None:
+        return etabs
+    for process_id in _etabs_process_ids():
+        try:
+            etabs = helper.GetObjectProcess(ETABS_OBJECT, process_id)
+        except Exception:
+            etabs = None
+        if etabs is not None:
+            return etabs
+    return None
+
+
+def attach_running_etabs(title: str = "ETABS"):
+    """A connector on the ETABS session that is running; None, with a message, when
+    there is none."""
+    from utilities._gui_helpers import show_warning
+
+    etabs = running_etabs()
+    if etabs is None:
+        show_warning(NOT_RUNNING, title=title)
+        return None
+    connector = ETABSConnector()
+    connector.etabs_object, connector.sap_model, connector.is_connected = (
+        etabs, etabs.SapModel, True)
+    return connector
+
 
 class ETABSConnector:
     """Manage a CSI ETABS COM connection and expose common ETABS operations."""
@@ -76,10 +144,11 @@ class ETABSConnector:
         )
         try:
             with LoadingWindow("Connecting to Model.."):
-                helper = comtypes.client.CreateObject("ETABSv1.Helper")
-                helper = helper.QueryInterface(comtypes.gen.ETABSv1.cHelper)
                 if attach_to_existing:
-                    self.etabs_object = helper.GetObject("CSI.ETABS.API.ETABSObject")
+                    etabs = running_etabs()
+                    if etabs is None:
+                        raise ConnectionError("no session is running")
+                    self.etabs_object = etabs
                     self.sap_model = self.etabs_object.SapModel
                     self.is_connected = True
                     return True

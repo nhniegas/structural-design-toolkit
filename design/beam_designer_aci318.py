@@ -22,6 +22,7 @@ from design.beam_deflection import (
     add_deflection_columns,
 )
 from utilities._calc_report import (
+    is_blank,
     MemberReport,
     ReportTable,
     Tex,
@@ -1971,12 +1972,14 @@ def _support_widths(frame_df: pd.DataFrame, conn_df: pd.DataFrame) -> pd.DataFra
 
 
 def prepare_beam_table(frame_df: pd.DataFrame, conn_df: pd.DataFrame,
-                       bars: dict) -> pd.DataFrame:
+                       bars: dict, earth_cover_stories=()) -> pd.DataFrame:
     """The beams of FRAME DATA with their support status and the bar inputs.
 
     ``bars`` has dm (main bar), ds (stirrup), dw (web bar) in mm, fyw (web bar
-    yield strength, MPa) and cc (cover, mm). One row per beam, sorted by floor,
-    type and mark.
+    yield strength, MPa) and cc (cover, mm). The beams of the stories in
+    ``earth_cover_stories`` (cast against or exposed to earth: footing tie
+    beams, ground beams) get the earth-contact cover instead, 75 mm. One row
+    per beam, sorted by floor, type and mark.
     """
     frame_df = frame_df.copy()
     conn_df = conn_df.copy()
@@ -1995,6 +1998,11 @@ def prepare_beam_table(frame_df: pd.DataFrame, conn_df: pd.DataFrame,
     beam_df = beam_df[cols]
     for key in BEAM_BAR_INPUTS:
         beam_df[key] = float(bars[key])
+    stories = {str(story) for story in earth_cover_stories or ()}
+    if stories and "Story" in beam_df.columns:
+        on_earth = beam_df["Story"].astype(str).isin(stories)
+        beam_df.loc[on_earth, "cc"] = max(float(bars["cc"]),
+                                          CODE.beam_detailing.earth_contact_cover)
     beam_df["_sort_key"] = beam_df["UniqueName"].apply(_beam_sort_key)
     return beam_df.sort_values("_sort_key").drop(columns="_sort_key").reset_index(drop=True)
 
@@ -2009,6 +2017,40 @@ def _deflection_settings_path() -> str:
     from utilities.user_settings import settings_path as user_settings_path
 
     return user_settings_path("beam_deflection.json")
+
+
+def ask_earth_cover_stories(stories: list[str], normal_cover: float,
+                            last: list[str] | None = None) -> list[str] | None:
+    """Ask which floor levels have beams that need the 75 mm earth-contact cover.
+
+    ``stories`` are the levels that have beams. Returns the chosen levels (an
+    empty list for none), or None when a dialog is closed. Nothing is asked
+    when the typed cover is already 75 mm or more.
+    """
+    from utilities._gui_helpers import DualListboxSelector, select_option
+
+    earth = CODE.beam_detailing.earth_contact_cover
+    if not stories or float(normal_cover) >= earth:
+        return []
+    last = [story for story in (last or []) if story in stories]
+    remembered = f" (last time: {', '.join(last)})" if last else ""
+    chosen = select_option(
+        "Beam Design - Cover against Earth",
+        f"Do the beams of any floor level need {earth:g} mm cover (cast against or exposed "
+        f"to earth, such as footing tie beams and ground beams)? The other beams keep "
+        f"{float(normal_cover):g} mm.{remembered}",
+        [f"No - {float(normal_cover):g} mm cover on every level",
+         f"Yes - choose the levels with {earth:g} mm cover"]
+        + ([f"Yes - the same levels as last time: {', '.join(last)}"] if last else []),
+        default_index=2 if last else 0)
+    if chosen is None:
+        return None
+    if chosen.startswith("No"):
+        return []
+    if "same levels" in chosen:
+        return last
+    picked = DualListboxSelector(f"Levels whose beams get {earth:g} mm cover", stories).show()
+    return [story for story in stories if story in set(picked)] or None
 
 
 def ask_deflection_limit() -> int | None:
@@ -2039,13 +2081,16 @@ def ask_deflection_limit() -> int | None:
 
 
 def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict,
-                 long_limit_divisor: int = LIMIT_DAMAGED, progress=None) -> pd.DataFrame:
+                 long_limit_divisor: int = LIMIT_DAMAGED, progress=None,
+                 earth_cover_stories=()) -> pd.DataFrame:
     """Design every beam from the extracted tables; deflection when service loads exist.
 
     ``tables`` holds FACTORED LOADS, FRAME DATA, CONNECTIVITY and (optional)
-    SERVICE LOADS. Returns the results, two rows (TOP, BOTTOM) per beam.
+    SERVICE LOADS. ``earth_cover_stories`` are the levels whose beams get the
+    75 mm earth-contact cover. Returns the results, two rows (TOP, BOTTOM) per beam.
     """
-    beam_props = prepare_beam_table(tables["FRAME DATA"], tables["CONNECTIVITY"], bars)
+    beam_props = prepare_beam_table(tables["FRAME DATA"], tables["CONNECTIVITY"], bars,
+                                    earth_cover_stories)
     results = execute_beam_design(
         df_beam_props=beam_props,
         df_frame_forces=tables["FACTORED LOADS"],
@@ -2063,12 +2108,37 @@ def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict
 _BEAM_GROUP_FILLS = ("BDD7EE", "E2EFDA", "FFF2CC", "FCE4D6", "DEEBF7")
 
 
+_ETABS_COLUMN_ONLY_FIELDS = (
+    "Diameter", "ReinfConfig", "IsSpiral", "IsDesigned", "Cover", "NumBars3Dir", "NumBars2Dir",
+    "NumBarsCirc", "BarSizeLong", "BarSizeCorn", "BarSizeConf", "SpacingConf", "NumCBars3",
+    "NumCBars2",
+)
+
+
+def beam_blank_reason(name: str, row: dict) -> str:
+    """Why a cell of the beam results has no value."""
+    if name in ("Defl_roof_mm", "Defl_roof_limit_mm"):
+        return "N/A - not a roof beam"
+    if name.startswith("Defl_"):
+        check = str(row.get("Deflection_Check", "")).strip()
+        return f"N/A - {check}" if check and check not in ("PASS", "FAIL") else "N/A"
+    if name in ("Ve_left_kN", "Ve_right_kN", "V_sway_max_kN") or name.startswith("SMRF_"):
+        return "N/A - no seismic design for this beam"
+    return "N/A"
+
+
 def write_beam_results_xlsx(results: pd.DataFrame, path: str) -> str:
     """The beam design results as a formatted Excel file (no Excel needed)."""
     from openpyxl import Workbook
     from openpyxl.styles import Border, Font, PatternFill, Side
     from openpyxl.utils import get_column_letter
 
+    from utilities._xlsx_values import cell_value, is_blank
+
+    # ETABS column-section fields that come with FRAME DATA: never filled for a beam.
+    unused = [c for c in _ETABS_COLUMN_ONLY_FIELDS
+              if c in results.columns and results[c].map(is_blank).all()]
+    results = results.drop(columns=unused)
     table = display_beam_result_labels(results)
     cols = table.columns.tolist()
     starts = [0]
@@ -2079,8 +2149,13 @@ def write_beam_results_xlsx(results: pd.DataFrame, path: str) -> str:
     sheet = book.active
     sheet.title = "BEAM DESIGN"
     sheet.append(cols)
-    for row in table.astype(object).where(pd.notna(table), None).itertuples(index=False):
-        sheet.append(list(row))
+    internal = results.columns.tolist()
+    for record, row in zip(results.to_dict("records"), table.astype(object).values.tolist()):
+        sheet.append([
+            cell_value(value, 3 if name in ("Defl_lambda", "Defl_ratio") else 2,
+                       beam_blank_reason(name, record) if is_blank(value) else "")
+            for name, value in zip(internal, row)
+        ])
     thin, thick = Side(style="thin"), Side(style="medium")
     for index, name in enumerate(cols, start=1):
         group = max(g for g, start in enumerate(starts) if index - 1 >= start)
@@ -2436,6 +2511,48 @@ def generate_dxf_beam_schedule(
 _BEAM_LOCATIONS = (("left", "Left support"), ("mid", "Midspan"), ("right", "Right support"))
 
 
+def _beam_deflection_table(top: pd.Series) -> ReportTable | None:
+    """The deflection checks of one beam (ACI 318M-14 24.2), from its result row.
+
+    None when the results were made without the deflection check. A beam with
+    no deflection data gets a table that says why.
+    """
+    if "Deflection_Check" not in top.index:
+        return None
+    check = str(top.get("Deflection_Check"))
+    if is_blank(top.get("Defl_ratio")):
+        return ReportTable(
+            "Deflection (ACI 24.2)", ["Parameter", "Value"],
+            [["Deflection check", check if check not in ("None", "nan", "") else
+              "Not checked - no service moments for this beam"]], "lr")
+
+    def pair(value, limit, missing: str) -> list:
+        if is_blank(value):
+            return [missing, "--", "--"]
+        ratio = (float(value) / float(limit)) if not is_blank(limit) and float(limit) > 0 else None
+        return [number(value), number(limit), number(ratio) if ratio is not None else "--"]
+
+    body = [
+        ["Immediate, live load (L/360)",
+         *pair(top.get("Defl_live_mm"), top.get("Defl_live_limit_mm"), "N/A")],
+        ["Immediate, roof live load (L/180)",
+         *pair(top.get("Defl_roof_mm"), top.get("Defl_roof_limit_mm"), "N/A - not a roof beam")],
+        ["After partitions are installed (long term)",
+         *pair(top.get("Defl_long_mm"), top.get("Defl_long_limit_mm"), "N/A")],
+    ]
+    return ReportTable(
+        "Deflection (ACI 24.2)",
+        ["Check", Tex(r"$\Delta$ (mm)"), "Limit (mm)", Tex(r"$\Delta$ / limit")],
+        body, "lrrr",
+        "Effective moment of inertia Ie (mm4): left "
+        f"{number(top.get('Defl_Ie_left'), 0)}, midspan {number(top.get('Defl_Ie_mid'), 0)}, "
+        f"right {number(top.get('Defl_Ie_right'), 0)}. Long-term factor "
+        f"{number(top.get('Defl_lambda'), 3)}. Governing ratio "
+        f"{number(top.get('Defl_ratio'), 3)}. The segments of one beam line between supports "
+        f"are checked as one span. Deflection check: {check}.",
+    )
+
+
 def _beam_calc_member(
     top: pd.Series, bottom: pd.Series, seismic: bool, code: AciCode = CODE
 ) -> MemberReport:
@@ -2615,6 +2732,10 @@ def _beam_calc_member(
             ],
             "lr",
         ))
+
+    deflection = _beam_deflection_table(top)
+    if deflection is not None:
+        tables.append(deflection)
 
     status = str(top.get("Design_Status"))
     tables.append(ReportTable(

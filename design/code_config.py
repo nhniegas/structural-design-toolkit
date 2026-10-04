@@ -156,6 +156,7 @@ class BeamDetailingConfig:
     max_clear_spacing_target: float = 150.0  # mm, project rule for bar count
     layer_clear_spacing: float = 25.0  # mm, between layers                    ACI 25.2.2
     max_layers: int = 3  # project rule before flagging congestion
+    earth_contact_cover: float = 75.0  # mm, cast against and exposed to earth  ACI Table 20.6.1.3.1
     min_bars_per_face: int = 2  # two continuous bars                          ACI 9.7.2 / 18.6.3.1
     min_stirrup_legs: int = 2
     stirrup_spacing_step: float = 25.0  # mm, spacing rounded down to this
@@ -286,6 +287,41 @@ class ColumnShearConfig:
 
 
 @dataclass(frozen=True)
+class ColumnSlendernessConfig:
+    """Slenderness of columns along their length (ACI 6.2.5, 6.6.4.5).
+
+    The sway (P-Delta) effects come from the second-order analysis (ACI 6.7);
+    these values are for the member (P-delta) magnification that is added to it.
+    """
+
+    radius_factor_rectangular: float = 0.30  # r = 0.30 h                        ACI 6.2.5.1(b)
+    radius_factor_circular: float = 0.25  # r = 0.25 D                           ACI 6.2.5.1(c)
+    limit_base: float = 34.0  # k lu / r <= 34 + 12 (M1/M2)                      ACI 6.2.5(b)
+    limit_moment_coeff: float = 12.0  #                                          ACI 6.2.5(b)
+    limit_max: float = 40.0  #                                                   ACI 6.2.5(c)
+    stiffness_factor: float = 0.40  # (EI)eff = 0.4 Ec Ig / (1 + beta_dns)       ACI 6.6.4.4.4(a)
+    stiffness_reduction: float = 0.75  # delta = Cm / (1 - Pu / (0.75 Pc))       ACI 6.6.4.5.2
+    cm_base: float = 0.6  # Cm = 0.6 - 0.4 (M1/M2)                               ACI 6.6.4.5.3
+    cm_moment_coeff: float = 0.4  #                                              ACI 6.6.4.5.3
+    min_eccentricity: float = 15.0  # mm, M2,min = Pu (15 + 0.03 h)              ACI 6.6.4.5.4
+    min_eccentricity_depth_factor: float = 0.03  #                               ACI 6.6.4.5.4
+    max_magnifier: float = 1.4  # second-order moment <= 1.4 first-order         ACI 6.2.6
+    default_sustained_ratio: float = 0.6  # beta_dns when the dead share is not in the data
+    # Effective length factor k of a braced column (ACI R6.2.5): the smaller of
+    # 0.7 + 0.05 (psiA + psiB) and 0.85 + 0.05 psi_min, at most 1.0.
+    k_sum_base: float = 0.70
+    k_sum_coeff: float = 0.05
+    k_min_base: float = 0.85
+    k_min_coeff: float = 0.05
+    k_max: float = 1.0
+    psi_fixed_base: float = 1.0  # a footing built to resist moment              ACI R6.2.5
+    psi_pinned_base: float = 10.0  #                                             ACI R6.2.5
+    column_inertia_factor: float = 0.70  # cracked I for psi                     ACI Table 6.6.3.1.1(a)
+    beam_inertia_factor: float = 0.35  #                                         ACI Table 6.6.3.1.1(a)
+    brace_alignment: float = 0.25  # cos^2 of the beam to the direction it braces (60 degrees)
+
+
+@dataclass(frozen=True)
 class DetailingDrawingConfig:
     """Constants that only affect the DXF drawings, not the design."""
 
@@ -335,6 +371,8 @@ class AciCode:
     column_transverse: ColumnTransverseConfig = field(default_factory=ColumnTransverseConfig)
     column_seismic: ColumnSeismicConfig = field(default_factory=ColumnSeismicConfig)
     column_shear: ColumnShearConfig = field(default_factory=ColumnShearConfig)
+    column_slenderness: ColumnSlendernessConfig = field(
+        default_factory=ColumnSlendernessConfig)
     drawing: DetailingDrawingConfig = field(default_factory=DetailingDrawingConfig)
     conventions: InputConventionConfig = field(default_factory=InputConventionConfig)
 

@@ -1,6 +1,6 @@
 # Grids, Columns and Walls from a DXF
 
-`python main.py grids` reads framing plans from one DXF file and builds the stories, grid lines, columns and walls of an ETABS model. Beams are drawn by hand in ETABS afterwards. When the plans are revised, running it again updates the model.
+`sdt grids` (or `python main.py grids`) reads framing plans from one DXF file and builds the stories, grid lines, columns and walls of an ETABS model. Beams are drawn by hand in ETABS afterwards. When the plans are revised, running it again updates the model.
 
 Code: `etabs_api/workflows/grid_column_model.py`. Sample drawings: `edb/plan dxf/`.
 
@@ -33,7 +33,7 @@ Other rules:
 
 ```powershell
 .venv\Scripts\Activate.ps1
-python main.py grids
+sdt grids
 ```
 
 `python etabs_api/workflows/grid_column_model.py` does the same.
@@ -41,9 +41,9 @@ python main.py grids
 1. Pick the DXF file.
 2. Confirm the layer names and type the concrete and rebar grade (ksi) of the columns and walls.
 3. Choose whether to add a footing level (see below); if so, type the embedment depth (mm) and the name of the ground level (`GF` by default). Both are remembered.
-4. Choose the model: the one open in ETABS, or a new blank model.
+4. Choose the model: the one open in ETABS, or a new blank model. For the open model, choose whether the changes go **into this model** or **into a copy**: the copy is saved where you choose (`<name> - REV.EDB` is offered) with the model's saved setup inputs, and the model it came from is left as it is on disk. ETABS has the copy open afterwards.
 5. A dialog lists what will change. Choose **Apply these changes** or **Cancel**.
-6. The closing message lists what was done. The full list of changes is saved beside the model as `<name> - plan changes.txt`.
+6. The closing summary, shown in a window and printed in the terminal, lists what was done. The full list of changes is saved beside the model as `<name> - plan changes.txt`.
 
 Closing any dialog cancels the run without changing the model.
 
@@ -51,6 +51,7 @@ Closing any dialog cancels the run without changing the model.
 
 | Item | Rule |
 |---|---|
+| Seismic and wind patterns | Their bottom and top story follow the stories (bottom = the ground level). "Per Code" seismic patterns become "User Defined" with the same Ca and Cv, because ETABS resets their source distance when that table is written |
 | Stories | Names and heights from the plan titles. On a model with members, the base elevation and every story height are updated in place and ETABS moves the levels above with their members; stories can only be added or removed while the model has no members |
 | Grid lines | General grid lines in the first grid system. The drawing replaces them on every run |
 | Column sections | `CR_<width>X<depth>_<concrete>_<rebar>` or `C_<diameter>_...`, created if missing, with the same rebar data as the model setup (no stiffness modifiers) |
@@ -101,7 +102,8 @@ from etabs_api.workflows.grid_column_model import build_grid_column_model
 
 building, changes, log, path = build_grid_column_model(
     r"C:\...\FRAMING PLANS.dxf", concrete_ksi=5, rebar_ksi=60, target="open",
-    footing_depth=1500, ground_story="GF")  # footing level optional
+    footing_depth=1500, ground_story="GF",  # footing level optional
+    copy_path=r"C:\...\MODEL - REV.EDB")   # optional: change a copy, keep the open model
 ```
 
 ## Tests

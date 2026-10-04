@@ -76,6 +76,10 @@ class ModelData:
     wind_drift_denominator: float = NSCP.wind.drift_limit_denominator  # h / this
     # section property modifiers: section -> (A, As2, As3, J, I22, I33, mass, weight)
     section_modifiers: dict[str, tuple] = field(default_factory=dict)
+    # drift combinations the user picked on a model without the DRIFT / WDRIFT
+    # names: combination -> (its lateral load case, whether it is wind)
+    drift_case_of: dict[str, tuple[str, bool]] = field(default_factory=dict)
+    r_factor: float | None = None  # R for the drift when no UBC 97 pattern gives it
 
     def table(self, name: str) -> pd.DataFrame:
         table = self.tables.get(name)
@@ -103,11 +107,13 @@ def check_model(d: ModelData) -> list[Finding]:
     untagged = names[names.str.isnumeric()].tolist()
     out.append(Finding("Model", WARN if untagged else OK,
                        f"{len(untagged)} beams/columns without a tag (numeric names; the design "
-                       f"skips them){': ' + ', '.join(untagged[:10]) if untagged else ''}"
+                       f"offers to tag them or to design them as they are)"
+                       f"{': ' + ', '.join(untagged[:10]) if untagged else ''}"
                        if untagged else "Every beam and column is tagged.", "sdt tag"))
     odd = sorted({str(p) for p in sections["SectProp"] if parse_section(str(p)) is None})
     out.append(Finding("Model", WARN if odd else OK,
-                       f"Sections outside the setup naming (not resized by sdt design): "
+                       f"Sections outside the setup naming (sdt design reads their size from "
+                       f"ETABS and creates new sizes under the setup names): "
                        f"{', '.join(odd[:8])}" if odd else
                        "Every frame uses a setup section (G_, B_, FTB_, CR_, C_)."))
     floors = d.table("Floor Object Connectivity")
@@ -608,7 +614,11 @@ def _worst_drifts(d: ModelData, wind: bool) -> dict[str, tuple[float, str, str]]
     wind_cases = {p for p, t in d.pattern_types.items() if t == WIND}
     out: dict[str, tuple[float, str, str]] = {}
     for name, (ratio, story) in d.drifts.items():
-        if d.drift_from == "combinations":
+        if name in d.drift_case_of:  # a combination the user picked
+            case, is_wind = d.drift_case_of[name]
+            if is_wind != wind:
+                continue
+        elif d.drift_from == "combinations":
             if not name.startswith(prefix):
                 continue
             case = name.split()[-1]
@@ -628,9 +638,12 @@ def _check_drift(d: ModelData, seismic: pd.DataFrame) -> list[Finding]:
         return [Finding("Seismic", NA, "Story drifts were not read.", "NSCP 208.6.5")]
     out = []
     if d.drift_from == "cases":
-        out.append(Finding("Seismic", WARN, "No DRIFT combinations: drift from the load cases "
-                           "alone (run sdt setup to add the 203.3 drift combinations).",
-                           "NSCP 208.6.4.1"))
+        out.append(Finding("Seismic", WARN, "No combination is named DRIFT: the drift here is "
+                           "from the load cases alone. sdt drift asks which of the model's "
+                           "combinations to check the drift on.", "NSCP 208.6.4.1"))
+    known = not seismic.empty and "Name" in seismic.columns
+    if not known:  # no UBC 97 seismic pattern: R is the user's, the period is not known
+        seismic = pd.DataFrame({"Name": pd.Series(dtype=str)})
     parents = seismic["Name"].astype(str).str.split("(").str[0]
     drift_rows = seismic[parents.map(lambda n: d.pattern_types.get(n) == SEISMIC_DRIFT)]
     for case, (ratio, story, source) in sorted(_worst_drifts(d, wind=False).items()):
@@ -638,8 +651,10 @@ def _check_drift(d: ModelData, seismic: pd.DataFrame) -> list[Finding]:
         # period of the drift patterns (the uncapped one, 208.6.5.2)
         rows = seismic[parents == case]
         rows = rows if not rows.empty else (drift_rows if not drift_rows.empty else seismic)
-        r_factor = _num(rows["R"].iloc[0], SEIS.smrf_r)
-        periods = pd.to_numeric(rows.get("TUsed"), errors="coerce").dropna()
+        fallback = d.r_factor if d.r_factor else SEIS.smrf_r
+        r_factor = _num(rows["R"].iloc[0], fallback) if known and len(rows) else fallback
+        periods = pd.to_numeric(rows.get("TUsed"), errors="coerce").dropna() \
+            if known else pd.Series(dtype=float)
         period = float(periods.max()) if len(periods) else math.nan
         limit = drift_limit(period) if period == period else SEIS.drift_limit_long
         inelastic = SEIS.drift_amplification * r_factor * ratio
@@ -699,13 +714,22 @@ def check_combinations(d: ModelData) -> list[Finding]:
                 .astype(str))
     out = []
     uls = [n for n in names if n.startswith("ULS")]
-    out.append(Finding("Combinations", OK if uls else FAIL,
-                       f"{len(uls)} ULS strength combinations." if uls else
-                       "No ULS strength combinations.", "NSCP 203.3"))
+    if uls:
+        out.append(Finding("Combinations", OK, f"{len(uls)} ULS strength combinations.",
+                           "NSCP 203.3"))
+    elif names:
+        # a model with its own names: the design commands ask which to design for
+        out.append(Finding("Combinations", WARN, f"None of the {len(set(names))} combinations "
+                           "is named ULS: the design commands ask which ones to design for, and "
+                           "their factors are then yours to confirm.", "NSCP 203.3"))
+    else:
+        out.append(Finding("Combinations", FAIL, "The model has no load combinations.",
+                           "NSCP 203.3"))
     defl = [n for n in names if n.startswith("DEF")]
     out.append(Finding("Combinations", OK if len(defl) >= 3 else WARN,
                        f"{len(defl)} deflection combinations." if defl else
-                       "No DEF deflection combinations (sdt beams adds them)."))
+                       "No DEF deflection combinations (sdt beams asks which of the "
+                       "model's combinations to use, or adds them)."))
     missing = sorted({str(load) for load in combos["LoadName"].dropna().astype(str)
                       if load not in cases and load not in set(names)})
     out.append(Finding("Combinations", FAIL if missing else OK,
@@ -1144,7 +1168,28 @@ def run_model_check() -> list[Finding] | None:
         data.wind_drift_denominator = denominator
         findings = run_checks(data)
     print(report_text(data, findings))
+    check_summary(findings, str(connector.sap_model.GetModelFilename())).show(popup=True, echo=False)
     return findings
+
+
+def check_summary(findings: list[Finding], model_path: str | None = None):
+    """The closing summary of a model check: the counts and every FAIL."""
+    from utilities.run_summary import RunSummary
+
+    summary = RunSummary("sdt check", model_path)
+    for status in (OK, INFO, WARN, FAIL):
+        summary.add(status, sum(1 for f in findings if f.status == status))
+    not_run = sum(1 for f in findings if f.status not in (OK, INFO, WARN, FAIL))
+    if not_run:
+        summary.add("N/A (needs analysis results)", not_run)
+    for finding in findings:
+        if finding.status == FAIL:
+            summary.fail(f"{finding.group}: {finding.text}")
+    warnings = sum(1 for f in findings if f.status == WARN)
+    if warnings:
+        summary.note(f"{warnings} warnings are listed above with their clauses.")
+    summary.note("The model was not changed.")
+    return summary
 
 
 if __name__ == "__main__":
