@@ -219,13 +219,22 @@ class BeamFlexureDesign:
         return int((clear_width + min_spacing) // (self.dmain + min_spacing))
 
     def get_min_bars_for_150mm_spacing(self) -> int:
-        """Return the minimum bar count needed to limit longitudinal bar spacing to 150 mm."""
+        """The fewest bars on a face that keep the bar spacing within its limit.
+
+        With the office rule (``limit_clear_spacing``) the clear spacing is at
+        most 150 mm; without it the limit is the crack-control spacing of ACI
+        24.3.2, centre to centre.
+        """
         clear_center_width = self.width - 2 * (
             self.cc + self.dstirrup + (self.dmain / 2.0)
         )
         detailing = self.code.beam_detailing
-        # Convert the clear-spacing target (150 mm) to a center-to-center spacing limit.
-        max_center_spacing = detailing.max_clear_spacing_target + self.dmain
+        if detailing.limit_clear_spacing:
+            # Convert the clear-spacing target (150 mm) to a center-to-center spacing limit.
+            max_center_spacing = detailing.max_clear_spacing_target + self.dmain
+        else:
+            max_center_spacing = self.code.crack_control_spacing(
+                self.fy, self.cc + self.dstirrup)
         min_spaces = math.ceil(clear_center_width / max_center_spacing)
         return max(detailing.min_bars_per_face, min_spaces + 1)
 
@@ -2178,14 +2187,17 @@ def ask_deflection_limit() -> int | None:
 def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict,
                  long_limit_divisor: int = LIMIT_DAMAGED, progress=None,
                  earth_cover_stories=(), carrier_depth: bool = False,
-                 compatibility_torsion: bool = False) -> pd.DataFrame:
+                 compatibility_torsion: bool = False,
+                 office_bar_spacing: bool = True) -> pd.DataFrame:
     """Design every beam from the extracted tables; deflection when service loads exist.
 
     ``tables`` holds FACTORED LOADS, FRAME DATA, CONNECTIVITY and (optional)
     SERVICE LOADS. ``earth_cover_stories`` are the levels whose beams get the
     75 mm earth-contact cover. ``carrier_depth`` also requires a beam to be at
     least as deep as the beams it carries. ``compatibility_torsion`` limits
-    the design torsion to phi Tcr (ACI 22.7.3.2). The target ratios are those that
+    the design torsion to phi Tcr (ACI 22.7.3.2). ``office_bar_spacing`` False
+    drops the office rule of 150 mm clear between bars: the bar count for
+    spacing then comes from crack control (ACI 24.3.2). The target ratios are those that
     are active (``dcr_targets.use``). Returns the results, two rows (TOP,
     BOTTOM) per beam.
     """
@@ -2198,6 +2210,8 @@ def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict
         gravity_combo_name=gravity_combo,
         progress=progress,
         compatibility_torsion=compatibility_torsion,
+        code=CODE if office_bar_spacing else override(
+            CODE, beam_detailing__limit_clear_spacing=False),
     )
     service = tables.get("SERVICE LOADS")
     if service is not None and len(service) and not results.empty:

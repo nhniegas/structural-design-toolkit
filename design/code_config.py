@@ -154,6 +154,11 @@ class BeamDetailingConfig:
     aggregate_spacing_factor: float = 4.0 / 3.0  # 4/3 * aggregate size        ACI 25.2.1
     default_aggregate_size: float = 25.0  # mm, project assumption
     max_clear_spacing_target: float = 150.0  # mm, project rule for bar count
+    # True: every beam face gets enough bars for that clear spacing (an office
+    # rule). False: the bar count for spacing comes from crack control alone,
+    # ACI 24.3.2. The rule adds steel, and beam steel raises the probable
+    # moments, the capacity shear and the joint shear demand.
+    limit_clear_spacing: bool = True
     layer_clear_spacing: float = 25.0  # mm, between layers                    ACI 25.2.2
     max_layers: int = 3  # project rule before flagging congestion
     earth_contact_cover: float = 75.0  # mm, cast against and exposed to earth  ACI Table 20.6.1.3.1

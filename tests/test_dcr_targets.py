@@ -259,3 +259,55 @@ def test_without_coordinates_the_supports_are_classified_as_before():
     connectivity, _ = chain(tip_held=True)
     status = beam.identify_cantilever_beams(None, connectivity).set_index("UniqueName")
     assert status.loc["R", "SupportStatus"] == "Cantilever (Free at PtJ)"
+
+
+# ----------------------------------------------------------------- bar spacing rule and runaway growth
+def test_without_the_office_rule_a_wide_beam_gets_fewer_bars_for_spacing():
+    """A 1000 mm wide beam: 150 mm clear needs 6 bars of 25 on a face; crack
+    control (about 250 mm centre to centre) needs 5."""
+    from design.code_config import CODE, override
+
+    office = beam.BeamFlexureDesign(1000, 800, 28, 414, 414, 25, 10, 40)
+    code_only = beam.BeamFlexureDesign(
+        1000, 800, 28, 414, 414, 25, 10, 40,
+        code=override(CODE, beam_detailing__limit_clear_spacing=False))
+    assert office.get_min_bars_for_150mm_spacing() == 6
+    assert code_only.get_min_bars_for_150mm_spacing() < 6
+    assert code_only.get_min_bars_for_150mm_spacing() >= 2
+
+
+def test_the_office_rule_stays_the_default_of_the_design():
+    props, forces = beam_tests._mock_beam_properties(), beam_tests._mock_force_table(wu=5.0)
+    props["Width"] = 900.0
+    tables = {"FRAME DATA": None}
+    default = beam.execute_beam_design(props, forces, False, "GRAV")
+    from design.code_config import CODE, override
+
+    code_only = beam.execute_beam_design(
+        props, forces, False, "GRAV",
+        code=override(CODE, beam_detailing__limit_clear_spacing=False))
+    count = lambda r: int(r[r["Face"] == "TOP"].iloc[0]["n_mid_L1"])
+    assert count(code_only) < count(default)
+    assert tables
+
+
+def test_the_loop_stops_enlarging_a_beam_that_keeps_failing_in_shear():
+    from etabs_api.workflows import design_loop as dl
+    from etabs_api.workflows.sections import Section
+
+    small, big = Section("G", 500, 800, "C06", "G60"), Section("G", 600, 800, "C06", "G60")
+    sections = {"2GX-10": small, "2GX-10A": small, "2GX-3": small}
+    counts: dict[str, int] = {}
+    for _ in range(dl.MAX_SHEAR_GROWTHS):
+        actions = {"2GX-10": (big, "grow (shear spacing)"),
+                   "2GX-10A": (big, "same beam line as 2GX-10"),
+                   "2GX-3": (big, "grow (deflection)")}
+        assert dl.stop_runaway_growth(actions, sections, counts) == []
+        assert actions["2GX-10"][0] == big
+    actions = {"2GX-10": (big, "grow (shear spacing)"),
+               "2GX-10A": (big, "same beam line as 2GX-10"),
+               "2GX-3": (big, "grow (deflection)")}
+    assert dl.stop_runaway_growth(actions, sections, counts) == ["2GX-10"]
+    assert actions["2GX-10"][0] == small and "does not help" in actions["2GX-10"][1]
+    assert "2GX-10A" not in actions                 # it only followed the stopped beam
+    assert actions["2GX-3"][0] == big               # growth for another reason goes on

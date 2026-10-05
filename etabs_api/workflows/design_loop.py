@@ -103,6 +103,7 @@ class LoopSettings:
     targets: object = None  # dcr_targets.Targets: target ratios by member type and check
     carrier_depth: bool = False  # a beam is at least as deep as the beams it carries
     compatibility_torsion: bool = False  # beam torsion at most phi Tcr (ACI 22.7.3.2)
+    office_bar_spacing: bool = True  # beam bars at most 150 mm clear (False: crack control)
 
 
 @dataclass
@@ -769,7 +770,8 @@ class Workbench:
                             progress=beam_progress,
                             earth_cover_stories=self.settings.beam_earth_cover_stories,
                             carrier_depth=self.settings.carrier_depth,
-                            compatibility_torsion=self.settings.compatibility_torsion)
+                            compatibility_torsion=self.settings.compatibility_torsion,
+                            office_bar_spacing=self.settings.office_bar_spacing)
 
     def design_columns(self, beams: pd.DataFrame) -> pd.DataFrame:
         from design.column_designer_aci318 import design_columns
@@ -857,10 +859,40 @@ class Workbench:
         return changes
 
 
+MAX_SHEAR_GROWTHS = 3   # times a beam is made larger for shear before the loop gives up on it
+SHEAR_REASONS = ("grow (shear spacing)", "grow (failed)")
+
+
+def stop_runaway_growth(actions: dict, sections: dict, shear_growths: dict[str, int]) -> list[str]:
+    """Stop enlarging beams that keep failing in shear however large they get.
+
+    The capacity shear of a frame beam comes from its own probable moments, so
+    a larger beam with more bars can need more shear, not less: a short span
+    is the usual cause. After ``MAX_SHEAR_GROWTHS`` enlargements for shear a
+    beam keeps its size and is reported; so are the beams that only followed
+    it along its line. ``actions`` is changed in place; returns the stopped beams.
+    """
+    stopped = []
+    for name, (new, reason) in list(actions.items()):
+        if reason not in SHEAR_REASONS or new == sections.get(name):
+            continue
+        shear_growths[name] = shear_growths.get(name, 0) + 1
+        if shear_growths[name] > MAX_SHEAR_GROWTHS:
+            actions[name] = (sections[name], f"made larger {MAX_SHEAR_GROWTHS} times for shear "
+                             "and still fails: a larger section does not help (the capacity "
+                             "shear grows with it); check the span and the bars")
+            stopped.append(name)
+    for name, (new, reason) in list(actions.items()):
+        if any(reason == f"same beam line as {leader}" for leader in stopped):
+            del actions[name]
+    return stopped
+
+
 def run_design_loop(bench: Workbench) -> dict:
     """The loop. Returns a summary: status, iterations, changes and what still fails."""
     settings = bench.settings
     grown: set[str] = set()
+    shear_growths: dict[str, int] = {}
     all_changes: list[Change] = []
     iteration = 0
     status = "not converged"
@@ -881,6 +913,7 @@ def run_design_loop(bench: Workbench) -> dict:
         sections = bench.sections()
         actions = beam_actions(beam_table, sections, bench.lengths(), grown, settings, seismic,
                                allow_shrink, bench.lines())
+        stop_runaway_growth(actions, sections, shear_growths)
         if columns:
             _, column_names = bench.members()
             sizer = bench.column_sizer() if settings.size_on_forces else None
@@ -1214,6 +1247,11 @@ def run_design_cli() -> dict | None:
     compatibility_torsion = ask_compatibility_torsion(title, last)
     if compatibility_torsion is None:
         return None
+    from design.concrete_workflow import ask_bar_spacing
+
+    office_bar_spacing = ask_bar_spacing(title, last)
+    if office_bar_spacing is None:
+        return None
     from etabs_api.workflows.drift_check import ask_drift_options, has_standard_combinations
 
     drift_options = ask_drift_options(title + ": drift of the final sizes",
@@ -1299,6 +1337,7 @@ def run_design_cli() -> dict | None:
         deflection_roles=ready.deflection_roles, sources=sources,
         targets=targets, carrier_depth=carrier_depth,
         compatibility_torsion=compatibility_torsion,
+        office_bar_spacing=office_bar_spacing,
     )
 
     # the working copy: the original model is not changed
@@ -1318,6 +1357,8 @@ def run_design_cli() -> dict | None:
             bench.log("A beam is at least as deep as the beams it carries.")
         if compatibility_torsion:
             bench.log("Beam torsion at most phi Tcr (compatibility torsion, ACI 22.7.3.2).")
+        bench.log("Beam bar spacing: " + ("office rule, 150 mm clear." if office_bar_spacing
+                                          else "crack control only (ACI 24.3.2)."))
         bench.log(f"Combinations: {len(combos)} ULS ({seismic})")
         bench.log("Size ranges (from, to, step): " + "; ".join(
             f"{family} " + " x ".join(
@@ -1398,6 +1439,8 @@ def loop_summary(summary: dict, settings: LoopSettings, original: str, working: 
 
         out.add("Beam torsion", "at most phi Tcr (compatibility torsion, ACI 22.7.3.2)")
         out.note(TORSION_NOTE)
+    out.add("Beam bar spacing", "office rule, 150 mm clear" if settings.office_bar_spacing
+            else "crack control only (ACI 24.3.2)")
     if settings.sources is not None:
         settings.sources.add_to(out)
     if settings.beam_earth_cover_stories:

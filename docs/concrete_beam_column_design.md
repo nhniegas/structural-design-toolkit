@@ -27,6 +27,7 @@ sdt columns    # design the columns from the stored beam step, save the column o
 | Deflection limit | Partitions likely to be damaged (L/480) or not (L/240) |
 | Target ratios | Use the code limits (every ratio 1.00), the targets saved for this model, or set them: one dialog for girders and one for beams, with a box for each check. See [Target ratios](#target-ratios) |
 | Beam torsion | Design for the analysis torsion, or take it as at most φTcr (compatibility torsion, ACI 22.7.3.2). See [Beam torsion](#beam-torsion) |
+| Beam bar spacing | The office rule (at most 150 mm clear between the bars of a face), or the code only (crack control, ACI 24.3.2). See [Beam bar spacing](#beam-bar-spacing) |
 | Depth of a beam that carries others | Whether a girder or beam must be at least as deep as the beams that frame into it. See [Carrier depth](#carrier-depth) |
 | Output folder | For the results, the calculations and the schedules |
 
@@ -236,6 +237,15 @@ ETABS gives the torsion the elastic model attracts. With the full torsional stif
 - **In the design:** answer "At most φTcr" to the torsion question. ACI 22.7.3.2 allows it where the torsion can redistribute after cracking. The torsion in the results stays the analysis value; the "Torsion designed for" column and the calculation report say which was used. ACI 22.7.3.3 then requires the adjoining members to be designed for the redistributed moments and shears, which this option does not give you: only a model with reduced J does.
 
 A cantilever keeps its analysis torsion with either choice, since nothing else can take it. The default is the analysis torsion.
+
+### Beam bar spacing
+
+A beam face needs enough bars to keep them close together. There are two rules for how close:
+
+- **Office rule (the default):** at most 150 mm clear between the bars of a face. A wide beam then gets more bars than its strength needs.
+- **Code only:** the crack control spacing of ACI 24.3.2, about 250 mm centre to centre for Grade 414 bars with 40 mm cover.
+
+The choice matters for seismic design. The extra bars of the office rule raise the probable moments of the beam, and with them the capacity shear Ve of the beam and the joint shear and capacity shear of the columns. On a wide beam with a short span this can be the whole reason the shear check fails. The summary and the calculation report say which rule was used.
 
 ### Carrier depth
 
