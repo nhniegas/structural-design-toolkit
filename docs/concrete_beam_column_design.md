@@ -25,6 +25,8 @@ sdt columns    # design the columns from the stored beam step, save the column o
 | Beam bars and cover | Main bar, stirrup and web bar (mm), web bar fy (MPa), cover (mm) |
 | Cover against earth | Whether the beams of any floor level need 75 mm cover (cast against or exposed to earth: footing tie beams, ground beams). If yes, pick the levels; the other beams keep the typed cover. Not asked when the typed cover is 75 mm or more. The levels are remembered and offered again |
 | Deflection limit | Partitions likely to be damaged (L/480) or not (L/240) |
+| Target ratios | Use the code limits (every ratio 1.00), the targets saved for this model, or set them: one dialog for girders and one for beams, with a box for each check. See [Target ratios](#target-ratios) |
+| Depth of a beam that carries others | Whether a girder or beam must be at least as deep as the beams that frame into it. See [Carrier depth](#carrier-depth) |
 | Output folder | For the results, the calculations and the schedules |
 
 **`sdt deflection`** checks only the deflections, apart from the strength design: it takes the bars of the last `sdt beams` of the model, reads the service moments again from ETABS (so a re-analysed model is checked with its current moments), asks the limit (L/480 or L/240) and the folder, and saves `<model> - Deflection.xlsx` with one row per beam: section, Ie, λΔ, the three deflections, their limits, the governing ratio and the check. It stops with a message when the model has no beam design yet (the cracked stiffness needs the bars).
@@ -194,6 +196,36 @@ For each beam, after its bars are chosen:
 **Spans, not segments.** ETABS splits a beam line wherever another member frames into it. The segments of one tagged line (`2GX-1`, `2GX-1A`, `2GX-1B`, ...) that meet at a joint without a column are checked together as one span, and L is the whole span. A span end is supported by a column, a wall or a member the line ends on; it is free (a cantilever tip) only when nothing else connects there. A cantilever span is fixed at its support, and the deflection from the rotation of that support (from the analysis) is added.
 
 The results file has Ie of each zone, λΔ, the three deflections, their limits, the governing ratio and `Deflection check`. A beam that fails the deflection and nothing else gets `FAILED: DEFLECTION (ACI 24.2.2)`. The calculation report has the same values in a Deflection table for each beam.
+
+### Target ratios
+
+The code passes a check when demand / capacity is at most 1.00. A target ratio below that is a margin you choose, as engineering judgement, by member type and check:
+
+| Member type | Checks with a target |
+|---|---|
+| Girders (frame into a column) | Flexure Mu / φMn; shear and torsion Vu / φVn; deflection / limit |
+| Beams (carried by other beams) | Flexure; shear and torsion; deflection |
+| Columns | Axial load and bending (P-M) Mu / φMn; shear Vu / φVn; joint shear Vj / φVn; strong column - weak beam, as a minimum ΣMnc / ΣMnb of at least 1.2 |
+
+How a target is applied:
+
+- **The members are designed to it.** With a flexure target of 0.85 the bars are chosen for Mu / 0.85, so Mu / φMn is at most 0.85; with a shear target the stirrups or ties are chosen the same way. The demands in the results are the real ones, not the divided ones.
+- **A check passes at or below its target**, and fails above it even when it is below 1.00. The failure text says it is the target that is exceeded.
+- A target is between 0.30 and 1.00. It cannot be looser than the code. The strong column ratio cannot be below 1.2.
+- Detailing rules (bar spacing, minimum steel, bar fit, SMRF steel limits) have no ratio and are not changed.
+- The targets are saved with the model, offered again the next time, and listed in the summary, in the result workbook (beams) and in the calculation reports.
+
+A flexure target below 1 on girders adds beam bars. More beam steel raises the probable moments, so the column capacity shear Ve and the joint shear demand rise with it; the summary says so when such a target is set.
+
+`sdt columns` asks the column targets; `sdt deflection` uses the targets of the beam design.
+
+### Carrier depth
+
+Where a girder is shallower than a beam it carries, the bottom bars of that beam pass below the girder's bottom bars and cannot rest on them. When you answer yes to "should a girder or beam be at least as deep as the beams that frame into it", every carrier is checked:
+
+- The carrier of a beam end is the beam whose centre line passes through it, whether ETABS has that girder as one member from column to column or as pieces that meet at the joint. Beams that only continue each other are not carriers.
+- A carrier shallower than a beam it carries gets `FAILED: DEPTH BELOW THE BEAM IT CARRIES`, with both depths in the "Depth against the beams it carries" column.
+- It is a detailing rule of your own, not a code clause, so it is off unless you ask for it. It needs the joint coordinates, which the extraction provides.
 
 ### Cover against earth
 

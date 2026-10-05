@@ -14,6 +14,7 @@ import pandas as pd
 import ezdxf
 from dataclasses import dataclass
 from design.code_config import CODE, AciCode
+from design import dcr_targets
 from design.column_interaction import clip_moments, section_rings
 from design.column_slenderness import (
     SLENDERNESS_REPORT_FIELDS,
@@ -1539,7 +1540,8 @@ def _evaluate_column_candidate(
                 if moment_capacity_kNm > 0
                 else math.inf
             )
-            moment_pass = moment_demand <= moment_capacity_kNm
+            moment_pass = moment_demand <= moment_capacity_kNm * dcr_targets.limit(
+                dcr_targets.COLUMN, dcr_targets.FLEXURE)
             tension_capacity = (
                 engine.code.strength.tension_controlled
                 * n_bars
@@ -1642,7 +1644,7 @@ def _evaluate_on_surface(member, force_rows, surface, engine, n_bars, dmain,
             utilization = np.where(
                 capacity_kNm > 0, demand / capacity_kNm,
                 np.where((demand <= 1e-9) & ~np.isnan(phi), 0.0, math.inf))
-        moment_pass = utilization <= 1.0
+        moment_pass = utilization <= dcr_targets.limit(dcr_targets.COLUMN, dcr_targets.FLEXURE)
         axial = data[indices, 0]
         axial_pass = np.where(axial >= 0, pu <= surface.p_cap,
                               np.abs(axial) <= tension_capacity)
@@ -2284,6 +2286,7 @@ def _column_shear_checks(
     starting_legs = {"V2": legs_along_x, "V3": legs_along_y}
     provided_legs = dict(starting_legs)
 
+    shear_target = dcr_targets.limit(dcr_targets.COLUMN, dcr_targets.SHEAR)
     station_values = pd.to_numeric(forces["Station"], errors="coerce").dropna()
     if station_values.empty or station_values.max() <= station_values.min():
         raise ValueError(
@@ -2398,8 +2401,10 @@ def _column_shear_checks(
                 analysis_shear = abs(_numeric(force[v_name], v_name, member))
                 design_shear = max(analysis_shear, capacity_shear_kN)
                 # Convert design shear to required steel shear after subtracting Vc.
+                # With a target ratio below 1 the ties are sized for the shear
+                # divided by it, so Vu / phi Vn stays at or below the target.
                 required_vs = max(
-                    0.0, design_shear * 1000.0 / phi_shear - shear_concrete
+                    0.0, design_shear / shear_target * 1000.0 / phi_shear - shear_concrete
                 )
                 # Ties at no more than d/2, d/4 for a large Vs (ACI 10.7.6.5.2), and
                 # at least Av,min (ACI 10.6.2.2) once Vu > 0.5 phi Vc.
@@ -2465,8 +2470,11 @@ def _column_shear_checks(
             else math.inf
         )
         item["Shear_Check"] = (
-            "PASS" if item["Design_Shear_kN"] <= shear_capacity + 1e-9
+            "PASS" if item["Design_Shear_kN"] <= shear_capacity * shear_target + 1e-9
             else "FAIL: Vs above 0.66 sqrt(fc') b d (ACI 22.5.1.2) - enlarge the section"
+            if item["Design_Shear_kN"] > shear_capacity + 1e-9
+            else f"FAIL: above the target ratio {shear_target:g} at the largest Vs "
+                 "- enlarge the section"
         )
         del item["_effective_depth_mm"]
         del item["_shear_concrete_N"]
@@ -3028,7 +3036,8 @@ def _evaluate_smrf_joints(
                         if beam_nominal > 0
                         else math.inf
                     )
-                    required_ratio = CODE.column_seismic.strong_column_ratio
+                    required_ratio = dcr_targets.limit(dcr_targets.COLUMN,
+                                                       dcr_targets.STRONG_COLUMN)
                     b_c_check = "PASS" if ratio >= required_ratio else "FAIL"
                     if bcc_exempt:
                         b_c_check = BCC_EXEMPT_TEXT
@@ -3139,8 +3148,13 @@ def _evaluate_smrf_joints(
                         if phi_vn_kN > 0
                         else math.inf
                     )
+                    joint_target = dcr_targets.limit(dcr_targets.COLUMN,
+                                                     dcr_targets.JOINT_SHEAR)
                     joint_shear_check = (
-                        "PASS" if joint_shear_demand <= phi_vn_kN else "FAIL"
+                        "PASS" if joint_shear_demand <= phi_vn_kN * joint_target
+                        else "FAIL: joint shear above its strength (ACI 18.8.4)"
+                        if joint_shear_demand > phi_vn_kN
+                        else f"FAIL: joint shear above the target ratio {joint_target:g}"
                     )
                     # Joint dimensions (NSCP 418.8.2.3, 418.8.2.4): where the beam bars
                     # run through the joint (beams on both sides), the column side along
@@ -3328,8 +3342,10 @@ def _build_consolidated_column_report(
         blocked = [value for value in normalized if value.startswith("BLOCKED")]
         if blocked:
             return " / ".join(blocked)
-        if any(value.startswith("FAIL") for value in normalized):
-            return "FAIL"
+        failed = [value for value in normalized if value.startswith("FAIL")]
+        if failed:   # with its reason, when the check gave one
+            reasons = [value for value in failed if value != "FAIL"]
+            return " / ".join(reasons) if reasons else "FAIL"
         if normalized and all(value.startswith("PASS") for value in normalized):
             return "PASS"
         return " / ".join(normalized) if normalized else "N/A"
@@ -4817,7 +4833,7 @@ def design_columns(
                 & ~exempt
                 & initial_joints.apply(
                     lambda row: current_joint_ratio(row)
-                    < CODE.column_seismic.strong_column_ratio - 1e-9,
+                    < dcr_targets.limit(dcr_targets.COLUMN, dcr_targets.STRONG_COLUMN) - 1e-9,
                     axis=1,
                 )
             ]
@@ -4939,7 +4955,8 @@ def design_columns(
             )
             initial_joints.at[joint_index, "Column_Beam_Ratio"] = ratio
             initial_joints.at[joint_index, "Strong_Column_Check"] = (
-                "PASS" if ratio >= CODE.column_seismic.strong_column_ratio else "FAIL"
+                "PASS" if ratio >= dcr_targets.limit(dcr_targets.COLUMN,
+                                                     dcr_targets.STRONG_COLUMN) else "FAIL"
             )
 
             # Joint shear demand uses the BEAMS' probable moments only, so adding
@@ -7053,7 +7070,9 @@ def _column_calc_member(rows: pd.DataFrame) -> MemberReport:
             flexure_rows, "l" + combo + "rrrrrll",
             "Forces in kN, moments in kN-m. phi Mn is the design strength along the direction of "
             "the Mu2-Mu3 resultant where phi Pn = Pu, read from the section's biaxial "
-            "interaction surface (figure below).",
+            "interaction surface (figure below)."
+            + (" " + dcr_targets.note((dcr_targets.COLUMN,))
+               if dcr_targets.note((dcr_targets.COLUMN,)) else ""),
         ),
         ReportTable(
             "Column shear - governing combination at each end",
@@ -7205,7 +7224,7 @@ def _bcc_caption(rows: pd.DataFrame) -> str:
             parts.append(f"along {axis} {ratios.min():.2f}")
     status = rows.get("BCC_Status", pd.Series(dtype=str)).astype(str)
     failing = status.str.startswith("FAIL").any()
-    required = CODE.column_seismic.strong_column_ratio
+    required = dcr_targets.limit(dcr_targets.COLUMN, dcr_targets.STRONG_COLUMN)
     if parts:
         return (" Strong column - weak beam is a separate check at the joints, on nominal "
                 f"strengths, and is not drawn here: lowest sum Mnc / sum Mnb {', '.join(parts)} "

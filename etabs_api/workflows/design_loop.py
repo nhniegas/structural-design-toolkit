@@ -60,7 +60,8 @@ from etabs_api.workflows.sections import (  # noqa: E402
     shrink_column,
 )
 
-DEPTH_FAILURES = ("MAX BARS", "SMRF STEEL RATIO", "SMRF MOMENT", "DEFLECTION")
+DEPTH_FAILURES = ("MAX BARS", "SMRF STEEL RATIO", "SMRF MOMENT", "DEFLECTION",
+                  "DEPTH BELOW THE BEAM IT CARRIES")
 WIDTH_FAILURES = ("SHEAR SPACING", "SHEAR STRENGTH")
 BCC_REQUIRED = 1.2
 SMRF_RHO_LIMIT = 0.025
@@ -99,6 +100,8 @@ class LoopSettings:
     # {standard deflection combination: the model's combination for that role}
     deflection_roles: dict | None = None
     sources: object = None  # model_inputs.Sources: where the inputs of the run came from
+    targets: object = None  # dcr_targets.Targets: target ratios by member type and check
+    carrier_depth: bool = False  # a beam is at least as deep as the beams it carries
 
 
 @dataclass
@@ -302,23 +305,30 @@ def _tension_controlled_rho(fc: float, fy: float) -> float:
 
 
 def beam_comfortable(rows: pd.DataFrame, ratio: float, seismic: bool) -> bool:
-    """A passing beam whose steel, shear and deflection all stay below ``ratio`` of the limits."""
+    """A passing beam whose steel, shear and deflection all stay below ``ratio`` of the
+    limits. With target ratios, below ``ratio`` of the targets."""
+    from design import dcr_targets
+
     top = rows.iloc[0]
+    kind = dcr_targets.beam_type(top.get("SupportStatus", ""))
+    flexure = ratio * dcr_targets.limit(kind, dcr_targets.FLEXURE)
+    shear_ratio = ratio * dcr_targets.limit(kind, dcr_targets.SHEAR)
+    deflection_ratio = ratio * dcr_targets.limit(kind, dcr_targets.DEFLECTION)
     fc, fy = float(top["f'c"]), float(top["fy"])
     limit = _tension_controlled_rho(fc, fy)
     if seismic and not str(top.get("SupportStatus", "")).startswith("Beam-Framed"):
         limit = min(limit, SMRF_RHO_LIMIT)
     for _, row in rows.iterrows():
-        if max(_beam_rho(row, z) for z in ("left", "mid", "right")) > ratio * limit:
+        if max(_beam_rho(row, z) for z in ("left", "mid", "right")) > flexure * limit:
             return False
     width = float(top["Width"])
     d = float(top["Depth"]) - float(top.get("cc", 40) or 40) - 30.0
     shear_limit = 0.75 * (0.17 + 0.66) * math.sqrt(fc) * width * d / 1e3  # kN, phi (Vc + Vs,max)
     shear = max(float(top.get(k, 0) or 0) for k in ("Vu_left", "Vu_right", "Vu_mid_2h"))
-    if shear > ratio * shear_limit:
+    if shear > shear_ratio * shear_limit:
         return False
     deflection = top.get("Defl_ratio")
-    if deflection is not None and pd.notna(deflection) and float(deflection) > ratio:
+    if deflection is not None and pd.notna(deflection) and float(deflection) > deflection_ratio:
         return False
     return True
 
@@ -355,6 +365,10 @@ def beam_actions(results: pd.DataFrame, sections: dict[str, Section], lengths: d
                 span = lengths.get(name, 0.0)
                 cantilever = "Cantilever" in str(rows.iloc[0].get("SupportStatus", ""))
                 min_depth = span / (8.0 if cantilever else 16.0)
+                # a carrier is not made shallower than the beams it carries
+                carried = _number(rows.iloc[0].get("Carried_Beam_Depth"))
+                if settings.carrier_depth and carried:
+                    min_depth = max(min_depth, carried)
                 smaller = shrink_beam(section, settings.ranges, min_depth)
                 if smaller is not None:
                     shrinkable[name] = smaller
@@ -413,13 +427,18 @@ def _number(value) -> float | None:
 
 def column_needs(rows: pd.DataFrame) -> set[str]:
     """What a column's report rows say it needs: "X", "Y" (a side) or "square"."""
+    from design import dcr_targets
+
     needs: set[str] = set()
     text = lambda column: " ".join(rows.get(column, pd.Series(dtype=str)).astype(str)).upper()
+    strong_column = max(BCC_REQUIRED, dcr_targets.limit(dcr_targets.COLUMN,
+                                                        dcr_targets.STRONG_COLUMN))
+    joint_target = dcr_targets.limit(dcr_targets.COLUMN, dcr_targets.JOINT_SHEAR)
     for axis in ("X", "Y"):
         ratios = [_number(v) for v in rows.get(f"BCC_Ratio_{axis}", [])]
         joints = [_number(v) for v in rows.get(f"Joint_Shear_Utilization_{axis}", [])]
-        if any(r is not None and r < BCC_REQUIRED for r in ratios) or \
-                any(u is not None and u > 1.0 for u in joints):
+        if any(r is not None and r < strong_column for r in ratios) or \
+                any(u is not None and u > joint_target + 1e-9 for u in joints):
             needs.add(axis)
     if "FAIL" in text("Flexure_Check") or "FAIL" in text("Axial_Check") \
             or "FAIL" in text("Slenderness_Check") \
@@ -433,17 +452,26 @@ def column_needs(rows: pd.DataFrame) -> set[str]:
 
 
 def column_comfortable(rows: pd.DataFrame, ratio: float) -> bool:
-    for column in ("Flexure_Utilization", "Shear_Utilization", "Joint_Shear_Utilization_X",
-                   "Joint_Shear_Utilization_Y"):
+    """A passing column whose ratios all stay below ``ratio`` of the limits, or of
+    the target ratios when the engineer set some."""
+    from design import dcr_targets
+
+    checks = {"Flexure_Utilization": dcr_targets.FLEXURE, "Shear_Utilization": dcr_targets.SHEAR,
+              "Joint_Shear_Utilization_X": dcr_targets.JOINT_SHEAR,
+              "Joint_Shear_Utilization_Y": dcr_targets.JOINT_SHEAR}
+    for column, check in checks.items():
         values = [_number(v) for v in rows.get(column, [])]
-        if any(v is not None and v > ratio for v in values):
+        allowed = ratio * dcr_targets.limit(dcr_targets.COLUMN, check)
+        if any(v is not None and v > allowed for v in values):
             return False
     rho = [_number(v) for v in rows.get("Reinforcement_Ratio", [])]
     if any(r is not None and r > ratio * COLUMN_RHO_LIMIT for r in rho):
         return False
     for axis in ("X", "Y"):
         values = [_number(v) for v in rows.get(f"BCC_Ratio_{axis}", [])]
-        if any(v is not None and v < BCC_REQUIRED / ratio for v in values):
+        required = max(BCC_REQUIRED, dcr_targets.limit(dcr_targets.COLUMN,
+                                                       dcr_targets.STRONG_COLUMN))
+        if any(v is not None and v < required / ratio for v in values):
             return False
     status = " ".join(rows.get("Column_Design_Status", pd.Series(dtype=str)).astype(str)).upper()
     return "FAIL" not in status
@@ -738,7 +766,8 @@ class Workbench:
         return design_beams(self.tables, self.settings.smrf, self.settings.gravity_combo,
                             self.settings.beam_bars, self.settings.long_limit,
                             progress=beam_progress,
-                            earth_cover_stories=self.settings.beam_earth_cover_stories)
+                            earth_cover_stories=self.settings.beam_earth_cover_stories,
+                            carrier_depth=self.settings.carrier_depth)
 
     def design_columns(self, beams: pd.DataFrame) -> pd.DataFrame:
         from design.column_designer_aci318 import design_columns
@@ -1168,6 +1197,16 @@ def run_design_cli() -> dict | None:
     long_limit = ask_deflection_limit()
     if long_limit is None:
         return None
+    from design import dcr_targets
+    from design.concrete_workflow import ask_carrier_depth, ask_dcr_targets
+
+    all_types = (dcr_targets.GIRDER, dcr_targets.BEAM, dcr_targets.COLUMN)
+    targets = ask_dcr_targets(original, title, all_types)
+    if targets is None:
+        return None
+    carrier_depth = ask_carrier_depth(title, last)
+    if carrier_depth is None:
+        return None
     from etabs_api.workflows.drift_check import ask_drift_options, has_standard_combinations
 
     drift_options = ask_drift_options(title + ": drift of the final sizes",
@@ -1251,6 +1290,7 @@ def run_design_cli() -> dict | None:
         beam_earth_cover_stories=tuple(earth_stories), check_top_level=levels[0],
         check_foundation_level=levels[1], inner_tie_style=tie_style,
         deflection_roles=ready.deflection_roles, sources=sources,
+        targets=targets, carrier_depth=carrier_depth,
     )
 
     # the working copy: the original model is not changed
@@ -1261,8 +1301,13 @@ def run_design_cli() -> dict | None:
     with open(log_path, "w", encoding="utf-8") as handle:
         handle.write(f"Design loop of {original}\nWorking copy: {working}\n"
                      f"Started {time.strftime('%Y-%m-%d %H:%M')}\n")
-    with LoadingWindow("Design loop: analysis, design and resizing") as window:
+    with dcr_targets.use(targets), \
+            LoadingWindow("Design loop: analysis, design and resizing") as window:
         bench = Workbench(connector, settings, log_path, window.update)
+        for line in targets.lines(all_types):
+            bench.log(f"Target ratio: {line}")
+        if carrier_depth:
+            bench.log("A beam is at least as deep as the beams it carries.")
         bench.log(f"Combinations: {len(combos)} ULS ({seismic})")
         bench.log("Size ranges (from, to, step): " + "; ".join(
             f"{family} " + " x ".join(
@@ -1330,6 +1375,14 @@ def loop_summary(summary: dict, settings: LoopSettings, original: str, working: 
     if drift.get("failed"):
         out.fail("Drift fails: the sections are not resized for drift. Reconfigure the model "
                  "(stiffer members, walls) and run sdt design again.")
+    if settings.targets is not None:
+        from design import dcr_targets
+        from design.concrete_workflow import add_targets_to
+
+        add_targets_to(out, settings.targets,
+                       (dcr_targets.GIRDER, dcr_targets.BEAM, dcr_targets.COLUMN))
+    if settings.carrier_depth:
+        out.add("Carrier depth", "a beam is at least as deep as the beams it carries")
     if settings.sources is not None:
         settings.sources.add_to(out)
     if settings.beam_earth_cover_stories:

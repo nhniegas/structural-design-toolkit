@@ -26,6 +26,8 @@ Supporting code:
 - `etabs_api/workflows/tributary.py`: geometric tributary areas for the live load reduction.
 - `etabs_api/workflows/framing_plans.py`: framing plans of the model as a DXF (`sdt plans`).
 - `design/beam_deflection.py`: beam deflection checks (ACI 318M-14 24.2).
+- `design/dcr_targets.py`: target demand / capacity ratios by member type and check.
+- `design/beam_carriers.py`: which beam carries which, and the rule that a carrier is at least as deep.
 - `design/column_slenderness.py`: slenderness of columns along their length (ACI 6.2.5, 6.6.4.5): unbraced lengths and k from the frame, the moment magnifier and the minimum moment. The sway effects come from the ETABS P-delta analysis.
 - `design/column_interaction.py`: the biaxial P-Mx-My design interaction surface of a column layout, built once and cached. It also provides the demand convex hull and the 3D figure for the calculation report.
 - `etabs_api/workflows/model_analysis.py`: analysis run, response spectrum scaling, period, modal mass and weight checks.
@@ -163,7 +165,7 @@ This defines the materials, frame sections, load patterns, UBC 97 response spect
 
 ## Beam and column design
 
-`sdt beams`, then `sdt columns` (and `sdt deflection` for the deflections alone). The design forces come from the analysis results, not from ETABS concrete design. The columns include slenderness: the sway effect from the ETABS P-delta analysis and the member effect by moment magnification. Each command saves its results (`.xlsx`), calculation report (`.pdf`) and schedules (`.dxf`) in the folder you choose. See [Concrete beam and column design](docs/concrete_beam_column_design.md).
+`sdt beams`, then `sdt columns` (and `sdt deflection` for the deflections alone). The design forces come from the analysis results, not from ETABS concrete design. You can set a target ratio below the code limit of 1.00 for each check of girders, beams and columns, and require a girder to be at least as deep as the beams it carries. The columns include slenderness: the sway effect from the ETABS P-delta analysis and the member effect by moment magnification. Each command saves its results (`.xlsx`), calculation report (`.pdf`) and schedules (`.dxf`) in the folder you choose. See [Concrete beam and column design](docs/concrete_beam_column_design.md).
 
 ## Tests
 
