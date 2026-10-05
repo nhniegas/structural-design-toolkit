@@ -27,6 +27,9 @@ the same commands.
                     slenderness; save the results, calculations and schedule
     sdt design      analysis and beam/column design loop that resizes the
                     members until they pass (etabs_api/workflows/design_loop.py)
+    sdt plans       framing plans of every floor as one DXF: beams at their
+                    width, columns at their size, marks and grids
+                    (etabs_api/workflows/framing_plans.py)
     sdt composite   rectangular filled composite column, AISC DG6
                     (design/composite_column_designer_aiscDG06.py)
     sdt steel       wide-flange member, AISC 360-22
@@ -55,7 +58,7 @@ import argparse
 import sys
 from pathlib import Path
 
-VERSION = "0.1.2"  # the same as in pyproject.toml (tests/test_main.py checks it)
+VERSION = "0.2.0"  # the same as in pyproject.toml (tests/test_main.py checks it)
 # Hidden first argument: this process is the progress window of another one
 # (utilities/_gui_helpers.LoadingWindow). It is how the packaged program,
 # which has no separate Python to start, opens that window.
@@ -145,6 +148,12 @@ def _design():
     return run_design_cli()
 
 
+def _plans():
+    from etabs_api.workflows.framing_plans import run_framing_plans
+
+    return run_framing_plans()
+
+
 def _composite():
     from design.composite_column_designer_aiscDG06 import run
 
@@ -180,6 +189,7 @@ COMMANDS = {
     "deflection": (_deflection, "check only the beam deflections (bars of the last beam design)"),
     "columns": (_columns, "design the columns (with slenderness) from the stored beam step"),
     "design": (_design, "analysis and design loop that resizes beams and columns"),
+    "plans": (_plans, "framing plans of every floor as one DXF (beams, columns, marks, grids)"),
     "composite": (_composite, "check a rectangular filled composite column (AISC DG6)"),
     "steel": (_steel, "check a wide-flange steel member (AISC 360-22)"),
     "wind": (_wind, "MWFRS wind pressures by the ASCE 7 directional procedure"),
