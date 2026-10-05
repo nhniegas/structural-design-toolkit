@@ -27,7 +27,17 @@ def select_output_directory(title: str = "Select the output folder") -> str:
     root.attributes("-topmost", True)
     folder_path = filedialog.askdirectory(title=title)
     root.destroy()
-    return os.path.normpath(folder_path) if folder_path else ""
+    if not folder_path:
+        return ""
+    # A folder typed in the dialog, or removed since it was last used, does not
+    # exist yet: make it now, not after the whole design has run.
+    folder_path = os.path.normpath(folder_path)
+    try:
+        os.makedirs(folder_path, exist_ok=True)
+    except OSError as error:
+        show_warning(f"The folder {folder_path} cannot be used: {error}", title=title)
+        return ""
+    return folder_path
 
 
 def select_save_file(default_name="Composite_Column_Report") -> str:

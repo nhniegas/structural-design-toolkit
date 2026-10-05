@@ -913,3 +913,17 @@ def test_smrf_midspan_stirrups_carry_the_probable_moment_shear():
                                        False, "GRAV")
     assert seismic["Spacing_Mid"].iloc[0] <= gravity["Spacing_Mid"].iloc[0]
     assert seismic["V_sway_max_kN"].iloc[0] > 0
+
+
+def test_a_beam_too_narrow_for_its_stirrup_legs_fails_and_the_others_are_designed():
+    """A 250 mm beam with 75 mm cover fits one 25 mm bar per layer, but a stirrup
+    has two legs. That beam fails with the reason; it must not stop the run."""
+    narrow = _mock_beam_properties("NARROW")
+    narrow["Width"], narrow["cc"] = 250.0, 75.0
+    props = pd.concat([narrow, _mock_beam_properties("B1")], ignore_index=True)
+    forces = pd.concat([_mock_force_table("NARROW", wu=40.0), _mock_force_table("B1")],
+                       ignore_index=True)
+    results = beam.execute_beam_design(props, forces, True, "GRAV")
+    status = results.groupby("UniqueName")["Design_Status"].first()
+    assert "STIRRUP LEGS" in status["NARROW"] and status["NARROW"].startswith("FAILED")
+    assert status["B1"] == "OK"

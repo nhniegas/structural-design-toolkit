@@ -454,3 +454,78 @@ def test_the_check_does_not_fail_a_model_for_its_combination_names():
     findings = [f for f in mc.check_combinations(data) if "ULS" in f.text]
     assert findings and findings[0].status == mc.WARN
     assert "ask which ones to design for" in findings[0].text
+
+
+# ----------------------------------------------------------------- defaults that are safe
+def test_only_an_unfactored_combination_matches_a_deflection_role():
+    matches = mi.deflection_matches(combinations())
+    assert matches[COMBO_DEAD] == ["SVC D"] and matches[COMBO_FULL] == ["SVC D+L"]
+    assert matches[COMBO_ROOF] == ["SVC D+Lr"] and matches[COMBO_SUSTAINED] == []
+    assert "1.4D" not in sum(matches.values(), [])
+
+
+def test_without_service_combinations_the_first_deflection_choice_adds_them(monkeypatch,
+                                                                              tmp_path):
+    """A model with factored combinations only: pressing Enter four times must not
+    check the deflections on 1.4 D or 1.2 D + 1.6 L."""
+    terms = {name: term for name, term in combinations().terms.items()
+             if not name.startswith("SVC")}
+    factored = mi.Combinations(list(terms), terms, TYPES)
+    dialogs = Dialogs(monkeypatch)
+    dialogs.select_option = None
+    shown = []
+
+    def first_option(title, prompt, options, default_index=0):
+        shown.append((options, default_index))
+        return options[default_index]
+
+    from utilities import _gui_helpers as gui
+
+    monkeypatch.setattr(gui, "select_option", first_option)
+    roles = mi.ask_deflection_roles(None, str(tmp_path / "m.EDB"), "t", factored)
+    assert roles == {role: role for role in mi.DEFLECTION_ROLES}   # all added by the toolkit
+    options, default = shown[0]
+    assert default == 0 and options[0].startswith("Let the toolkit add it")
+    assert any("1.4 D" in option for option in options[1:])        # factors are shown
+
+
+def test_a_listed_combination_is_saved_by_its_name_not_its_label(monkeypatch, tmp_path):
+    from utilities import _gui_helpers as gui
+
+    terms = {name: term for name, term in combinations().terms.items()
+             if not name.startswith("SVC")}
+    factored = mi.Combinations(list(terms), terms, TYPES)
+    monkeypatch.setattr(gui, "select_option",
+                        lambda title, prompt, options, default_index=0:
+                        next(o for o in options if o.startswith("1.4D")))
+    roles = mi.ask_deflection_roles(None, str(tmp_path / "m.EDB"), "t", factored)
+    assert roles[COMBO_DEAD] == "1.4D"
+
+
+def test_the_beam_seismic_shear_defaults_to_the_combination_closest_to_12d_f1l():
+    terms = {
+        "1.4D": ComboTerms("1.4D", {"D": 1.4, "SD": 1.4}),
+        "1.2D+1.6L+0.5Lr": ComboTerms("1.2D+1.6L+0.5Lr", {"D": 1.2, "L": 1.6, "Lr": 0.5}),
+        "1.2D+1.6Lr+0.5L": ComboTerms("1.2D+1.6Lr+0.5L", {"D": 1.2, "L": 0.5, "Lr": 1.6}),
+        "1.2D+1.0L": ComboTerms("1.2D+1.0L", {"D": 1.2, "L": 1.0}),
+    }
+    c = mi.Combinations(list(terms), terms, TYPES)
+    assert mi.ve_gravity_default(c, list(terms)) == "1.2D+1.0L"
+    # the combinations of sdt setup: 1.4 D is first in the list but has no live load
+    assert mi.ve_gravity_default(c, list(terms)[:3]) == "1.2D+1.6Lr+0.5L"
+    assert mi.ve_gravity_default(c, ["1.4D"]) == "1.4D"       # the only choice
+    assert mi.ve_gravity_default(c, []) is None
+
+
+def test_untagged_members_are_designed_as_they_are_by_default(monkeypatch, tmp_path):
+    """Tagging renames the members of the open model and drops its results, so it
+    is not what pressing Enter does."""
+    from design import concrete_workflow as cw
+
+    first = next(iter(cw.UNNAMED_OPTIONS))
+    assert cw.UNNAMED_OPTIONS[first] == "numbers"
+    ready, dialogs, connector = prepared(
+        monkeypatch, tmp_path, ["11", "12"], combinations(),
+        {"picks": ["1.4D", "1.2D+1.6L"]})
+    assert connector.include_numeric_members is True
+    assert ready.gravity_default == "1.2D+1.6L"

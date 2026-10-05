@@ -24,6 +24,7 @@ Supporting code:
 - `etabs_api/workflows/analysis_forces.py`: factored forces from the analysis results (combinations, spectrum and wind permutations, NSCP live load reduction, pattern live load).
 - `etabs_api/workflows/design_loop.py`, `sections.py`: the analysis and design loop with member resizing.
 - `etabs_api/workflows/tributary.py`: geometric tributary areas for the live load reduction.
+- `etabs_api/workflows/framing_plans.py`: framing plans of the model as a DXF (`sdt plans`).
 - `design/beam_deflection.py`: beam deflection checks (ACI 318M-14 24.2).
 - `design/column_slenderness.py`: slenderness of columns along their length (ACI 6.2.5, 6.6.4.5): unbraced lengths and k from the frame, the moment magnifier and the minimum moment. The sway effects come from the ETABS P-delta analysis.
 - `design/column_interaction.py`: the biaxial P-Mx-My design interaction surface of a column layout, built once and cached. It also provides the demand convex hull and the 3D figure for the calculation report.
@@ -89,6 +90,7 @@ Each guide in `docs/` covers one tool: how to run it, its inputs, what it writes
 
 - [Concrete beam and column workflow](docs/concrete_beam_column_design.md)
 - [Working on a model the toolkit did not set up](docs/existing_models.md)
+- [Framing plans as DXF](docs/etabs_framing_plans.md)
 - [Steel and composite modules](docs/steel_design_documentation.md)
 - [Wind load calculator](docs/wind_calculator_asce7_documentation.md)
 
@@ -108,6 +110,7 @@ sdt beams       # extract the forces and design the beams; results, calcs and sc
 sdt deflection  # only the beam deflections (bars of the last beam design)
 sdt columns     # design the columns from the stored beam step
 sdt design      # analysis and beam/column design loop that resizes members until they pass
+sdt plans       # framing plans of every floor as one DXF: beams, columns, marks, grids
 sdt composite   # rectangular filled composite column, AISC DG6 (no ETABS)
 sdt steel       # wide-flange steel member, AISC 360-22 (no ETABS)
 sdt wind        # MWFRS wind pressures, ASCE 7 directional procedure (no ETABS)
@@ -154,6 +157,10 @@ This defines the materials, frame sections, load patterns, UBC 97 response spect
 
 `sdt design` runs the analysis and the beam and column design again and again on a copy of the model, resizing the members until they pass (deflection included). See [Design loop](docs/etabs_design_loop.md).
 
+## Framing plans
+
+`sdt plans` writes the framing plans of the open model as one DXF, the floors side by side at 1:1 in mm. Beams and girders are dashed multilines at their true width, which keep their width when an end is dragged in AutoCAD, and stop at the column faces. Columns are solid at their true size and rotation, walls at their thickness. Every beam has its name; the column marks are on every floor or only where each column starts; the grids, with or without dimensions, are optional. See [Framing plans](docs/etabs_framing_plans.md).
+
 ## Beam and column design
 
 `sdt beams`, then `sdt columns` (and `sdt deflection` for the deflections alone). The design forces come from the analysis results, not from ETABS concrete design. The columns include slenderness: the sway effect from the ETABS P-delta analysis and the member effect by moment magnification. Each command saves its results (`.xlsx`), calculation report (`.pdf`) and schedules (`.dxf`) in the folder you choose. See [Concrete beam and column design](docs/concrete_beam_column_design.md).
@@ -192,6 +199,10 @@ Not in this version, and planned for later ones:
 - **Drift in the design loop.** Drift is checked on the final sizes and reported; members are not resized for it.
 - **Steel and composite members from the ETABS model.** `sdt steel` and `sdt composite` are standalone checks with typed inputs.
 - **Flanged beams.** The design loop resizes rectangular beams and rectangular or circular columns only.
+- **Irregularities and torsion.** The vertical irregularities (NSCP Table 208-9) and the plan ones (Table 208-10), with the accidental torsion amplifier Ax.
+- **P-delta stability ratio** (NSCP 208.6.3). Today only whether P-delta is switched on is checked.
+- **Redundancy factor ρ and the system factors.** ρ is a fixed value, and R and Ω0 are not checked against Table 208-11A by system.
+- **Slabs on the framing plans.** `sdt plans` draws beams, columns, walls and grids; slab marks and span arrows are not drawn yet.
 - **Seismic checks for other codes.** The period, base shear and spectrum scaling checks read UBC 97 seismic patterns; other patterns are designed for but those checks are reported as not applicable.
 - **Further checks and features** not listed here are added as they are built; each release lists what it adds.
 

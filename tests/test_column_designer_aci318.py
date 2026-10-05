@@ -1626,3 +1626,26 @@ def test_strong_column_rule_is_waived_at_a_lightly_loaded_top_joint():
     assert light["Column_Beam_Ratio"].isna().all()
     heavy = col._evaluate_smrf_joints(**_top_joint_model(900.0))
     assert heavy["Strong_Column_Check"].isin(["PASS", "FAIL"]).all()
+
+
+# --------------------------------------------------------------------------
+# CLEAR HEIGHT FOR THE CAPACITY SHEAR
+# --------------------------------------------------------------------------
+def test_the_clear_height_is_the_storey_less_the_beam_taken_out_once():
+    """ETABS stations stop at the rigid end zones, so they already leave the
+    beam out; it must not be taken out of their span a second time."""
+    clear = col.capacity_clear_height
+    # a typical story: 4500 joint to joint, 500 beam, stations over 4000
+    assert clear(4500.0, 4000.0, 500.0) == 4000.0
+    # footing story, edge column: 1000 joint to joint, stations over 500
+    assert clear(1000.0, 500.0, 500.0) == 500.0
+    # footing story, corner column: ETABS gives it a 375 end zone, stations over 625
+    assert clear(1000.0, 625.0, 500.0) == 500.0        # it was 625 - 500 = 125
+
+
+def test_the_clear_height_never_exceeds_the_station_span_and_falls_back_to_it():
+    clear = col.capacity_clear_height
+    assert clear(4500.0, 3800.0, 500.0) == 3800.0      # a longer end zone in the model
+    assert clear(0.0, 4000.0, 500.0) == 4000.0         # joint coordinates not known
+    assert clear(400.0, 300.0, 500.0) == 300.0         # a beam deeper than the stub
+    assert clear(4500.0, 4500.0, 0.0) == 4500.0        # no beam at the top

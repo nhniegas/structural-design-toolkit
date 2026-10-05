@@ -27,6 +27,9 @@ the same commands.
                     slenderness; save the results, calculations and schedule
     sdt design      analysis and beam/column design loop that resizes the
                     members until they pass (etabs_api/workflows/design_loop.py)
+    sdt plans       framing plans of every floor as one DXF: beams at their
+                    width, columns at their size, marks and grids
+                    (etabs_api/workflows/framing_plans.py)
     sdt composite   rectangular filled composite column, AISC DG6
                     (design/composite_column_designer_aiscDG06.py)
     sdt steel       wide-flange member, AISC 360-22
@@ -55,7 +58,7 @@ import argparse
 import sys
 from pathlib import Path
 
-VERSION = "0.1.1"  # the same as in pyproject.toml (tests/test_main.py checks it)
+VERSION = "0.2.0"  # the same as in pyproject.toml (tests/test_main.py checks it)
 # Hidden first argument: this process is the progress window of another one
 # (utilities/_gui_helpers.LoadingWindow). It is how the packaged program,
 # which has no separate Python to start, opens that window.
@@ -145,6 +148,12 @@ def _design():
     return run_design_cli()
 
 
+def _plans():
+    from etabs_api.workflows.framing_plans import run_framing_plans
+
+    return run_framing_plans()
+
+
 def _composite():
     from design.composite_column_designer_aiscDG06 import run
 
@@ -180,6 +189,7 @@ COMMANDS = {
     "deflection": (_deflection, "check only the beam deflections (bars of the last beam design)"),
     "columns": (_columns, "design the columns (with slenderness) from the stored beam step"),
     "design": (_design, "analysis and design loop that resizes beams and columns"),
+    "plans": (_plans, "framing plans of every floor as one DXF (beams, columns, marks, grids)"),
     "composite": (_composite, "check a rectangular filled composite column (AISC DG6)"),
     "steel": (_steel, "check a wide-flange steel member (AISC 360-22)"),
     "wind": (_wind, "MWFRS wind pressures by the ASCE 7 directional procedure"),
@@ -203,13 +213,27 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def run_and_restore(name: str):
+    """Run a command, then put back the units of the ETABS model it worked on
+    (the commands work in N-mm, whatever units the model is in)."""
+    try:
+        return COMMANDS[name][0]()
+    finally:
+        try:
+            from etabs_api.core.connection import restore_units
+
+            restore_units()
+        except Exception:  # noqa: BLE001 - never hide the command's own error
+            pass
+
+
 def run_command(name: str) -> bool:
     """Run one command for the menu. An error is printed, not raised, so the
     window stays open and the menu comes back. True when it ran to its end."""
     import traceback
 
     try:
-        COMMANDS[name][0]()
+        run_and_restore(name)
     except KeyboardInterrupt:
         print(f"\n{name} was stopped (Ctrl+C).")
         return False
@@ -268,7 +292,7 @@ def main(argv: list[str] | None = None) -> int:
             return menu()  # typed alone in a terminal, or the program double-clicked
         parser.print_help()
         return 1
-    COMMANDS[arguments.command][0]()
+    run_and_restore(arguments.command)
     return 0
 
 

@@ -4946,8 +4946,7 @@ def design_columns(
             # column bars changes the strong-column ratio but not the joint shear.
         joint_results = initial_joints
 
-    # Clear height of each column for its capacity shear: the joint-to-joint length
-    # less the deepest beam framing into its top joint (beams hang from the floor).
+    # Clear height of each column for its capacity shear (capacity_clear_height).
     beam_depth_at_joint: dict[str, float] = {}
     beam_depths = {}
     if {"Depth", "DesignType"} <= set(frame_data.columns):
@@ -4968,9 +4967,17 @@ def design_columns(
         stations = pd.to_numeric(force_frames[member]["Station"], errors="coerce").dropna()
         if stations.empty:
             continue
-        _, top_joint = column_ends(member)
-        clear_heights[member] = float(stations.max() - stations.min()) \
-            - beam_depth_at_joint.get(top_joint, 0.0)
+        bottom_joint, top_joint = column_ends(member)
+        joint_length = 0.0
+        if bottom_joint in point_coordinates and top_joint in point_coordinates:
+            joint_length = float(np.linalg.norm(
+                point_coordinates[top_joint] - point_coordinates[bottom_joint]))
+        elif "Length" in connection_by_name.columns:
+            length = pd.to_numeric(connection_by_name.loc[member].get("Length"), errors="coerce")
+            joint_length = float(length) if length == length else 0.0
+        clear_heights[member] = capacity_clear_height(
+            joint_length, float(stations.max() - stations.min()),
+            beam_depth_at_joint.get(top_joint, 0.0))
 
     # ACI 18.7.6.1.1: the column end moment for Ve need not exceed what the beams
     # deliver at their probable strength. At each joint the beams' sum of Mpr is
@@ -5407,6 +5414,25 @@ def design_columns(
     report.attrs["foundation_columns"] = sorted(foundation_columns)
     report.attrs["skipped_joints"] = dict(skipped_joints)
     return report, report_groups, joint_results
+
+
+def capacity_clear_height(joint_length: float, station_span: float,
+                          top_beam_depth: float) -> float:
+    """Clear height lu of a column for its capacity shear Ve = sum of Mpr / lu, mm.
+
+    It is the joint-to-joint length less the deepest beam at the top joint
+    (beams hang below the floor). The force stations of ETABS already stop at
+    the rigid end zones, so their span has the beam taken out once; taking it
+    out of that span again made lu too short, and far too short for a column
+    whose end zone ETABS makes shorter than the beam, such as a corner column
+    of a footing story. The station span is the upper limit, and what is used
+    when the joint-to-joint length is not known.
+    """
+    if joint_length > 0:
+        clear = joint_length - max(top_beam_depth, 0.0)
+        if clear > 0:
+            return min(clear, station_span) if station_span > 0 else clear
+    return station_span
 
 
 def _slenderness_section(engine: ColumnFlexureDesign) -> ColumnSection:

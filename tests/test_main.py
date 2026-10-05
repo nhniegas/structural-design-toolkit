@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import main  # noqa: E402
 
 
-@pytest.mark.parametrize("command", ["setup", "grids", "tag", "check", "analyze", "drift", "beams", "deflection", "columns", "design", "composite", "steel", "wind", "doctor"])
+@pytest.mark.parametrize("command", ["setup", "grids", "tag", "check", "analyze", "drift", "beams", "deflection", "columns", "design", "plans", "composite", "steel", "wind", "doctor"])
 def test_each_command_runs_its_workflow(command, monkeypatch):
     ran = []
     for name in main.COMMANDS:
@@ -187,3 +187,57 @@ def test_doctor_gives_the_install_command_when_latex_is_missing(monkeypatch):
     monkeypatch.setattr(latex_help.shutil, "which", lambda name: None)
     status, _, found = doctor.check_latex()
     assert status == doctor.WARN and latex_help.INSTALL_COMMAND in found
+
+
+# ----------------------------------------------------------------- units of the ETABS model
+class FakeUnitsModel:
+    def __init__(self, units):
+        self.units, self.calls = units, []
+
+    def GetPresentUnits(self):
+        return self.units
+
+    def SetPresentUnits(self, units):
+        self.units = units
+        self.calls.append(units)
+        return 0
+
+
+def test_a_command_works_in_n_mm_and_puts_the_units_of_the_model_back():
+    from etabs_api.core import connection
+
+    kn_m, n_mm = 6, connection.EXTRACTION_UNITS
+    model = FakeUnitsModel(kn_m)
+    connection.use_working_units(model)
+    assert model.units == n_mm
+    model.units = kn_m                     # ETABS shows a file's own units after opening it
+    connection.use_working_units(model)    # so the commands set them again
+    assert model.units == n_mm
+    connection.restore_units()
+    assert model.units == kn_m and model.calls == [n_mm, n_mm, kn_m]
+    connection.restore_units()             # nothing left to put back
+    assert model.calls == [n_mm, n_mm, kn_m]
+
+
+def test_a_model_already_in_n_mm_is_left_alone():
+    from etabs_api.core import connection
+
+    model = FakeUnitsModel(connection.EXTRACTION_UNITS)
+    connection.use_working_units(model)
+    connection.restore_units()
+    assert model.calls == []
+
+
+def test_the_units_are_put_back_even_when_the_command_fails(monkeypatch):
+    from etabs_api.core import connection
+
+    model = FakeUnitsModel(6)
+
+    def command():
+        connection.use_working_units(model)
+        raise RuntimeError("ETABS went away")
+
+    monkeypatch.setitem(main.COMMANDS, "beams", (command, "text"))
+    with pytest.raises(RuntimeError):
+        main.main(["beams"])
+    assert model.units == 6

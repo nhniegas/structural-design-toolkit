@@ -1694,16 +1694,26 @@ def execute_beam_design(
 
             anchorage_passed_all = True
             for loc_name, eng in flex_engines.items():
-                anch_check = check_stirrup_leg_anchorage(
-                    eng.n_top,
-                    eng.n_bot,
-                    governing_beam_legs,
-                    eng.max_bar_per_layer,
-                    d_m,
-                    d_s,
-                    b_width,
-                    c_cover,
-                )
+                try:
+                    anch_check = check_stirrup_leg_anchorage(
+                        eng.n_top,
+                        eng.n_bot,
+                        governing_beam_legs,
+                        eng.max_bar_per_layer,
+                        d_m,
+                        d_s,
+                        b_width,
+                        c_cover,
+                    )
+                except ValueError:
+                    # The width cannot hold a bar for every stirrup leg: this beam
+                    # fails, and the other beams are still designed.
+                    failure = (f"WIDTH FITS {eng.max_bar_per_layer} BAR(S) PER LAYER, "
+                               f"{governing_beam_legs} STIRRUP LEGS NEED {governing_beam_legs} "
+                               "(WIDEN THE BEAM, OR REDUCE THE BAR SIZE OR COVER)")
+                    if failure not in section_failures:
+                        section_failures.append(failure)
+                    continue
                 if not anch_check["anchorage_passed"]:
                     eng.n_top = anch_check["final_n_top"]
                     eng.n_bot = anch_check["final_n_bot"]

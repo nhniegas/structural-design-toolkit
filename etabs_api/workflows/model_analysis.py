@@ -190,8 +190,18 @@ def spectrum_cases(connector) -> dict[str, str]:
 
 
 def multiply_spectrum_scale(connector, case: str, factor: float) -> None:
-    """Multiply every scale factor of a response spectrum case."""
-    api = connector.sap_model.LoadCases.ResponseSpectrum
+    """Multiply every scale factor of a response spectrum case.
+
+    The model is unlocked first. ETABS accepts a new scale factor on a locked
+    model and the next run gives the new base shear, but it keeps the
+    accidental torsion of the run before, at the old scale: the story torsion
+    of the spectrum cases is then too small. Unlocked, the next run is
+    complete.
+    """
+    model = connector.sap_model
+    if model.GetModelIsLocked():
+        model.SetModelIsLocked(False)
+    api = model.LoadCases.ResponseSpectrum
     count, directions, functions, scales, systems, angles, status = api.GetLoads(case)
     if status != 0:
         raise RuntimeError(f"Could not read the loads of {case}.")
@@ -358,7 +368,12 @@ def reopen_model(connector) -> bool:
     path = os.path.splitext(os.path.normpath(str(model.GetModelFilename())))[0] + ".EDB"
     if not os.path.isfile(path):
         return False
-    return return_code(model.File.Save(path)) == 0 and return_code(model.File.OpenFile(path)) == 0
+    from etabs_api.core.connection import use_working_units
+
+    opened = (return_code(model.File.Save(path)) == 0
+              and return_code(model.File.OpenFile(path)) == 0)
+    use_working_units(model)  # a file opens in its own units
+    return opened
 
 
 def analyze_model(connector, zone_factor: float | None = None, ct: float | None = None,

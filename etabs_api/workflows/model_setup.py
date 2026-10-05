@@ -759,7 +759,11 @@ def save_and_reopen(model, path: str, log: SetupLog) -> bool:
     """
     if not log.check(model.File.Save(path), f"saving the model: {path}"):
         return False
-    return log.check(model.File.OpenFile(path), "opening the saved model again")
+    opened = log.check(model.File.OpenFile(path), "opening the saved model again")
+    from etabs_api.core.connection import use_working_units
+
+    use_working_units(model)  # a file opens in its own units
+    return opened
 
 
 def define_lateral_loads(model, settings: dict, log: SetupLog) -> None:
@@ -899,9 +903,13 @@ def make_seismic_per_code(model, path: str, settings: dict, log: SetupLog) -> bo
     with open(edited, "w", encoding="utf-8", errors="surrogateescape") as handle:
         handle.write(text)
     try:
+        from etabs_api.core.connection import use_working_units
+
         opened = log.check(model.File.OpenFile(edited), "opening the edited model text file")
-        return (opened and log.check(model.File.Save(path), "saving the per-code model")
+        done = (opened and log.check(model.File.Save(path), "saving the per-code model")
                 and log.check(model.File.OpenFile(path), "opening the saved per-code model"))
+        use_working_units(model)  # a file opens in its own units
+        return done
     finally:
         if os.path.exists(edited):
             os.remove(edited)
