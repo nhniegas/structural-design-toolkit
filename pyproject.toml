@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "structural-design-toolkit"
-version = "0.3.0"
+version = "0.3.1"
 description = "Structural design checks and ETABS workflows"
 requires-python = ">=3.10"
 license = "MIT"

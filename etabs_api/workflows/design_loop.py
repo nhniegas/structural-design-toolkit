@@ -102,6 +102,7 @@ class LoopSettings:
     sources: object = None  # model_inputs.Sources: where the inputs of the run came from
     targets: object = None  # dcr_targets.Targets: target ratios by member type and check
     carrier_depth: bool = False  # a beam is at least as deep as the beams it carries
+    compatibility_torsion: bool = False  # beam torsion at most phi Tcr (ACI 22.7.3.2)
 
 
 @dataclass
@@ -767,7 +768,8 @@ class Workbench:
                             self.settings.beam_bars, self.settings.long_limit,
                             progress=beam_progress,
                             earth_cover_stories=self.settings.beam_earth_cover_stories,
-                            carrier_depth=self.settings.carrier_depth)
+                            carrier_depth=self.settings.carrier_depth,
+                            compatibility_torsion=self.settings.compatibility_torsion)
 
     def design_columns(self, beams: pd.DataFrame) -> pd.DataFrame:
         from design.column_designer_aci318 import design_columns
@@ -1207,6 +1209,11 @@ def run_design_cli() -> dict | None:
     carrier_depth = ask_carrier_depth(title, last)
     if carrier_depth is None:
         return None
+    from design.concrete_workflow import ask_compatibility_torsion
+
+    compatibility_torsion = ask_compatibility_torsion(title, last)
+    if compatibility_torsion is None:
+        return None
     from etabs_api.workflows.drift_check import ask_drift_options, has_standard_combinations
 
     drift_options = ask_drift_options(title + ": drift of the final sizes",
@@ -1291,6 +1298,7 @@ def run_design_cli() -> dict | None:
         check_foundation_level=levels[1], inner_tie_style=tie_style,
         deflection_roles=ready.deflection_roles, sources=sources,
         targets=targets, carrier_depth=carrier_depth,
+        compatibility_torsion=compatibility_torsion,
     )
 
     # the working copy: the original model is not changed
@@ -1308,6 +1316,8 @@ def run_design_cli() -> dict | None:
             bench.log(f"Target ratio: {line}")
         if carrier_depth:
             bench.log("A beam is at least as deep as the beams it carries.")
+        if compatibility_torsion:
+            bench.log("Beam torsion at most phi Tcr (compatibility torsion, ACI 22.7.3.2).")
         bench.log(f"Combinations: {len(combos)} ULS ({seismic})")
         bench.log("Size ranges (from, to, step): " + "; ".join(
             f"{family} " + " x ".join(
@@ -1383,6 +1393,11 @@ def loop_summary(summary: dict, settings: LoopSettings, original: str, working: 
                        (dcr_targets.GIRDER, dcr_targets.BEAM, dcr_targets.COLUMN))
     if settings.carrier_depth:
         out.add("Carrier depth", "a beam is at least as deep as the beams it carries")
+    if settings.compatibility_torsion:
+        from design.concrete_workflow import TORSION_NOTE
+
+        out.add("Beam torsion", "at most phi Tcr (compatibility torsion, ACI 22.7.3.2)")
+        out.note(TORSION_NOTE)
     if settings.sources is not None:
         settings.sources.add_to(out)
     if settings.beam_earth_cover_stories:

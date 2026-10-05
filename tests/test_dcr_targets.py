@@ -217,3 +217,45 @@ def test_the_carrier_depth_question_defaults_to_no(monkeypatch):
                         lambda title, prompt, options, default_index=0: options[default_index])
     assert cw.ask_carrier_depth("t") is False
     assert cw.ask_carrier_depth("t", {"carrier_depth": True}) is True
+
+
+# ----------------------------------------------------------------- what holds a beam end
+def test_an_end_on_an_unsplit_girder_is_carried_not_free():
+    held = bc.end_conditions(*framing())                 # B1 from the girder's mid span
+    assert held[("B1", "m")] == bc.BEAM_END
+    assert held[("B1", "n")] == bc.FREE_END              # nothing at its far end
+    assert held[("G1", "a")] == held[("G1", "b")] == bc.COLUMN_END
+
+
+def chain(tip_held: bool):
+    """A column at a; beam pieces a-b and b-c in line; c free, or on a girder."""
+    points = pd.DataFrame({"UniqueName": ["a0", "a", "b", "c", "g1", "g2"],
+                           "X": [0, 0, 2000, 4000, 4000, 4000], "Y": [0, 0, 0, 0, -3000, 3000],
+                           "Z": [0, 3000, 3000, 3000, 3000, 3000]})
+    rows = [("C1", "Column", "a0", "a"), ("R", "Beam", "a", "b"), ("T", "Beam", "b", "c")]
+    if tip_held:
+        rows.append(("G", "Beam", "g1", "g2"))            # a girder across the tip, not split
+    return pd.DataFrame(rows, columns=["UniqueName", "DesignType", "UniquePtI", "UniquePtJ"]), points
+
+
+def test_a_cantilever_in_two_pieces_is_still_a_cantilever():
+    connectivity, points = chain(tip_held=False)
+    held = bc.end_conditions(connectivity, points)
+    assert held[("T", "c")] == bc.FREE_END and held[("R", "b")] == bc.FREE_END
+    status = beam.identify_cantilever_beams(None, connectivity, points).set_index("UniqueName")
+    assert status.loc["R", "SupportStatus"] == "Cantilever (Free at PtJ)"
+
+
+def test_a_beam_from_a_column_to_a_girder_is_not_a_cantilever():
+    connectivity, points = chain(tip_held=True)
+    held = bc.end_conditions(connectivity, points)
+    assert held[("T", "c")] == bc.BEAM_END and held[("R", "b")] == bc.BEAM_END
+    status = beam.identify_cantilever_beams(None, connectivity, points).set_index("UniqueName")
+    assert status.loc["R", "SupportStatus"] == "Supported Both Ends"
+    assert status.loc["T", "SupportStatus"] == beam.GRAVITY_BEAM_STATUS
+
+
+def test_without_coordinates_the_supports_are_classified_as_before():
+    connectivity, _ = chain(tip_held=True)
+    status = beam.identify_cantilever_beams(None, connectivity).set_index("UniqueName")
+    assert status.loc["R", "SupportStatus"] == "Cantilever (Free at PtJ)"

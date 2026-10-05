@@ -25,6 +25,7 @@ sdt design
 | Interior ties of the column schedule | Crossties or closed inner hoops, as in `sdt columns`; used for the `Column_Schedule.dxf` of the final design |
 | Deflection limit | L/480 (partitions likely to be damaged) or L/240 |
 | Target ratios | The code limits, the targets saved for this model, or your own for girders, beams and columns, check by check. The loop then sizes the members to them: a member above its target is made larger, and "make smaller" is measured against the target. See the [concrete guide](concrete_beam_column_design.md#target-ratios) |
+| Beam torsion | The analysis torsion, or at most φTcr (compatibility torsion), as in `sdt beams` |
 | Depth of a beam that carries others | When yes, a carrier shallower than a beam it carries is made deeper, and no carrier is made shallower than the beams it carries |
 | Loop limits | One dialog, remembered for next time. **Shared:** size increment past the setup ranges (50 mm), the downsizing threshold (0.7), the number of rounds (5). **Beams:** largest width and depth, iterations in a round (10), the beam line similarity (30 %). **Columns:** largest side, largest side ratio long / short (2), iterations in a round (10). The largest sizes are real limits: a setup range that goes beyond them is cut there |
 | Drift of the final sizes | Where to read the drift, static and/or spectrum drift combinations, and the wind limit, as in [`sdt drift`](etabs_drift.md). Without `DRIFT` / `WDRIFT` combinations in the model, you pick the drift combinations |

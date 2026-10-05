@@ -58,7 +58,7 @@ Every story is included, those below the ground level too. A model set up before
 | | Drift ΔM = 0.7 R ΔS at most 0.025 h (T < 0.7 s) or 0.020 h, from the drift patterns and the spectrum drift cases (names ending in D) | 208.6.4.2, 208.6.5.1 |
 | Wind | Story range; speed, exposure, Kzt, G and Kd for you to confirm | 207 |
 | Combinations | Strength combinations exist (a model whose combinations are not named `ULS` gets a warning, not a failure: the design commands ask which ones to design for, see [existing models](existing_models.md)); every combination refers to existing cases; seismic strength combinations carry Ev = 0.5 Ca I D on the dead load, (1.2 + Ev) D and (0.9 − Ev) D | 203.3.1, 208.6.1 |
-| Analysis | Linear static cases on preset P-Delta; the P-delta method | 208.6.3 |
+| Analysis | Beams with the full torsional stiffness (J modifier near 1), which attract large compatibility torsion (ACI 22.7.3.2); Linear static cases on preset P-Delta; the P-delta method | 208.6.3 |
 | | Mass source without double self weight | 208.6.1 |
 | | Effective cracked-section I, the member modifier times the section modifier as ETABS applies them, of 0.35 (beams) and 0.70 (columns). A modifier assigned to both the members and the sections is applied twice: 0.12 / 0.49 | 208.6.2, 406.6.3.1.1 |
 | | Mass and weight modifiers equal to 1 (any other value reduces W) | 208.6.1 |
