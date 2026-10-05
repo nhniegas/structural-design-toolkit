@@ -192,6 +192,10 @@ Not in this version, and planned for later ones:
 - **Drift in the design loop.** Drift is checked on the final sizes and reported; members are not resized for it.
 - **Steel and composite members from the ETABS model.** `sdt steel` and `sdt composite` are standalone checks with typed inputs.
 - **Flanged beams.** The design loop resizes rectangular beams and rectangular or circular columns only.
+- **Irregularities and torsion.** The vertical irregularities (NSCP Table 208-9) and the plan ones (Table 208-10), with the accidental torsion amplifier Ax.
+- **P-delta stability ratio** (NSCP 208.6.3). Today only whether P-delta is switched on is checked.
+- **Redundancy factor ρ and the system factors.** ρ is a fixed value, and R and Ω0 are not checked against Table 208-11A by system.
+- **Framing plans as DXF** from the ETABS model, with beam widths, column sizes and member marks.
 - **Seismic checks for other codes.** The period, base shear and spectrum scaling checks read UBC 97 seismic patterns; other patterns are designed for but those checks are reported as not applicable.
 - **Further checks and features** not listed here are added as they are built; each release lists what it adds.
 

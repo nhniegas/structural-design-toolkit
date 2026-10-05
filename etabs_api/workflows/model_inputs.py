@@ -204,6 +204,53 @@ def suggest_deflection(combinations: Combinations) -> dict[str, list[str]]:
     return out
 
 
+ROLE_FACTORS = {  # dead, live, roof live of each deflection role: unfactored
+    COMBO_DEAD: (1.0, 0.0, 0.0), COMBO_FULL: (1.0, 1.0, 0.0),
+    COMBO_SUSTAINED: (1.0, 0.25, 0.0), COMBO_ROOF: (1.0, 0.0, 1.0),
+}
+
+
+def deflection_matches(combinations: Combinations) -> dict[str, list[str]]:
+    """The model's combinations that are exactly a deflection role: gravity cases
+    only, with the unfactored factors of the role. A factored combination is
+    never a match (it would give deflections that are too large)."""
+    out: dict[str, list[str]] = {role: [] for role in ROLE_FACTORS}
+    for name in combinations.linear:
+        if combinations.kind(name) != GRAVITY:
+            continue
+        f = combinations.factors(name)
+        for role, (dead, live, roof) in ROLE_FACTORS.items():
+            if (abs(f["dead"] - dead) < 0.005 and abs(f["live"] - live) < 0.005
+                    and abs(f["roof"] - roof) < 0.005 and f["other"] < 0.005):
+                out[role].append(name)
+    return out
+
+
+def factors_text(combinations: Combinations, name: str) -> str:
+    """``1.2 D + 1.6 L`` of a combination, for a choice the user must judge."""
+    f = combinations.factors(name)
+    parts = [f"{f[key]:g} {symbol}" for key, symbol in
+             (("dead", "D"), ("live", "L"), ("roof", "Lr")) if abs(f[key]) > 1e-9]
+    return " + ".join(parts) if parts else "no gravity load"
+
+
+def ve_gravity_default(combinations: Combinations, choices: list[str]) -> str | None:
+    """The choice closest to 1.2 D + f1 L, the factored gravity load of the beam
+    seismic shear Ve (ACI 318-14 18.6.5.1; NSCP 2015 203.3 with f1 = 0.5 or 1.0).
+
+    A combination without live load, such as 1.4 D, leaves the live load out
+    of Ve and is ranked last.
+    """
+    def score(name: str) -> float:
+        f = combinations.factors(name)
+        live = min(abs(f["live"] - 0.5), abs(f["live"] - 1.0))
+        return (abs(f["dead"] - 1.2) + live + 0.25 * abs(f["roof"]) + f["other"]
+                + (1.0 if f["live"] <= 1e-9 else 0.0))
+
+    known = [name for name in choices if name in combinations.terms]
+    return min(known, key=score) if known else (choices[0] if choices else None)
+
+
 def deflection_roles(names: list[str], saved: dict | None = None) -> dict[str, str | None]:
     """Combination of each deflection role: the standard name when the model has
     it, else the saved choice when it still exists, else None (to be asked).
@@ -514,19 +561,30 @@ def ask_deflection_roles(connector, model_path: str, title: str,
     if all(roles.values()):
         return {role: str(name) for role, name in roles.items()}
     suggestions = suggest_deflection(combinations)
+    matches = deflection_matches(combinations)
     for role, name in roles.items():
         if name is not None:
             continue
+        # First what is safe: a combination that is exactly the unfactored role,
+        # else the toolkit's own. Other gravity combinations follow with their
+        # factors, since a factored one gives deflections that are too large.
         add = ADD_IT.format(name=role)
-        options = suggestions[role][:MAX_CHOICES - 1] + [add]
+        exact = matches[role]
+        others = {f"{other}  [{factors_text(combinations, other)}]": other
+                  for other in suggestions[role] if other not in exact}
+        shown = list(others)[:max(MAX_CHOICES - 1 - len(exact), 0)]
+        options = exact + [add] + shown
         chosen = select_option(
             title, f"Deflection check: which combination is {DEFLECTION_ROLES[role]}, "
-            "unfactored? The model has none under the standard name. Existing gravity "
-            "combinations are listed, the closest first.", options,
-            default_index=0 if len(options) > 1 else len(options) - 1)
+            "unfactored? The model has none under the standard name. "
+            + ("The first choice has exactly these factors. " if exact else
+               "No combination of the model has exactly these factors, so the first choice "
+               "lets the toolkit add it. ")
+            + "The other gravity combinations are listed with their factors: a factored "
+            "combination gives deflections that are too large.", options, default_index=0)
         if chosen is None:
             return None
-        roles[role] = role if chosen == add else chosen
+        roles[role] = role if chosen == add else others.get(chosen, chosen)
     save(model_path, deflection=roles)
     return {role: str(name) for role, name in roles.items()}
 

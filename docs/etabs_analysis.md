@@ -21,7 +21,7 @@ The report is printed in the terminal and the model is saved. A separate window 
 
 ## What it does
 
-1. Runs every load case.
+1. Runs every load case. The command works in N-mm, whatever the units of the model, and puts the model's units back at the end; the spectrum scale g I / R is a length per second squared, so it depends on the units.
 2. Puts every response spectrum case back to its unscaled factor, g I / R from the seismic patterns, so a second run does not keep the first run's scaling. For each response spectrum case (`RSAX` along U1, `RSAY` along U2), compares its base shear with the largest static seismic case of the same direction (the load patterns of type Seismic). The drift cases `RSAXD` and `RSAYD` (names ending in D) are compared with the drift patterns (type Seismic (Drift): `EQXSD`, `EQYSD`), whose period is not capped (NSCP 208.6.5.2). So the drift cases are not inflated to the capped-period strength shear, and the drift check in `sdt check` uses them. When the spectrum base shear is lower, the scale factor of the spectrum case is multiplied by static / spectrum and the analysis runs again. The analysis is linear, so one scaling is exact; it is repeated (at most three times) until the two agree within 1 %. A spectrum base shear above the static one is left as it is.
 3. Reports:
 
@@ -44,6 +44,8 @@ Sum X: 98.3 %   Sum Y: 98.6 %
 Seismic weight from the mass source: 14,567.5 kN
 Base reaction of the same loads:     14,567.5 kN
 ```
+
+The model is unlocked before each scale factor is changed. ETABS accepts a new factor on a locked model and gives the new base shear, but keeps the accidental torsion of the run before; the story torsion of the spectrum cases would then be too small.
 
 ## Not covered yet
 

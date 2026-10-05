@@ -75,3 +75,37 @@ def test_hn_is_measured_from_the_ground_level(elevations, ground, height):
 def test_report_states_the_height_above_the_ground():
     report = ma.AnalysisReport(method_a=0.5, cap=1.3, height=11500.0, ground_elevation=0.0)
     assert "Height above the ground hn = 11.50 m" in report.text()
+
+
+def test_the_model_is_unlocked_before_the_spectrum_scale_is_changed():
+    """On a locked model ETABS takes the new scale but keeps the accidental
+    torsion of the run before, so the next run must start from an unlocked model."""
+    calls = []
+
+    class Spectrum:
+        def GetLoads(self, case):
+            return (1, ["U1"], ["RS"], [1000.0], ["Global"], [0.0], 0)
+
+        def SetLoads(self, case, count, directions, functions, scales, systems, angles):
+            calls.append(("set", list(scales)))
+            return 0
+
+    class Model:
+        locked = True
+
+        class LoadCases:
+            ResponseSpectrum = Spectrum()
+
+        def GetModelIsLocked(self):
+            return self.locked
+
+        def SetModelIsLocked(self, value):
+            calls.append(("locked", value))
+            self.locked = value
+            return 0
+
+    class Connector:
+        sap_model = Model()
+
+    ma.multiply_spectrum_scale(Connector(), "RSAX", 1.25)
+    assert calls == [("locked", False), ("set", [1250.0])]

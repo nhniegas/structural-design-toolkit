@@ -281,10 +281,9 @@ def run_beams() -> DesignStore | None:
     gravity = None
     if smrf:
         choices = ready.gravity_choices[:24]  # what one choice dialog can show
-        previous = last.get("gravity_combo")
-        gravity = select_option(title, "Gravity combination for the beam seismic shear:",
-                                choices, default_index=choices.index(previous)
-                                if previous in choices else 0)
+        gravity = select_option(title, VE_GRAVITY_PROMPT, choices,
+                                default_index=choices.index(ready.gravity_default)
+                                if ready.gravity_default in choices else 0)
         if gravity is None:
             return None
     bars = _ask_numbers(title, "Beam bars and cover.", BEAM_FIELDS, last)
@@ -346,14 +345,21 @@ class ModelReady:
     combos: list[str]
     seismic_key: str | None          # EQ / RSA / Both for the ULS names; None when picked
     gravity_choices: list[str]
+    gravity_default: str | None      # the choice closest to 1.2 D + f1 L, for Ve
     deflection_roles: dict[str, str]
     sources: object                  # model_inputs.Sources
 
 
+VE_GRAVITY_PROMPT = (
+    "Gravity combination for the beam seismic shear Ve. It is the factored gravity load on "
+    "the span, 1.2 D + f1 L (ACI 318-14 18.6.5.1, NSCP 2015 203.3); the closest combination "
+    "is selected. A combination without live load, such as 1.4 D, leaves the live load out.")
 SEISMIC_CHOICES = {"Static (EQ)": "EQ", "Response spectrum (RSA)": "RSA", "Both": "Both"}
+# The first choice changes nothing in the model. Tagging renames the members of
+# the open model, unlocks it and drops its results.
 UNNAMED_OPTIONS = {
-    "Tag them now, in this model (sdt tag)": "tag",
     "Design them as they are, with their ETABS numbers": "numbers",
+    "Tag them now, in this model (it renames the members and drops the results)": "tag",
     "Leave the unnamed members out": "skip",
 }
 
@@ -486,8 +492,9 @@ def prepare_model(connector, model_path: str, title: str, command: str,
                                "types: " + ", ".join(added))
     if not own and not added:
         sources.model.append("deflection combinations (DEF names)")
-    return ModelReady(combos, seismic_key, mi.gravity_options(combinations, combos), roles,
-                      sources)
+    gravity_choices = mi.gravity_options(combinations, combos)
+    return ModelReady(combos, seismic_key, gravity_choices,
+                      mi.ve_gravity_default(combinations, gravity_choices[:24]), roles, sources)
 
 
 def beam_stories(connector) -> list[str]:

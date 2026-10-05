@@ -21,7 +21,7 @@ sdt columns    # design the columns from the stored beam step, save the column o
 | Seismic combinations | Static (EQ), response spectrum (RSA) or both. Gravity and wind `ULS` combinations are always included |
 | Live load reduction, tributary method, pattern live load | See [Extraction](#extraction) |
 | SMRF (seismic) design | One setting for the beams and the columns. Gravity beams (on other beams only) are designed for gravity in any case |
-| Gravity combination for the beam seismic shear | Only with SMRF; the combinations without seismic or wind terms are offered |
+| Gravity combination for the beam seismic shear | Only with SMRF; the combinations without seismic or wind terms are offered. The shear Ve uses the factored gravity load 1.2 D + f1 L (ACI 318-14 18.6.5.1, NSCP 2015 203.3), so the combination closest to it is selected; a combination without live load, such as 1.4 D, leaves the live load out |
 | Beam bars and cover | Main bar, stirrup and web bar (mm), web bar fy (MPa), cover (mm) |
 | Cover against earth | Whether the beams of any floor level need 75 mm cover (cast against or exposed to earth: footing tie beams, ground beams). If yes, pick the levels; the other beams keep the typed cover. Not asked when the typed cover is 75 mm or more. The levels are remembered and offered again |
 | Deflection limit | Partitions likely to be damaged (L/480) or not (L/240) |
@@ -106,7 +106,7 @@ Members with a purely numeric ETABS name are skipped by default; only named memb
 
 **A model with other names.** When no combination is named `ULS`, you pick the strength combinations from the model's own; when the `DEF` deflection combinations are missing, you pick an existing combination for each or let the toolkit add it. A dialog first lists what was found and what is missing. The summary ends with what was read from the model, what you answered and what was assumed. `sdt columns` uses the forces stored by `sdt beams`, so it carries the same list. See [Working on a model the toolkit did not set up](existing_models.md).
 
-Units: every table is read in N and mm, whatever units the model was created in and whatever the ETABS window displays. If the model's API units differ, the extraction switches them to N-mm for each read and restores them afterwards. Forces are then written to Excel in kN and kN-m, dimensions in mm, strengths in MPa.
+Units: every command works in N and mm, whatever units the model was created in. When a command attaches to ETABS it sets the model's units to N-mm, and it puts the model's own units back when it ends (also when it stops with an error). So a model in kN-m gives the same results as the same model in N-mm. A model that a command saves (`setup`, `grids`, `tag`, `analyze`, `drift`, `design`) is saved while in N-mm, so ETABS shows N-mm when that file is opened again; set your units in ETABS as usual. The model itself is not changed by this. Forces are then written to Excel in kN and kN-m, dimensions in mm, strengths in MPa.
 
 ### Load-combination permutations
 

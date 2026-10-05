@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import atexit
 import os
 import sys
 from contextlib import contextmanager
@@ -96,6 +97,46 @@ def running_etabs(helper=None):
     return None
 
 
+# The models whose units a command changed to its working units, with the units
+# to put back: (the model, its units before).
+_BORROWED_UNITS: list[tuple[object, int]] = []
+
+
+def use_working_units(model) -> None:
+    """Make N-mm the present units of ``model`` for the rest of the command.
+
+    Every number the toolkit passes to ETABS or reads from it is in N and mm:
+    section sizes, coordinates, elevations, and the response spectrum scale
+    g I / R. ETABS takes such a number in the model's present units, so a
+    model in kN-m would get a spectrum a thousand times too large. The units
+    the model had are put back by ``restore_units`` when the command ends.
+    Call it again after opening a file: ETABS then shows that file's units.
+    """
+    try:
+        original = int(model.GetPresentUnits())
+    except Exception:
+        return
+    if original == EXTRACTION_UNITS:
+        return
+    if not any(borrowed is model for borrowed, _ in _BORROWED_UNITS):
+        _BORROWED_UNITS.append((model, original))
+    ensure_success(model.SetPresentUnits(EXTRACTION_UNITS),
+                   f"SetPresentUnits({UNIT_NAMES[EXTRACTION_UNITS]})")
+
+
+def restore_units() -> None:
+    """Put back the units of every model a command worked on (``use_working_units``)."""
+    while _BORROWED_UNITS:
+        model, original = _BORROWED_UNITS.pop()
+        try:
+            model.SetPresentUnits(original)
+        except Exception:  # ETABS was closed, or the model is gone
+            pass
+
+
+atexit.register(restore_units)
+
+
 def attach_running_etabs(title: str = "ETABS"):
     """A connector on the ETABS session that is running; None, with a message, when
     there is none."""
@@ -108,6 +149,7 @@ def attach_running_etabs(title: str = "ETABS"):
     connector = ETABSConnector()
     connector.etabs_object, connector.sap_model, connector.is_connected = (
         etabs, etabs.SapModel, True)
+    use_working_units(connector.sap_model)
     return connector
 
 
@@ -151,6 +193,7 @@ class ETABSConnector:
                     self.etabs_object = etabs
                     self.sap_model = self.etabs_object.SapModel
                     self.is_connected = True
+                    use_working_units(self.sap_model)
                     return True
         except Exception as exc:
             # No running ETABS session to attach to: fall through and open a model.
@@ -184,6 +227,7 @@ class ETABSConnector:
         self.etabs_object.ApplicationStart()
         try:
             self.sap_model.File.OpenFile(self.model_path)
+            use_working_units(self.sap_model)  # a file opens in its own units
             func_name = sys._getframe().f_code.co_name
             print(f"[{func_name}] Model opened successfully: {self.model_path}")
             return True
@@ -306,8 +350,8 @@ class ETABSConnector:
     def extraction_units(self):
         """Read in N-mm for the duration of the block, then restore the model's units.
 
-        Does nothing when the model is already in N-mm. The display units in the
-        ETABS window are not affected.
+        Does nothing when the model is already in N-mm, which is the case in
+        every command: ``use_working_units`` sets it when ETABS is attached.
         """
         original = self.get_units()
         if original == EXTRACTION_UNITS:

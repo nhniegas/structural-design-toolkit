@@ -1137,9 +1137,11 @@ def run_design_cli() -> dict | None:
     gravity = None
     if smrf:
         choices = ready.gravity_choices[:24]  # what one choice dialog can show
-        gravity = select_option(title, "Gravity combination for the beam seismic shear:",
-                                choices, default_index=choices.index(last["gravity_combo"])
-                                if last.get("gravity_combo") in choices else 0)
+        from design.concrete_workflow import VE_GRAVITY_PROMPT
+
+        gravity = select_option(title, VE_GRAVITY_PROMPT, choices,
+                                default_index=choices.index(ready.gravity_default)
+                                if ready.gravity_default in choices else 0)
         if gravity is None:
             return None
     beam_bars = _ask_numbers(title, "Beam bars and cover.", BEAM_FIELDS, last)

@@ -19,7 +19,7 @@ Choose **Continue** or **Stop**. On a model that has everything, the dialog is n
 | Missing | What the command does |
 |---|---|
 | Strength combinations named `ULS` | You pick the combinations to design for from the model's own. Envelope combinations are left out of the list, because an envelope is not one set of forces |
-| Deflection combinations named `DEF` | For each of the four cases (dead; dead + live; dead + 25 % live; dead + roof live) you pick an existing gravity combination, listed closest first, or choose **Let the toolkit add it**. A combination added by the toolkit is built from the load pattern types of the model |
+| Deflection combinations named `DEF` | For each of the four cases (dead; dead + live; dead + 25 % live; dead + roof live) the first choice is a combination of the model with exactly those unfactored factors, or, when there is none, **Let the toolkit add it**. The other gravity combinations follow with their factors shown (for example `1.4 D`): a factored combination gives deflections that are too large, so it is never the choice made for you. A combination added by the toolkit is built from the load pattern types of the model |
 | Drift combinations named `DRIFT` / `WDRIFT` | In `sdt drift` and at the end of `sdt design`, you pick the seismic and wind combinations to check the drift on |
 | Member names | Members that still have their ETABS number: tag them now, design them with their numbers, or leave them out (see below) |
 | Section size ranges | `sdt design` shows every section family with a range to confirm or change. The dialog lists the sizes the model has now, and the range shown always holds them |
@@ -31,8 +31,8 @@ Your answers are saved in `<model>.setup.json` under `"model"`, and offered agai
 
 `sdt tag` gives each member its level, type and number (`2GX-1`, `3-C5`), and the schedules use those names. When members still have their ETABS numbers, the design command offers three choices:
 
-- **Tag them now**, in this model.
-- **Design them as they are.** The results and schedules then list the ETABS numbers. ETABS splits a girder where a secondary beam frames into it; without tags, the pieces of one beam line are found from the geometry (beams in line that meet at a joint with no column), so deflection and resizing still treat them as one beam.
+- **Design them as they are** (the first choice: it changes nothing in the model). The results and schedules then list the ETABS numbers. ETABS splits a girder where a secondary beam frames into it; without tags, the pieces of one beam line are found from the geometry (beams in line that meet at a joint with no column), so deflection and resizing still treat them as one beam.
+- **Tag them now**, in this model. Tagging renames the members of the open model, unlocks it and drops its analysis results; in `sdt design` it happens before the working copy is made, so it is the one choice that changes your original model.
 - **Leave the unnamed members out** (when only some are unnamed).
 
 ## Sections with other names (`sdt design`)
