@@ -35,6 +35,7 @@ import pandas as pd
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from design import dcr_targets  # noqa: E402
 from utilities.latex_help import missing_pdf_reason  # noqa: E402
 
 STORE_SUFFIX = " - design data.pkl"
@@ -296,14 +297,22 @@ def run_beams() -> DesignStore | None:
     divisor = ask_deflection_limit()
     if divisor is None:
         return None
+    beam_types = (dcr_targets.GIRDER, dcr_targets.BEAM)
+    targets = ask_dcr_targets(model_path, title, beam_types)
+    if targets is None:
+        return None
+    carrier_depth = ask_carrier_depth(title, last)
+    if carrier_depth is None:
+        return None
     folder = select_output_directory("Folder for the beam results, calculations and schedules")
     if not folder:
         return None
     _remember({**({"seismic": seismic_key} if seismic_key else {}), "smrf": smrf,
-               "gravity_combo": gravity, **bars, "beam_earth_cover_stories": earth_stories})
+               "gravity_combo": gravity, **bars, "beam_earth_cover_stories": earth_stories,
+               "carrier_depth": carrier_depth})
 
     stem = os.path.splitext(os.path.basename(model_path))[0]
-    with LoadingWindow("Beam design") as window:
+    with dcr_targets.use(targets), LoadingWindow("Beam design") as window:
         tables, notes = extract(connector, combos, options, progress=window.update,
                                 deflection_roles=ready.deflection_roles)
         store = DesignStore(model_path, os.path.getmtime(model_path), tables, {
@@ -311,12 +320,13 @@ def run_beams() -> DesignStore | None:
             "beam_bars": bars, "long_limit": divisor,
             "beam_earth_cover_stories": earth_stories,
             "deflection_roles": ready.deflection_roles,
+            "dcr_targets": targets.to_saved(), "carrier_depth": carrier_depth,
             "sources": {"model": list(ready.sources.model),
                         "answered": list(ready.sources.answered),
                         "assumed": list(ready.sources.assumed)},
         })
         results = design_beams(tables, smrf, gravity, bars, divisor, progress=window.update,
-                               earth_cover_stories=earth_stories)
+                               earth_cover_stories=earth_stories, carrier_depth=carrier_depth)
         store.beam_results = results
         store.save()
         window.update("Saving 1 of 3: the results workbook (.xlsx)")
@@ -327,6 +337,9 @@ def run_beams() -> DesignStore | None:
         pdf = export_beam_pdf(results, os.path.join(folder, f"{stem} - Beam Calculations.pdf"),
                               smrf, gravity)
     summary = beam_summary(results, "sdt beams", model_path, len(combos), earth_stories)
+    add_targets_to(summary, targets, beam_types)
+    if carrier_depth:
+        summary.add("Carrier depth", "a beam is at least as deep as the beams it carries")
     ready.sources.add_to(summary)
     for note in notes:
         summary.note(note)
@@ -497,6 +510,90 @@ def prepare_model(connector, model_path: str, title: str, command: str,
                       mi.ve_gravity_default(combinations, gravity_choices[:24]), roles, sources)
 
 
+CODE_LIMITS = "Use the code limits (every ratio 1.00)"
+SET_TARGETS = "Set target ratios"
+CARRIER_NO = "No - the depths are as modelled"
+CARRIER_YES = "Yes - a beam is at least as deep as the beams it carries"
+
+
+def ask_dcr_targets(model_path: str, title: str, members: tuple[str, ...]
+                    ) -> dcr_targets.Targets | None:
+    """The target ratios of these member types; None when a dialog is closed.
+
+    The code passes a check at a ratio of 1.00. A target below it is a margin
+    the engineer chooses, by member type and check. The targets are saved
+    with the model and offered again.
+    """
+    from etabs_api.workflows import model_inputs as mi
+    from utilities._gui_helpers import enter_values, select_option, show_warning
+
+    saved = dcr_targets.Targets.from_saved(mi.load(model_path).get("dcr"))
+    mine = saved.lines(members)
+    options = [CODE_LIMITS] + (["Use the targets saved for this model"] if mine else []) \
+        + [SET_TARGETS]
+    chosen = select_option(
+        title, "Target ratios (demand / capacity). The code passes a check at 1.00; a lower "
+        "target is a margin of your own, by member type and check. The members are designed "
+        "to stay at or below it."
+        + ("\n\nSaved for this model:\n  " + "\n  ".join(mine) if mine else ""),
+        options, default_index=1 if mine else 0)
+    if chosen is None:
+        return None
+    if chosen == CODE_LIMITS:
+        return dcr_targets.Targets()
+    if chosen != SET_TARGETS:
+        return saved
+    targets = dcr_targets.Targets(dict(saved.values))
+    for member in members:
+        checks = dcr_targets.CHECKS[member]
+        labels = {words: check for check, words in checks.items()}
+        defaults = {words: f"{targets.get(member, check):g}" for words, check in labels.items()}
+        while True:
+            typed = enter_values(
+                title, f"{dcr_targets.TYPE_NAMES[member]}: target ratio of each check. Leave "
+                "1 for the code limit; the strong column ratio is at least "
+                f"{dcr_targets.code_limit(dcr_targets.STRONG_COLUMN):g}.",
+                list(labels), defaults)
+            if typed is None:
+                return None
+            try:
+                for words, check in labels.items():
+                    targets.set(member, check, float(typed[words]))
+                break
+            except ValueError as error:
+                defaults = dict(typed)
+                show_warning(f"{dcr_targets.TYPE_NAMES[member]}: {error} Type a number in "
+                             "every box.", title=title)
+    mi.save(model_path, dcr=targets.to_saved())
+    return targets
+
+
+def ask_carrier_depth(title: str, last: dict | None = None) -> bool | None:
+    """Whether a beam must be at least as deep as the beams it carries."""
+    from utilities._gui_helpers import select_option
+
+    chosen = select_option(
+        title, "Should a girder or beam be at least as deep as the beams that frame into it? "
+        "With a shallower carrier, the bottom bars of the carried beam pass below the "
+        "carrier's bottom bars and cannot rest on them. This is a detailing rule of your "
+        "own, not a code clause: a carrier that is shallower fails.",
+        [CARRIER_NO, CARRIER_YES],
+        default_index=1 if (last or {}).get("carrier_depth") else 0)
+    return None if chosen is None else chosen == CARRIER_YES
+
+
+def add_targets_to(summary, targets: dcr_targets.Targets, members: tuple[str, ...]) -> None:
+    """List the target ratios in a summary, with what a beam target does to the columns."""
+    lines = targets.lines(members)
+    for line in lines:
+        summary.add("Target ratio", line)
+    beams = {dcr_targets.GIRDER, dcr_targets.BEAM} & set(members)
+    if any((member, dcr_targets.FLEXURE) in targets.values for member in beams):
+        summary.note("A flexure target below 1 adds beam bars. More beam steel raises the "
+                     "probable moments, so the column shear Ve and the joint shear demand "
+                     "rise with it.")
+
+
 def beam_stories(connector) -> list[str]:
     """The story of every beam of the open model, in the order ETABS lists them."""
     table = connector.get_data("Beam Object Connectivity")
@@ -609,7 +706,8 @@ def run_deflection() -> pd.DataFrame | None:
     folder = select_output_directory("Folder for the deflection results")
     if not folder:
         return None
-    with LoadingWindow("Deflection check") as window:
+    targets = dcr_targets.Targets.from_saved(store.inputs.get("dcr_targets"))
+    with dcr_targets.use(targets), LoadingWindow("Deflection check") as window:
         window.update("Reading the service moments of the deflection combinations from ETABS")
         exporter = ETABSDataExporter(connector)
         exporter.deflection_roles = roles
@@ -641,6 +739,7 @@ def run_deflection() -> pd.DataFrame | None:
     own = [f"{mi.DEFLECTION_ROLES[role]} = {name}" for role, name in roles.items()
            if name != role]
     summary.add("Combinations", "; ".join(own) if own else "the DEF names of the model")
+    add_targets_to(summary, targets, (dcr_targets.GIRDER, dcr_targets.BEAM))
     if failing:
         summary.fail("Deflection (ACI 24.2.2): " + listed(failing))
     summary.file("Results", path)
@@ -704,12 +803,15 @@ def run_columns() -> DesignStore | None:
     tie_style = ask_inner_tie_style()
     if tie_style is None:
         return None
+    targets = ask_dcr_targets(model_path, title, (dcr_targets.COLUMN,))
+    if targets is None:
+        return None
     folder = select_output_directory("Folder for the column results, calculations and schedule")
     if not folder:
         return None
     _remember({**bars, "check_top_level": levels[0], "check_foundation_level": levels[1]})
 
-    with LoadingWindow("Column design") as window:
+    with dcr_targets.use(targets), LoadingWindow("Column design") as window:
         report, groups, joints = design_columns(
             store.tables, store.beam_results, smrf, bars["dmain"], bars["dties"], bars["cover"],
             progress=window.update, continuous_vertical_bars=answers[0],
@@ -718,7 +820,8 @@ def run_columns() -> DesignStore | None:
         store.column_report, store.column_groups, store.joint_results = report, groups, joints
         store.inputs.update({"column_bars": bars, "continuous_bars": answers[0],
                              "bottom_cover": answers[1], "check_top_level": levels[0],
-                             "check_foundation_level": levels[1]})
+                             "check_foundation_level": levels[1],
+                             "column_dcr_targets": targets.to_saved()})
         store.save()
         window.update("Saving 1 of 3: the results workbook (.xlsx)")
         xlsx = write_column_results_xlsx(report, groups,
@@ -730,6 +833,7 @@ def run_columns() -> DesignStore | None:
         pdf = export_column_pdf(report, os.path.join(folder, f"{stem} - Column Calculations.pdf"),
                                 smrf, bars["dmain"], bars["dties"], bars["cover"])
     summary = column_summary(report, "sdt columns", model_path, levels[0], levels[1])
+    add_targets_to(summary, targets, (dcr_targets.COLUMN,))
     from etabs_api.workflows import model_inputs as mi
 
     # the forces are those of the beam step: so are the inputs they came from

@@ -14,6 +14,7 @@ from typing import Dict, List
 import ezdxf
 import pandas as pd
 
+from design import dcr_targets
 from design.code_config import CODE, AciCode
 from design.beam_deflection import (
     DEFLECTION_COLUMNS,
@@ -1356,6 +1357,13 @@ def execute_beam_design(
             b_row.get("SupportStatus", "")
         )
 
+        # Target ratios of this member type: the bars and stirrups are chosen for
+        # the demand divided by the target, so demand / capacity stays at or
+        # below it. The demands that are reported stay the real ones.
+        member_type = dcr_targets.beam_type(b_row.get("SupportStatus", ""))
+        flexure_target = dcr_targets.limit(member_type, dcr_targets.FLEXURE)
+        shear_target = dcr_targets.limit(member_type, dcr_targets.SHEAR)
+
         df_grav = df_b[df_b["Combo"] == gravity_combo_name]
         Vu_grav_left = df_grav["Vu_left"].max() if not df_grav.empty else 0.0
         Vu_grav_right = df_grav["Vu_right"].max() if not df_grav.empty else 0.0
@@ -1381,14 +1389,20 @@ def execute_beam_design(
                 for _ in range(3)
             )
 
-            flex_eng_left.Mu_neg = df_b[df_b["Face"] == "TOP"]["Mu_left"].max()
-            flex_eng_left.Mu_pos = df_b[df_b["Face"] == "BOTTOM"]["Mu_left"].max()
+            flex_eng_left.Mu_neg = df_b[df_b["Face"] == "TOP"]["Mu_left"].max() \
+                / flexure_target
+            flex_eng_left.Mu_pos = df_b[df_b["Face"] == "BOTTOM"]["Mu_left"].max() \
+                / flexure_target
 
-            flex_eng_mid.Mu_neg = df_b[df_b["Face"] == "TOP"]["Mu_mid"].max()
-            flex_eng_mid.Mu_pos = df_b[df_b["Face"] == "BOTTOM"]["Mu_mid"].max()
+            flex_eng_mid.Mu_neg = df_b[df_b["Face"] == "TOP"]["Mu_mid"].max() \
+                / flexure_target
+            flex_eng_mid.Mu_pos = df_b[df_b["Face"] == "BOTTOM"]["Mu_mid"].max() \
+                / flexure_target
 
-            flex_eng_right.Mu_neg = df_b[df_b["Face"] == "TOP"]["Mu_right"].max()
-            flex_eng_right.Mu_pos = df_b[df_b["Face"] == "BOTTOM"]["Mu_right"].max()
+            flex_eng_right.Mu_neg = df_b[df_b["Face"] == "TOP"]["Mu_right"].max() \
+                / flexure_target
+            flex_eng_right.Mu_pos = df_b[df_b["Face"] == "BOTTOM"]["Mu_right"].max() \
+                / flexure_target
 
             max_Tu_left, max_Tu_mid, max_Tu_right = (
                 df_b["Tu_left"].max(),
@@ -1400,6 +1414,13 @@ def execute_beam_design(
                 df_b["Vu_mid_2h"].max(),
                 df_b["Vu_right"].max(),
             )
+            real_Vu_left, real_Vu_right = max_Vu_left, max_Vu_right
+            max_Tu_left, max_Tu_mid, max_Tu_right = (
+                max_Tu_left / shear_target, max_Tu_mid / shear_target,
+                max_Tu_right / shear_target)
+            max_Vu_left, max_Vu_mid, max_Vu_right = (
+                max_Vu_left / shear_target, max_Vu_mid / shear_target,
+                max_Vu_right / shear_target)
 
             # Initial effective-depth estimate for torsion steel distribution before flexure layers are known.
             d_eff_guess = b_height - c_cover - d_s - (d_m / 2.0)
@@ -1550,8 +1571,8 @@ def execute_beam_design(
                     Vu_grav_left,
                     Vu_grav_right,
                     side_distributions,
-                    Vu_envelope_max_left=max_Vu_left,
-                    Vu_envelope_max_right=max_Vu_right,
+                    Vu_envelope_max_left=real_Vu_left,
+                    Vu_envelope_max_right=real_Vu_right,
                 )
 
             min_legs = detailing.min_stirrup_legs
@@ -1588,6 +1609,7 @@ def execute_beam_design(
                     ("Interior Web (Gov. 2h)", Vu_M, df_c_top["Tu_mid_2h"], "M"),
                     ("Right Support (d_eff)", Vu_R, df_c_top["Tu_right"], "R"),
                 ]:
+                    Vu_val, Tu_val = Vu_val / shear_target, Tu_val / shear_target
                     report(unique_name, story, combo_name,
                            f"Shear and torsion, {zone_name.split(' (')[0].lower()}")
                     # Use the shallower face-specific effective depth as the conservative transverse-design depth.
@@ -1804,6 +1826,11 @@ def execute_beam_design(
                 "PASSED" if anchorage_passed_all else "ADJUSTED"
             )
             summary["Alternating_Tie_Check"] = "PASSED"
+            if dcr_targets.active().changed:   # shown only when the engineer set targets
+                summary["Target_DCR_Flexure"] = flexure_target
+                summary["Target_DCR_Shear"] = shear_target
+                summary["Target_DCR_Deflection"] = dcr_targets.limit(
+                    member_type, dcr_targets.DEFLECTION)
             summary["SMRF_Flexure_Ratio_Check"] = smrf_flexure_check
             summary["SMRF_Rho_Check"] = smrf_rho_check
 
@@ -1912,7 +1939,12 @@ _BEAM_RESULT_LABELS = {
     "Vc_zero_right": "Concrete shear suppressed (right)",
     "Anchorage_Check": "Stirrup anchorage check",
     "Alternating_Tie_Check": "Alternating tie check",
+    "Target_DCR_Flexure": "Target ratio, flexure",
+    "Target_DCR_Shear": "Target ratio, shear and torsion",
     **DEFLECTION_COLUMNS,
+    "Target_DCR_Deflection": "Target ratio, deflection",
+    "Carried_Beam_Depth": "Deepest beam it carries (mm)",
+    "Carrier_Depth_Check": "Depth against the beams it carries",
     "Design_Status": "Design status",
 }
 
@@ -2092,12 +2124,15 @@ def ask_deflection_limit() -> int | None:
 
 def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict,
                  long_limit_divisor: int = LIMIT_DAMAGED, progress=None,
-                 earth_cover_stories=()) -> pd.DataFrame:
+                 earth_cover_stories=(), carrier_depth: bool = False) -> pd.DataFrame:
     """Design every beam from the extracted tables; deflection when service loads exist.
 
     ``tables`` holds FACTORED LOADS, FRAME DATA, CONNECTIVITY and (optional)
     SERVICE LOADS. ``earth_cover_stories`` are the levels whose beams get the
-    75 mm earth-contact cover. Returns the results, two rows (TOP, BOTTOM) per beam.
+    75 mm earth-contact cover. ``carrier_depth`` also requires a beam to be at
+    least as deep as the beams it carries. The target ratios are those that
+    are active (``dcr_targets.use``). Returns the results, two rows (TOP,
+    BOTTOM) per beam.
     """
     beam_props = prepare_beam_table(tables["FRAME DATA"], tables["CONNECTIVITY"], bars,
                                     earth_cover_stories)
@@ -2112,6 +2147,10 @@ def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict
     if service is not None and len(service) and not results.empty:
         results = add_deflection_columns(results, service, long_limit_divisor,
                                          tables["CONNECTIVITY"], progress=progress)
+    if carrier_depth and not results.empty:
+        from design.beam_carriers import add_carrier_depth_check
+
+        results = add_carrier_depth_check(results, tables["CONNECTIVITY"], tables.get("POINTS"))
     return sort_beam_rows(results)
 
 
@@ -2134,6 +2173,8 @@ def beam_blank_reason(name: str, row: dict) -> str:
         return f"N/A - {check}" if check and check not in ("PASS", "FAIL") else "N/A"
     if name in ("Ve_left_kN", "Ve_right_kN", "V_sway_max_kN") or name.startswith("SMRF_"):
         return "N/A - no seismic design for this beam"
+    if name == "Carried_Beam_Depth":
+        return "N/A - carries no beam"
     return "N/A"
 
 
@@ -2606,6 +2647,10 @@ def _beam_calc_member(
         "llll",
     )
 
+    member_type = dcr_targets.beam_type(top.get("SupportStatus", ""))
+    flexure_target = dcr_targets.limit(member_type, dcr_targets.FLEXURE)
+    shear_target = dcr_targets.limit(member_type, dcr_targets.SHEAR)
+    target_note = dcr_targets.note((member_type,))
     flexure_rows = []
     flexure_passes = True
     for location, label in _BEAM_LOCATIONS:
@@ -2619,7 +2664,7 @@ def _beam_calc_member(
                 result = engine.solve_moment_capacity(is_negative_moment=negative)
                 depth = engine.compute_effective_depths(negative)[0]
                 ratio = demand / result["phi_Mn"] if result["phi_Mn"] > 0 else float("nan")
-                passed = demand <= result["phi_Mn"] + 1e-6
+                passed = demand <= result["phi_Mn"] * flexure_target + 1e-6
                 flexure_passes = flexure_passes and passed
                 flexure_rows.append([
                     label, face, number(demand), layout or "0",
@@ -2640,7 +2685,8 @@ def _beam_calc_member(
          Tex(r"$M_u/\phi M_n$"), "Check"],
         flexure_rows,
         "ll" + "r" * 10 + "l",
-        "Moments in kN-m, areas in mm2, depths in mm. Bars are listed per layer, from the face inward.",
+        "Moments in kN-m, areas in mm2, depths in mm. Bars are listed per layer, from the "
+        "face inward." + (" " + target_note if target_note else ""),
     )
 
     legs = int(float(top.get("Stirrup_Legs") or 0))
@@ -2691,7 +2737,7 @@ def _beam_calc_member(
             number(torsion_demand), number(depth, 1), number(shear_result["Vc"]),
             legs, number(spacing, 0), number(steel_shear), number(capacity), number(ratio),
             number(torsion_result["At_s_demand"], 3), number(torsion_result["Al_design"], 0),
-            "PASS" if design_shear <= capacity + 1e-6 else "FAIL",
+            "PASS" if design_shear <= capacity * shear_target + 1e-6 else "FAIL",
         ])
     shear = ReportTable(
         "Shear and torsion",
@@ -2702,7 +2748,8 @@ def _beam_calc_member(
         "l" + "r" * 13 + "l",
         "Forces in kN, torsion in kN-m, lengths in mm, At/s in mm2/mm, Al in mm2. "
         "Vu and Tu are the envelopes of all combinations. Vc is taken as zero where the "
-        "seismic rule requires it. The stirrups also carry the torsion steel At/s.",
+        "seismic rule requires it. The stirrups also carry the torsion steel At/s."
+        + (" " + target_note if target_note else ""),
     )
 
     tables = [section, flexure, shear]

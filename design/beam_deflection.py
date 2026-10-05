@@ -32,6 +32,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from design import dcr_targets
+
 ES = 200000.0           # MPa
 XI_LONG_TERM = 2.0      # 5 years or more, ACI Table 24.2.4.1.3
 LAYER_CLEAR = 25.0      # mm between layers (BeamDetailingConfig.layer_clear_spacing)
@@ -554,11 +556,16 @@ def add_deflection_columns(results, service, long_limit_divisor: float = LIMIT_D
                 "Defl_long_mm": round(result.long_term, 2),
                 "Defl_long_limit_mm": round(result.long_limit, 2),
                 "Defl_ratio": round(result.ratio, 3),
-                "Deflection_Check": "PASS" if result.passed else "FAIL",
             }
+            # the target ratio of this member type (1.0 unless the engineer set one)
+            status = rows_of[name].iloc[0].get("SupportStatus", "")
+            target = dcr_targets.limit(dcr_targets.beam_type(status), dcr_targets.DEFLECTION)
+            passed = result.ratio <= target + 1e-9
+            values["Deflection_Check"] = "PASS" if passed else (
+                "FAIL" if target >= 1.0 else f"FAIL: above the target ratio {target:g}")
             for key, value in values.items():
                 out.loc[index, key] = value
-            if not result.passed:
+            if not passed:
                 passing = out.loc[index, "Design_Status"].astype(str).eq("OK").to_numpy()
                 out.loc[index[passing], "Design_Status"] = DEFLECTION_FAILED
     order = [c for c in out.columns if c != "Design_Status"] + ["Design_Status"]
