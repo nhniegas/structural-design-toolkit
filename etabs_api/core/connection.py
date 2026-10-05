@@ -125,7 +125,12 @@ def use_working_units(model) -> None:
 
 
 def restore_units() -> None:
-    """Put back the units of every model a command worked on (``use_working_units``)."""
+    """Put back the units of every model a command worked on (``use_working_units``).
+
+    These are the units of the API session. ETABS does not store them in the
+    model file, and they are not the units its window displays, so nothing
+    needs to be saved again.
+    """
     while _BORROWED_UNITS:
         model, original = _BORROWED_UNITS.pop()
         try:
