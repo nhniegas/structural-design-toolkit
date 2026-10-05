@@ -293,3 +293,67 @@ def test_grid_lines_are_read_in_global_coordinates():
     turned = by_label["R"]
     assert (turned.x1, turned.y1) == pytest.approx((1000.0, 2000.0))
     assert (turned.x2, turned.y2) == pytest.approx((1000.0, 3000.0))
+
+
+# ----------------------------------------------------------------- carried beams and skewed frames
+def unsplit_bay() -> fp.FloorPlan:
+    """The girders run from column to column as one member; the beam they carry
+    ends on their centre lines at joints the girders do not have."""
+    columns = [square("C1", 0, 0, "a"), square("C2", 6000, 0, "b"),
+               square("C3", 0, 5000, "c"), square("C4", 6000, 5000, "d")]
+    beams = [fp.PlanBeam("GX-1", 0, 0, 6000, 0, 500, "a", "b", True),
+             fp.PlanBeam("GX-2", 0, 5000, 6000, 5000, 400, "c", "d", True),
+             fp.PlanBeam("BY-1", 2000, 0, 2000, 5000, 300, "m", "n", False)]
+    return fp.FloorPlan("3F", 0.0, beams, columns)
+
+
+def test_a_beam_stops_at_the_face_of_a_girder_that_is_not_split_where_it_frames_in():
+    trims = fp.beam_trims(unsplit_bay())
+    assert trims["BY-1"] == pytest.approx((250.0, 200.0))   # half of 500 and half of 400
+    assert trims["GX-1"] == pytest.approx((250.0, 250.0))   # the girder itself: column faces
+
+
+def test_a_beam_meeting_a_girder_at_a_skew_stops_at_its_face():
+    """A girder along X, 400 wide, and a beam that leaves it at 60 degrees."""
+    angle = math.radians(60.0)
+    beams = [fp.PlanBeam("G", 0, 0, 6000, 0, 400, "a", "b", True),
+             fp.PlanBeam("B", 3000, 0, 3000 + 4000 * math.cos(angle), 4000 * math.sin(angle),
+                         300, "m", "n", False)]
+    cut, face = fp.beam_end_cuts(fp.FloorPlan("2F", 0.0, beams))["B"][0]
+    assert cut == pytest.approx(200.0 / math.sin(angle))      # to the face, along the beam
+    assert face == pytest.approx((1.0, 0.0))                  # the face runs along the girder
+    end_cut, stretch = fp.skew_end((math.cos(angle), math.sin(angle)), face)
+    assert stretch == pytest.approx(1.0 / math.sin(angle))    # the cut is longer than the width
+    assert abs(end_cut[0]) == pytest.approx(1.0) and end_cut[1] == pytest.approx(0.0, abs=1e-9)
+
+
+def test_the_face_of_a_rotated_column_is_followed():
+    column = fp.PlanColumn("C", 0, 0, 600, 600, 30.0, False, "a", "a0")
+    distance, face = fp.column_face(column, (1.0, 0.0))
+    assert distance == pytest.approx(300.0 / math.cos(math.radians(30.0)))
+    # the face it leaves through is square to the column's local 2 axis
+    assert face == pytest.approx((-math.sin(math.radians(30.0)), math.cos(math.radians(30.0))))
+    assert fp.column_face(fp.PlanColumn("R", 0, 0, 600, 600, 0, True), (1.0, 0.0))[1] is None
+
+
+def test_a_square_meeting_keeps_a_square_end_and_a_flat_one_is_not_skewed():
+    assert fp.skew_end((0.0, 1.0), (1.0, 0.0)) is None             # square to the face
+    assert fp.skew_end((1.0, 0.0), None) is None                   # no straight face
+    flat = (math.cos(math.radians(10.0)), math.sin(math.radians(10.0)))
+    assert fp.skew_end((1.0, 0.0), flat) is None                   # nearly in line
+
+
+def test_the_lines_of_a_skewed_beam_end_on_the_face_in_the_dxf(tmp_path):
+    """Both lines of the multiline must end on the girder face, not short of it
+    and not inside the girder."""
+    angle = math.radians(60.0)
+    beams = [fp.PlanBeam("G", 0, 0, 6000, 0, 400, "a", "b", True),
+             fp.PlanBeam("B", 3000, 0, 3000 + 4000 * math.cos(angle), 4000 * math.sin(angle),
+                         300, "m", "n", False)]
+    path = tmp_path / "skew.dxf"
+    fp.write_framing_plans([fp.FloorPlan("2F", 0.0, beams)], [], str(path),
+                           fp.PlanOptions(grids=False))
+    doc = ezdxf.readfile(str(path))
+    beam = next(e for e in doc.modelspace() if e.dxftype() == "MLINE" and e.dxf.scale_factor == 300.0)
+    starts = sorted(min(line.dxf.start.y, line.dxf.end.y) for line in beam.virtual_entities())
+    assert starts == pytest.approx([200.0, 200.0], abs=0.5)        # the girder face is at y = 200

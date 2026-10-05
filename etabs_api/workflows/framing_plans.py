@@ -42,6 +42,8 @@ DIM_STYLE = "SDT_PLAN"
 PAPER_TEXT = 2.5              # mm on paper; the text height is this times the plot scale
 EVERY_LEVEL, BOTTOM_ONLY = "every", "bottom"
 COLLINEAR = math.cos(math.radians(15.0))   # beams within 15 degrees continue each other
+ON_LINE = 10.0                # mm: a joint this close to a centre line is on it
+MIN_SKEW = math.sin(math.radians(20.0))    # a face flatter than this to the beam: square end
 
 
 # =============================================================================
@@ -178,46 +180,112 @@ def _direction(beam: PlanBeam, joint: str) -> tuple[float, float] | None:
     return ((end[0] - start[0]) / length, (end[1] - start[1]) / length) if length > 1e-6 else None
 
 
-def beam_trims(floor: FloorPlan) -> dict[str, tuple[float, float]]:
-    """How much each beam is cut back at its I and J ends: {beam: (at I, at J)}.
+def column_face(column: PlanColumn, direction: tuple[float, float]
+                ) -> tuple[float, tuple[float, float] | None]:
+    """Where a beam leaving the centre of a column along ``direction`` crosses its
+    face: (distance from the centre, direction of that face). A circular
+    column has no straight face: None."""
+    distance = face_distance(column, direction)
+    if column.circular:
+        return distance, None
+    angle = math.radians(column.angle)
+    local_2, local_3 = (math.cos(angle), math.sin(angle)), (-math.sin(angle), math.cos(angle))
+    along = abs(direction[0] * local_2[0] + direction[1] * local_2[1])
+    across = abs(direction[0] * local_3[0] + direction[1] * local_3[1])
+    reach_2 = column.depth / 2.0 / along if along > 1e-9 else math.inf
+    reach_3 = column.width / 2.0 / across if across > 1e-9 else math.inf
+    # leaving through the face square to local 2: that face runs along local 3
+    return distance, (local_3 if reach_2 <= reach_3 else local_2)
 
-    At a column, to the face of the column. At a joint with no column, to the
-    face of the girder that runs through it (two beams in line with each
-    other); beams that continue each other are not cut.
+
+def _passes(other: PlanBeam, x: float, y: float) -> str:
+    """How the centre line of ``other`` meets the point: "through" (the point is
+    inside its length), "end" (at one of its ends) or "" (it does not)."""
+    dx, dy = other.x2 - other.x1, other.y2 - other.y1
+    length = math.hypot(dx, dy)
+    if length <= ON_LINE:
+        return ""
+    along = ((x - other.x1) * dx + (y - other.y1) * dy) / length
+    off = abs((x - other.x1) * dy - (y - other.y1) * dx) / length
+    if off > ON_LINE or along < -ON_LINE or along > length + ON_LINE:
+        return ""
+    return "through" if ON_LINE < along < length - ON_LINE else "end"
+
+
+def beam_end_cuts(floor: FloorPlan) -> dict[str, tuple[tuple, tuple]]:
+    """Where each beam stops at its I and J ends: {beam: (at I, at J)}, each
+    (distance cut back from the joint, direction of the face it stops at).
+
+    At a column: the face of the column, whatever the rotation of the column
+    or the direction of the beam. Elsewhere: the face of the girder that
+    carries it, which is any beam whose centre line passes through that end,
+    as one member or as two pieces in line. Beams that only continue each
+    other are not cut. The face direction lets the end of the beam follow a
+    face it meets at a skew; it is None for a square end.
     """
     column_at: dict[str, PlanColumn] = {}
     for column in floor.columns_above:
         column_at[column.bottom] = column
     for column in floor.columns:          # the column below the floor comes first
         column_at[column.top] = column
-    beams_at: dict[str, list[PlanBeam]] = {}
-    for beam in floor.beams:
-        for joint in (beam.joint_i, beam.joint_j):
-            beams_at.setdefault(joint, []).append(beam)
 
-    def trim(beam: PlanBeam, joint: str) -> float:
+    def cut(beam: PlanBeam, joint: str) -> tuple[float, tuple[float, float] | None]:
         direction = _direction(beam, joint)
         if direction is None:
-            return 0.0
+            return 0.0, None
         if joint in column_at:
-            return face_distance(column_at[joint], direction)
-        others = [(other, _direction(other, joint)) for other in beams_at.get(joint, [])
-                  if other.name != beam.name]
-        others = [(other, d) for other, d in others if d is not None]
-        cut = 0.0
-        for other, d in others:
-            cosine = direction[0] * d[0] + direction[1] * d[1]
+            return column_face(column_at[joint], direction)
+        x, y = (beam.x1, beam.y1) if joint == beam.joint_i else (beam.x2, beam.y2)
+        meeting = []
+        for other in floor.beams:
+            if other.name == beam.name or other.width <= 0:
+                continue
+            how = _passes(other, x, y)
+            if not how:
+                continue
+            length = math.hypot(other.x2 - other.x1, other.y2 - other.y1)
+            along = ((other.x2 - other.x1) / length, (other.y2 - other.y1) / length)
+            meeting.append((other, how, along))
+        best: tuple[float, tuple[float, float] | None] = (0.0, None)
+        for other, how, along in meeting:
+            cosine = direction[0] * along[0] + direction[1] * along[1]
             if abs(cosine) >= COLLINEAR:
                 continue                   # it continues this beam, or lies on it
-            runs_through = any(d[0] * e[0] + d[1] * e[1] <= -COLLINEAR
-                               for third, e in others if third.name != other.name)
-            if runs_through and other.width > 0:
-                sine = math.sqrt(max(1.0 - cosine * cosine, 1e-9))
-                cut = max(cut, other.width / 2.0 / sine)
-        return cut
+            if how == "end":               # two pieces in line make the girder
+                partner = any(abs(along[0] * a[0] + along[1] * a[1]) >= COLLINEAR
+                              for third, _, a in meeting if third.name != other.name)
+                if not partner:
+                    continue
+            sine = math.sqrt(max(1.0 - cosine * cosine, 1e-9))
+            distance = other.width / 2.0 / sine
+            if distance > best[0]:
+                best = (distance, along)
+        return best
 
-    return {beam.name: (trim(beam, beam.joint_i), trim(beam, beam.joint_j))
+    return {beam.name: (cut(beam, beam.joint_i), cut(beam, beam.joint_j))
             for beam in floor.beams}
+
+
+def beam_trims(floor: FloorPlan) -> dict[str, tuple[float, float]]:
+    """How much each beam is cut back at its I and J ends (see ``beam_end_cuts``)."""
+    return {name: (at_i[0], at_j[0]) for name, (at_i, at_j) in beam_end_cuts(floor).items()}
+
+
+def skew_end(direction: tuple[float, float], face: tuple[float, float] | None
+             ) -> tuple[tuple[float, float], float] | None:
+    """For a beam running along ``direction`` that stops at a face running along
+    ``face``: (the direction of its end cut, pointing to the left of the beam,
+    and how much longer than the width that cut is). None for a square end,
+    and for a face nearly in line with the beam."""
+    if face is None:
+        return None
+    left = (-direction[1], direction[0])
+    across = face[0] * left[0] + face[1] * left[1]
+    if abs(across) < MIN_SKEW or abs(across) > 1.0 - 1e-9:
+        return None
+    if across < 0:
+        face, across = (-face[0], -face[1]), -across
+    return face, 1.0 / across
 
 
 def trimmed_ends(beam: PlanBeam, trims: tuple[float, float]
@@ -337,6 +405,25 @@ def _solid(msp, points: list[tuple[float, float]], layer: str) -> None:
     msp.add_lwpolyline(points, close=True, dxfattribs={"layer": layer})
 
 
+def _skew_ends(line, width: float, faces: tuple) -> None:
+    """Make the two ends of a beam multiline follow the faces they stop at.
+
+    A multiline stores, at each vertex, the direction of its end cut and how
+    far along it each of its lines starts. Square ends are what it has when
+    it is made; here an end that meets a face at a skew is cut along that face.
+    """
+    if len(line.vertices) != 2:
+        return
+    for vertex, face in zip(line.vertices, faces):
+        direction = (vertex.line_direction.x, vertex.line_direction.y)
+        skew = skew_end(direction, face)
+        if skew is None:
+            continue
+        (mx, my), stretch = skew
+        vertex.miter_direction = type(vertex.miter_direction)(mx, my, 0.0)
+        vertex.line_params = [(width / 2.0 * stretch, 0.0), (-width / 2.0 * stretch, 0.0)]
+
+
 def draw_floor(msp, floor: FloorPlan, offset: tuple[float, float], options: PlanOptions,
                marked: set[tuple[str, str]]) -> dict[str, int]:
     """Draw one floor with its lower left moved by ``offset``. Returns the counts."""
@@ -345,17 +432,19 @@ def draw_floor(msp, floor: FloorPlan, offset: tuple[float, float], options: Plan
     ox, oy = offset
     height = options.text_height
     counts = {"beams": 0, "single_line": 0, "columns": 0, "walls": 0}
-    trims = beam_trims(floor)
+    cuts = beam_end_cuts(floor)
     for beam in floor.beams:
-        ends = trimmed_ends(beam, trims[beam.name])
+        at_i, at_j = cuts[beam.name]
+        ends = trimmed_ends(beam, (at_i[0], at_j[0]))
         if ends is None:
             continue
         (x1, y1), (x2, y2) = ends
         layer = LAYER_GIRDER if beam.girder else LAYER_BEAM
         if beam.width > 0:
-            msp.add_mline([(x1 + ox, y1 + oy), (x2 + ox, y2 + oy)], dxfattribs={
+            line = msp.add_mline([(x1 + ox, y1 + oy), (x2 + ox, y2 + oy)], dxfattribs={
                 "layer": layer, "style_name": BEAM_STYLE, "scale_factor": beam.width,
                 "justification": MLine.ZERO})
+            _skew_ends(line, beam.width, (at_i[1], at_j[1]))
         else:   # a section that is not a rectangle: its centre line
             msp.add_line((x1 + ox, y1 + oy), (x2 + ox, y2 + oy),
                          dxfattribs={"layer": layer, "linetype": "HIDDEN"})

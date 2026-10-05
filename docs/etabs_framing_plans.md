@@ -38,7 +38,9 @@ The floors are drawn side by side in one row, from the lowest, each with its tit
 
 **Beams are multilines** (the AutoCAD `MLINE` object, style `SDT_BEAM`). A multiline is one object with two parallel lines: when you drag an end point, both lines follow and the width is kept. The width is the scale of each multiline, so it can be changed in its properties. `EXPLODE` turns a multiline into two plain lines.
 
-**Where a beam stops.** At a column, at the face of the column, for any rotation of the column. At a joint with no column, at the face of the girder that runs through the joint. Beams that continue each other in line are not cut where they meet.
+**Where a beam stops.** At a column, at the face of the column. Elsewhere, at the face of the girder that carries it: any beam whose centre line passes through that end, whether ETABS has it as one member from column to column or as pieces split at that joint. Beams that only continue each other in line are not cut where they meet.
+
+**Skewed frames.** None of this assumes the frames run along X and Y. A beam that meets a girder or a column face at an angle is cut along that face, so both of its lines end on the face; a rotated column is cut along its own rotated face. A circular column, and a face nearly in line with the beam (under 20 degrees), get a square end. When you drag the end of such a beam in AutoCAD, the program redraws that end square.
 
 **Columns of a floor.** A floor shows the columns below it, which are the columns of that ETABS story. A column that starts on a floor (with none below) is not drawn there, but the beams still stop at its face.
 
