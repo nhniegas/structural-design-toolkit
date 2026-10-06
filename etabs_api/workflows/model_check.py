@@ -283,13 +283,14 @@ def nscp_coefficient(ca: float, cv: float, importance: float, r: float, period: 
 
     V = Cv I / (R T) W (208-8), at most 2.5 Ca I / R W (208-9), at least
     0.11 Ca I W (208-10) and, in zone 4, 0.8 Z Nv I / R W (208-11). For drift
-    (``drift``) the two lower limits do not apply (208.6.5.2).
+    (``drift``) 208.6.5.2 lifts the 0.11 Ca I limit and the cap on the period,
+    not the zone 4 limit of 208-11, which holds for drift as well.
     """
     value = min(cv * importance / (r * period), SEIS.plateau * ca * importance / r)
     if not drift:
         value = max(value, SEIS.minimum * ca * importance)
-        if zone_factor >= SEIS.zone4_factor:
-            value = max(value, SEIS.zone4_minimum * zone_factor * nv * importance / r)
+    if zone_factor >= SEIS.zone4_factor:
+        value = max(value, SEIS.zone4_minimum * zone_factor * nv * importance / r)
     return value
 
 
@@ -301,6 +302,56 @@ def method_a_period(ct_ft: float, height_mm: float) -> float:
 def drift_limit(period: float) -> float:
     """NSCP 208.6.5.1: 0.025 of the storey height when T < 0.7 s, otherwise 0.020."""
     return SEIS.drift_limit_short if period < SEIS.drift_period else SEIS.drift_limit_long
+
+
+def story_range_findings(d: ModelData, group: str, rows: pd.DataFrame, bottom: str, top: str,
+                         reference: str, what: str) -> list[Finding]:
+    """Whether the lateral load patterns cover the right stories.
+
+    The loads start at the ground level (``bottom``) or below it: a base at
+    the bottom of the foundation is the engineer's choice, and is said, not
+    failed. They end at the top level; for the seismic patterns that must be
+    a level with structure, since the height hn of the period comes from it.
+    """
+    names = [n for n, _ in d.stories]
+    elevation = dict(d.stories)
+    with_weight = [n for n in names if d.story_weights.get(n, 0.0) > 0.0]
+    structure_top = with_weight[-1] if with_weight else top
+    wrong, below, empty = [], [], []
+    for _, r in rows.iterrows():
+        low, high = str(r["BotStory"]), str(r["TopStory"])
+        label = f"{r['Name']} {low}-{high}"
+        if low not in elevation or high not in elevation:
+            wrong.append(label)
+            continue
+        if elevation[low] > elevation.get(bottom, elevation[low]) + 0.5:
+            wrong.append(label + " (starts above the ground level)")
+        elif low != bottom:
+            below.append(str(r["Name"]))
+        if what == "seismic" and elevation[high] > elevation.get(structure_top, 0.0) + 0.5:
+            empty.append(label)
+        elif high not in (top, structure_top):
+            wrong.append(label + " (stops below the top level)")
+    out = [Finding(group, FAIL if wrong else OK,
+                   f"Story range should start at {bottom} or below and end at {structure_top}: "
+                   + ", ".join(wrong) if wrong
+                   else f"Every {what} pattern covers the building up to "
+                        f"{structure_top if what == 'seismic' else top}.", reference)]
+    if below:
+        low = str(rows.iloc[0]["BotStory"])
+        out.append(Finding(group, INFO,
+                           f"The {what} loads start at {low}, below the ground level {bottom} "
+                           f"({', '.join(below[:6])}): the base is taken at {low}, so the weight "
+                           "and the height hn are measured from there - confirm it is the base "
+                           "you mean", reference))
+    if empty:
+        out.append(Finding(group, FAIL,
+                           f"Top story of the seismic patterns has no structure: "
+                           f"{', '.join(empty[:6])}. The highest level with weight is "
+                           f"{structure_top}; the height hn and the period cap are too long "
+                           "with an empty story above it, and the base shear too small",
+                           "NSCP 208.5.2.2"))
+    return out
 
 
 def check_seismic(d: ModelData, settings: dict | None = None) -> list[Finding]:
@@ -318,12 +369,7 @@ def check_seismic(d: ModelData, settings: dict | None = None) -> list[Finding]:
     auto = seismic["IsAuto"].astype(str) == "Yes" if "IsAuto" in seismic else \
         pd.Series(False, index=seismic.index)
     rows = seismic[~auto]
-    wrong = [f"{r['Name']} {r['BotStory']}-{r['TopStory']}" for _, r in rows.iterrows()
-             if (str(r["BotStory"]), str(r["TopStory"])) != (bottom, top)]
-    out.append(Finding("Seismic", FAIL if wrong else OK,
-                       f"Story range should be {bottom} to {top}: " + ", ".join(wrong)
-                       if wrong else f"Every seismic pattern covers {bottom} to {top}.",
-                       "NSCP 208.5.2.3"))
+    out += story_range_findings(d, "Seismic", rows, bottom, top, "NSCP 208.5.2.3", "seismic")
     ecc = [str(r["Name"]) for _, r in rows.iterrows()
            if abs(_num(r.get("EccRatio"), 0) - SEIS.eccentricity) > 1e-6
            and any(str(r.get(k)) == "Yes" for k in ("XDirPlusE", "XDirMinusE", "YDirPlusE",
@@ -557,11 +603,13 @@ def _check_static_results(d: ModelData, seismic: pd.DataFrame, bottom: str) -> l
         return out
     names = [n for n, _ in d.stories]
     elevations = [z for _, z in d.stories]
-    ground = elevations[names.index(bottom)] if bottom in names else (elevations or [0])[0]
-    height = (elevations[-1] - ground) if elevations else 0.0
-    # W: the seismic weight of the stories above the ground level (208.6.1)
-    above = names[names.index(bottom) + 1:] if bottom in names else names[1:]
-    total = sum(d.story_weights.get(n, 0.0) for n in above)
+    elevation = dict(d.stories)
+
+    def stories_of(row) -> tuple[str, str]:
+        low, high = str(row.get("BotStory")), str(row.get("TopStory"))
+        return (low if low in elevation else bottom,
+                high if high in elevation else (names[-1] if names else ""))
+
     checked_weight = False
     for _, r in seismic.iterrows():
         name = str(r["Name"])
@@ -571,15 +619,21 @@ def _check_static_results(d: ModelData, seismic: pd.DataFrame, bottom: str) -> l
         if kind not in (SEISMIC, SEISMIC_DRIFT) or period != period or used != used:
             continue
         weight = _num(r.get("WeightUsed"))
+        low, high = stories_of(r)
+        # W: the seismic weight of the stories above the base of the pattern (208.6.1)
+        above = [n for n in names if elevation[low] < elevation[n] <= elevation[high] + 0.5] \
+            if low in elevation and high in elevation else []
+        total = sum(d.story_weights.get(n, 0.0) for n in above)
+        height = elevation[high] - elevation[low] if above else 0.0
         if total > 0 and weight == weight and not checked_weight:
             checked_weight = True
             good = abs(weight / total - 1.0) <= WEIGHT_TOLERANCE
             out.append(Finding("Seismic", OK if good else FAIL,
                                f"W used by the static patterns {weight / 1e3:,.0f} kN" +
-                               (f" = the stories above {bottom}." if good else
-                                f", but the stories above {bottom} weigh {total / 1e3:,.0f} kN "
-                                f"(check the story range: {r['BotStory']} to {r['TopStory']})"),
-                               "NSCP 208.5.2.1, 208.6.1"))
+                               (f" = the stories above {low}." if good else
+                                f", but the stories above {low} up to {high} weigh "
+                                f"{total / 1e3:,.0f} kN (check the mass source and the story "
+                                "range)"), "NSCP 208.5.2.1, 208.6.1"))
         drift = kind == SEISMIC_DRIFT
         z, nv = _num(r.get("Z")), _num(r.get("Nv"), 1.0)  # no Z when Ca, Cv are typed
         want = nscp_coefficient(_num(r["Ca"]), _num(r["Cv"]), _num(r["I"]), _num(r["R"]),
@@ -588,7 +642,8 @@ def _check_static_results(d: ModelData, seismic: pd.DataFrame, bottom: str) -> l
         out.append(Finding("Seismic", OK if good else FAIL,
                            f"{name}: V/W {used:.4f} at T {period:.3f} s" +
                            ("" if good else f", NSCP gives {want:.4f}") +
-                           (" (drift: no lower limit)" if drift else ""),
+                           (" (drift: the 0.11 Ca I minimum does not apply, 208-11 does)"
+                            if drift else ""),
                            "NSCP 208.6.5.2" if drift else "NSCP 208.5.2.1 Eq. 208-8 to 208-11"))
         ct = _num(r.get("Ct"))
         if not drift and height > 0 and ct == ct:
@@ -597,7 +652,8 @@ def _check_static_results(d: ModelData, seismic: pd.DataFrame, bottom: str) -> l
             cap = (SEIS.period_cap_zone4 if z >= SEIS.zone4_factor or z != z
                    else SEIS.period_cap_other) * t_a
             out.append(Finding("Seismic", OK if period <= cap * (1 + CAP_TOLERANCE) else FAIL,
-                               f"{name}: T {period:.3f} s, T_A {t_a:.3f} s, cap {cap:.3f} s",
+                               f"{name}: T {period:.3f} s, T_A {t_a:.3f} s for hn "
+                               f"{height / 1e3:.2f} m ({low} to {high}), cap {cap:.3f} s",
                                "NSCP 208.5.2.2"))
     return out
 
@@ -689,12 +745,9 @@ def check_wind(d: ModelData) -> list[Finding]:
     names = [n for n, _ in d.stories]
     bottom, top = lateral_story_range(names, [z for _, z in d.stories]) if names else ("", "")
     rows = wind[wind["BotStory"].notna() & (wind["BotStory"].astype(str) != "None")]
-    wrong = [f"{r['Name']} {r['BotStory']}-{r['TopStory']}" for _, r in rows.iterrows()
-             if (str(r["BotStory"]), str(r["TopStory"])) != (bottom, top)
-             and "(" not in str(r["Name"])]
-    out = [Finding("Wind", FAIL if wrong else OK,
-                   f"Story range should be {bottom} to {top}: " + ", ".join(wrong) if wrong
-                   else f"Every wind pattern covers {bottom} to {top}.", "NSCP 207")]
+    out = story_range_findings(
+        d, "Wind", rows[~rows["Name"].astype(str).str.contains(r"\(", regex=True)], bottom, top,
+        "NSCP 207", "wind")
     out += check_wind_drift(d)
     for _, r in rows[~rows["Name"].astype(str).str.contains(r"\(", regex=True)].iterrows():
         out.append(Finding("Wind", INFO, f"{r['Name']}: speed {r.get('WindSpeed')} (mph = "

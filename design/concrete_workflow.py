@@ -861,7 +861,8 @@ def run_deflection() -> pd.DataFrame | None:
         results = store.beam_results.drop(columns=[c for c in DEFLECTION_COLUMNS
                                                    if c in store.beam_results.columns])
         checked = add_deflection_columns(results, service, divisor, connectivity,
-                                         progress=window.update, stages=stages)
+                                         progress=window.update, stages=stages,
+                                         points=(store.tables or {}).get("POINTS"))
         table = deflection_table(checked)
         window.update("Saving the deflection workbook (.xlsx)")
         path = write_deflection_xlsx(table, os.path.join(folder, f"{stem} - Deflection.xlsx"))

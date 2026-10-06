@@ -148,6 +148,83 @@ def center_drifts(table: pd.DataFrame, base_elevation: float) -> dict[str, tuple
     return out
 
 
+def corner_story_drifts(table: pd.DataFrame, corners: dict[str, list[str]]
+                        ) -> dict[tuple[str, str], float]:
+    """Largest drift ratio of each (combination, story) at the corner joints."""
+    wanted = {(story, joint) for story, joints in corners.items() for joint in joints}
+    if table.empty:
+        return {}
+    keys = list(zip(table["Story"].astype(str), table["UniqueName"].astype(str)))
+    rows = table[[key in wanted for key in keys]].copy()
+    rows["ratio"] = pd.concat([pd.to_numeric(rows["DriftX"], errors="coerce").abs(),
+                               pd.to_numeric(rows["DriftY"], errors="coerce").abs()],
+                              axis=1).max(axis=1)
+    worst = rows.groupby([rows["OutputCase"].astype(str), rows["Story"].astype(str)],
+                         sort=False)["ratio"].max()
+    return {(combo, story): float(ratio) for (combo, story), ratio in worst.items()
+            if ratio == ratio}
+
+
+def center_story_drifts(table: pd.DataFrame, base_elevation: float
+                        ) -> dict[tuple[str, str], float]:
+    """Largest drift ratio of each (combination, story) at the diaphragm centres of mass
+    (see ``center_drifts``)."""
+    if table.empty:
+        return {}
+    data = table.copy()
+    for column in ("UX", "UY", "Z"):
+        data[column] = pd.to_numeric(data[column], errors="coerce")
+    out: dict[tuple[str, str], float] = {}
+    keys = [data["OutputCase"].astype(str), data["Diaphragm"].astype(str),
+            data["StepType"].astype(str)]
+    for (combo, _, _), rows in data.groupby(keys, sort=False):
+        rows = rows.sort_values("Z")
+        below_z, below_u = base_elevation, (0.0, 0.0)
+        for _, r in rows.iterrows():
+            height = r["Z"] - below_z
+            if height > 0:
+                ratio = max(abs(r["UX"] - below_u[0]), abs(r["UY"] - below_u[1])) / height
+                key = (combo, str(r["Story"]))
+                out[key] = max(float(ratio), out.get(key, 0.0))
+            below_z, below_u = r["Z"], (r["UX"], r["UY"])
+    return out
+
+
+def story_table(by_story: dict[tuple[str, str], float], order: list[str], is_wind,
+                r_factor: float | None) -> list[tuple]:
+    """One row per story, the top first: (story, seismic drift ratio, Delta_M = 0.7 R x it,
+    its combination, wind drift ratio, its combination). None where there is none."""
+    rows = []
+    stories = [s for s in order if any(story == s for _, story in by_story)]
+    stories += sorted({story for _, story in by_story} - set(stories))
+    for story in stories:
+        seismic = [(ratio, combo) for (combo, at), ratio in by_story.items()
+                   if at == story and not is_wind(combo)]
+        wind = [(ratio, combo) for (combo, at), ratio in by_story.items()
+                if at == story and is_wind(combo)]
+        s_ratio, s_combo = max(seismic) if seismic else (None, None)
+        w_ratio, w_combo = max(wind) if wind else (None, None)
+        delta_m = None if s_ratio is None or not r_factor else 0.7 * r_factor * s_ratio
+        rows.append((story, s_ratio, delta_m, s_combo, w_ratio, w_combo))
+    return rows
+
+
+def story_table_text(rows: list[tuple]) -> list[str]:
+    """The lines of ``story_table`` for the report."""
+    if not rows:
+        return []
+    lines = ["Drift of every story (the largest of the combinations checked):",
+             f"  {'Story':<20}{'seismic':>10}{'Delta_M':>10}  {'combination':<44}"
+             f"{'wind':>9}  combination"]
+    for story, s_ratio, delta_m, s_combo, w_ratio, w_combo in rows:
+        seismic = "-" if s_ratio is None else f"{s_ratio:.5f}"
+        inelastic = "-" if delta_m is None else f"{delta_m:.4f}"
+        wind = "-" if not w_ratio else f"h/{1.0 / w_ratio:,.0f}"
+        lines.append(f"  {story:<20}{seismic:>10}{inelastic:>10}  {str(s_combo or '-')[:42]:<44}"
+                     f"{wind:>9}  {str(w_combo or '-')[:42]}")
+    return lines
+
+
 def level_findings(drifts: dict[str, tuple[float, str]], seismic: pd.DataFrame,
                    pattern_types: dict[str, int], wind_denominator: float,
                    drift_cases: dict[str, tuple[str, bool]] | None = None,
@@ -179,6 +256,7 @@ class DriftReport:
     restored: bool = False
     notes: list[str] = field(default_factory=list)
     picked: list[str] = field(default_factory=list)  # combinations the user picked, if any
+    stories: dict[str, list[tuple]] = field(default_factory=dict)  # level name: story_table rows
     modifiers: list[mc.Finding] = field(default_factory=list)  # your modifiers, judged
     modelled: str = ""  # the effective I of your modifiers, as text
 
@@ -206,6 +284,7 @@ class DriftReport:
                 lines.append("Drift pattern periods: " + ", ".join(
                     f"{case} {t:.3f} s" for case, t in sorted(periods.items())))
             lines += [f"[{f.status:>4}] {f.text}   ({f.ref})" for f in findings]
+            lines += story_table_text(self.stories.get(level.name, []))
         lines += [""] + self.notes
         lines.append("Model restored to its strength modifiers and spectrum scale factors"
                      + (" and analysed again." if self.restored else "."))
@@ -346,6 +425,7 @@ def run_drift(connector, reference: str = CENTER,
         corners = outer_corners(connector._read_database_table("Point Object Connectivity"),
                                 connector._read_database_table("Column Object Connectivity"))
     base_elevation = float(as_list(model.Story.GetStories()[2])[0])
+    story_order = [str(n) for n in as_list(model.Story.GetStories()[1])][::-1]   # the top first
 
     def run():
         connector.analysis.run()
@@ -376,11 +456,13 @@ def run_drift(connector, reference: str = CENTER,
                 scale_spectrum_to_static(connector, run)
             say(f"{level.name}: reading the drift")
             if reference == CORNERS:
-                drifts = corner_drifts(_read(connector, "Joint Drifts", combos), corners)
+                moved = _read(connector, "Joint Drifts", combos)
+                drifts = corner_drifts(moved, corners)
+                by_story = corner_story_drifts(moved, corners)
             else:
-                drifts = center_drifts(
-                    _read(connector, "Diaphragm Center Of Mass Displacements", combos),
-                    base_elevation)
+                moved = _read(connector, "Diaphragm Center Of Mass Displacements", combos)
+                drifts = center_drifts(moved, base_elevation)
+                by_story = center_story_drifts(moved, base_elevation)
             # the pattern definitions read only with the patterns selected for display
             model.DatabaseTables.SetLoadPatternsSelectedForDisplay(patterns)
             try:
@@ -399,6 +481,17 @@ def run_drift(connector, reference: str = CENTER,
             report.levels.append((level, level_findings(
                 drifts, pattern_table, pattern_types, wind_denominator, drift_cases, r_factor),
                 periods))
+            used_r = r_factor
+            if not used_r and "R" in pattern_table.columns:
+                values = pd.to_numeric(pattern_table["R"], errors="coerce").dropna()
+                used_r = float(values.iloc[0]) if len(values) else None
+
+            def is_wind(combo: str) -> bool:
+                if drift_cases and combo in drift_cases:
+                    return bool(drift_cases[combo][1])
+                return str(combo).upper().startswith("WDRIFT")
+
+            report.stories[level.name] = story_table(by_story, story_order, is_wind, used_r)
     finally:
         say("Restoring the strength modifiers and spectrum scale factors")
         model.SetModelIsLocked(False)

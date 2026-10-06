@@ -45,6 +45,8 @@ For the spectrum combinations, ETABS gives Max and Min envelopes. The centre-of-
 
 ## Checks (per level)
 
+**Every story is listed.** Under the checks of each stiffness level the report has a table with one row per story, the top first: the largest seismic drift ratio of the combinations checked, ΔM = 0.7 R times it, the combination it comes from, and the same for wind as h/x. The checks above the table give only the worst story of each load case, and one very flexible level, such as a small deck at the top, would otherwise hide that the storeys below it are over the limit too.
+
 - **Seismic** (`DRIFT` combinations: 203-5 and 203-7, E from `EQXSD`, `EQYSD`, `RSAXD` and `RSAYD`, ρ = 1.0): ΔM = 0.7 R ΔS, at most 0.025h when T < 0.7 s, otherwise 0.020h (NSCP 208.6.5.1). T is the drift pattern period from the same run. The worst combination of each case is reported.
 - **Wind** (`WDRIFT` combinations: 203-3, 203-4 and 203-6 on `WX` and `WY`): at most h / the typed limit. NSCP 207 sets no wind drift limit.
 

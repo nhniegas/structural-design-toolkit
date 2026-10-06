@@ -91,6 +91,7 @@ def identify_cantilever_beams(
     frame_df: pd.DataFrame,
     conn_df: pd.DataFrame,
     points: pd.DataFrame | None = None,
+    pushes: dict | None = None,
 ) -> pd.DataFrame:
     """Classify the supports of every beam.
 
@@ -149,7 +150,7 @@ def identify_cantilever_beams(
     beams = conn.loc[conn["DesignType"].eq("Beam")].copy()
     has_support_i = beams["UniquePtI"].isin(support_joints)
     has_support_j = beams["UniquePtJ"].isin(support_joints)
-    held = end_conditions(conn, points)
+    held = end_conditions(conn, points, pushes)
     held_i = pd.Series([held.get((_name(n), _name(j))) == BEAM_END for n, j in
                         zip(beams["UniqueName"], beams["UniquePtI"])], index=beams.index)
     held_j = pd.Series([held.get((_name(n), _name(j))) == BEAM_END for n, j in
@@ -2132,7 +2133,8 @@ def _support_widths(frame_df: pd.DataFrame, conn_df: pd.DataFrame) -> pd.DataFra
 
 def prepare_beam_table(frame_df: pd.DataFrame, conn_df: pd.DataFrame,
                        bars: dict, earth_cover_stories=(),
-                       points: pd.DataFrame | None = None) -> pd.DataFrame:
+                       points: pd.DataFrame | None = None,
+                       pushes: dict | None = None) -> pd.DataFrame:
     """The beams of FRAME DATA with their support status and the bar inputs.
 
     ``bars`` has dm (main bar), ds (stirrup), dw (web bar) in mm, fyw (web bar
@@ -2145,7 +2147,7 @@ def prepare_beam_table(frame_df: pd.DataFrame, conn_df: pd.DataFrame,
     conn_df = conn_df.copy()
     frame_df.columns = [str(c).strip() for c in frame_df.columns]
     conn_df.columns = [str(c).strip() for c in conn_df.columns]
-    support_df = identify_cantilever_beams(frame_df, conn_df, points)
+    support_df = identify_cantilever_beams(frame_df, conn_df, points, pushes)
     support_df = support_df.merge(_support_widths(frame_df, conn_df), on="UniqueName",
                                   how="left")
     beam_df = frame_df.merge(support_df, on="UniqueName", how="left")
@@ -2307,13 +2309,36 @@ def ask_deflection_stages(title: str = "Beam Design - Deflection") -> Deflection
     return stages
 
 
+def load_path_pushes(tables: dict, gravity_combo: str | None = None) -> dict:
+    """What the analysis says holds each beam end, for the support status and
+    the carrier rule: the shear and moment diagrams and, with the service
+    loads, the deflected shape (``beam_carriers.LoadPath``).
+
+    Read under the full service load (DEF 101) when the model has the
+    deflection combinations, otherwise under the factored gravity
+    combination of the seismic shear. Empty when neither is there: the
+    geometry of the framing then decides.
+    """
+    from design.beam_carriers import read_load_path
+    from design.beam_deflection import COMBO_FULL
+
+    connectivity = tables.get("CONNECTIVITY")
+    service = tables.get("SERVICE LOADS")
+    if service is not None and len(service) and "V2" in service.columns:
+        path = read_load_path(service, COMBO_FULL, connectivity)
+        if path:
+            return path
+    return read_load_path(tables.get("FACTORED LOADS"), gravity_combo, connectivity)
+
+
 def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict,
                  long_limit_divisor: int = LIMIT_DAMAGED, progress=None,
                  earth_cover_stories=(), carrier_depth: bool = False,
                  compatibility_torsion: bool = False,
                  office_bar_spacing: bool = True,
                  exempt_short_spans: bool = False,
-                 deflection_stages: DeflectionStages | None = None) -> pd.DataFrame:
+                 deflection_stages: DeflectionStages | None = None,
+                 load_path: dict | None = None) -> pd.DataFrame:
     """Design every beam from the extracted tables; deflection when service loads exist.
 
     ``tables`` holds FACTORED LOADS, FRAME DATA, CONNECTIVITY and (optional)
@@ -2325,12 +2350,16 @@ def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict
     spacing then comes from crack control (ACI 24.3.2). ``exempt_short_spans``
     designs the girders with a clear span under 4d without the SMRF rules
     (ACI 18.6.2.1(a)). ``deflection_stages`` (when the partitions are built)
-    deducts the long-term deflection before them. The target ratios are those that
+    deducts the long-term deflection before them. ``load_path`` is what holds
+    each beam end (``load_path_pushes``); it is read from the tables when not
+    given, and the design loop gives the reading of its first analysis so
+    that it does not change as the sizes do. The target ratios are those that
     are active (``dcr_targets.use``). Returns the results, two rows (TOP,
     BOTTOM) per beam.
     """
+    pushes = load_path_pushes(tables, gravity_combo) if load_path is None else load_path
     beam_props = prepare_beam_table(tables["FRAME DATA"], tables["CONNECTIVITY"], bars,
-                                    earth_cover_stories, tables.get("POINTS"))
+                                    earth_cover_stories, tables.get("POINTS"), pushes)
     results = execute_beam_design(
         df_beam_props=beam_props,
         df_frame_forces=tables["FACTORED LOADS"],
@@ -2346,11 +2375,13 @@ def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict
     if service is not None and len(service) and not results.empty:
         results = add_deflection_columns(results, service, long_limit_divisor,
                                          tables["CONNECTIVITY"], progress=progress,
-                                         stages=deflection_stages)
+                                         stages=deflection_stages, points=tables.get("POINTS"),
+                                         pushes=pushes)
     if carrier_depth and not results.empty:
         from design.beam_carriers import add_carrier_depth_check
 
-        results = add_carrier_depth_check(results, tables["CONNECTIVITY"], tables.get("POINTS"))
+        results = add_carrier_depth_check(results, tables["CONNECTIVITY"], tables.get("POINTS"),
+                                          pushes)
     return sort_beam_rows(results)
 
 

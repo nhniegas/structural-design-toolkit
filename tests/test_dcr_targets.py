@@ -229,12 +229,14 @@ def test_an_end_on_an_unsplit_girder_is_carried_not_free():
 
 def chain(tip_held: bool):
     """A column at a; beam pieces a-b and b-c in line; c free, or on a girder."""
-    points = pd.DataFrame({"UniqueName": ["a0", "a", "b", "c", "g1", "g2"],
-                           "X": [0, 0, 2000, 4000, 4000, 4000], "Y": [0, 0, 0, 0, -3000, 3000],
-                           "Z": [0, 3000, 3000, 3000, 3000, 3000]})
+    points = pd.DataFrame({"UniqueName": ["a0", "a", "b", "c", "g1", "g2", "h1", "h2"],
+                           "X": [0, 0, 2000, 4000, 4000, 4000, 4000, 4000],
+                           "Y": [0, 0, 0, 0, -3000, 3000, -3000, 3000],
+                           "Z": [0, 3000, 3000, 3000, 3000, 3000, 0, 0]})
     rows = [("C1", "Column", "a0", "a"), ("R", "Beam", "a", "b"), ("T", "Beam", "b", "c")]
-    if tip_held:
-        rows.append(("G", "Beam", "g1", "g2"))            # a girder across the tip, not split
+    if tip_held:   # a girder on its own columns across the tip, not split there
+        rows += [("G", "Beam", "g1", "g2"), ("C2", "Column", "h1", "g1"),
+                 ("C3", "Column", "h2", "g2")]
     return pd.DataFrame(rows, columns=["UniqueName", "DesignType", "UniquePtI", "UniquePtJ"]), points
 
 
@@ -311,3 +313,30 @@ def test_the_loop_stops_enlarging_a_beam_that_keeps_failing_in_shear():
     assert actions["2GX-10"][0] == small and "does not help" in actions["2GX-10"][1]
     assert "2GX-10A" not in actions                 # it only followed the stopped beam
     assert actions["2GX-3"][0] == big               # growth for another reason goes on
+
+
+def test_an_edge_beam_on_the_tips_of_cantilever_girders_is_not_their_carrier():
+    """Two girders cantilever from their columns; an edge beam in two pieces runs across
+    their tips. By geometry alone the edge beam passes under each girder end."""
+    points = pd.DataFrame({
+        "UniqueName": ["a0", "a", "b0", "b", "t1", "t2", "e0", "e3"],
+        "X": [0, 0, 6000, 6000, 0, 6000, -3000, 9000],
+        "Y": [0, 0, 0, 0, 3000, 3000, 3000, 3000],
+        "Z": [0, 3000, 0, 3000, 3000, 3000, 3000, 3000]})
+    rows = [("C1", "Column", "a0", "a"), ("C2", "Column", "b0", "b"),
+            ("2GY-1", "Beam", "a", "t1"), ("2GY-2", "Beam", "b", "t2"),
+            ("2BX-7", "Beam", "e0", "t1"), ("2BX-7A", "Beam", "t1", "t2"),
+            ("2BX-7B", "Beam", "t2", "e3")]
+    connectivity = pd.DataFrame(rows, columns=["UniqueName", "DesignType", "UniquePtI", "UniquePtJ"])
+    network = bc.BeamNetwork(connectivity, points)
+    assert network.rank_of(["2GY-1"]) == 0 and network.rank_of(["2BX-7A"]) == 1
+    carriers = bc.carried_beams(connectivity, points)
+    assert not any(name.startswith("2BX-7") for name in carriers)       # it carries no girder
+    assert sorted(carriers) == ["2GY-1", "2GY-2"]                       # the girders carry it
+    assert carriers["2GY-1"] == ["2BX-7", "2BX-7A"]
+
+    held = bc.end_conditions(connectivity, points)
+    assert held[("2GY-1", "t1")] == bc.FREE_END                         # still a cantilever
+    status = beam.identify_cantilever_beams(None, connectivity, points).set_index("UniqueName")
+    assert status.loc["2GY-1", "SupportStatus"] == "Cantilever (Free at PtJ)"
+    assert status.loc["2BX-7A", "SupportStatus"] == beam.GRAVITY_BEAM_STATUS

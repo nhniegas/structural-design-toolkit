@@ -27,7 +27,7 @@ The report is printed in the terminal and the model is saved. A separate window 
 
 | Check | Rule |
 |---|---|
-| Periods | The modal period with the largest mass in X and in Y, against NSCP 208.5.2.2 Method A, T_A = Ct hn^(3/4) (Ct and hn in ft units, as UBC 97 and ETABS). hn is the height of the top level above the ground level: elevation 0 when the base is below it (a footing level or a basement), otherwise the base. It is printed with the periods, and the Method B cap: 1.3 T_A in zone 4, 1.4 T_A in zone 2. A longer modal period is reported: the static seismic cases use the capped period |
+| Periods | The modal period with the largest mass in X and in Y, against NSCP 208.5.2.2 Method A, T_A = Ct hn^(3/4) (Ct and hn in ft units, as UBC 97 and ETABS). hn is the height between the bottom and top stories of the static seismic patterns, which is the height ETABS uses for their period; the report names the two stories. On a model with no such pattern it is the height of the top level above the ground level: elevation 0 when the base is below it (a footing level or a basement), otherwise the base. It is printed with the periods, and the Method B cap: 1.3 T_A in zone 4, 1.4 T_A in zone 2. A longer modal period is reported: the static seismic cases use the capped period |
 | Modal mass | The sum of the modal participating mass in X and Y; a warning below 90 % (add modes) |
 | Weight | The seismic weight from the mass source (Mass Summary by Story), against the vertical base reaction of the mass-source load patterns with their multipliers. A difference above 1 % is reported: element self mass or added mass in the mass source, or loads on the base |
 

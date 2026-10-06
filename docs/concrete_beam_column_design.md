@@ -178,8 +178,23 @@ A shear larger than phi (Vc + 0.66 √f'c bw d) (ACI 22.5.1.2), or a combined sh
 **Support status.** Each beam is classified by what holds its two ends:
 
 - An end is on a support when a column or a wall is at its joint.
-- An end that another beam carries is supported too: a beam across it at the joint, or a girder whose centre line passes through the joint, also when ETABS has not split that girder there.
+- An end that another beam carries is supported too. Whether a beam carries or is carried follows the **load path**, not only what meets at the joint (see below).
 - A beam that only continues in line does not hold an end by itself. The end is as held as the far end of that beam, so a cantilever that ETABS has in two pieces is still a cantilever.
+
+**The load path.** Whether a beam carries or is carried is read from the shear and moment diagrams of the analysis, not from the framing alone. For each beam end, under gravity load:
+
+- **Pushed up:** something carries the beam there. The end is supported.
+- **A downward force on it:** the diagrams do not settle it. A free tip that carries a beam and an end that a girder or a column in tension holds down (the back span of a see-saw) have the same shear and moment diagrams. The **deflected shape** of the analysis tells them apart: a free tip drops, an end that is held down stays where it is.
+
+The movement is read from the joint displacements. For the end in question, measured from the other end of the member, the part of its downward movement that is bending is the movement less what the rotation of the other end gives. A free tip moves down by its bending or more; a held end does not, the rotation taking up the bending. The end is free when its movement is at least half of that bending.
+
+So an edge beam with girders ending on it is their carrier when the girder ends are pushed up, even though it reaches no column itself. And a girder whose end drops under a downward force is a cantilever, whatever beam is at its tip.
+
+The diagrams are those of the full service load (`DEF 101`) when the model has the deflection combinations, otherwise those of the factored gravity combination. The sign of the shear is taken from the slope of the moment, so it does not depend on the sign convention of the analysis. An end force below 5 % of the largest shear of the member, or below 0.5 kN, is too small to read.
+
+Where there are no diagrams or movements to read (results made by an earlier version, or a model with no deflection combinations), the framing decides. Every beam line gets a rank: 0 when it rests on a column or a wall, 1 when it rests only on lines of rank 0, and so on. A line nearer to the supports holds the end of one further away; two lines of the same rank hold each other only where one runs through the joint and is itself held at both its ends: the member that holds an end down must be supported on its own two ends. A column counts as a support at the joint on its top; a column that only starts at a joint (a planted column) is a load.
+
+Because the diagrams come from the analysis, the reading can change when the sizes change a great deal. `sdt beams` reads it from the analysis in the model. The design loop reads it once, from its first analysis, and keeps it: read again after every resizing, a member made stiffer attracts more load, and the classification and the sizes would chase each other.
 
 `Supported Both Ends` is a member on a column or wall at one end at least and held at the other. `Cantilever (Free at PtI / PtJ)` is on a column or wall at one end and truly free at the other. Before version 0.3.1 a beam from a column to a girder was taken as a cantilever, with a short clear span and a capacity shear far too large.
 
@@ -235,7 +250,20 @@ What the staged values assume:
 - The same Ie is used at every stage: the beam is taken as cracked under the full service load from the start, which is the safe side for the early stages.
 - It is the ACI time-factor method, not a creep analysis in time steps.
 
-**Spans, not segments.** ETABS splits a beam line wherever another member frames into it. The segments of one tagged line (`2GX-1`, `2GX-1A`, `2GX-1B`, ...) that meet at a joint without a column are checked together as one span, and L is the whole span. A span end is supported by a column, a wall or a member the line ends on; it is free (a cantilever tip) only when nothing else connects there. A cantilever span is fixed at its support, and the deflection from the rotation of that support (from the analysis) is added.
+**Spans, not segments.** ETABS splits a beam line wherever another member frames into it, and a line can run over several supports. The whole line (`2GX-1`, `2GX-1A`, `2GX-1B`, ...) is taken as one chain and cut where it is supported; each stretch between two supports is checked as one span, and L is that span.
+
+A line is supported:
+
+- at a joint with a column below it or a wall;
+- where the shear of the full service load jumps up, at a joint or inside a member. That is a support pushing up, such as a girder that carries the line and that ETABS has not split there;
+- at an end that the diagrams show pushed up, or that the deflected shape shows held down (see "The load path" under [Beam design](#beam-design)). An end that drops under a downward force is free.
+
+A planted column and a beam that rests on the line are loads: the span runs on through them. A stretch beyond the last support to a free end is a cantilever: it is fixed at that support, and the deflection from the rotation of the support (from the analysis) is added. A cantilever with an edge beam on its tip is still a cantilever.
+
+The "Span checked" and "Span length checked" columns say which members were checked together, whether as a cantilever, and over what length. Earlier versions counted the members at a joint to decide whether an end was supported, and joined the pieces of a line through every joint without a column. That read a line ending on an unsplit girder as a cantilever, joined an edge beam resting on several girders into one very long span, and called a cantilever supported when an edge beam sat on its tip.
+
+Two things the check does not do. It measures a span from its own supports, so the movement of a girder is not added to the beam it carries. And where a cantilever is cut inside a member, away from a joint, the rotation of its support is not known and is taken as zero.
+
 
 The results file has Ie of each zone, λΔ, the three deflections, their limits, the long-term part, the total, the stage values when the stages are given, the governing ratio and `Deflection check`. A beam that fails the deflection and nothing else gets `FAILED: DEFLECTION (ACI 24.2.2)`. The calculation report has the same values in a Deflection table for each beam.
 
@@ -301,6 +329,7 @@ The effective depth is taken to the centre of one layer of bars: d = h - cover -
 
 Where a girder is shallower than a beam it carries, the bottom bars of that beam pass below the girder's bottom bars and cannot rest on them. When you answer yes to "should a girder or beam be at least as deep as the beams that frame into it", every carrier is checked:
 
+- The carrier follows the load path, read from the shear and moment diagrams: a beam end that is pushed up is carried by the beam running through its joint, and an end with a downward force on it is not carried there. An edge beam can therefore be the carrier of the girders that end on it.
 - The carrier of a beam end is the beam whose centre line passes through it, whether ETABS has that girder as one member from column to column or as pieces that meet at the joint. Beams that only continue each other are not carriers.
 - A carrier shallower than a beam it carries gets `FAILED: DEPTH BELOW THE BEAM IT CARRIES`, with both depths in the "Depth against the beams it carries" column.
 - It is a detailing rule of your own, not a code clause, so it is off unless you ask for it. It needs the joint coordinates, which the extraction provides.

@@ -376,3 +376,74 @@ def test_the_range_shown_holds_the_sizes_the_model_has():
     # no default range (circular columns): from the model's sizes
     assert suggested_range(None, [600, 700], 100) == [600, 900, 100]
     assert suggested_range(None, []) == []
+
+
+# ----------------------------------------------------------------- who follows whom in a line
+def with_demands(name, moment, shear, **kwargs):
+    rows = beam_rows(name, vu=shear, **kwargs)
+    for row in rows:
+        row["Mu_left"], row["Mu_mid"], row["Mu_right"] = moment, moment / 2, moment
+    return rows
+
+
+def test_a_member_much_less_loaded_than_the_one_that_governs_keeps_its_size():
+    failing = "FAILED: MAX BARS EXCEEDED (>3 LAYERS)"
+    results = pd.DataFrame(with_demands("2GX-2", 800.0, 400.0, status=failing)
+                           + with_demands("2GX-2A", 700.0, 380.0)      # 88 % and 95 %: follows
+                           + with_demands("2GX-2B", 500.0, 380.0)      # 63 % of the moment: no
+                           + with_demands("2GX-2C", 790.0, 200.0))     # half the shear: no
+    sections = {n: g(300, 500) for n in ("2GX-2", "2GX-2A", "2GX-2B", "2GX-2C")}
+    lengths = {n: 6000.0 for n in sections}
+    actions = beam_actions(results, sections, lengths, set(), SETTINGS, allow_shrink=False)
+    assert sorted(actions) == ["2GX-2", "2GX-2A"]
+
+    from dataclasses import replace
+
+    everyone = beam_actions(results, sections, lengths, set(),
+                            replace(SETTINGS, line_demand_share=0.0), allow_shrink=False)
+    assert sorted(everyone) == sorted(sections)                 # 0 switches the condition off
+
+
+def test_the_pieces_of_one_span_take_one_size_whatever_their_lengths_and_demands():
+    failing = "FAILED: DEFLECTION (ACI 24.2.2)"
+    rows = (with_demands("2GX-3", 900.0, 400.0, status=failing) + with_demands("2GX-3A", 100.0, 50.0)
+            + with_demands("2GX-3B", 850.0, 390.0))
+    for row in rows:      # 3 and 3A were checked as one span of 9 m; 3B is the next span
+        row["Defl_span"] = "2GX-3 to 2GX-3A" if row["UniqueName"] != "2GX-3B" else "2GX-3B"
+        row["Defl_span_mm"] = 9000.0 if row["UniqueName"] != "2GX-3B" else 4000.0
+    results = pd.DataFrame(rows)
+    sections = {n: g(300, 500) for n in ("2GX-3", "2GX-3A", "2GX-3B")}
+    lengths = {"2GX-3": 7000.0, "2GX-3A": 2000.0, "2GX-3B": 4000.0}     # the ETABS members
+    actions = beam_actions(results, sections, lengths, set(), SETTINGS, allow_shrink=False)
+    assert actions["2GX-3A"][0] == g(300, 600)      # a short, lightly loaded piece of the same span
+    assert "2GX-3B" not in actions                  # the next span is under half as long
+
+
+def test_a_beam_whose_deflection_does_not_come_down_is_not_made_larger_again():
+    from etabs_api.workflows.design_loop import stop_unhelped_deflection_growth
+
+    small, big = g(300, 500), g(300, 600)
+    sections = {"2GX-8": small, "2GX-8A": small, "2GX-9": small}
+    ratios: dict[str, float] = {}
+
+    def results(a, b):
+        return pd.DataFrame(beam_rows("2GX-8", defl=a) + beam_rows("2GX-8A", defl=0.2)
+                            + beam_rows("2GX-9", defl=b))
+
+    def actions():
+        return {"2GX-8": (big, "grow (deflection)"), "2GX-8A": (big, "same beam line as 2GX-8"),
+                "2GX-9": (big, "grow (deflection)")}
+
+    first = actions()
+    assert stop_unhelped_deflection_growth(first, sections, results(5.0, 2.0), ratios) == []
+    assert first == actions() and ratios == {"2GX-8": 5.0, "2GX-9": 2.0}
+    # 2GX-8 hardly moved (the rotation of its support governs); 2GX-9 came down by a third
+    second = actions()
+    stopped = stop_unhelped_deflection_growth(second, sections, results(4.9, 1.3), ratios)
+    assert stopped == ["2GX-8"]
+    assert second["2GX-8"][0] == small and "does not help" in second["2GX-8"][1]
+    assert "2GX-8A" not in second                    # the member that only followed it stays
+    assert second["2GX-9"] == (big, "grow (deflection)") and ratios["2GX-9"] == 1.3
+    # and it stays stopped on the next pass
+    third = actions()
+    assert stop_unhelped_deflection_growth(third, sections, results(4.9, 0.9), ratios) == ["2GX-8"]

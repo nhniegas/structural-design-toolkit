@@ -36,9 +36,9 @@ def by_ref(findings, ref):
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("period, drift, expected", [
     (0.243, False, 2.5 * 0.44 / 8.5),           # 208-9 governs
-    (1.518, True, 0.768 / (8.5 * 1.518)),       # 208-8, drift: no lower limit
+    (1.518, True, 0.768 / (8.5 * 1.518)),       # 208-8, drift: above the zone 4 minimum
     (5.0, False, 0.11 * 0.44),                  # 208-10 governs (0.0484 > 208-11 0.0452)
-    (5.0, True, 0.768 / (8.5 * 5.0)),
+    (5.0, True, 0.8 * 0.4 * 1.2 / 8.5),         # drift: 208-10 is lifted, 208-11 is not
 ])
 def test_nscp_coefficient(period, drift, expected):
     assert mc.nscp_coefficient(0.44, 0.768, 1.0, 8.5, period, 0.4, 1.2, drift) == \
@@ -118,7 +118,7 @@ def test_static_coefficient_and_period_cap_pass():
     coefficient = by_ref(findings, "Eq. 208-8 to 208-11")
     assert [f.status for f in coefficient] == [mc.OK]
     assert by_ref(findings, "208.6.5.2")[0].status == mc.OK
-    assert [f.status for f in findings if f.ref == "NSCP 208.5.2.2" and "s, cap" in f.text] == [mc.OK]
+    assert [f.status for f in findings if f.ref == "NSCP 208.5.2.2" and "), cap" in f.text] == [mc.OK]
 
 
 def test_edited_static_coefficient_fails():
@@ -129,7 +129,7 @@ def test_edited_static_coefficient_fails():
 def test_period_above_the_cap_fails():
     # T_A = 0.03 (11000 / 304.8)^0.75 = 0.441 s; cap 1.3 T_A = 0.573 s
     findings = mc.check_seismic(analysed(TUsed=0.70, CoeffUsed=0.768 / (8.5 * 0.70)))
-    cap = [f for f in findings if f.ref == "NSCP 208.5.2.2" and "s, cap" in f.text]
+    cap = [f for f in findings if f.ref == "NSCP 208.5.2.2" and "), cap" in f.text]
     assert cap[0].status == mc.FAIL
 
 
@@ -288,3 +288,36 @@ def test_user_defined_table_without_site_columns():
     assert [f.status for f in by_ref(findings, "Eq. 208-8 to 208-11")] == [mc.OK]
     drift = by_ref(findings, "208.6.5.1")[0]
     assert "T 1.52 s" in drift.text and drift.status == mc.OK
+
+
+# --------------------------------------------------------------------------- #
+# the story range of the lateral loads
+# --------------------------------------------------------------------------- #
+def with_footing_level(bottom="FT", top="RD", weights=None):
+    """Stories FT (-2500), GF (0), 2F, RD and an empty PH above; the patterns from ``bottom``."""
+    d = model([seismic_row("EQX", BotStory=bottom, TopStory=top)])
+    d.stories = [("Base", -5000.0), ("FT", -2500.0), ("GF", 0.0), ("2F", 4000.0), ("RD", 8000.0),
+                 ("PH", 11000.0)]
+    d.story_weights = weights if weights is not None else {
+        "FT": 500e3, "GF": 2000e3, "2F": 2000e3, "RD": 1500e3, "PH": 0.0}
+    return d
+
+
+def test_a_base_below_the_ground_level_is_said_not_failed():
+    findings = by_ref(mc.check_seismic(with_footing_level("FT")), "208.5.2.3")
+    assert findings[0].status == mc.OK
+    note = [f for f in findings if f.status == mc.INFO]
+    assert note and "below the ground level GF" in note[0].text
+
+
+def test_patterns_that_start_above_the_ground_level_still_fail():
+    findings = by_ref(mc.check_seismic(with_footing_level("2F")), "208.5.2.3")
+    assert findings[0].status == mc.FAIL and "starts above the ground level" in findings[0].text
+
+
+def test_a_top_story_with_no_structure_fails_because_the_height_is_too_long():
+    findings = mc.check_seismic(with_footing_level("GF", "PH"))
+    empty = [f for f in findings if "has no structure" in f.text]
+    assert empty and empty[0].status == mc.FAIL and "RD" in empty[0].text
+    assert not [f for f in mc.check_seismic(with_footing_level("GF", "RD"))
+                if "has no structure" in f.text]

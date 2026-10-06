@@ -67,8 +67,22 @@ def test_beam_past_the_range_grows_by_the_increment_to_the_maximum():
 
 
 def test_beam_widens_when_deepening_would_break_the_ratio():
-    # 300 x 1050 is below b/h = 0.3: the beam widens first, then deepens next time
-    assert grow_beam(g(300, 1000), "depth", RANGES, LIMITS) == g(400, 1000)
+    # 300 x 1050 is below b/h = 0.3: the beam is made deeper and as wide as that depth needs
+    assert grow_beam(g(300, 1000), "depth", RANGES, LIMITS) == g(400, 1050)
+
+
+def test_the_width_share_of_the_engineer_is_kept_when_a_beam_is_resized():
+    from dataclasses import replace
+
+    wide = replace(LIMITS, beam_min_ratio=0.4)
+    assert grow_beam(g(300, 700), "depth", RANGES, LIMITS) == g(300, 800)      # 0.375: fine at 0.3
+    assert grow_beam(g(300, 700), "depth", RANGES, wide) == g(400, 800)        # 0.4 needs 320 mm
+    assert grow_beam(g(400, 1000), "depth", RANGES, wide) == g(500, 1050)
+    assert shrink_beam(g(400, 900), RANGES, min_ratio=0.4) == g(400, 800)      # depth first
+    assert shrink_beam(g(400, 1000), {"G": {"width": [300, 600, 100], "depth": [1000, 1000, 100]}},
+                       min_ratio=0.4) is None                                  # 300 / 1000 is below 0.4
+    assert replace(LIMITS, beam_min_ratio=0.1).beam_min_ratio == 0.1           # never below the code:
+    assert grow_beam(g(300, 1000), "depth", RANGES, replace(LIMITS, beam_min_ratio=0.1))         == g(400, 1050)                                                        # 0.3 still holds
 
 
 def test_beam_widening_deepens_when_width_would_pass_depth():
