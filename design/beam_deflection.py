@@ -16,8 +16,9 @@ For each beam, after its bars are chosen:
    at a joint with a column below it or a wall; at a joint, or inside a
    member, where the shear of the full service load jumps up, which is a
    support pushing up (a girder that carries the line). An end of the line
-   is held when the diagrams show it pushed up; with a downward force on it
-   it is a free end, whatever beam is there (``beam_carriers.BeamNetwork``).
+   is held when the diagrams show it pushed up. With a downward force on
+   it, the deflected shape of the analysis decides: a free tip drops, an end
+   that is held down stays (``beam_carriers.BeamNetwork``).
    A planted column and a beam that rests on the line are loads: the span
    runs on through them.
 4. Long-term factor lambda = xi / (1 + 50 rho'), rho' the compression steel
@@ -842,10 +843,10 @@ def add_deflection_columns(results, service, long_limit_divisor: float = LIMIT_D
 
     checked: dict[str, DeflectionResult] = {}
     if has_lines:
-        from design.beam_carriers import BeamNetwork, end_pushes
+        from design.beam_carriers import BeamNetwork, read_load_path
 
         network = BeamNetwork(connectivity, points, pushes if pushes is not None
-                              else end_pushes(service, COMBO_FULL, connectivity))
+                              else read_load_path(service, COMBO_FULL, connectivity))
         for chain in beam_spans(connectivity, names, points, through_supports=True):
             tell(chain)
             found = by_structure(chain)

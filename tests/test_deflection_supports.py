@@ -248,3 +248,56 @@ def test_the_carrier_of_the_depth_rule_follows_the_diagrams():
     assert sorted(carriers) == ["2GX-1"] and sorted(carriers["2GX-1"]) == ["2BY-8", "2BY-8A"]
     # no diagrams: the framing says the girder, on its column, carries the edge beam
     assert sorted(carried_beams(table, points)) == ["2GX-1"]
+
+
+def test_the_deflected_shape_tells_a_free_tip_from_an_end_that_is_held_down():
+    """A girder from its column to a joint where another girder runs through between its own
+    columns, with a downward force on that end. The diagrams are the same either way."""
+    from design.beam_carriers import (DOWN_I, DOWN_J, TIP_I, TIP_J, BeamNetwork, end_moves,
+                                      read_load_path)
+
+    table = connectivity([("2GX-7", "a", "t"), ("2GY-9", "s", "t"), ("2GY-9A", "t", "u")],
+                         [("C1", "a0", "a"), ("C2", "s0", "s"), ("C3", "u0", "u")])
+
+    def loads(down_tip, tip_from_root_rotation):
+        frame = service({"2GX-7": tip_loaded})
+        frame[DOWN_I], frame[DOWN_J] = 1.0, down_tip
+        frame[TIP_I], frame[TIP_J] = tip_from_root_rotation, 0.0
+        return frame
+
+    # a free tip: it moves down 40 mm, 25 of it bending and 15 from the rotation of the root
+    free = loads(41.0, 15.0)
+    assert end_moves(free, bd.COMBO_FULL, table)[("2GX-7", "t")] == -1
+    assert not BeamNetwork(table, None, read_load_path(free, bd.COMBO_FULL, table)).held_at(
+        "t", ["2GX-7"])
+    # held down: it stays where it is, the root rotating back by what the bending would give
+    held = loads(1.5, -24.0)
+    assert end_moves(held, bd.COMBO_FULL, table)[("2GX-7", "t")] == 1
+    assert BeamNetwork(table, None, read_load_path(held, bd.COMBO_FULL, table)).held_at(
+        "t", ["2GX-7"])
+    # the end at the column is not a tip either way, and without the movements nothing is read
+    assert end_moves(free, bd.COMBO_FULL, table)[("2GX-7", "a")] == 1
+    assert end_moves(service({"2GX-7": tip_loaded}), bd.COMBO_FULL, table) == {}
+
+    results = rows("2GX-7")
+    as_cantilever = top(bd.add_deflection_columns(results, free, connectivity=table), "2GX-7")
+    as_span = top(bd.add_deflection_columns(results, held, connectivity=table), "2GX-7")
+    assert "cantilever" in as_cantilever["Defl_span"] and "cantilever" not in as_span["Defl_span"]
+    assert as_cantilever["Defl_live_mm"] > 10 * max(as_span["Defl_live_mm"], 0.01)
+
+
+def test_a_girder_that_is_not_held_at_both_ends_does_not_hold_another_down():
+    """With no movements to read, the member that would hold an end down must itself be
+    supported at both its ends (by the diagrams): otherwise the end is free."""
+    from design.beam_carriers import BeamNetwork, end_pushes
+
+    table = connectivity([("2GX-7", "a", "t"), ("2GY-9", "s", "t"), ("2GY-9A", "t", "u")],
+                         [("C1", "a0", "a"), ("C2", "s0", "s")])        # no column at u
+    shears = {"2GX-7": tip_loaded, "2GY-9": simple, "2GY-9A": tip_loaded}
+    pushes = end_pushes(service(shears), bd.COMBO_FULL, table)
+    assert pushes[("2GY-9A", "u")] == -1                 # the far end of that girder is loaded
+    assert not BeamNetwork(table, None, pushes).held_at("t", ["2GX-7"])
+    both = connectivity([("2GX-7", "a", "t"), ("2GY-9", "s", "t"), ("2GY-9A", "t", "u")],
+                        [("C1", "a0", "a"), ("C2", "s0", "s"), ("C3", "u0", "u")])
+    assert BeamNetwork(both, None, end_pushes(service(shears), bd.COMBO_FULL, both)).held_at(
+        "t", ["2GX-7"])

@@ -184,13 +184,15 @@ A shear larger than phi (Vc + 0.66 √f'c bw d) (ACI 22.5.1.2), or a combined sh
 **The load path.** Whether a beam carries or is carried is read from the shear and moment diagrams of the analysis, not from the framing alone. For each beam end, under gravity load:
 
 - **Pushed up:** something carries the beam there. The end is supported.
-- **A downward force on it:** not settled by the diagrams. A free tip that carries a beam and an end that a girder holds down (the back span of a see-saw) have the same shear and moment diagrams; only the deflected shape tells them apart, and it is not read yet. The framing decides there, by the ranks below.
+- **A downward force on it:** the diagrams do not settle it. A free tip that carries a beam and an end that a girder or a column in tension holds down (the back span of a see-saw) have the same shear and moment diagrams. The **deflected shape** of the analysis tells them apart: a free tip drops, an end that is held down stays where it is.
 
-So an edge beam with girders ending on it is their carrier when the girder ends are pushed up, even though it reaches no column itself. A cantilever girder with an edge beam on its tip stays a cantilever when that edge beam is further from the supports than the girder; where the edge beam is as near to the supports and runs through the tip, the tip is taken as held, which can miss a cantilever. Check the "Span checked" column for girders you know to be cantilevers.
+The movement is read from the joint displacements. For the end in question, measured from the other end of the member, the part of its downward movement that is bending is the movement less what the rotation of the other end gives. A free tip moves down by its bending or more; a held end does not, the rotation taking up the bending. The end is free when its movement is at least half of that bending.
+
+So an edge beam with girders ending on it is their carrier when the girder ends are pushed up, even though it reaches no column itself. And a girder whose end drops under a downward force is a cantilever, whatever beam is at its tip.
 
 The diagrams are those of the full service load (`DEF 101`) when the model has the deflection combinations, otherwise those of the factored gravity combination. The sign of the shear is taken from the slope of the moment, so it does not depend on the sign convention of the analysis. An end force below 5 % of the largest shear of the member, or below 0.5 kN, is too small to read.
 
-Where there are no diagrams to read, the framing decides. Every beam line gets a rank: 0 when it rests on a column or a wall, 1 when it rests only on lines of rank 0, and so on. A line nearer to the supports holds the end of one further away; two lines of the same rank hold each other only where one runs through the joint. A column counts as a support at the joint on its top; a column that only starts at a joint (a planted column) is a load.
+Where there are no diagrams or movements to read (results made by an earlier version, or a model with no deflection combinations), the framing decides. Every beam line gets a rank: 0 when it rests on a column or a wall, 1 when it rests only on lines of rank 0, and so on. A line nearer to the supports holds the end of one further away; two lines of the same rank hold each other only where one runs through the joint and is itself held at both its ends: the member that holds an end down must be supported on its own two ends. A column counts as a support at the joint on its top; a column that only starts at a joint (a planted column) is a load.
 
 Because the diagrams come from the analysis, the reading can change when the sizes change a great deal. `sdt beams` reads it from the analysis in the model. The design loop reads it once, from its first analysis, and keeps it: read again after every resizing, a member made stiffer attracts more load, and the classification and the sizes would chase each other.
 
@@ -254,7 +256,7 @@ A line is supported:
 
 - at a joint with a column below it or a wall;
 - where the shear of the full service load jumps up, at a joint or inside a member. That is a support pushing up, such as a girder that carries the line and that ETABS has not split there;
-- at an end that the diagrams show pushed up (see "The load path" under [Beam design](#beam-design)). Where the end has a downward force on it, the framing decides.
+- at an end that the diagrams show pushed up, or that the deflected shape shows held down (see "The load path" under [Beam design](#beam-design)). An end that drops under a downward force is free.
 
 A planted column and a beam that rests on the line are loads: the span runs on through them. A stretch beyond the last support to a free end is a cantilever: it is fixed at that support, and the deflection from the rotation of the support (from the analysis) is added. A cantilever with an edge beam on its tip is still a cantilever.
 

@@ -98,7 +98,10 @@ class ETABSDataExporter:
         the model; returns None, writing nothing, when there are none. Each row
         also has, for the beam's combination, the downward tip deflection (mm)
         from the rotation of its I end and of its J end, used when the beam is a
-        cantilever supported at that end.
+        cantilever supported at that end, and the downward movement (mm) of its
+        I and J joints: the deflected shape tells a free tip that carries a
+        beam from an end that a girder holds down, which the shear and moment
+        diagrams cannot.
         """
         from design.beam_deflection import DEFLECTION_COMBOS
 
@@ -151,6 +154,8 @@ class ETABSDataExporter:
         by_actual = {(str(j), str(c)): (float(rx), float(ry)) for j, c, rx, ry in zip(
             moves["UniqueName"], moves["OutputCase"], pd.to_numeric(moves["Rx"]),
             pd.to_numeric(moves["Ry"]))}
+        down_actual = {(str(j), str(c)): -float(uz) for j, c, uz in zip(
+            moves["UniqueName"], moves["OutputCase"], pd.to_numeric(moves["Uz"]))}             if "Uz" in moves.columns else {}
         joints = {joint for joint, _ in by_actual}
         rotation = {(joint, role): by_actual[(joint, actual)]
                     for role, actual in actual_of.items() for joint in joints
@@ -174,6 +179,14 @@ class ETABSDataExporter:
             tips[(str(m), str(c))][0] for m, c in zip(table["UniqueName"], table["Combo"])]
         table["Tip from rotation at J (mm)"] = [
             tips[(str(m), str(c))][1] for m, c in zip(table["UniqueName"], table["Combo"])]
+        if down_actual:
+            def down(member: str, combo: str, end: int) -> float | None:
+                joint = ends.get(member, ("", ""))[end]
+                return down_actual.get((joint, actual_of.get(combo, combo)))
+
+            for end, column in ((0, "Down at I (mm)"), (1, "Down at J (mm)")):
+                table[column] = [down(str(m), str(c), end)
+                                 for m, c in zip(table["UniqueName"], table["Combo"])]
 
         stories = self.etabs.get_data("Story Definitions")["Story"].astype(str).tolist()
         order = {name: index for index, name in enumerate(stories)}  # listed top first

@@ -28,6 +28,10 @@ import pandas as pd
 ON_LINE = 10.0                                   # mm
 IN_LINE = math.cos(math.radians(15.0))           # beams within 15 degrees are in line
 SAME_LEVEL = 50.0                                # mm
+MOVE_SHARE = 0.5       # an end drops when it moves down by this share of its bending or more
+MOVE_FLOOR = 0.1       # mm: less bending than this is not read
+DOWN_I, DOWN_J = "Down at I (mm)", "Down at J (mm)"
+TIP_I, TIP_J = "Tip from rotation at I (mm)", "Tip from rotation at J (mm)"
 PUSH_SHARE = 0.05      # an end force above this share of the member's largest shear is read
 PUSH_FLOOR = 0.5       # kN: smaller end forces are not read at all
 CARRIER_FAILED = "FAILED: DEPTH BELOW THE BEAM IT CARRIES"
@@ -267,6 +271,70 @@ def end_pushes(forces: pd.DataFrame | None, combo: str | None,
     return out
 
 
+def end_moves(forces: pd.DataFrame | None, combo: str | None,
+              connectivity: pd.DataFrame | None) -> dict[tuple[str, str], int]:
+    """What the deflected shape of the analysis says about each beam end.
+
+    {(beam, joint): -1 or +1}. -1: the end drops like the tip of a
+    cantilever. +1: it stays, held where it is. The shear and moment
+    diagrams cannot tell these apart when a downward force acts on the end:
+    a free tip that carries a beam and an end that a girder or a column in
+    tension holds down look the same. The movement does.
+
+    For an end, measured from the other end of the member: ``delta`` is how
+    far it moves down, and the part of it that is bending is ``delta`` less
+    the movement from the rotation of the other end. With the other end held,
+    a free tip moves down by its bending or more (the rotation adds to it);
+    a held end does not move, the rotation of the far end taking up the
+    bending. The end drops when delta is at least ``MOVE_SHARE`` of the
+    bending. ``forces`` needs the joint movements and the tip movements from
+    the end rotations (the service loads table has them); empty without.
+    """
+    needed = ("UniqueName", "Combo", DOWN_I, DOWN_J, TIP_I, TIP_J)
+    if forces is None or connectivity is None or not combo or len(forces) == 0 \
+            or any(c not in forces.columns for c in needed):
+        return {}
+    kind = connectivity["DesignType"].astype(str).str.strip().str.casefold()
+    ends = {_name(r["UniqueName"]): (_name(r["UniquePtI"]), _name(r["UniquePtJ"]))
+            for r in connectivity.loc[kind.eq("beam")].to_dict("records")}
+    table = forces.loc[forces["Combo"].astype(str).eq(str(combo)), list(needed)]
+    table = table.drop_duplicates("UniqueName")
+    out: dict[tuple[str, str], int] = {}
+    for name, down_i, down_j, tip_i, tip_j in zip(
+            table["UniqueName"].map(_name), *(pd.to_numeric(table[c], errors="coerce")
+                                              for c in (DOWN_I, DOWN_J, TIP_I, TIP_J))):
+        if name not in ends or any(v != v for v in (down_i, down_j, tip_i, tip_j)):
+            continue
+        # (the end, how far it moves down from the other end, the part from that end's rotation)
+        for joint, delta, rotation in ((ends[name][1], down_j - down_i, tip_i),
+                                       (ends[name][0], down_i - down_j, tip_j)):
+            bending = delta - rotation
+            drops = bending > MOVE_FLOOR and delta >= MOVE_SHARE * bending
+            out[(name, joint)] = -1 if drops else 1
+    return out
+
+
+class LoadPath:
+    """What the analysis says holds each beam end: ``pushes`` from the shear and
+    moment diagrams (``end_pushes``) and ``moves`` from the deflected shape
+    (``end_moves``). Either may be empty."""
+
+    def __init__(self, pushes: dict | None = None, moves: dict | None = None):
+        self.pushes = pushes or {}
+        self.moves = moves or {}
+
+    def __bool__(self) -> bool:
+        return bool(self.pushes or self.moves)
+
+
+def read_load_path(forces: pd.DataFrame | None, combo: str | None,
+                   connectivity: pd.DataFrame | None) -> LoadPath:
+    """The load path of ``forces`` under ``combo``: the diagrams and, where the table
+    has the joint movements, the deflected shape."""
+    return LoadPath(end_pushes(forces, combo, connectivity),
+                    end_moves(forces, combo, connectivity))
+
+
 class BeamNetwork:
     """Which beams meet, and which of them can reach a support.
 
@@ -285,20 +353,26 @@ class BeamNetwork:
     framing looks like. An edge beam that the girders ending on it push
     down, while their own ends are pushed up, carries those girders.
 
-    A downward force on an end does not settle it. A free tip that carries
-    a beam and an end that a girder holds down (the back span of a see-saw)
-    have the same diagrams; only the deflected shape tells them apart, and
-    the tables do not have it. There, and where the diagrams are missing or
-    too small to read, the geometry decides. Every beam line has a rank: 0 when it rests
+    A downward force on an end does not settle it: a free tip that carries
+    a beam and an end that a girder or a column in tension holds down (the
+    back span of a see-saw) have the same diagrams. The deflected shape of
+    the analysis tells them apart (``moves``, from ``end_moves``): a free tip
+    drops, a held end stays.
+
+    Where neither is there, the framing decides. Every beam line has a rank: 0 when it rests
     on a support, 1 when it rests only on lines of rank 0, and so on (a line
     is the pieces of one tagged line, or pieces that continue each other in
     a straight line). An end is then held when another line there is nearer
-    to the supports, or as near and running through the joint.
+    to the supports, or as near, running through the joint and supported at both its own
+    ends: the member that holds an end down must itself be held.
+
+    ``pushes`` is a ``LoadPath``, or the dictionary of ``end_pushes`` alone.
     """
 
     def __init__(self, connectivity: pd.DataFrame | None, points: pd.DataFrame | None = None,
                  pushes: dict[tuple[str, str], int] | None = None):
-        self.pushes = pushes or {}
+        self.moves = getattr(pushes, "moves", None) or {}
+        self.pushes = (pushes.pushes if isinstance(pushes, LoadPath) else pushes) or {}
         self.beams: dict[str, tuple[str, str]] = {}
         self.supports: set[str] = set()
         self.at_joint: dict[str, list[str]] = {}
@@ -488,6 +562,14 @@ class BeamNetwork:
             return 0
         return self.pushes.get((_name(enders[0]), joint), 0)
 
+    def move_at(self, joint, own) -> int:
+        """-1 (drops), +1 (stays) or 0 (not known) for the end of the line ``own`` at ``joint``."""
+        joint = _name(joint)
+        enders = [m for m in own if joint in self.beams.get(_name(m), ())]
+        if len(enders) != 1:
+            return 0
+        return self.moves.get((_name(enders[0]), joint), 0)
+
     def held_at(self, joint, own) -> bool:
         """Whether the end of the beams ``own`` at ``joint`` is held up (see the class)."""
         joint = _name(joint)
@@ -497,7 +579,11 @@ class BeamNetwork:
         if self.push_at(joint, own) > 0:
             return True                          # the diagrams show it pushed up: it is carried
         # A downward force on the end does not settle it: a free tip that carries a beam and
-        # an end that a girder holds down have the same diagrams. The framing decides then.
+        # an end that is held down have the same diagrams. The deflected shape does.
+        move = self.move_at(joint, own)
+        if move:
+            return move > 0
+        # no movements to read: the framing decides
         own_lines = {self.line.get(m) for m in own}
         mine = self.rank_of(own)
         for other in self.others_at(joint, own):
@@ -509,9 +595,21 @@ class BeamNetwork:
                 return True                      # nearer to the supports: it carries this end
             runs_through = joint not in self.line_ends.get(line, ()) \
                 or other in self.passing.get(joint, ())
-            if theirs == mine and theirs != math.inf and runs_through:
+            if theirs == mine and theirs != math.inf and runs_through \
+                    and self.supported_both_ends(line):
                 return True
         return False
+
+    def supported_both_ends(self, line: str) -> bool:
+        """Whether a line is held at both its ends, by a support or pushed up there (from
+        the diagrams). An end the diagrams say nothing about counts as held."""
+        for joint in self.line_ends.get(line, ()):
+            if joint in self.supports:
+                continue
+            enders = [m for m in self.at_joint.get(joint, ()) if self.line.get(m) == line]
+            if any(self.pushes.get((m, joint), 1) <= 0 for m in enders):
+                return False
+        return True
 
 
 def add_carrier_depth_check(results: pd.DataFrame, connectivity: pd.DataFrame,

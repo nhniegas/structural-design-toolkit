@@ -2310,24 +2310,25 @@ def ask_deflection_stages(title: str = "Beam Design - Deflection") -> Deflection
 
 
 def load_path_pushes(tables: dict, gravity_combo: str | None = None) -> dict:
-    """What the shear and moment diagrams say holds each beam end, for the
-    support status and the carrier rule (``beam_carriers.end_pushes``).
+    """What the analysis says holds each beam end, for the support status and
+    the carrier rule: the shear and moment diagrams and, with the service
+    loads, the deflected shape (``beam_carriers.LoadPath``).
 
     Read under the full service load (DEF 101) when the model has the
     deflection combinations, otherwise under the factored gravity
     combination of the seismic shear. Empty when neither is there: the
     geometry of the framing then decides.
     """
-    from design.beam_carriers import end_pushes
+    from design.beam_carriers import read_load_path
     from design.beam_deflection import COMBO_FULL
 
     connectivity = tables.get("CONNECTIVITY")
     service = tables.get("SERVICE LOADS")
     if service is not None and len(service) and "V2" in service.columns:
-        pushes = end_pushes(service, COMBO_FULL, connectivity)
-        if pushes:
-            return pushes
-    return end_pushes(tables.get("FACTORED LOADS"), gravity_combo, connectivity)
+        path = read_load_path(service, COMBO_FULL, connectivity)
+        if path:
+            return path
+    return read_load_path(tables.get("FACTORED LOADS"), gravity_combo, connectivity)
 
 
 def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict,
