@@ -1660,3 +1660,15 @@ def test_a_confinement_ratio_equal_to_the_required_one_passes_whatever_the_last_
     assert _meets(0.012182885935757375, 0.012182885935757377)
     assert _meets(0.0123, 0.0122)
     assert not _meets(0.0122029, 0.0122030)                       # a real shortfall still fails
+
+
+def test_names_are_cleaned_once_for_each_different_name():
+    from design.column_designer_aci318 import _normalize_names, _normalize_object_name
+
+    names = pd.Series([502.0, "C1 ", None, 502, "007.0", float("nan"), "C1 ", 12.5, "3.0"],
+                      index=list("abcdefghi"), name="UniqueName")
+    cleaned = _normalize_names(names)
+    assert list(cleaned) == [_normalize_object_name(v) for v in names]
+    assert list(cleaned) == ["502", "C1", "", "502", "007.0", "", "C1", "12.5", "3"]
+    assert list(cleaned.index) == list("abcdefghi") and cleaned.name == "UniqueName"
+    assert _normalize_names(pd.Series([], dtype=object)).empty

@@ -102,7 +102,11 @@ Beam design reads each beam's forces once and cuts the zones of every combinatio
 
 A round whose iterations settle needs fewer analyses than iterations: on the 4-story test model a round of six iterations (three for the beams, two for the columns, the final check) runs four analyses, since two of them follow an iteration that changed nothing.
 
-Reading the results is done on numbers, not on the ETABS display tables: 78 s on that model where it took 224 s. One full iteration there (analysis, reading, beam and column design) is now about 5 minutes.
+Reading the results is done on numbers, not on the ETABS display tables: 78 s on that model where it took 224 s.
+
+On a model of 200 beams or more, `sdt` shares the beam design between the cores of the machine: up to 8 processes, each designing a part of the beams, with the results joined in the order one process gives them. The values are the same; on that model the beam design takes 31 s where one process takes 61 s. `SDT_WORKERS=1` in the environment keeps one process, and another number sets how many. `sdt doctor` says whether the processes start on this machine. The column design stays in one process: sharing it was tried and was no faster, since the columns of a joint and of a stack depend on each other and the forces must be passed between the processes.
+
+One full iteration on that model (analysis 84 s, reading 78 s, beam design 31 s, column design about 115 s the first time and 60 s after) is about 4 to 5 minutes, where it was 18 to 25.
 
 Column design is vectorized: the interaction surface of a bar layout is computed in closed form (no polygon clipping per grid point) and every demand of a column is checked against it in one call. On a 48-column, 4-story SMRF test model with 20 combinations column design takes about 5 s (it was 16 s), and a non-SMRF set of 20 columns with 80 load sets about 2 s (it was 20 s). Most of an iteration is now the ETABS analysis and extraction; sizing on the current forces cuts the number of those.
 

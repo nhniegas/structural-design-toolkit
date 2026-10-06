@@ -549,6 +549,16 @@ def _normalize_object_name(value) -> str:
     return text
 
 
+def _normalize_names(names: pd.Series) -> pd.Series:
+    """``_normalize_object_name`` of every value of a column, worked out once for each
+    different name: the force table repeats a few thousand names millions of times."""
+    codes, different = pd.factorize(names, use_na_sentinel=True)     # a missing name: -1
+    cleaned = np.empty(len(different) + 1, dtype=object)
+    cleaned[:-1] = [_normalize_object_name(name) for name in different]
+    cleaned[-1] = _normalize_object_name(None)
+    return pd.Series(cleaned[codes], index=names.index, name=names.name)
+
+
 class IncompleteJointDataError(ValueError):
     """Signal that SMRF joint checks lack a framing member's design/load data."""
 
@@ -2538,7 +2548,7 @@ def _evaluate_smrf_joints(
     beam_design = restore_beam_result_labels(beam_design)
     for frame in (connectivity, frame_data, factored_loads, beam_design, column_results):
         if "UniqueName" in frame.columns:
-            frame["UniqueName"] = frame["UniqueName"].map(_normalize_object_name)
+            frame["UniqueName"] = _normalize_names(frame["UniqueName"])
     for point_column in ("UniquePtI", "UniquePtJ"):
         connectivity[point_column] = connectivity[point_column].map(
             _normalize_object_name
@@ -2619,11 +2629,16 @@ def _evaluate_smrf_joints(
             frame_rows[member] = design_by_name.loc[member]
         return frame_rows[member]
 
+    beam_geometry_rows: dict[str, pd.Series] = {}
+
     def beam_geometry_row(member: str) -> pd.Series:
-        """Return beam geometry from BEAM DESIGN, falling back to FRAME DATA."""
-        if member in beam_result_groups:
-            return beam_result_groups[member].iloc[0]
-        return frame_data_row(member)
+        """Return beam geometry from BEAM DESIGN, falling back to FRAME DATA (read once
+        for each beam: the joint checks ask for it tens of thousands of times)."""
+        if member not in beam_geometry_rows:
+            beam_geometry_rows[member] = (beam_result_groups[member].iloc[0]
+                                          if member in beam_result_groups
+                                          else frame_data_row(member))
+        return beam_geometry_rows[member]
 
     def joint_column_reinforcement(joint: str, members: list[str]) -> str:
         """Summarize reinforcement for every designed column framing into a joint."""
@@ -4311,7 +4326,7 @@ def design_columns(
     factored_loads, combo_display = _expand_combo_permutations(factored_loads)
     for frame in (frame_data, connectivity, factored_loads, beam_design):
         if "UniqueName" in frame.columns:
-            frame["UniqueName"] = frame["UniqueName"].map(_normalize_object_name)
+            frame["UniqueName"] = _normalize_names(frame["UniqueName"])
     for point_column in ("UniquePtI", "UniquePtJ"):
         if point_column in connectivity.columns:
             connectivity[point_column] = connectivity[point_column].map(
@@ -5588,7 +5603,7 @@ def column_size_passes(
     left to the full design.
     """
     forces, _ = _expand_combo_permutations(_to_compression_positive(_clean_table(forces)))
-    forces["UniqueName"] = forces["UniqueName"].map(_normalize_object_name)
+    forces["UniqueName"] = _normalize_names(forces["UniqueName"])
     row = frame_row.copy()
     row["UniqueName"] = _normalize_object_name(row["UniqueName"])
     engine, _ = _build_column_section(row, 4, dmain, dties, cover, is_smrf)

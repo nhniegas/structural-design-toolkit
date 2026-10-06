@@ -37,6 +37,7 @@ Supporting code:
 - `utilities/_calc_report.py`: layout of the beam and column PDF calculation reports.
 - `utilities/run_summary.py`: the summary every command shows in a window when it finishes (the terminal keeps the detailed results).
 - `utilities/doctor.py`: `sdt doctor`, the check that a machine can run the toolkit.
+- `design/parallel.py`: the processes that share the beam design of a large model between the cores (`SDT_WORKERS=1` keeps one).
 - `build_exe.ps1`: builds the packaged program `sdt.exe`.
 - `utilities/_xlsx_values.py`: rounded numbers and stated blanks of the result workbooks.
 - `main.qmd`: Quarto template for written reports.
@@ -47,7 +48,7 @@ Supporting code:
 1. Open the [Releases](https://github.com/nhniegas/structural-design-toolkit/releases) page and download `sdt-<version>-windows.zip` of the latest release.
 2. Unzip it anywhere and open the `sdt` folder. Keep the files of the folder together.
 3. Double-click `sdt.exe`. A terminal opens with the menu of commands: type a number or a name, and the menu comes back when the command ends.
-4. Run `doctor` first. It checks that ETABS, the dialogs and LaTeX are in place on your machine.
+4. Run `doctor` first. It checks that ETABS, the dialogs and LaTeX are in place on your machine, and that the design processes start.
 
 Windows may warn that the program is from an unknown publisher (it is not signed): choose **More info**, then **Run anyway**. ETABS must be installed for the ETABS commands.
 

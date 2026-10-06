@@ -152,6 +152,22 @@ def check_latex() -> Check:
         "calculation reports are not. " + INSTALL_HINT)
 
 
+def check_design_processes() -> Check:
+    """Whether the member designs of a large model can be shared between the cores."""
+    from design import parallel
+
+    cores = os.cpu_count() or 1
+    if cores < 3:
+        return OK, "Design processes", f"{cores} core(s): the designs run in one process"
+    if parallel.self_test() == 2:
+        return OK, "Design processes", (
+            f"{cores} cores; the beam design of a large model uses up to "
+            f"{min(parallel.MAX_WORKERS, cores - 1)} processes (SDT_WORKERS=1 switches it off)")
+    return WARN, "Design processes", (
+        "the extra processes did not start: the designs run in one process, which is "
+        "slower on a large model and gives the same results")
+
+
 def run_doctor(version: str = "") -> list[Check]:
     """Run every check, print one line each, and return them."""
     checks = [check_program(version), check_settings_folder(), check_modules(),
@@ -161,6 +177,7 @@ def run_doctor(version: str = "") -> list[Check]:
     if api[0] == OK:
         checks.append(check_running_etabs())
     checks.append(check_latex())
+    checks.append(check_design_processes())
     print()
     for status, what, found in checks:
         print(f"[{status:>4}] {what}: {found}")

@@ -82,4 +82,22 @@ def chunks(names: list, workers: int) -> list[list]:
     return out
 
 
+def _answer(pair: tuple) -> float:
+    """What a process of ``self_test`` does: it loads the beam designer, as a design would."""
+    from design import beam_designer_aci318  # noqa: F401
+
+    return sum(pair)
+
+
+def self_test(timeout: float = 120.0) -> int:
+    """Start two processes and have each do a sum: the number that answered right
+    (2 when the processes work). Used by ``sdt doctor``."""
+    try:
+        with ProcessPoolExecutor(max_workers=2) as trial:
+            answers = list(trial.map(_answer, [(1, 2), (3, 4)], timeout=timeout))
+        return sum(1 for got, want in zip(answers, (3, 7)) if got == want)
+    except Exception:
+        return 0
+
+
 atexit.register(shutdown)
