@@ -81,6 +81,7 @@ class AnalysisReport:
     cap: float | None = None
     height: float | None = None                # mm, hn above the ground level
     ground_elevation: float = 0.0              # mm
+    height_from: str = ""                      # the stories hn runs between, when the patterns say
     mass_sum: dict[str, float] = field(default_factory=dict)
     seismic_weight: float | None = None        # N, from the mass source
     reaction_weight: float | None = None       # N, base reaction of the mass-source loads
@@ -107,7 +108,9 @@ class AnalysisReport:
         for direction, period in self.governing_period.items():
             lines.append(f"Governing modal period {direction}: {period:.3f} s")
         if self.height is not None:
-            lines.append(f"Height above the ground hn = {self.height / 1e3:.2f} m "
+            lines.append(f"Height hn = {self.height / 1e3:.2f} m ({self.height_from}, the "
+                         "stories of the static seismic patterns)" if self.height_from else
+                         f"Height above the ground hn = {self.height / 1e3:.2f} m "
                          f"(ground level at elevation {self.ground_elevation / 1e3:g} m)")
         if self.method_a is not None:
             lines.append(f"Method A, T_A = Ct hn^(3/4): {self.method_a:.3f} s; "
@@ -284,6 +287,29 @@ def height_above_ground(elevations: list[float]) -> float:
     return float(elevations[-1]) - ground_elevation(elevations)
 
 
+def seismic_height(connector) -> tuple[float, float, str] | None:
+    """(base elevation, hn, "bottom to top") of the static seismic patterns, mm.
+
+    hn runs between the stories the patterns themselves are given, which is
+    the height ETABS uses for the period: from the ground level, or from the
+    bottom of the foundation when the engineer took the base there, up to
+    the top story of the patterns. None when the model has no such pattern.
+    """
+    try:
+        with connector.extraction_units():
+            stories = connector.sap_model.Story.GetStories()
+        elevation = {str(n): float(z) for n, z in zip(as_list(stories[1]), as_list(stories[2]))}
+        table = _read(connector, "Load Pattern Definitions - Auto Seismic - UBC 97")
+        if "IsAuto" in table.columns:
+            table = table[table["IsAuto"].astype(str) != "Yes"]
+        for low, high in zip(table["BotStory"].astype(str), table["TopStory"].astype(str)):
+            if low in elevation and high in elevation and elevation[high] > elevation[low]:
+                return elevation[low], elevation[high] - elevation[low], f"{low} to {high}"
+    except Exception:
+        return None
+    return None
+
+
 def story_elevations(connector) -> list[float]:
     """Elevation of the base and of every story above it, mm."""
     with connector.extraction_units():
@@ -435,6 +461,9 @@ def analyze_model(connector, zone_factor: float | None = None, ct: float | None 
         elevations = story_elevations(connector)
         report.ground_elevation = ground_elevation(elevations)
         report.height = height_above_ground(elevations)
+        own = seismic_height(connector)
+        if own is not None:   # the height the static patterns use, so the cap is theirs
+            report.ground_elevation, report.height, report.height_from = own
         report.method_a = method_a_period(ct, report.height)
         report.cap = period_cap(zone_factor)
         limit = report.cap * report.method_a
