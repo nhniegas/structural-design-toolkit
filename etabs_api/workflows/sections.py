@@ -79,6 +79,7 @@ class Limits:
     beam_max_depth: int = 1200
     column_max: int = 1200
     column_max_ratio: float = 1.0 / COLUMN_MIN_RATIO  # longer side / shorter side
+    beam_min_ratio: float = BEAM_MIN_RATIO  # beam width / depth when a beam is resized
 
 
 def _sizes(span) -> list[int]:
@@ -112,8 +113,8 @@ def has_range(ranges: dict, family: str) -> bool:
     return bool(spans.get("diameter"))
 
 
-def _beam_ok(width: int, depth: int) -> bool:
-    return depth >= width and width / depth >= BEAM_MIN_RATIO
+def _beam_ok(width: int, depth: int, min_ratio: float = BEAM_MIN_RATIO) -> bool:
+    return depth >= width and width / depth >= max(min_ratio, BEAM_MIN_RATIO) - 1e-9
 
 
 def _column_ok(width: int, depth: int, max_ratio: float | None = None) -> bool:
@@ -136,20 +137,25 @@ def grow_beam(section: Section, mode: str, ranges: dict, limits: Limits) -> Sect
     depths = _extended(_sizes(spans.get("depth")) or [section.depth], limits.increment,
                        limits.beam_max_depth, (section.depth,))
     w, d = section.width, section.depth
+    ratio = limits.beam_min_ratio
 
     def deeper():
-        # the next depth that keeps this width; widen if the ratio needs it
+        # the next depth that keeps this width; where the width is then too small
+        # for the depth, the smallest width that is not
         for depth in (x for x in depths if x > d):
-            if _beam_ok(w, depth):
+            if _beam_ok(w, depth, ratio):
                 return replace(section, depth=depth)
+            for width in (x for x in widths if x > w):
+                if _beam_ok(width, depth, ratio):
+                    return replace(section, width=width, depth=depth)
         return None
 
     def wider():
         for width in (x for x in widths if x > w):
-            if _beam_ok(width, d):
+            if _beam_ok(width, d, ratio):
                 return replace(section, width=width)
             for depth in (x for x in depths if x > d):  # deepen to keep depth >= width
-                if _beam_ok(width, depth):
+                if _beam_ok(width, depth, ratio):
                     return replace(section, width=width, depth=depth)
         return None
 
@@ -157,20 +163,22 @@ def grow_beam(section: Section, mode: str, ranges: dict, limits: Limits) -> Sect
     return first() or second()
 
 
-def shrink_beam(section: Section, ranges: dict, min_depth: float = 0.0) -> Section | None:
+def shrink_beam(section: Section, ranges: dict, min_depth: float = 0.0,
+                min_ratio: float = BEAM_MIN_RATIO) -> Section | None:
     """One size smaller: the next smaller depth, else the next smaller width.
 
-    Never below the smallest size of the range nor below ``min_depth``.
+    Never below the smallest size of the range nor below ``min_depth``, and
+    the width stays at least ``min_ratio`` of the depth.
     """
     spans = ranges.get(section.family, {})
     widths = sorted(set(_sizes(spans.get("width")) + [section.width]))
     depths = sorted(set(_sizes(spans.get("depth")) + [section.depth]))
     w, d = section.width, section.depth
     for depth in sorted((x for x in depths if x < d), reverse=True):
-        if depth >= min_depth and _beam_ok(w, depth):
+        if depth >= min_depth and _beam_ok(w, depth, min_ratio):
             return replace(section, depth=depth)
     for width in sorted((x for x in widths if x < w), reverse=True):
-        if _beam_ok(width, d):
+        if _beam_ok(width, d, min_ratio):
             return replace(section, width=width)
     return None
 

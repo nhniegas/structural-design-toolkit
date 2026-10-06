@@ -89,6 +89,7 @@ class LoopSettings:
     downsize_ratio: float = 0.7
     span_similarity: float = 0.30
     line_max_bend: float = 15.0  # degrees: members of a line share a size up to this bend
+    line_demand_share: float = 0.75  # and with at least this share of the governing moment and shear
     max_rounds: int = 5
     max_inner: int = 10          # beam iterations within a round
     max_inner_columns: int = 10  # column iterations within a round
@@ -398,6 +399,37 @@ def support_kinds(results: pd.DataFrame) -> dict[str, str]:
     return out
 
 
+def checked_spans(results: pd.DataFrame) -> tuple[dict[str, str], dict[str, float]]:
+    """The span each beam was checked in for deflection: ({member: its label},
+    {member: its length in mm}). Empty for results without the deflection check."""
+    if results is None or results.empty or "Defl_span" not in results.columns:
+        return {}, {}
+    labels, spans = {}, {}
+    for name, label, length in zip(results["UniqueName"].astype(str), results["Defl_span"],
+                                   results.get("Defl_span_mm", [None] * len(results))):
+        if label is not None and str(label) not in ("", "nan", "None"):
+            labels[name] = str(label)
+            value = _number(length)
+            if value:
+                spans[name] = value
+    return labels, spans
+
+
+def member_demands(results: pd.DataFrame) -> dict[str, tuple[float, float]]:
+    """The largest design moment and shear of each beam, {member: (Mu, Vu)}."""
+    moments = [c for c in ("Mu_left", "Mu_mid", "Mu_right") if c in results.columns]
+    shears = [c for c in ("Vu_left", "Vu_mid_2h", "Vu_right") if c in results.columns]
+    if results.empty or not moments or not shears:
+        return {}
+    table = results[["UniqueName"] + moments + shears].copy()
+    for column in moments + shears:
+        table[column] = pd.to_numeric(table[column], errors="coerce").abs()
+    table["M"], table["V"] = table[moments].max(axis=1), table[shears].max(axis=1)
+    grouped = table.groupby(table["UniqueName"].astype(str))[["M", "V"]].max()
+    return {name: (float(m), float(v)) for name, m, v in zip(grouped.index, grouped["M"],
+                                                             grouped["V"]) if m == m and v == v}
+
+
 def beam_actions(results: pd.DataFrame, sections: dict[str, Section], lengths: dict[str, float],
                  grown: set[str], settings: LoopSettings, seismic: bool = True,
                  allow_shrink: bool = True, lines: dict[str, str] | None = None,
@@ -413,6 +445,10 @@ def beam_actions(results: pd.DataFrame, sections: dict[str, Section], lengths: d
     """
     wanted: dict[str, tuple[Section, str]] = {}
     shrinkable: dict[str, Section] = {}
+    # the span of a beam is the one its deflection was checked on, between its
+    # supports; the length of the ETABS member where there is no such check
+    span_of, span_length = checked_spans(results)
+    lengths = {**lengths, **span_length}
     for name, rows in results.groupby(results["UniqueName"].astype(str)):
         section = sections.get(name)
         if section is None or not section.is_beam:
@@ -438,7 +474,8 @@ def beam_actions(results: pd.DataFrame, sections: dict[str, Section], lengths: d
                 carried = _number(rows.iloc[0].get("Carried_Beam_Depth"))
                 if settings.carrier_depth and carried:
                     min_depth = max(min_depth, carried)
-                smaller = shrink_beam(section, settings.ranges, min_depth)
+                smaller = shrink_beam(section, settings.ranges, min_depth,
+                                      settings.limits.beam_min_ratio)
                 if smaller is not None:
                     shrinkable[name] = smaller
             continue
@@ -455,13 +492,22 @@ def beam_actions(results: pd.DataFrame, sections: dict[str, Section], lengths: d
         if sections[name].is_beam:
             by_line.setdefault(_line(name, lines), []).append(name)
     support = support_kinds(results)
+    demands = member_demands(results)
+    share = settings.line_demand_share
     directions = directions or {}
     # the cosine of the largest bend; the direction of a beam has no sign
     straight = math.cos(math.radians(min(max(settings.line_max_bend, 0.0), 90.0))) - 1e-9
 
     def similar(a: str, b: str) -> bool:
+        """Whether ``b`` takes the size of ``a``, the member that governs."""
+        if a in span_of and span_of[a] == span_of.get(b):
+            return True                          # pieces of one span: one size
         if a in support and b in support and support[a] != support[b]:
             return False
+        if share > 0 and a in demands and b in demands:
+            (moment_a, shear_a), (moment_b, shear_b) = demands[a], demands[b]
+            if moment_b < share * moment_a or shear_b < share * shear_a:
+                return False                     # much less loaded: it keeps its own size
         if a in directions and b in directions:
             (ax, ay), (bx, by) = directions[a], directions[b]
             if abs(ax * bx + ay * by) < straight:
@@ -974,11 +1020,52 @@ def stop_runaway_growth(actions: dict, sections: dict, shear_growths: dict[str, 
     return stopped
 
 
+DEFLECTION_REASON = "grow (deflection)"
+MIN_DEFLECTION_GAIN = 0.05   # a larger beam must bring its deflection ratio down by this much
+
+
+def stop_unhelped_deflection_growth(actions: dict, sections: dict, results: pd.DataFrame,
+                                    ratios: dict[str, float]) -> list[str]:
+    """Stop enlarging beams whose deflection does not come down as they grow.
+
+    A deflection that the beam's own stiffness governs falls by a quarter or
+    more for each step of depth. One that hardly moves comes from elsewhere:
+    the rotation of the support of a cantilever, or the movement of what
+    carries the beam. Such a beam keeps its size and is reported; so are the
+    beams that only followed it along its line. ``ratios`` holds the ratio
+    each beam had when it was last made larger; ``actions`` is changed in
+    place. Returns the stopped beams.
+    """
+    if results is None or results.empty or "Defl_ratio" not in results.columns:
+        return []
+    now = pd.to_numeric(results["Defl_ratio"], errors="coerce").groupby(
+        results["UniqueName"].astype(str)).max()
+    stopped = []
+    for name, (new, reason) in list(actions.items()):
+        if reason != DEFLECTION_REASON or new == sections.get(name):
+            continue
+        ratio = float(now.get(name, float("nan")))
+        before = ratios.get(name)
+        if before is not None and ratio == ratio and ratio > before * (1.0 - MIN_DEFLECTION_GAIN):
+            actions[name] = (sections[name], f"deflection ratio {ratio:.2f} was {before:.2f} "
+                             "before it was made larger: a larger section does not help "
+                             "(the rotation or the movement of its support governs); check "
+                             "the framing, not the size")
+            stopped.append(name)
+        elif ratio == ratio:
+            ratios[name] = ratio
+    for name, (new, reason) in list(actions.items()):
+        if any(reason == f"same beam line as {leader}" for leader in stopped):
+            del actions[name]
+    return stopped
+
+
 def run_design_loop(bench: Workbench) -> dict:
     """The loop. Returns a summary: status, iterations, changes and what still fails."""
     settings = bench.settings
     grown: set[str] = set()
     shear_growths: dict[str, int] = {}
+    deflection_ratios: dict[str, float] = {}
     all_changes: list[Change] = []
     iteration = 0
     status = "not converged"
@@ -1000,6 +1087,7 @@ def run_design_loop(bench: Workbench) -> dict:
         actions = beam_actions(beam_table, sections, bench.lengths(), grown, settings, seismic,
                                allow_shrink, bench.lines(), bench.directions())
         stop_runaway_growth(actions, sections, shear_growths)
+        stop_unhelped_deflection_growth(actions, sections, beam_table, deflection_ratios)
         if columns:
             _, column_names = bench.members()
             sizer = bench.column_sizer() if settings.size_on_forces else None
@@ -1060,6 +1148,9 @@ LOOP_FIELDS = {
     "Beam iterations in a round at most": ("max_inner", 10),
     "Beam line shares one size when lengths differ by at most (%)": ("span_similarity", 30),
     "Beam line shares one size when its members bend by at most (degrees)": ("line_max_bend", 15),
+    "Beam line shares one size with at least this share of the moment and shear (%)":
+        ("line_demand_share", 75),
+    "Smallest beam width as a share of its depth (%)": ("beam_min_ratio", 40),
     "Largest column side (mm)": ("column_max", 1200),
     "Largest column side ratio (long side / short side)": ("column_max_ratio", 2.0),
     "Column iterations in a round at most": ("max_inner_columns", 10),
@@ -1380,12 +1471,16 @@ def run_design_cli() -> dict | None:
                   for label, (key, default) in LOOP_FIELDS.items()}
         if values["column_max_ratio"] < 1.0 or min(
                 values["max_inner"], values["max_inner_columns"], values["max_rounds"]) < 1 \
-                or not 0 <= values["line_max_bend"] <= 90:
+                or not 0 <= values["line_max_bend"] <= 90 \
+                or not 0 <= values["line_demand_share"] <= 100 \
+                or not 30 <= values["beam_min_ratio"] <= 100:
             raise ValueError
     except ValueError:
         show_warning("Every loop setting must be a number; the side ratio at least 1, the "
-                     "iterations and rounds at least 1 and the bend from 0 to 90 degrees.",
-                     title=title)
+                     "iterations and rounds at least 1, the bend from 0 to 90 degrees, the "
+                     "share of the moment and shear from 0 to 100 % and the beam width from "
+                     "30 to 100 % of the depth (30 % is the least for a special moment frame, "
+                     "ACI 18.6.2.1).", title=title)
         return None
     _save("design_loop", values)
 
@@ -1426,10 +1521,12 @@ def run_design_cli() -> dict | None:
         long_limit=long_limit,
         limits=Limits(int(values["increment"]), int(values["beam_max_width"]),
                       int(values["beam_max_depth"]), int(values["column_max"]),
-                      float(values["column_max_ratio"])),
+                      float(values["column_max_ratio"]),
+                      float(values["beam_min_ratio"]) / 100.0),
         ranges=setup["sections"], downsize_ratio=values["downsize_ratio"],
         span_similarity=values["span_similarity"] / 100.0,
         line_max_bend=values["line_max_bend"],
+        line_demand_share=values["line_demand_share"] / 100.0,
         max_rounds=int(values["max_rounds"]), max_inner=int(values["max_inner"]),
         max_inner_columns=int(values["max_inner_columns"]),
         zone_factor=seismic_values["zone_factor"], ct=seismic_values["ct"],

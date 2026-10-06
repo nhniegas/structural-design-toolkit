@@ -233,6 +233,7 @@ class DeflectionResult:
     deducted: float = 0.0           # long-term deflection before the partitions (stages)
     at_first_load: float | None = None    # when the dead load is first carried (stages)
     at_partitions: float | None = None    # just before the partitions are built (stages)
+    label: str = ""                       # the members checked together as this span
 
     @property
     def ratio(self) -> float:
@@ -266,6 +267,8 @@ DEFLECTION_COLUMNS = {
     "Defl_at_partitions_mm": "Δ just before the partitions are built (mm)",
     "Defl_deducted_mm": "Δ long-term before the partitions, deducted (mm)",
     "Defl_stages": "Deflection stages",
+    "Defl_span": "Span checked (members and kind)",
+    "Defl_span_mm": "Span length checked (mm)",
     "Defl_ratio": "Δ / limit (governing)",
     "Deflection_Check": "Deflection check",
 }
@@ -453,6 +456,9 @@ def span_deflection(parts: list[SpanPart], cantilever_root: str | None = None,
             deducted=float(deducted_curve[mine].max()),
             at_first_load=float(first_curve[mine].max()) if staged else None,
             at_partitions=float((first_curve + deducted_curve)[mine].max()) if staged else None,
+            label=(parts[0].name if len(parts) == 1 or parts[0].name == parts[-1].name
+                   else f"{parts[0].name} to {parts[-1].name}")
+            + (", cantilever" if cantilever_root else ""),
         )
     return out
 
@@ -871,6 +877,8 @@ def add_deflection_columns(results, service, long_limit_divisor: float = LIMIT_D
             "Defl_long_limit_mm": round(result.long_limit, 2),
             "Defl_creep_mm": round(result.creep, 2),
             "Defl_total_mm": round(result.total, 2),
+            "Defl_span": result.label,
+            "Defl_span_mm": round(result.span),
             "Defl_ratio": round(result.ratio, 3),
         }
         if staged:
