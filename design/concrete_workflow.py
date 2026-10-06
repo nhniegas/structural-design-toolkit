@@ -297,6 +297,11 @@ def run_beams() -> DesignStore | None:
     divisor = ask_deflection_limit()
     if divisor is None:
         return None
+    from design.beam_designer_aci318 import ask_deflection_stages
+
+    stages = ask_deflection_stages()
+    if stages is None:
+        return None
     beam_types = (dcr_targets.GIRDER, dcr_targets.BEAM)
     targets = ask_dcr_targets(model_path, title, beam_types)
     if targets is None:
@@ -330,6 +335,7 @@ def run_beams() -> DesignStore | None:
         store = DesignStore(model_path, os.path.getmtime(model_path), tables, {
             "combos": combos, "seismic": seismic_key, "smrf": smrf, "gravity_combo": gravity,
             "beam_bars": bars, "long_limit": divisor,
+            "deflection_stages": stages.to_saved(),
             "beam_earth_cover_stories": earth_stories,
             "deflection_roles": ready.deflection_roles,
             "dcr_targets": targets.to_saved(), "carrier_depth": carrier_depth,
@@ -344,7 +350,8 @@ def run_beams() -> DesignStore | None:
                                earth_cover_stories=earth_stories, carrier_depth=carrier_depth,
                                compatibility_torsion=compatibility_torsion,
                                office_bar_spacing=office_bar_spacing,
-                               exempt_short_spans=exempt_short_spans)
+                               exempt_short_spans=exempt_short_spans,
+                               deflection_stages=stages)
         store.beam_results = results
         store.save()
         window.update("Saving 1 of 3: the results workbook (.xlsx)")
@@ -364,6 +371,7 @@ def run_beams() -> DesignStore | None:
     summary.add("Beam bar spacing", "office rule, 150 mm clear" if office_bar_spacing
                 else "crack control only (ACI 24.3.2)")
     add_short_spans_to(summary, results, exempt_short_spans)
+    summary.add("Deflection stages", stages.describe())
     ready.sources.add_to(summary)
     for note in notes:
         summary.note(note)
@@ -828,6 +836,11 @@ def run_deflection() -> pd.DataFrame | None:
     divisor = ask_deflection_limit()
     if divisor is None:
         return None
+    from design.beam_designer_aci318 import ask_deflection_stages
+
+    stages = ask_deflection_stages("Deflection check")
+    if stages is None:
+        return None
     folder = select_output_directory("Folder for the deflection results")
     if not folder:
         return None
@@ -848,7 +861,7 @@ def run_deflection() -> pd.DataFrame | None:
         results = store.beam_results.drop(columns=[c for c in DEFLECTION_COLUMNS
                                                    if c in store.beam_results.columns])
         checked = add_deflection_columns(results, service, divisor, connectivity,
-                                         progress=window.update)
+                                         progress=window.update, stages=stages)
         table = deflection_table(checked)
         window.update("Saving the deflection workbook (.xlsx)")
         path = write_deflection_xlsx(table, os.path.join(folder, f"{stem} - Deflection.xlsx"))
@@ -859,7 +872,8 @@ def run_deflection() -> pd.DataFrame | None:
         if "UniqueName" in table.columns else []
     summary = RunSummary("sdt deflection", model_path)
     summary.add("Beams checked", len(table))
-    summary.add("Limits", f"L/360 live, L/{divisor} after partitions")
+    summary.add("Limits", f"L/360 live, L/{divisor} after attachment of partitions")
+    summary.add("Deflection stages", stages.describe())
     summary.add("Failing", int(status.str.startswith("FAIL").sum()))
     own = [f"{mi.DEFLECTION_ROLES[role]} = {name}" for role, name in roles.items()
            if name != role]

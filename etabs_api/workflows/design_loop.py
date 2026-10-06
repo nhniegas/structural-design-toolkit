@@ -105,6 +105,7 @@ class LoopSettings:
     compatibility_torsion: bool = False  # beam torsion at most phi Tcr (ACI 22.7.3.2)
     office_bar_spacing: bool = True  # beam bars at most 150 mm clear (False: crack control)
     exempt_short_spans: bool = False  # girders under 4d clear span without the SMRF rules
+    deflection_stages: object = None  # beam_deflection.DeflectionStages: when partitions are built
 
 
 @dataclass
@@ -774,7 +775,8 @@ class Workbench:
                             carrier_depth=self.settings.carrier_depth,
                             compatibility_torsion=self.settings.compatibility_torsion,
                             office_bar_spacing=self.settings.office_bar_spacing,
-                            exempt_short_spans=self.settings.exempt_short_spans)
+                            exempt_short_spans=self.settings.exempt_short_spans,
+                            deflection_stages=self.settings.deflection_stages)
 
     def design_columns(self, beams: pd.DataFrame) -> pd.DataFrame:
         from design.column_designer_aci318 import design_columns
@@ -1235,6 +1237,11 @@ def run_design_cli() -> dict | None:
     long_limit = ask_deflection_limit()
     if long_limit is None:
         return None
+    from design.beam_designer_aci318 import ask_deflection_stages
+
+    deflection_stages = ask_deflection_stages(title)
+    if deflection_stages is None:
+        return None
     from design import dcr_targets
     from design.concrete_workflow import ask_carrier_depth, ask_dcr_targets
 
@@ -1347,6 +1354,7 @@ def run_design_cli() -> dict | None:
         compatibility_torsion=compatibility_torsion,
         office_bar_spacing=office_bar_spacing,
         exempt_short_spans=exempt_short_spans,
+        deflection_stages=deflection_stages,
     )
 
     # the working copy: the original model is not changed
@@ -1371,6 +1379,7 @@ def run_design_cli() -> dict | None:
         if exempt_short_spans:
             bench.log("Girders with a clear span under 4d are designed without the SMRF rules "
                       "(ACI 18.6.2.1(a)).")
+        bench.log("Deflection stages: " + deflection_stages.describe() + ".")
         bench.log(f"Combinations: {len(combos)} ULS ({seismic})")
         bench.log("Size ranges (from, to, step): " + "; ".join(
             f"{family} " + " x ".join(
@@ -1456,6 +1465,8 @@ def loop_summary(summary: dict, settings: LoopSettings, original: str, working: 
     from design.concrete_workflow import add_short_spans_to
 
     add_short_spans_to(out, beams, settings.exempt_short_spans)
+    if settings.deflection_stages is not None:
+        out.add("Deflection stages", settings.deflection_stages.describe())
     if settings.sources is not None:
         settings.sources.add_to(out)
     if settings.beam_earth_cover_stories:
@@ -1497,6 +1508,8 @@ def save_final_design(bench: Workbench, summary: dict, working: str, folder: str
         "exempt_short_spans": settings.exempt_short_spans,
         "beam_bars": settings.beam_bars, "column_bars": settings.column_bars,
         "long_limit": settings.long_limit,
+        "deflection_stages": (settings.deflection_stages.to_saved()
+                              if settings.deflection_stages is not None else None),
         "beam_earth_cover_stories": list(settings.beam_earth_cover_stories),
         "check_top_level": settings.check_top_level,
         "check_foundation_level": settings.check_foundation_level,

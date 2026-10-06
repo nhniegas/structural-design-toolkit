@@ -20,6 +20,7 @@ from design.beam_deflection import (
     DEFLECTION_COLUMNS,
     LIMIT_DAMAGED,
     LIMIT_NOT_DAMAGED,
+    DeflectionStages,
     add_deflection_columns,
 )
 from utilities._calc_report import (
@@ -1344,10 +1345,13 @@ def execute_beam_design(
             v_right_boundary = max_st - two_h
 
             combos = df_forces_beam["Combo"].unique()
+            # one line for the beam: the lines of its combinations come faster than
+            # the window shows them, and only the first one was ever seen
+            report(u_name, prop_row.get("Story", "-"),
+                   f"all {len(combos)} combinations" if len(combos) != 1 else combos[0],
+                   "Demands: Mu, Vu and Tu at the supports and midspan")
 
             for combo in combos:
-                report(u_name, prop_row.get("Story", "-"), combo,
-                       "Demands: Mu, Vu and Tu at the supports and midspan")
                 df_combo = df_forces_beam[df_forces_beam["Combo"] == combo]
 
                 df_left_m = df_combo[df_combo["Station"] <= m_left_boundary]
@@ -2230,10 +2234,77 @@ def ask_deflection_limit() -> int | None:
     if chosen is None:
         return None
     divisor = DEFLECTION_LIMIT_OPTIONS[chosen]
+    _save_deflection_settings({"long_limit_divisor": divisor})
+    return divisor
+
+
+def _deflection_settings() -> dict:
+    import json
+
+    try:
+        with open(_deflection_settings_path(), encoding="utf-8") as handle:
+            saved = json.load(handle)
+        return saved if isinstance(saved, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_deflection_settings(values: dict) -> None:
+    import json
+
+    path = _deflection_settings_path()
+    saved = {**_deflection_settings(), **values}
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as handle:
-        json.dump({"long_limit_divisor": divisor}, handle)
-    return divisor
+        json.dump(saved, handle)
+
+
+STAGES_UNKNOWN = "Not known: count all the long-term deflection after them (the safe side)"
+STAGES_ENTER = "Enter when they are built"
+STAGE_MONTHS = "Months from when the beams first carry their dead load to the partitions"
+STAGE_SHARE = "Dead load in place before the partitions (%)"
+
+
+def ask_deflection_stages(title: str = "Beam Design - Deflection") -> DeflectionStages | None:
+    """Ask when the partitions are built, for the after-attachment deflection.
+
+    Returns the stages (inactive when the time is not known, which counts all
+    the long-term deflection after the partitions), or None when closed. The
+    answer is remembered for next time.
+    """
+    from utilities._gui_helpers import enter_values, select_option, show_warning
+
+    last = DeflectionStages.from_saved(_deflection_settings().get("stages"))
+    chosen = select_option(
+        title, "When are the partitions built?\n\nThe deflection that can damage partitions "
+        "is the long-term deflection after they are built, plus the live load. The code lets "
+        "you leave out the long-term deflection that happens before (ACI Table 24.2.2). With "
+        "the time of construction the results also show the deflection at each stage.",
+        [STAGES_UNKNOWN, STAGES_ENTER], default_index=1 if last.active else 0)
+    if chosen is None:
+        return None
+    if chosen == STAGES_UNKNOWN:
+        _save_deflection_settings({"stages": DeflectionStages().to_saved()})
+        return DeflectionStages()
+    typed = enter_values(
+        title, "The beams start to creep when the forms are removed. The share is the part "
+        "of the dead load on the beam before the partitions: self weight, slab and what else "
+        "is there by then, not the partitions and what follows them.",
+        [STAGE_MONTHS, STAGE_SHARE],
+        {STAGE_MONTHS: f"{last.months_before_partitions or 3:g}",
+         STAGE_SHARE: f"{(last.dead_share_before if last.active else 0.8) * 100:g}"})
+    if typed is None:
+        return None
+    try:
+        months, share = float(typed[STAGE_MONTHS]), float(typed[STAGE_SHARE]) / 100.0
+        if months < 0 or not 0 <= share <= 1:
+            raise ValueError
+    except ValueError:
+        show_warning("The months must be 0 or more and the share from 0 to 100 %.", title=title)
+        return None
+    stages = DeflectionStages(months, share)
+    _save_deflection_settings({"stages": stages.to_saved()})
+    return stages
 
 
 def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict,
@@ -2241,7 +2312,8 @@ def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict
                  earth_cover_stories=(), carrier_depth: bool = False,
                  compatibility_torsion: bool = False,
                  office_bar_spacing: bool = True,
-                 exempt_short_spans: bool = False) -> pd.DataFrame:
+                 exempt_short_spans: bool = False,
+                 deflection_stages: DeflectionStages | None = None) -> pd.DataFrame:
     """Design every beam from the extracted tables; deflection when service loads exist.
 
     ``tables`` holds FACTORED LOADS, FRAME DATA, CONNECTIVITY and (optional)
@@ -2252,7 +2324,8 @@ def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict
     drops the office rule of 150 mm clear between bars: the bar count for
     spacing then comes from crack control (ACI 24.3.2). ``exempt_short_spans``
     designs the girders with a clear span under 4d without the SMRF rules
-    (ACI 18.6.2.1(a)). The target ratios are those that
+    (ACI 18.6.2.1(a)). ``deflection_stages`` (when the partitions are built)
+    deducts the long-term deflection before them. The target ratios are those that
     are active (``dcr_targets.use``). Returns the results, two rows (TOP,
     BOTTOM) per beam.
     """
@@ -2272,7 +2345,8 @@ def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict
     service = tables.get("SERVICE LOADS")
     if service is not None and len(service) and not results.empty:
         results = add_deflection_columns(results, service, long_limit_divisor,
-                                         tables["CONNECTIVITY"], progress=progress)
+                                         tables["CONNECTIVITY"], progress=progress,
+                                         stages=deflection_stages)
     if carrier_depth and not results.empty:
         from design.beam_carriers import add_carrier_depth_check
 
@@ -2714,9 +2788,25 @@ def _beam_deflection_table(top: pd.Series) -> ReportTable | None:
          *pair(top.get("Defl_live_mm"), top.get("Defl_live_limit_mm"), "N/A")],
         ["Immediate, roof live load (L/180)",
          *pair(top.get("Defl_roof_mm"), top.get("Defl_roof_limit_mm"), "N/A - not a roof beam")],
-        ["After partitions are installed (long term)",
+        ["After attachment of the partitions (long-term part + live load not sustained)",
          *pair(top.get("Defl_long_mm"), top.get("Defl_long_limit_mm"), "N/A")],
     ]
+
+    def information(label: str, key: str) -> None:
+        if key in top.index and not is_blank(top.get(key)):
+            body.append([label, number(top.get(key)), "--", "--"])
+
+    information("For information: long-term part alone (creep and shrinkage, sustained load)",
+                "Defl_creep_mm")
+    information("For information: total, immediate + long-term", "Defl_total_mm")
+    information("Stage: when the dead load is first carried", "Defl_first_load_mm")
+    information("Stage: just before the partitions are built", "Defl_at_partitions_mm")
+    information("Long-term deflection before the partitions (deducted above)",
+                "Defl_deducted_mm")
+    stages_text = str(top.get("Defl_stages", "") or "")
+    stages_note = (f" Stages: {stages_text}; the long-term deflection before the partitions "
+                   "is deducted (ACI Table 24.2.2)." if stages_text not in ("", "None", "nan")
+                   else " All the long-term deflection is counted after the partitions.")
     return ReportTable(
         "Deflection (ACI 24.2)",
         ["Check", Tex(r"$\Delta$ (mm)"), "Limit (mm)", Tex(r"$\Delta$ / limit")],
@@ -2724,7 +2814,7 @@ def _beam_deflection_table(top: pd.Series) -> ReportTable | None:
         "Effective moment of inertia Ie (mm4): left "
         f"{number(top.get('Defl_Ie_left'), 0)}, midspan {number(top.get('Defl_Ie_mid'), 0)}, "
         f"right {number(top.get('Defl_Ie_right'), 0)}. Long-term factor "
-        f"{number(top.get('Defl_lambda'), 3)}. Governing ratio "
+        f"{number(top.get('Defl_lambda'), 3)}.{stages_note} Governing ratio "
         f"{number(top.get('Defl_ratio'), 3)}. The segments of one beam line between supports "
         f"are checked as one span. Deflection check: {check}.",
     )
