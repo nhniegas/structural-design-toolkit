@@ -83,6 +83,18 @@ The loop stops when the final check changes nothing (converged) or after the num
 - **Downsizing**: a passing member whose ratios are all below the threshold goes one size smaller and the next analysis confirms it. Beams: tension steel ratio, shear and deflection ratio; columns: flexure, shear and joint shear utilization, steel ratio, beam-column strength ratio at least 1.2 / threshold. A member that grew in this run is never made smaller again, and beams never go below the ACI 318-14 Table 9.3.1.1 depth (L/16, cantilevers L/8).
 - Sizes follow the setup ranges of the family, then grow by the increment up to the largest size given. Missing sections are created with the setup rebar data and no stiffness modifiers; the modifiers assigned to the frames stay with them when their section changes. Concrete and rebar never change.
 
+## When the loop is done
+
+Changing the size of one member shifts the forces in the others, so no member is judged on old forces:
+
+- **Every iteration designs every member again** on the forces of the analysis just run, whether its own size changed or not.
+- **Every round ends with a final check of every member**, beams and columns together, with no member made smaller. The results that are written come from the last such pass, on the final sizes and their forces.
+- **Converged** means that a final check changed nothing: nothing fails that a size can fix. If the final check still has to make a member larger, another round starts, up to the largest number of rounds. The log and the summary say whether the loop converged or stopped at that limit.
+
+What "optimal" means here: within a round, a member whose ratios are all under the "make smaller" threshold goes one size down, and a member that had to grow is not made smaller again. So the loop ends where no member that was trimmed can lose another size without failing. It is not a least-weight or least-cost design: members are moved one at a time, with no objective for the whole frame, and a threshold close to 1.0 leaves little room between "can shrink" and "must grow", which takes more rounds to settle.
+
+Members that no size fixes are listed apart in the log and the summary, by what stops them: at the largest size allowed, shear that grows with the section, or a deflection that the support governs.
+
 ## Time
 
 Column design is vectorized: the interaction surface of a bar layout is computed in closed form (no polygon clipping per grid point) and every demand of a column is checked against it in one call. On a 48-column, 4-story SMRF test model with 20 combinations column design takes about 5 s (it was 16 s), and a non-SMRF set of 20 columns with 80 load sets about 2 s (it was 20 s). Most of an iteration is now the ETABS analysis and extraction; sizing on the current forces cuts the number of those.
