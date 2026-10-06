@@ -178,8 +178,16 @@ A shear larger than phi (Vc + 0.66 √f'c bw d) (ACI 22.5.1.2), or a combined sh
 **Support status.** Each beam is classified by what holds its two ends:
 
 - An end is on a support when a column or a wall is at its joint.
-- An end that another beam carries is supported too: a beam across it at the joint, or a girder whose centre line passes through the joint, also when ETABS has not split that girder there.
+- An end that another beam carries is supported too. Whether a beam carries or is carried follows the **load path**, not only what meets at the joint (see below).
 - A beam that only continues in line does not hold an end by itself. The end is as held as the far end of that beam, so a cantilever that ETABS has in two pieces is still a cantilever.
+
+**The load path.** Every beam line gets a rank: 0 when it rests on a column or a wall, 1 when it rests only on lines of rank 0, and so on. A line is the pieces of one tagged line, or pieces that continue each other in a straight line. A column counts as a support at the joint on its top; a column that only starts at a joint (a planted column) is a load. From the ranks:
+
+- A line nearer to the supports (a lower rank) holds the end of one further away. A gravity beam on a girder is held by it.
+- A line further from the supports never holds one nearer. An edge beam across the tips of cantilever girders rests on them, so the girders stay cantilevers, free at their tips.
+- Two lines of the same rank hold each other only where one runs through the joint. Two that both end there, such as two cantilevers meeting at a corner with no column, do not.
+
+The ranks come from the geometry of the model alone, so they do not change as the design loop resizes members.
 
 `Supported Both Ends` is a member on a column or wall at one end at least and held at the other. `Cantilever (Free at PtI / PtJ)` is on a column or wall at one end and truly free at the other. Before version 0.3.1 a beam from a column to a girder was taken as a cantilever, with a short clear span and a capacity shear far too large.
 
@@ -235,7 +243,20 @@ What the staged values assume:
 - The same Ie is used at every stage: the beam is taken as cracked under the full service load from the start, which is the safe side for the early stages.
 - It is the ACI time-factor method, not a creep analysis in time steps.
 
-**Spans, not segments.** ETABS splits a beam line wherever another member frames into it. The segments of one tagged line (`2GX-1`, `2GX-1A`, `2GX-1B`, ...) that meet at a joint without a column are checked together as one span, and L is the whole span. A span end is supported by a column, a wall or a member the line ends on; it is free (a cantilever tip) only when nothing else connects there. A cantilever span is fixed at its support, and the deflection from the rotation of that support (from the analysis) is added.
+**Spans, not segments.** ETABS splits a beam line wherever another member frames into it, and a line can run over several supports. The whole line (`2GX-1`, `2GX-1A`, `2GX-1B`, ...) is taken as one chain and cut where it is supported; each stretch between two supports is checked as one span, and L is that span.
+
+A line is supported:
+
+- at a joint with a column below it or a wall;
+- where the shear of the full service load jumps up, at a joint or inside a member. That is a support pushing up, such as a girder that carries the line and that ETABS has not split there;
+- at an end where another beam holds it by the load path (see "Support status" under [Beam design](#beam-design)): a line nearer to the supports, or as near and running through the joint.
+
+A planted column and a beam that rests on the line are loads: the span runs on through them. A stretch beyond the last support to a free end is a cantilever: it is fixed at that support, and the deflection from the rotation of the support (from the analysis) is added. A cantilever with an edge beam on its tip is still a cantilever.
+
+The "Span checked" and "Span length checked" columns say which members were checked together, whether as a cantilever, and over what length. Earlier versions counted the members at a joint to decide whether an end was supported, and joined the pieces of a line through every joint without a column. That read a line ending on an unsplit girder as a cantilever, joined an edge beam resting on several girders into one very long span, and called a cantilever supported when an edge beam sat on its tip.
+
+Two things the check does not do. It measures a span from its own supports, so the movement of a girder is not added to the beam it carries. And where a cantilever is cut inside a member, away from a joint, the rotation of its support is not known and is taken as zero.
+
 
 The results file has Ie of each zone, λΔ, the three deflections, their limits, the long-term part, the total, the stage values when the stages are given, the governing ratio and `Deflection check`. A beam that fails the deflection and nothing else gets `FAILED: DEFLECTION (ACI 24.2.2)`. The calculation report has the same values in a Deflection table for each beam.
 
@@ -301,6 +322,7 @@ The effective depth is taken to the centre of one layer of bars: d = h - cover -
 
 Where a girder is shallower than a beam it carries, the bottom bars of that beam pass below the girder's bottom bars and cannot rest on them. When you answer yes to "should a girder or beam be at least as deep as the beams that frame into it", every carrier is checked:
 
+- The carrier follows the load path: a beam is never the carrier of one nearer to the supports than itself. An edge beam across the tips of cantilever girders carries no girder; the girders carry it, and the depth rule applies to them.
 - The carrier of a beam end is the beam whose centre line passes through it, whether ETABS has that girder as one member from column to column or as pieces that meet at the joint. Beams that only continue each other are not carriers.
 - A carrier shallower than a beam it carries gets `FAILED: DEPTH BELOW THE BEAM IT CARRIES`, with both depths in the "Depth against the beams it carries" column.
 - It is a detailing rule of your own, not a code clause, so it is off unless you ask for it. It needs the joint coordinates, which the extraction provides.
