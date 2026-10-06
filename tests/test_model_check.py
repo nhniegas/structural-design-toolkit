@@ -343,3 +343,23 @@ def test_the_zone_4_minimum_uses_the_nv_of_typed_coefficients():
     assert low.status == mc.FAIL and "Nv 1.36" in low.text and "0.0512" in low.text
     assert mc.typed_minimum_finding("EQX", ca, cv, 1.0, 8.5, etabs * 1.36) is None
     assert mc.typed_minimum_finding("EQX", 0.123, 0.456, 1.0, 8.5, 0.01) is None   # no such site
+
+
+def test_drift_cases_are_scaled_to_the_zone_4_minimum_only_when_it_governs():
+    from etabs_api.workflows import model_analysis as ma
+    from etabs_api.workflows.ubc97 import seismic_coefficients, typed_zone4_minimum
+
+    ca, cv = seismic_coefficients(0.4, "SD", "A", 8.0)                     # Nv 1.36
+    minimum, soil, nv = typed_zone4_minimum(ca, cv, 1.0, 8.5)
+    assert (soil, nv) == ("SD", pytest.approx(1.36, abs=0.01))
+    assert minimum == pytest.approx(0.8 * 0.4 * 1.36 / 8.5, rel=1e-3)
+    assert typed_zone4_minimum(0.123, 0.456, 1.0, 8.5) is None             # no such site
+    table = pd.DataFrame({
+        "Name": ["EQXSD(1/2)", "EQXSD(2/2)", "EQYSD", "EQX"], "Ca": [ca] * 4, "Cv": [cv] * 4,
+        "I": [1.0] * 4, "R": [8.5] * 4, "CoeffUsed": [0.0429, 0.0429, 0.0600, 0.0871]})
+    x, y = ma.minimum_scalings(table, ["EQXSD", "EQYSD"])
+    assert x.factor == pytest.approx(minimum / 0.0429) and x.factor > 1.19
+    assert y.factor == 1.0                                                 # already above it
+    table["Z"] = 0.4                                                       # defined by its site
+    assert ma.minimum_scalings(table, ["EQXSD", "EQYSD"]) == []
+    assert ma.minimum_scalings(pd.DataFrame(), ["EQXSD"]) == []

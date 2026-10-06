@@ -92,6 +92,23 @@ def sites_of_coefficients(ca: float, cv: float, tolerance: float = 0.005
     return list(found.values())
 
 
+def typed_zone4_minimum(ca: float, cv: float, importance: float, r_factor: float
+                        ) -> tuple[float, str, float] | None:
+    """0.8 Z Nv I / R (Eq. 208-11) of typed Ca and Cv: (V/W, soil, Nv).
+
+    None unless the two values belong to zone 4 sites only and all of them
+    give one Nv: the minimum is then known, where ETABS takes Nv = 1.
+    """
+    sites = sites_of_coefficients(ca, cv)
+    if not sites or r_factor <= 0 or any(z < _SEISMIC.zone4_factor for z, _, _, _ in sites):
+        return None
+    factors = {round(nv, 2) for _, _, _, nv in sites}
+    if len(factors) != 1:
+        return None
+    zone, soil, _, nv = sites[0]
+    return _SEISMIC.zone4_minimum * zone * nv * importance / r_factor, soil, nv
+
+
 def vertical_effect_factor(ca: float, importance: float) -> float:
     """Ev as a fraction of the dead load: Ev = 0.5 Ca I D."""
     return NSCP.load_factors.vertical_effect * ca * importance

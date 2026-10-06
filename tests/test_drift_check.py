@@ -169,6 +169,7 @@ def test_a_drift_pattern_under_the_zone_4_minimum_is_reported():
     found = dc.typed_minimum_findings(table, types)
     assert len(found) == 1 and found[0].status == mc.FAIL
     assert found[0].text.startswith("EQXSD:") and "too small by the same share" in found[0].text
+    assert dc.typed_minimum_findings(table, types, {"EQXSD": 1.37}) == []   # scaled in its case
     table["CoeffUsed"] = 0.8 * 0.4 * 1.36 / 8.5
     assert dc.typed_minimum_findings(table, types) == []
     assert dc.typed_minimum_findings(pd.DataFrame({"Name": []}), types) == []

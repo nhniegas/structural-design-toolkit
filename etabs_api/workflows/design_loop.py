@@ -882,6 +882,10 @@ class Workbench:
         for item in report.scaling:
             self.log(f"  {item.direction}: static {item.static_shear / 1e3:,.0f} kN, "
                      f"{item.spectrum_case} x {item.factor:.3f}")
+        for m in report.minimum_scaling:
+            if m.factor > 1.0:
+                self.log(f"  {m.case}: scaled x {m.factor:.3f} to the zone 4 minimum "
+                         f"(V/W {m.minimum:.4f}, Nv {m.nv:g})")
         if report.governing_period:
             self.log("  periods: " + ", ".join(
                 f"{d} {t:.3f} s" for d, t in report.governing_period.items()))

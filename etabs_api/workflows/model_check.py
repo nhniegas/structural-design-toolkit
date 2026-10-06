@@ -80,6 +80,8 @@ class ModelData:
     # names: combination -> (its lateral load case, whether it is wind)
     drift_case_of: dict[str, tuple[str, bool]] = field(default_factory=dict)
     r_factor: float | None = None  # R for the drift when no UBC 97 pattern gives it
+    # scale factor of each static seismic pattern in its own load case (1 when not read)
+    case_scales: dict[str, float] = field(default_factory=dict)
 
     def table(self, name: str) -> pd.DataFrame:
         table = self.tables.get(name)
@@ -334,8 +336,9 @@ def typed_minimum_finding(name: str, ca: float, cv: float, importance: float, r:
     return Finding("Seismic", FAIL if every else WARN,
                    f"{name}: V/W {used:.4f} is under the zone 4 minimum 0.8 Z Nv I / R of the "
                    f"site that Ca {ca:g}, Cv {cv:g} belong to ({listed}). ETABS takes Nv = 1 "
-                   "with typed coefficients: scale the pattern up by the difference, or define "
-                   "the site (zone, soil, source and distance) in the pattern"
+                   "with typed coefficients: run sdt analyze, which scales the drift load "
+                   "cases up to the minimum, or define the site (zone, soil, source and "
+                   "distance) in the pattern"
                    + ("" if every else " - several sites give these values, confirm yours"),
                    "NSCP 208.5.2.1 Eq. 208-11")
 
@@ -672,8 +675,16 @@ def _check_static_results(d: ModelData, seismic: pd.DataFrame, bottom: str) -> l
         drift = kind == SEISMIC_DRIFT
         z, nv = _num(r.get("Z")), _num(r.get("Nv"), 1.0)  # no Z when Ca, Cv are typed
         if z != z:
-            low_v = typed_minimum_finding(str(name).split("(")[0], _num(r["Ca"]), _num(r["Cv"]), _num(r["I"]),
-                                          _num(r["R"]), used)
+            parent = str(name).split("(")[0]
+            factor = d.case_scales.get(parent, 1.0)
+            low_v = typed_minimum_finding(parent, _num(r["Ca"]), _num(r["Cv"]), _num(r["I"]),
+                                          _num(r["R"]), used * factor)
+            if low_v is None and factor > 1.0 + 1e-6:
+                low_v = Finding("Seismic", INFO,
+                                f"{parent}: V/W {used:.4f} x {factor:.3f} in its load case = "
+                                f"{used * factor:.4f}, the zone 4 minimum 0.8 Z Nv I / R (ETABS "
+                                "takes Nv = 1 with typed Ca, Cv; sdt analyze scales the case)",
+                                "NSCP 208.5.2.1 Eq. 208-11")
             if low_v is not None and low_v.text not in {f.text for f in out}:
                 out.append(low_v)
             from etabs_api.workflows.ubc97 import sites_of_coefficients
@@ -1170,6 +1181,13 @@ def read_model_data(connector, progress=None) -> ModelData:
                                               model.PropFrame.GetModifiers(prop, [])[0])
         except Exception:
             pass
+    try:
+        from etabs_api.workflows.model_analysis import static_case_scales
+
+        d.case_scales = static_case_scales(model, [
+            n for n, kind in d.pattern_types.items() if kind in (SEISMIC, SEISMIC_DRIFT)])
+    except Exception:
+        pass
     if d.analysed:
         from etabs_api.workflows.model_analysis import base_shears, modal_periods
 

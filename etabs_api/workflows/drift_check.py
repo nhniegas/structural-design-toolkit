@@ -235,13 +235,16 @@ def story_table_text(rows: list[tuple]) -> list[str]:
     return lines
 
 
-def typed_minimum_findings(seismic: pd.DataFrame, pattern_types: dict[str, int]
-                           ) -> list[mc.Finding]:
+def typed_minimum_findings(seismic: pd.DataFrame, pattern_types: dict[str, int],
+                           scales: dict[str, float] | None = None) -> list[mc.Finding]:
     """The drift patterns whose forces are under the zone 4 minimum of Eq. 208-11.
 
     With Ca and Cv typed in, ETABS applies the minimum with Nv = 1
     (``model_check.typed_minimum_finding``), so the drift read on such a
     pattern is too small by the same share. One finding for each pattern.
+    ``scales`` are the scale factors of the patterns in their load cases
+    (``sdt analyze`` raises them to the minimum): a pattern that meets the
+    minimum with its factor is not reported.
     """
     out, seen = [], set()
     if seismic.empty or not {"Name", "Ca", "Cv", "I", "R", "CoeffUsed"} <= set(seismic.columns):
@@ -253,7 +256,8 @@ def typed_minimum_findings(seismic: pd.DataFrame, pattern_types: dict[str, int]
             continue
         finding = mc.typed_minimum_finding(parent, mc._num(r["Ca"]), mc._num(r["Cv"]),
                                            mc._num(r["I"]), mc._num(r["R"]),
-                                           mc._num(r["CoeffUsed"]))
+                                           mc._num(r["CoeffUsed"])
+                                           * (scales or {}).get(parent, 1.0))
         if finding is not None:
             seen.add(parent)
             finding.text += ". The drift of this pattern is too small by the same share"
@@ -445,7 +449,11 @@ def run_drift(connector, reference: str = CENTER,
     ``cases`` are load cases to read the drift on directly, in place of
     combinations (``drift_load_cases``).
     """
-    from etabs_api.workflows.model_analysis import scale_spectrum_to_static
+    from etabs_api.workflows.model_analysis import (
+        raise_drift_cases_to_minimum,
+        scale_spectrum_to_static,
+        static_case_scales,
+    )
 
     model = connector.sap_model
     say = progress or (lambda text: None)
@@ -521,6 +529,7 @@ def run_drift(connector, reference: str = CENTER,
                     report.notes.append(f"Could not set the modifiers of {name}.")
             say(f"{level.name}: running the analysis")
             run()
+            raised = [m for m in raise_drift_cases_to_minimum(connector, run) if m.factor > 1.0]
             if seismic != STATIC:
                 say(f"{level.name}: scaling the response spectrum cases")
                 scale_spectrum_to_static(connector, run)
@@ -551,7 +560,14 @@ def run_drift(connector, reference: str = CENTER,
                         periods[parent] = max(period, periods.get(parent, 0.0))
             report.levels.append((level, level_findings(
                 drifts, pattern_table, pattern_types, wind_denominator, drift_cases, r_factor)
-                + typed_minimum_findings(pattern_table, pattern_types), periods))
+                + [mc.Finding("Seismic", mc.INFO,
+                              f"{m.case}: scaled x {m.factor:.3f} in its load case, from V/W "
+                              f"{m.coefficient:.4f} to the zone 4 minimum {m.minimum:.4f} (soil "
+                              f"{m.soil}, Nv {m.nv:g}; ETABS takes Nv = 1 with typed Ca, Cv)",
+                              "NSCP 208.5.2.1 Eq. 208-11") for m in raised]
+                + typed_minimum_findings(pattern_table, pattern_types, static_case_scales(
+                    model, [n for n, k in pattern_types.items() if k == mc.SEISMIC_DRIFT])),
+                periods))
             used_r = r_factor
             if not used_r and "R" in pattern_table.columns:
                 values = pd.to_numeric(pattern_table["R"], errors="coerce").dropna()
@@ -572,6 +588,7 @@ def run_drift(connector, reference: str = CENTER,
         if had_results:
             say("Analysing the restored model")
             run()
+            raise_drift_cases_to_minimum(connector, run)   # the factor of the restored periods
             report.restored = True
         else:
             model.File.Save()
