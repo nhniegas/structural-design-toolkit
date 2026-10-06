@@ -285,6 +285,9 @@ def main(argv: list[str] | None = None) -> int:
 
         run_loading_window(argv[1] if len(argv) > 1 else "")
         return 0
+    from design import parallel
+
+    parallel.enable()   # the member designs of a large model are shared between the cores
     parser = build_parser()
     arguments = parser.parse_args(argv)
     if arguments.command is None:
@@ -297,4 +300,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    import multiprocessing
+
+    multiprocessing.freeze_support()   # the packaged program starts its design processes itself
     raise SystemExit(main())

@@ -1290,7 +1290,69 @@ def _largest(values: np.ndarray):
     return valid.max() if valid.size else np.nan
 
 
+def _beam_design_part(arguments: tuple) -> pd.DataFrame:
+    """The design of one part of the beams, in a process of its own."""
+    targets, props, forces, options = arguments
+    dcr_targets.use(targets)     # the active target ratios are per process
+    return _execute_beam_design(props, forces, progress=None, **options)
+
+
 def execute_beam_design(
+    df_beam_props: pd.DataFrame,
+    df_frame_forces: pd.DataFrame,
+    enable_seismic_design: bool,
+    gravity_combo_name: str,
+    Pu_axial_load: float = 50.0,
+    code: AciCode = CODE,
+    progress=None,
+    compatibility_torsion: bool = False,
+    exempt_short_spans: bool = False,
+) -> pd.DataFrame:
+    """The beam design, shared between several processes on a large model.
+
+    Each beam is designed on its own forces, whatever the others are, so the
+    beams are split into consecutive parts of their sorted names, each part
+    is designed by ``_execute_beam_design`` in a process, and the results are
+    joined in that order: the rows and the values are those of one process.
+    One process is used when ``design.parallel`` is not enabled, on a small
+    model, or if the processes fail to start.
+    """
+    from design import parallel
+
+    options = dict(enable_seismic_design=enable_seismic_design,
+                   gravity_combo_name=gravity_combo_name, Pu_axial_load=Pu_axial_load,
+                   code=code, compatibility_torsion=compatibility_torsion,
+                   exempt_short_spans=exempt_short_spans)
+    names = df_beam_props["UniqueName"] if "UniqueName" in df_beam_props.columns else []
+    workers = parallel.workers_for(len(names))
+    if workers > 1 and all(isinstance(name, str) for name in names):
+        try:
+            ordered = sorted(set(names))                    # the order of the results
+            parts = parallel.chunks(ordered, workers)
+            part_of = {name: index for index, part in enumerate(parts) for name in part}
+            prop_part = df_beam_props["UniqueName"].map(part_of)
+            force_part = df_frame_forces["UniqueName"].map(part_of)
+            targets = dcr_targets.active()
+            jobs = [(targets, df_beam_props[prop_part == index],
+                     df_frame_forces[force_part == index], options)
+                    for index in range(len(parts))]
+            if progress is not None:
+                progress(f"Beam design in {workers} processes\n{len(ordered)} beams")
+            done, results = 0, []
+            for part, result in zip(parts, parallel.pool(workers).map(_beam_design_part, jobs)):
+                results.append(result)
+                done += len(part)
+                if progress is not None:
+                    progress(f"Beam design in {workers} processes\n"
+                             f"{done} of {len(ordered)} beams designed")
+            results = [r for r in results if not r.empty]
+            return pd.concat(results, ignore_index=True) if results else pd.DataFrame()
+        except Exception:   # the processes could not start or stopped: design here
+            parallel.shutdown()
+    return _execute_beam_design(df_beam_props, df_frame_forces, progress=progress, **options)
+
+
+def _execute_beam_design(
     df_beam_props: pd.DataFrame,
     df_frame_forces: pd.DataFrame,
     enable_seismic_design: bool,
