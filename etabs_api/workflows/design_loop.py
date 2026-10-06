@@ -23,7 +23,8 @@ Rules (agreed with the office):
   ratios and deflection grow the depth first; stirrup spacing below the
   minimum (shear, torsion) grows the width first. Members of one beam line
   share the size unless their lengths differ by more than the similarity
-  limit.
+  limit, or they are held differently (a cantilever, a span between supports,
+  a gravity beam).
 * Columns: joint shear or beam-column strength failing in one direction grows
   the side along that direction; flexure, axial load, bar limits, shear and
   the SMRF dimension go straight to the first larger square size that passes
@@ -87,6 +88,7 @@ class LoopSettings:
     ranges: dict = field(default_factory=dict)
     downsize_ratio: float = 0.7
     span_similarity: float = 0.30
+    line_max_bend: float = 15.0  # degrees: members of a line share a size up to this bend
     max_rounds: int = 5
     max_inner: int = 10          # beam iterations within a round
     max_inner_columns: int = 10  # column iterations within a round
@@ -338,14 +340,76 @@ def beam_comfortable(rows: pd.DataFrame, ratio: float, seismic: bool) -> bool:
     return True
 
 
+def beam_directions(connectivity, points) -> dict[str, tuple[float, float]]:
+    """Unit direction in plan of every beam, {member: (dx, dy)}.
+
+    ``connectivity`` has UniqueName, UniquePtI and UniquePtJ; ``points`` has
+    UniqueName, X and Y. A beam whose joints are not both there, or that has
+    no length in plan, is left out, and so is everything when a table is missing.
+    """
+    needed = ("UniqueName", "UniquePtI", "UniquePtJ")
+    if connectivity is None or points is None or len(connectivity) == 0 or len(points) == 0 \
+            or any(c not in connectivity.columns for c in needed) \
+            or any(c not in points.columns for c in ("UniqueName", "X", "Y")):
+        return {}
+
+    def key(value) -> str:
+        text = str(value).strip()
+        return text[:-2] if text.endswith(".0") else text
+
+    xy = {key(n): (float(x), float(y)) for n, x, y in zip(
+        points["UniqueName"], pd.to_numeric(points["X"], errors="coerce"),
+        pd.to_numeric(points["Y"], errors="coerce")) if x == x and y == y}
+    rows = connectivity
+    if "DesignType" in rows.columns:
+        rows = rows[rows["DesignType"].astype(str).str.strip().str.casefold().eq("beam")]
+    out = {}
+    for name, i, j in zip(rows["UniqueName"], rows["UniquePtI"], rows["UniquePtJ"]):
+        start, end = xy.get(key(i)), xy.get(key(j))
+        if start is None or end is None:
+            continue
+        dx, dy = end[0] - start[0], end[1] - start[1]
+        length = math.hypot(dx, dy)
+        if length > 1e-6:
+            out[key(name)] = (dx / length, dy / length)
+    return out
+
+
+CANTILEVER_SUPPORT, GRAVITY_SUPPORT, SPAN_SUPPORT = "cantilever", "gravity beam", "span"
+
+
+def support_kinds(results: pd.DataFrame) -> dict[str, str]:
+    """How each beam of the design table is held, from its ``SupportStatus``:
+    a cantilever, a gravity beam (on other beams only) or a span between
+    supports. A beam without a status is left out."""
+    if results is None or results.empty or "SupportStatus" not in results.columns:
+        return {}
+    out = {}
+    for name, status in zip(results["UniqueName"].astype(str), results["SupportStatus"]):
+        text = "" if status is None else str(status).strip()
+        if text in ("", "nan", "None"):
+            continue
+        if "Cantilever" in text:
+            out[name] = CANTILEVER_SUPPORT
+        elif text.startswith("Beam-Framed"):
+            out[name] = GRAVITY_SUPPORT
+        else:
+            out[name] = SPAN_SUPPORT
+    return out
+
+
 def beam_actions(results: pd.DataFrame, sections: dict[str, Section], lengths: dict[str, float],
                  grown: set[str], settings: LoopSettings, seismic: bool = True,
-                 allow_shrink: bool = True, lines: dict[str, str] | None = None
+                 allow_shrink: bool = True, lines: dict[str, str] | None = None,
+                 directions: dict[str, tuple[float, float]] | None = None
                  ) -> dict[str, tuple[Section, str]]:
     """New sizes for the beams: grow the failing ones, shrink the comfortable ones.
 
     ``results`` is the beam design table with internal column names (two rows
-    per beam). Returns {member: (new section, reason)}.
+    per beam). ``directions`` is the unit direction of each beam in plan;
+    with it, members of a line share a size only when they bend from each
+    other by no more than ``settings.line_max_bend``. Returns
+    {member: (new section, reason)}.
     """
     wanted: dict[str, tuple[Section, str]] = {}
     shrinkable: dict[str, Section] = {}
@@ -384,12 +448,24 @@ def beam_actions(results: pd.DataFrame, sections: dict[str, Section], lengths: d
             wanted[name] = (new, f"grow ({reason})")
 
     # members of a beam line share the size, unless their lengths differ too much
+    # or they are held differently: a cantilever does not pass its depth to the
+    # span next to it, nor a span between columns to a cantilever
     by_line: dict[str, list[str]] = {}
     for name in sections:
         if sections[name].is_beam:
             by_line.setdefault(_line(name, lines), []).append(name)
+    support = support_kinds(results)
+    directions = directions or {}
+    # the cosine of the largest bend; the direction of a beam has no sign
+    straight = math.cos(math.radians(min(max(settings.line_max_bend, 0.0), 90.0))) - 1e-9
 
     def similar(a: str, b: str) -> bool:
+        if a in support and b in support and support[a] != support[b]:
+            return False
+        if a in directions and b in directions:
+            (ax, ay), (bx, by) = directions[a], directions[b]
+            if abs(ax * bx + ay * by) < straight:
+                return False
         la, lb = lengths.get(a, 0.0), lengths.get(b, 0.0)
         top = max(la, lb)
         return top <= 0 or abs(la - lb) / top <= settings.span_similarity
@@ -690,6 +766,11 @@ class Workbench:
         table = self._table("Beam Object Connectivity")
         return dict(zip(table["UniqueName"].astype(str), pd.to_numeric(table["Length"])))
 
+    def directions(self) -> dict[str, tuple[float, float]]:
+        """Unit direction in plan of every beam, from the extracted connectivity
+        and joint coordinates. Empty when the coordinates are not there."""
+        return beam_directions(self.tables.get("CONNECTIVITY"), self.tables.get("POINTS"))
+
     def angles(self, columns: list[str]) -> dict[str, float]:
         return {name: float(self.model.FrameObj.GetLocalAxes(name, 0.0, False)[0])
                 for name in columns}
@@ -917,7 +998,7 @@ def run_design_loop(bench: Workbench) -> dict:
         column_report = bench.design_columns(beam_table) if columns else None
         sections = bench.sections()
         actions = beam_actions(beam_table, sections, bench.lengths(), grown, settings, seismic,
-                               allow_shrink, bench.lines())
+                               allow_shrink, bench.lines(), bench.directions())
         stop_runaway_growth(actions, sections, shear_growths)
         if columns:
             _, column_names = bench.members()
@@ -978,6 +1059,7 @@ LOOP_FIELDS = {
     "Largest beam depth (mm)": ("beam_max_depth", 1200),
     "Beam iterations in a round at most": ("max_inner", 10),
     "Beam line shares one size when lengths differ by at most (%)": ("span_similarity", 30),
+    "Beam line shares one size when its members bend by at most (degrees)": ("line_max_bend", 15),
     "Largest column side (mm)": ("column_max", 1200),
     "Largest column side ratio (long side / short side)": ("column_max_ratio", 2.0),
     "Column iterations in a round at most": ("max_inner_columns", 10),
@@ -1294,13 +1376,16 @@ def run_design_cli() -> dict | None:
     if typed is None:
         return None
     try:
-        values = {key: float(typed[label]) for label, (key, _) in LOOP_FIELDS.items()}
+        values = {key: float(typed.get(label, default))
+                  for label, (key, default) in LOOP_FIELDS.items()}
         if values["column_max_ratio"] < 1.0 or min(
-                values["max_inner"], values["max_inner_columns"], values["max_rounds"]) < 1:
+                values["max_inner"], values["max_inner_columns"], values["max_rounds"]) < 1 \
+                or not 0 <= values["line_max_bend"] <= 90:
             raise ValueError
     except ValueError:
-        show_warning("Every loop setting must be a number; the side ratio at least 1 and the "
-                     "iterations and rounds at least 1.", title=title)
+        show_warning("Every loop setting must be a number; the side ratio at least 1, the "
+                     "iterations and rounds at least 1 and the bend from 0 to 90 degrees.",
+                     title=title)
         return None
     _save("design_loop", values)
 
@@ -1344,6 +1429,7 @@ def run_design_cli() -> dict | None:
                       float(values["column_max_ratio"])),
         ranges=setup["sections"], downsize_ratio=values["downsize_ratio"],
         span_similarity=values["span_similarity"] / 100.0,
+        line_max_bend=values["line_max_bend"],
         max_rounds=int(values["max_rounds"]), max_inner=int(values["max_inner"]),
         max_inner_columns=int(values["max_inner_columns"]),
         zone_factor=seismic_values["zone_factor"], ct=seismic_values["ct"],

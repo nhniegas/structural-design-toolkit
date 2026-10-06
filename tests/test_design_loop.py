@@ -77,6 +77,96 @@ def test_a_beam_line_shares_the_size_unless_the_lengths_differ():
     assert "2GX-3B" not in actions              # half the length: sized on its own
 
 
+def test_a_cantilever_and_the_span_next_to_it_do_not_pass_their_size_to_each_other():
+    cantilever = "Cantilever (Free at PtJ)"
+    lengths = {"2GX-4": 3000.0, "2GX-4A": 3200.0, "2GX-4B": 3100.0}   # all within 30 %
+    sections = {n: g(300, 500) for n in lengths}
+
+    # the cantilever fails: the spans between columns keep their size
+    results = pd.DataFrame(
+        beam_rows("2GX-4", "FAILED: DEFLECTION (ACI 24.2.2)", support=cantilever)
+        + beam_rows("2GX-4A") + beam_rows("2GX-4B"))
+    actions = beam_actions(results, sections, lengths, set(), SETTINGS, allow_shrink=False)
+    assert actions["2GX-4"][0] == g(300, 600)
+    assert "2GX-4A" not in actions and "2GX-4B" not in actions
+
+    # a span fails: the other span follows it, the cantilever does not
+    results = pd.DataFrame(
+        beam_rows("2GX-4", support=cantilever)
+        + beam_rows("2GX-4A", "FAILED: DEFLECTION (ACI 24.2.2)") + beam_rows("2GX-4B"))
+    actions = beam_actions(results, sections, lengths, set(), SETTINGS, allow_shrink=False)
+    assert actions["2GX-4A"][0] == g(300, 600) and actions["2GX-4B"][0] == g(300, 600)
+    assert "2GX-4" not in actions
+
+
+def test_a_comfortable_span_can_shrink_whatever_the_cantilever_of_its_line_needs():
+    from etabs_api.workflows.design_loop import support_kinds
+
+    cantilever = "Cantilever (Free at PtJ)"
+    results = pd.DataFrame(beam_rows("2GX-6", support=cantilever, depth=700, vu=400.0, defl=0.95)
+                           + beam_rows("2GX-6A", depth=700, vu=20.0, defl=0.1))
+    assert support_kinds(results) == {"2GX-6": "cantilever", "2GX-6A": "span"}
+    sections = {"2GX-6": g(300, 700), "2GX-6A": g(300, 700)}
+    actions = beam_actions(results, sections, {"2GX-6": 3000.0, "2GX-6A": 3000.0}, set(), SETTINGS)
+    assert "2GX-6" not in actions                 # the cantilever is not comfortable: it stays
+    assert actions["2GX-6A"][0].depth < 700       # the span shrinks without waiting for it
+
+
+def test_members_of_a_line_share_a_size_only_up_to_the_largest_bend():
+    import math
+    from dataclasses import replace
+
+    import pytest
+
+    from etabs_api.workflows.design_loop import beam_directions
+
+    # 2GX-5 runs along X; 2GX-5A bends 10 degrees from it, 2GX-5B bends 30 degrees
+    points = pd.DataFrame({
+        "UniqueName": ["1", "2", "3", "4"],
+        "X": [0.0, 6000.0, 6000.0 + 6000.0 * math.cos(math.radians(10)),
+              6000.0 - 6000.0 * math.cos(math.radians(30))],
+        "Y": [0.0, 0.0, 6000.0 * math.sin(math.radians(10)), 6000.0 * math.sin(math.radians(30))],
+    })
+    connectivity = pd.DataFrame({
+        "UniqueName": ["2GX-5", "2GX-5A", "2GX-5B", "C1"],
+        "DesignType": ["Beam", "Beam", "Beam", "Column"],
+        "UniquePtI": ["1", "2", "2", "1"], "UniquePtJ": ["2", "3", "4", "1"]})
+    directions = beam_directions(connectivity, points)
+    assert set(directions) == {"2GX-5", "2GX-5A", "2GX-5B"}     # the column is left out
+    assert directions["2GX-5"] == pytest.approx((1.0, 0.0))
+
+    results = pd.DataFrame(beam_rows("2GX-5", "FAILED: DEFLECTION (ACI 24.2.2)")
+                           + beam_rows("2GX-5A") + beam_rows("2GX-5B"))
+    sections = {n: g(300, 500) for n in ("2GX-5", "2GX-5A", "2GX-5B")}
+    lengths = {n: 6000.0 for n in sections}
+
+    def followers(limit):
+        actions = beam_actions(results, sections, lengths, set(),
+                               replace(SETTINGS, line_max_bend=limit), allow_shrink=False,
+                               directions=directions)
+        return sorted(n for n in actions if n != "2GX-5")
+
+    assert followers(15.0) == ["2GX-5A"]               # 10 degrees follows, 30 does not
+    assert followers(45.0) == ["2GX-5A", "2GX-5B"]     # the bend the tags allow
+    assert followers(5.0) == []                        # each on its own
+    # 2GX-5B runs the other way along its line: the direction of a beam has no sign
+    assert followers(31.0) == ["2GX-5A", "2GX-5B"]
+
+    # without the coordinates the bend is not checked
+    actions = beam_actions(results, sections, lengths, set(), SETTINGS, allow_shrink=False)
+    assert sorted(actions) == ["2GX-5", "2GX-5A", "2GX-5B"]
+    assert beam_directions(connectivity, None) == {} and beam_directions(None, points) == {}
+
+
+def test_beams_without_a_support_status_share_their_line_as_before():
+    results = pd.DataFrame(beam_rows("2GX-9", "FAILED: DEFLECTION (ACI 24.2.2)")
+                           + beam_rows("2GX-9A")).drop(columns="SupportStatus")
+    sections = {n: g(300, 500) for n in ("2GX-9", "2GX-9A")}
+    actions = beam_actions(results, sections, {"2GX-9": 6000.0, "2GX-9A": 6000.0}, set(),
+                           SETTINGS, allow_shrink=False)
+    assert actions["2GX-9A"][0] == g(300, 600)
+
+
 def test_a_comfortable_beam_shrinks_but_not_below_l_over_16():
     results = pd.DataFrame(beam_rows("2GX-7", width=300, depth=700))
     sections = {"2GX-7": g(300, 700)}
