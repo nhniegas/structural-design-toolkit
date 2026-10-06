@@ -12,14 +12,26 @@ For each beam, after its bars are chosen:
 3. Deflection along the clear span: the curvature M / (Ec Ie) integrated
    twice, with zero deflection at both supports. A cantilever is fixed at its
    root and the deflection from the support rotation of the analysis is added.
-4. Long-term factor lambda = 2.0 / (1 + 50 rho'), rho' the compression steel
-   at midspan (at the support of a cantilever).
+4. Long-term factor lambda = xi / (1 + 50 rho'), rho' the compression steel
+   at midspan (at the support of a cantilever); xi = 2.0 for 5 years or more.
 5. Checks (Table 24.2.2):
 
    * immediate live load       D(DL+LL) - D(DL)                           L/360
    * immediate roof live load  D(DL+Lr) - D(DL), roof level only          L/180
-   * after partitions          lambda D(DL+0.25LL) + D(DL+LL) - D(DL+0.25LL)
+   * after attachment of the partitions: the long-term part plus the live
+     load that is not sustained
+                               lambda D(DL+0.25LL) + D(DL+LL) - D(DL+0.25LL)
                                L/480 (partitions likely to be damaged) or L/240
+6. For information: the long-term part alone, lambda D(DL+0.25LL), and the
+   total, D(DL+LL) + lambda D(DL+0.25LL). The code sets no limit on them.
+7. With ``DeflectionStages`` the long-term deflection that happens before
+   the partitions are built is deducted from the after-attachment
+   deflection, as the footnote of Table 24.2.2 allows:
+   lambda(t) x share x D(DL), where t is the time from when the dead load is
+   first carried to when the partitions are built, lambda(t) uses xi(t) of
+   Table 24.2.4.1.3 and ``share`` is the part of the dead load in place
+   before the partitions. Without stages nothing is deducted, which is the
+   safe side.
 
 Lengths in mm, moments in kN-m, stresses in MPa.
 """
@@ -36,6 +48,8 @@ from design import dcr_targets
 
 ES = 200000.0           # MPa
 XI_LONG_TERM = 2.0      # 5 years or more, ACI Table 24.2.4.1.3
+# (months under load, xi): ACI Table 24.2.4.1.3, straight lines between its values
+TIME_FACTORS = ((0.0, 0.0), (3.0, 1.0), (6.0, 1.2), (12.0, 1.4), (60.0, XI_LONG_TERM))
 LAYER_CLEAR = 25.0      # mm between layers (BeamDetailingConfig.layer_clear_spacing)
 ZONE_FRACTION = 0.25    # end zones of the span (BeamDetailingConfig.moment_zone_fraction)
 
@@ -47,6 +61,58 @@ DEFLECTION_COMBOS = (COMBO_DEAD, COMBO_FULL, COMBO_SUSTAINED, COMBO_ROOF)
 
 LIMIT_DAMAGED = 480     # partitions likely to be damaged
 LIMIT_NOT_DAMAGED = 240
+
+
+def time_factor(months: float) -> float:
+    """xi for a load sustained ``months``: ACI Table 24.2.4.1.3 (1.0 at 3 months,
+    1.2 at 6, 1.4 at 12, 2.0 at 60 or more), straight lines in between and
+    from zero at the start."""
+    months = max(0.0, float(months))
+    for (m0, x0), (m1, x1) in zip(TIME_FACTORS, TIME_FACTORS[1:]):
+        if months <= m1:
+            return x0 + (x1 - x0) * (months - m0) / (m1 - m0)
+    return XI_LONG_TERM
+
+
+@dataclass(frozen=True)
+class DeflectionStages:
+    """When the partitions are built, for the after-attachment deflection.
+
+    ``months_before_partitions``: from the time the beam first carries its
+    dead load (the forms are removed) to the time the partitions are built.
+    ``dead_share_before``: the part of the dead load, 0 to 1, in place before
+    the partitions (self weight, slab, and what else is there by then; not
+    the partitions and what comes after them).
+    """
+
+    months_before_partitions: float = 0.0
+    dead_share_before: float = 1.0
+
+    @property
+    def active(self) -> bool:
+        return self.months_before_partitions > 0 and self.dead_share_before > 0
+
+    def describe(self) -> str:
+        if not self.active:
+            return "all the long-term deflection counted after the partitions (the safe side)"
+        return (f"partitions built {self.months_before_partitions:g} months after the dead load "
+                f"is first carried (xi {time_factor(self.months_before_partitions):.2f}); "
+                f"{self.dead_share_before * 100:g} % of the dead load in place before them")
+
+    def to_saved(self) -> dict:
+        return {"months_before_partitions": self.months_before_partitions,
+                "dead_share_before": self.dead_share_before}
+
+    @classmethod
+    def from_saved(cls, saved) -> "DeflectionStages":
+        try:
+            stages = cls(float(saved["months_before_partitions"]),
+                         float(saved["dead_share_before"]))
+        except (TypeError, KeyError, ValueError):
+            return cls()
+        if stages.months_before_partitions < 0 or not 0 <= stages.dead_share_before <= 1:
+            return cls()
+        return stages
 
 
 # =============================================================================
@@ -149,11 +215,16 @@ class DeflectionResult:
     lam: float
     live: float
     roof: float | None
-    long_term: float
+    long_term: float                # after attachment of the partitions: the checked value
     span: float
     live_limit: float
     roof_limit: float | None
     long_limit: float
+    creep: float = 0.0              # the long-term part alone, lambda D(DL + 0.25 LL)
+    total: float = 0.0              # immediate + long-term, D(DL + LL) + lambda D(DL + 0.25 LL)
+    deducted: float = 0.0           # long-term deflection before the partitions (stages)
+    at_first_load: float | None = None    # when the dead load is first carried (stages)
+    at_partitions: float | None = None    # just before the partitions are built (stages)
 
     @property
     def ratio(self) -> float:
@@ -179,11 +250,19 @@ DEFLECTION_COLUMNS = {
     "Defl_live_limit_mm": "Δ live limit L/360 (mm)",
     "Defl_roof_mm": "Δ roof live (mm)",
     "Defl_roof_limit_mm": "Δ roof limit L/180 (mm)",
-    "Defl_long_mm": "Δ after partitions (mm)",
-    "Defl_long_limit_mm": "Δ after partitions limit (mm)",
+    "Defl_long_mm": "Δ after attachment of partitions (mm)",
+    "Defl_long_limit_mm": "Δ after attachment limit (mm)",
+    "Defl_creep_mm": "Δ long-term part, λΔ·Δ(DL + 0.25 LL) (mm)",
+    "Defl_total_mm": "Δ total, immediate + long-term (mm)",
+    "Defl_first_load_mm": "Δ when the dead load is first carried (mm)",
+    "Defl_at_partitions_mm": "Δ just before the partitions are built (mm)",
+    "Defl_deducted_mm": "Δ long-term before the partitions, deducted (mm)",
+    "Defl_stages": "Deflection stages",
     "Defl_ratio": "Δ / limit (governing)",
     "Deflection_Check": "Deflection check",
 }
+# shown only when the engineer gave the stages
+STAGE_COLUMNS = ("Defl_first_load_mm", "Defl_at_partitions_mm", "Defl_deducted_mm", "Defl_stages")
 DEFLECTION_FAILED = "FAILED: DEFLECTION (ACI 24.2.2)"
 _ZONES = ("left", "mid", "right")
 _TIP_I = "Tip from rotation at I (mm)"
@@ -250,8 +329,12 @@ def _stiffness(part: SpanPart) -> tuple[dict[str, float], np.ndarray, float]:
 
 def span_deflection(parts: list[SpanPart], cantilever_root: str | None = None,
                     root_rotation: dict[str, float] | None = None, roof: bool = False,
-                    long_limit_divisor: float = LIMIT_DAMAGED) -> dict[str, DeflectionResult]:
+                    long_limit_divisor: float = LIMIT_DAMAGED,
+                    stages: DeflectionStages | None = None) -> dict[str, DeflectionResult]:
     """Deflection checks of a span made of one or more segments, per segment.
+
+    ``stages`` deducts the long-term deflection that happens before the
+    partitions are built and reports the deflection at those stages.
 
     The span is supported at both ends, or is a cantilever fixed at
     ``cantilever_root`` ("start" or "end" of the positions). ``root_rotation``
@@ -277,7 +360,16 @@ def span_deflection(parts: list[SpanPart], cantilever_root: str | None = None,
 
     dead, full, sustained = profile(COMBO_DEAD), profile(COMBO_FULL), profile(COMBO_SUSTAINED)
     live_curve = full - dead
-    long_curve = lam * sustained + full - sustained
+    creep_curve = lam * sustained
+    staged = stages is not None and stages.active
+    if staged:   # the dead load before the partitions creeps until they are built
+        first_curve = stages.dead_share_before * dead
+        deducted_curve = (lam / XI_LONG_TERM) * time_factor(
+            stages.months_before_partitions) * first_curve
+    else:
+        first_curve, deducted_curve = None, np.zeros_like(dead)
+    long_curve = creep_curve - deducted_curve + full - sustained
+    total_curve = full + creep_curve
     roof_curve = profile(COMBO_ROOF) - dead if roof and COMBO_ROOF in combos else None
     out = {}
     for i, (part, (ie, _, part_lam)) in enumerate(zip(parts, stiffness)):
@@ -289,6 +381,10 @@ def span_deflection(parts: list[SpanPart], cantilever_root: str | None = None,
             live_limit=span / 360.0,
             roof_limit=span / 180.0 if roof_curve is not None else None,
             long_limit=span / long_limit_divisor,
+            creep=float(creep_curve[mine].max()), total=float(total_curve[mine].max()),
+            deducted=float(deducted_curve[mine].max()),
+            at_first_load=float(first_curve[mine].max()) if staged else None,
+            at_partitions=float((first_curve + deducted_curve)[mine].max()) if staged else None,
         )
     return out
 
@@ -296,8 +392,8 @@ def span_deflection(parts: list[SpanPart], cantilever_root: str | None = None,
 def beam_deflection(section: BeamSection, x: np.ndarray, moments: dict[str, np.ndarray],
                     cantilever_root: str | None = None,
                     root_rotation: dict[str, float] | None = None,
-                    roof: bool = False, long_limit_divisor: float = LIMIT_DAMAGED
-                    ) -> DeflectionResult:
+                    roof: bool = False, long_limit_divisor: float = LIMIT_DAMAGED,
+                    stages: DeflectionStages | None = None) -> DeflectionResult:
     """Deflection checks of a single-segment span (see ``span_deflection``).
 
     ``root_rotation`` here is the downward deflection at the tip (mm).
@@ -309,7 +405,8 @@ def beam_deflection(section: BeamSection, x: np.ndarray, moments: dict[str, np.n
     per_mm = None
     if root_rotation and length > 0:
         per_mm = {combo: value / length for combo, value in root_rotation.items()}
-    return span_deflection([part], cantilever_root, per_mm, roof, long_limit_divisor)["member"]
+    return span_deflection([part], cantilever_root, per_mm, roof, long_limit_divisor,
+                           stages)["member"]
 
 
 # =============================================================================
@@ -430,18 +527,23 @@ def beam_spans(connectivity, members: list[str]) -> list[Span]:
 
 
 def add_deflection_columns(results, service, long_limit_divisor: float = LIMIT_DAMAGED,
-                           connectivity=None, progress=None):
+                           connectivity=None, progress=None,
+                           stages: DeflectionStages | None = None):
     """Add the deflection checks to the beam design results (TOP and BOTTOM rows).
 
     ``service`` is the SERVICE LOADS table and ``connectivity`` the
     CONNECTIVITY table; with it the segments of a beam line are checked as
     one span. A beam that fails turns from OK to DEFLECTION_FAILED.
+    ``stages`` (when the partitions are built) deducts the long-term
+    deflection before them and adds the deflection at those stages.
     """
     import pandas as pd
 
+    staged = stages is not None and stages.active
     out = results.copy()
     for column in DEFLECTION_COLUMNS:
-        out[column] = None
+        if staged or column not in STAGE_COLUMNS:
+            out[column] = None
     if service is None or len(service) == 0:
         out["Deflection_Check"] = "NO DEF COMBOS"
         return out
@@ -499,7 +601,8 @@ def add_deflection_columns(results, service, long_limit_divisor: float = LIMIT_D
             members = span.members[0] if len(span.members) == 1 else \
                 f"{span.members[0]} to {span.members[-1]} ({len(span.members)} segments)"
             progress(f"Beam {members}  |  Level {story}\nCombo: DEF 100 to DEF 103 "
-                     "(service)\nCheck: Deflection (Ie, long-term, L/360 and L/480)")
+                     "(service)\nCheck: Deflection (Ie, long-term, live load and after "
+                     "attachment of partitions)")
         parts, roof, ok = [], False, True
         single = len(span.members) == 1 and span.lengths[0] == 0.0
         for name, flip, offset, seg in zip(span.members, span.reversed, span.offsets,
@@ -540,7 +643,8 @@ def add_deflection_columns(results, service, long_limit_divisor: float = LIMIT_D
                             svc.groupby(svc["Combo"].astype(str))[column].first().items()}
             zone = "left" if support_at_i else "right"
             parts[index].compression_zone = zone
-        results_by_part = span_deflection(parts, root, rotation, roof, long_limit_divisor)
+        results_by_part = span_deflection(parts, root, rotation, roof, long_limit_divisor,
+                                          stages)
         for name, result in results_by_part.items():
             index = rows_of[name].index
             values = {
@@ -555,8 +659,17 @@ def add_deflection_columns(results, service, long_limit_divisor: float = LIMIT_D
                                        else round(result.roof_limit, 2)),
                 "Defl_long_mm": round(result.long_term, 2),
                 "Defl_long_limit_mm": round(result.long_limit, 2),
+                "Defl_creep_mm": round(result.creep, 2),
+                "Defl_total_mm": round(result.total, 2),
                 "Defl_ratio": round(result.ratio, 3),
             }
+            if staged:
+                values.update({
+                    "Defl_first_load_mm": round(result.at_first_load, 2),
+                    "Defl_at_partitions_mm": round(result.at_partitions, 2),
+                    "Defl_deducted_mm": round(result.deducted, 2),
+                    "Defl_stages": stages.describe(),
+                })
             # the target ratio of this member type (1.0 unless the engineer set one)
             status = rows_of[name].iloc[0].get("SupportStatus", "")
             target = dcr_targets.limit(dcr_targets.beam_type(status), dcr_targets.DEFLECTION)

@@ -25,6 +25,7 @@ sdt columns    # design the columns from the stored beam step, save the column o
 | Beam bars and cover | Main bar, stirrup and web bar (mm), web bar fy (MPa), cover (mm) |
 | Cover against earth | Whether the beams of any floor level need 75 mm cover (cast against or exposed to earth: footing tie beams, ground beams). If yes, pick the levels; the other beams keep the typed cover. Not asked when the typed cover is 75 mm or more. The levels are remembered and offered again |
 | Deflection limit | Partitions likely to be damaged (L/480) or not (L/240) |
+| When the partitions are built | Not known (all the long-term deflection is counted after them), or the months from when the beams first carry their dead load and the share of the dead load in place by then. See [Deflection stages](#deflection-stages) |
 | Target ratios | Use the code limits (every ratio 1.00), the targets saved for this model, or set them: one dialog for girders and one for beams, with a box for each check. See [Target ratios](#target-ratios) |
 | Beam torsion | Design for the analysis torsion, or take it as at most φTcr (compatibility torsion, ACI 22.7.3.2). See [Beam torsion](#beam-torsion) |
 | Beam bar spacing | The office rule (at most 150 mm clear between the bars of a face), or the code only (crack control, ACI 24.3.2). See [Beam bar spacing](#beam-bar-spacing) |
@@ -202,11 +203,41 @@ For each beam, after its bars are chosen:
 |---|---|---|
 | Immediate live load | Δ(DL + LL) - Δ(DL) | L/360 |
 | Immediate roof live load (roof level) | Δ(DL + Lr) - Δ(DL) | L/180 |
-| After partitions are installed | λΔ Δ(DL + 0.25 LL) + Δ(DL + LL) - Δ(DL + 0.25 LL) | L/480 or L/240 |
+| After attachment of the partitions | λΔ Δ(DL + 0.25 LL) + Δ(DL + LL) - Δ(DL + 0.25 LL) | L/480 or L/240 |
+
+**What the after-attachment deflection is.** It is the part of the deflection that can damage partitions (ACI Table 24.2.2): the long-term deflection of the sustained load, plus the immediate deflection of the live load that is not sustained. It is not the total. The live load deflection above has no long-term effect in it. Two more values are in the results for information; the code sets no limit on them:
+
+| Value | Deflection |
+|---|---|
+| Long-term part alone (creep and shrinkage) | λΔ Δ(DL + 0.25 LL) |
+| Total, immediate + long-term | Δ(DL + LL) + λΔ Δ(DL + 0.25 LL) |
+
+The total is the after-attachment deflection plus the immediate deflection of the sustained load, Δ(DL + 0.25 LL), which is there before the partitions are built. It is what camber, finishes and clearances have to allow for. The sustained live load of 25 % is a common practice value, not a code value.
+
+#### Deflection stages
+
+By default all the long-term deflection is counted after the partitions, with ξ = 2.0 on the whole sustained load. That is the safe side, and needs nothing about the construction. The code allows leaving out the long-term deflection that happens before the partitions are built (footnote of Table 24.2.2). `sdt beams`, `sdt deflection` and `sdt design` ask when they are built:
+
+- **Not known** (the default): nothing is deducted.
+- **Enter when they are built**: the months from when the beams first carry their dead load (the forms are removed) to when the partitions are built, and the share of the dead load in place before the partitions (self weight, slab and what else is there by then; not the partitions and what follows them).
+
+The deduction is λ(t) × share × Δ(DL), where λ(t) = ξ(t) / (1 + 50 ρ') and ξ(t) follows ACI Table 24.2.4.1.3, with straight lines between its values:
+
+| Months under load | 0 | 3 | 6 | 12 | 60 or more |
+|---|---|---|---|---|---|
+| ξ | 0 | 1.0 | 1.2 | 1.4 | 2.0 |
+
+With the stages given the results also show the deflection when the dead load is first carried (share × Δ(DL)), the deflection just before the partitions are built (that plus the deduction), and the deduction itself. The live load deflection, the long-term part and the total do not change.
+
+What the staged values assume:
+
+- The dead load before the partitions is taken as a share of the whole dead load, with the same distribution along the beam. The model is not read stage by stage.
+- The same Ie is used at every stage: the beam is taken as cracked under the full service load from the start, which is the safe side for the early stages.
+- It is the ACI time-factor method, not a creep analysis in time steps.
 
 **Spans, not segments.** ETABS splits a beam line wherever another member frames into it. The segments of one tagged line (`2GX-1`, `2GX-1A`, `2GX-1B`, ...) that meet at a joint without a column are checked together as one span, and L is the whole span. A span end is supported by a column, a wall or a member the line ends on; it is free (a cantilever tip) only when nothing else connects there. A cantilever span is fixed at its support, and the deflection from the rotation of that support (from the analysis) is added.
 
-The results file has Ie of each zone, λΔ, the three deflections, their limits, the governing ratio and `Deflection check`. A beam that fails the deflection and nothing else gets `FAILED: DEFLECTION (ACI 24.2.2)`. The calculation report has the same values in a Deflection table for each beam.
+The results file has Ie of each zone, λΔ, the three deflections, their limits, the long-term part, the total, the stage values when the stages are given, the governing ratio and `Deflection check`. A beam that fails the deflection and nothing else gets `FAILED: DEFLECTION (ACI 24.2.2)`. The calculation report has the same values in a Deflection table for each beam.
 
 ### Target ratios
 
@@ -418,7 +449,7 @@ Beam report, per beam:
 - flexure at the left support, midspan and right support, top and bottom: Mu, bars per layer, As, d, a, strain, phi, Mn, phi Mn and Mu / phi Mn
 - shear and torsion per zone: Vu, Ve, design Vu, Tu, d, Vc, legs, spacing, Vs, phi Vn, Vu / phi Vn, At/s and Al
 - with SMRF on: nominal moment strengths at each location and the seismic design shear
-- deflection (ACI 24.2): the live, roof live and after-partitions deflections with their limits and ratios, Ie at the three zones, the long-term factor and the check
+- deflection (ACI 24.2): the live, roof live and after-attachment deflections with their limits and ratios, the long-term part and the total for information, the stage values when given, Ie at the three zones, the long-term factor and the check
 - detailing and design status
 
 The design results hold the bars, legs and spacings; depths, strengths and ratios in the report are worked out again from them with the same design classes.
