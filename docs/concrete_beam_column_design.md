@@ -181,13 +181,18 @@ A shear larger than phi (Vc + 0.66 √f'c bw d) (ACI 22.5.1.2), or a combined sh
 - An end that another beam carries is supported too. Whether a beam carries or is carried follows the **load path**, not only what meets at the joint (see below).
 - A beam that only continues in line does not hold an end by itself. The end is as held as the far end of that beam, so a cantilever that ETABS has in two pieces is still a cantilever.
 
-**The load path.** Every beam line gets a rank: 0 when it rests on a column or a wall, 1 when it rests only on lines of rank 0, and so on. A line is the pieces of one tagged line, or pieces that continue each other in a straight line. A column counts as a support at the joint on its top; a column that only starts at a joint (a planted column) is a load. From the ranks:
+**The load path.** Whether a beam carries or is carried is read from the shear and moment diagrams of the analysis, not from the framing alone. For each beam end, under gravity load:
 
-- A line nearer to the supports (a lower rank) holds the end of one further away. A gravity beam on a girder is held by it.
-- A line further from the supports never holds one nearer. An edge beam across the tips of cantilever girders rests on them, so the girders stay cantilevers, free at their tips.
-- Two lines of the same rank hold each other only where one runs through the joint. Two that both end there, such as two cantilevers meeting at a corner with no column, do not.
+- **Pushed up:** something carries the beam there. The end is supported.
+- **A downward force on it:** the end is free, and carries what sits on it. A girder like this is a cantilever, whatever beam is at its tip.
 
-The ranks come from the geometry of the model alone, so they do not change as the design loop resizes members.
+So the same framing can be read both ways, and only the diagrams tell which. An edge beam with girders ending on it carries those girders when their ends are pushed up, and rests on them when they are cantilevers with the edge beam on their tips.
+
+The diagrams are those of the full service load (`DEF 101`) when the model has the deflection combinations, otherwise those of the factored gravity combination. The sign of the shear is taken from the slope of the moment, so it does not depend on the sign convention of the analysis. An end force below 5 % of the largest shear of the member, or below 0.5 kN, is too small to read.
+
+Where there are no diagrams to read, the framing decides. Every beam line gets a rank: 0 when it rests on a column or a wall, 1 when it rests only on lines of rank 0, and so on. A line nearer to the supports holds the end of one further away; two lines of the same rank hold each other only where one runs through the joint. A column counts as a support at the joint on its top; a column that only starts at a joint (a planted column) is a load.
+
+Because the diagrams come from the analysis, the reading can change when the sizes change a great deal. It is taken again at every analysis of the design loop.
 
 `Supported Both Ends` is a member on a column or wall at one end at least and held at the other. `Cantilever (Free at PtI / PtJ)` is on a column or wall at one end and truly free at the other. Before version 0.3.1 a beam from a column to a girder was taken as a cantilever, with a short clear span and a capacity shear far too large.
 
@@ -249,7 +254,7 @@ A line is supported:
 
 - at a joint with a column below it or a wall;
 - where the shear of the full service load jumps up, at a joint or inside a member. That is a support pushing up, such as a girder that carries the line and that ETABS has not split there;
-- at an end where another beam holds it by the load path (see "Support status" under [Beam design](#beam-design)): a line nearer to the supports, or as near and running through the joint.
+- at an end that the diagrams show pushed up (see "The load path" under [Beam design](#beam-design)). An end with a downward force on it is free.
 
 A planted column and a beam that rests on the line are loads: the span runs on through them. A stretch beyond the last support to a free end is a cantilever: it is fixed at that support, and the deflection from the rotation of the support (from the analysis) is added. A cantilever with an edge beam on its tip is still a cantilever.
 
@@ -322,7 +327,7 @@ The effective depth is taken to the centre of one layer of bars: d = h - cover -
 
 Where a girder is shallower than a beam it carries, the bottom bars of that beam pass below the girder's bottom bars and cannot rest on them. When you answer yes to "should a girder or beam be at least as deep as the beams that frame into it", every carrier is checked:
 
-- The carrier follows the load path: a beam is never the carrier of one nearer to the supports than itself. An edge beam across the tips of cantilever girders carries no girder; the girders carry it, and the depth rule applies to them.
+- The carrier follows the load path, read from the shear and moment diagrams: a beam end that is pushed up is carried by the beam running through its joint; an end with a downward force on it is not carried, and the girder it belongs to carries what sits on its tip. An edge beam can therefore be the carrier of the girders that end on it, or be carried by them.
 - The carrier of a beam end is the beam whose centre line passes through it, whether ETABS has that girder as one member from column to column or as pieces that meet at the joint. Beams that only continue each other are not carriers.
 - A carrier shallower than a beam it carries gets `FAILED: DEPTH BELOW THE BEAM IT CARRIES`, with both depths in the "Depth against the beams it carries" column.
 - It is a detailing rule of your own, not a code clause, so it is off unless you ask for it. It needs the joint coordinates, which the extraction provides.
