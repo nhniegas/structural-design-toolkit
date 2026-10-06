@@ -158,11 +158,16 @@ def test_a_cantilever_that_carries_a_beam_at_its_tip_is_still_a_cantilever():
     free = bd.add_deflection_columns(results, service({"2GX-7": cantilever}), connectivity=corner)
     assert top(free, "2GX-7")["Defl_live_mm"] == row["Defl_live_mm"]
 
-    # a girder that runs through the tip between its own columns holds it: a span
-    propped = connectivity([("2GX-7", "a", "t"), ("2GY-9", "s", "t"), ("2GY-9A", "t", "u")],
+    # a girder runs through the tip between its own columns. The diagrams still show a
+    # downward force on the tip, so it is a cantilever that carries that girder there
+    through = connectivity([("2GX-7", "a", "t"), ("2GY-9", "s", "t"), ("2GY-9A", "t", "u")],
                            [("C1", "a0", "a"), ("C2", "s0", "s"), ("C3", "u0", "u")])
-    held = bd.add_deflection_columns(results, service({"2GX-7": cantilever}), connectivity=propped)
-    assert top(held, "2GX-7")["Defl_live_mm"] < 0.1 * expected
+    loaded = bd.add_deflection_columns(results, service({"2GX-7": cantilever}), connectivity=through)
+    assert top(loaded, "2GX-7")["Defl_live_mm"] == row["Defl_live_mm"]
+    # without the diagrams the framing decides: that girder holds the tip, a span
+    framed = bd.add_deflection_columns(results, service({"2GX-7": cantilever}, with_shear=False),
+                                       connectivity=through)
+    assert top(framed, "2GX-7")["Defl_live_mm"] < 0.1 * expected
 
 
 def test_an_edge_beam_on_the_tips_of_cantilevers_does_not_hold_them_and_rests_on_them():
@@ -188,3 +193,60 @@ def test_a_member_supported_inside_its_length_is_cut_there():
     assert q[21] - q[20] > 0                              # the reaction of the middle support
     assert bd.support_cuts([x], [q]) == [(0, 0), (0, 21), (1, 0)]
     assert moment[20] == pytest.approx(moment[21])
+
+
+# ------------------------------------------------------------------ the diagrams come first
+def simple(x, w):
+    return w * x * (L - x) / 2.0, w * (L / 2.0 - x)
+
+
+def tip_loaded(x, w):
+    return -10.0 * (L - x), 10.0 + 0.0 * x
+
+
+def test_the_diagrams_tell_an_edge_beam_that_carries_girders_from_one_that_rests_on_them():
+    """Two girders from their columns to an edge beam that reaches no column itself.
+    By the framing alone the edge beam rests on the girders. The diagrams decide."""
+    from design.beam_carriers import BEAM_END, FREE_END, BeamNetwork, end_conditions, end_pushes
+
+    table = connectivity([("2GX-1", "a", "t1"), ("2GX-2", "b", "t2"), ("2BY-8", "t1", "t2")],
+                         [("C1", "a0", "a"), ("C2", "b0", "b")])
+    points = pd.DataFrame({"UniqueName": ["a0", "a", "b0", "b", "t1", "t2"],
+                           "X": [0, 0, 6000, 6000, 0, 6000], "Y": [0, 0, 0, 0, 6000, 6000],
+                           "Z": [0, 3000, 0, 3000, 3000, 3000]})
+
+    # the girders are pushed up at the edge beam: it carries them, they are spans
+    carried = end_pushes(service({"2GX-1": simple, "2GX-2": simple}), bd.COMBO_FULL, table)
+    assert carried[("2GX-1", "t1")] == 1 and carried[("2GX-1", "a")] == 1
+    assert BeamNetwork(table, points, carried).held_at("t1", ["2GX-1"])
+    assert end_conditions(table, points, carried)[("2GX-1", "t1")] == BEAM_END
+
+    # a downward force on the girder ends: they are cantilevers and the edge beam rests on them
+    loaded = end_pushes(service({"2GX-1": tip_loaded, "2GX-2": tip_loaded}), bd.COMBO_FULL, table)
+    assert loaded[("2GX-1", "t1")] == -1 and loaded[("2GX-1", "a")] == 1
+    assert not BeamNetwork(table, points, loaded).held_at("t1", ["2GX-1"])
+    assert end_conditions(table, points, loaded)[("2GX-1", "t1")] == FREE_END
+
+    # with no diagrams the framing decides, and takes the girders for cantilevers
+    assert not BeamNetwork(table, points).held_at("t1", ["2GX-1"])
+    assert end_pushes(None, bd.COMBO_FULL, table) == {} and end_pushes(
+        service({"2GX-1": simple}, with_shear=False), bd.COMBO_FULL, table) == {}
+
+
+def test_the_carrier_of_the_depth_rule_follows_the_diagrams():
+    """A girder ends on an edge beam in two pieces. Pushed up there, the edge beam is its
+    carrier even though it reaches no column; with a load on its end, the girder is."""
+    from design.beam_carriers import carried_beams, end_pushes
+
+    table = connectivity([("2GX-1", "a", "t"), ("2BY-8", "e0", "t"), ("2BY-8A", "t", "e1")],
+                         [("C1", "a0", "a")])
+    points = pd.DataFrame({"UniqueName": ["a0", "a", "t", "e0", "e1"],
+                           "X": [0, 0, 0, -4000, 4000], "Y": [0, 0, 6000, 6000, 6000],
+                           "Z": [0, 3000, 3000, 3000, 3000]})
+    up = end_pushes(service({"2GX-1": simple}), bd.COMBO_FULL, table)
+    assert carried_beams(table, points, up) == {"2BY-8": ["2GX-1"], "2BY-8A": ["2GX-1"]}
+    down = end_pushes(service({"2GX-1": tip_loaded}), bd.COMBO_FULL, table)
+    carriers = carried_beams(table, points, down)
+    assert sorted(carriers) == ["2GX-1"] and sorted(carriers["2GX-1"]) == ["2BY-8", "2BY-8A"]
+    # no diagrams: the framing says the girder, on its column, carries the edge beam
+    assert sorted(carried_beams(table, points)) == ["2GX-1"]

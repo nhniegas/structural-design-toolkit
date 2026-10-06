@@ -28,6 +28,8 @@ import pandas as pd
 ON_LINE = 10.0                                   # mm
 IN_LINE = math.cos(math.radians(15.0))           # beams within 15 degrees are in line
 SAME_LEVEL = 50.0                                # mm
+PUSH_SHARE = 0.05      # an end force above this share of the member's largest shear is read
+PUSH_FLOOR = 0.5       # kN: smaller end forces are not read at all
 CARRIER_FAILED = "FAILED: DEPTH BELOW THE BEAM IT CARRIES"
 NOT_A_CARRIER = "N/A - carries no beam"
 
@@ -38,10 +40,11 @@ def _name(value) -> str:
     return str(value).strip()
 
 
-def carried_beams(connectivity: pd.DataFrame, points: pd.DataFrame | None
-                  ) -> dict[str, list[str]]:
-    """{carrier beam: the beams it carries}, from the frame connectivity and the
-    joint coordinates. Empty without coordinates: the direction of a beam is
+def carried_beams(connectivity: pd.DataFrame, points: pd.DataFrame | None,
+                  pushes: dict[tuple[str, str], int] | None = None) -> dict[str, list[str]]:
+    """{carrier beam: the beams it carries}, from the frame connectivity, the
+    joint coordinates and, with ``pushes`` (``end_pushes``), the shear and
+    moment diagrams. Empty without coordinates: the direction of a beam is
     needed to tell a carrier from a continuation."""
     if connectivity is None or connectivity.empty or points is None or points.empty:
         return {}
@@ -80,7 +83,7 @@ def carried_beams(connectivity: pd.DataFrame, points: pd.DataFrame | None
         return "through" if ON_LINE < along < length - ON_LINE else "end"
 
     directions = {name: unit(name) for name in beams}
-    network = BeamNetwork(connectivity, points)
+    network = BeamNetwork(connectivity, points, pushes)
     out: dict[str, list[str]] = {}
     for name, ends in beams.items():
         own = directions[name]
@@ -90,6 +93,9 @@ def carried_beams(connectivity: pd.DataFrame, points: pd.DataFrame | None
         for joint in ends:
             if joint in column_joints:
                 continue
+            push = network.pushes.get((name, joint), 0)
+            if push < 0:
+                continue                   # a downward force on this end: nothing carries it here
             meeting = [(other, meets(other, joint)) for other in beams if other != name]
             meeting = [(other, how) for other, how in meeting
                        if how and directions[other] is not None]
@@ -100,10 +106,12 @@ def carried_beams(connectivity: pd.DataFrame, points: pd.DataFrame | None
                 if how == "end":           # a girder in two pieces: its partner is in line
                     partner = any(abs(d[0] * directions[third][0] + d[1] * directions[third][1])
                                   >= IN_LINE for third, _ in meeting if third != other)
-                    if not partner and network.rank_of([other]) >= rank:
-                        continue           # it only ends here, and is no nearer to the supports
-                if network.rank_of([other]) > rank:
-                    continue               # it rests on this beam: the load path runs the other way
+                    if not partner:        # it only ends here: a carrier when it pushes up
+                        lifts = network.pushes.get((other, joint), 0)
+                        if lifts > 0 or (lifts == 0 and network.rank_of([other]) >= rank):
+                            continue
+                if push == 0 and network.rank_of([other]) > rank:
+                    continue               # no diagram to read, and it is further from the supports
                 carried = out.setdefault(other, [])
                 if name not in carried:
                     carried.append(name)
@@ -113,7 +121,8 @@ def carried_beams(connectivity: pd.DataFrame, points: pd.DataFrame | None
 COLUMN_END, BEAM_END, FREE_END = "column", "beam", "free"
 
 
-def end_conditions(connectivity: pd.DataFrame, points: pd.DataFrame | None
+def end_conditions(connectivity: pd.DataFrame, points: pd.DataFrame | None,
+                   pushes: dict[tuple[str, str], int] | None = None
                    ) -> dict[tuple[str, str], str]:
     """What holds each beam end: {(beam, joint): "column", "beam" or "free"}.
 
@@ -180,7 +189,7 @@ def end_conditions(connectivity: pd.DataFrame, points: pd.DataFrame | None
                 return True
         return False
 
-    network = BeamNetwork(connectivity, points)
+    network = BeamNetwork(connectivity, points, pushes)
     raw: dict[tuple[str, str], str | list[str]] = {}
     for name, ends in beams.items():
         own = directions[name]
@@ -215,6 +224,49 @@ def end_conditions(connectivity: pd.DataFrame, points: pd.DataFrame | None
     return {key: resolve(key[0], key[1], frozenset({key[0]})) for key in raw}
 
 
+def end_pushes(forces: pd.DataFrame | None, combo: str | None,
+               connectivity: pd.DataFrame | None) -> dict[tuple[str, str], int]:
+    """What the shear and moment diagrams say holds each beam end.
+
+    {(beam, joint): +1, -1 or 0} for the beams of ``forces`` under the load
+    combination ``combo`` (gravity). +1: the end is pushed up, so something
+    carries it there. -1: a downward force acts on the end, so it is a free
+    end that carries what sits on it. 0: too small to read. The sign of the
+    shear is taken from the slope of the moment, whatever sign the analysis
+    uses. ``forces`` has UniqueName, Combo, Station, M3 and V2.
+    """
+    needed = ("UniqueName", "Combo", "Station", "M3", "V2")
+    if forces is None or connectivity is None or not combo or len(forces) == 0 \
+            or any(c not in forces.columns for c in needed):
+        return {}
+    import numpy as np
+
+    from design.beam_deflection import statics_shear
+
+    kind = connectivity["DesignType"].astype(str).str.strip().str.casefold()
+    ends = {_name(r["UniqueName"]): (_name(r["UniquePtI"]), _name(r["UniquePtJ"]))
+            for r in connectivity.loc[kind.eq("beam")].to_dict("records")}
+    table = forces.loc[forces["Combo"].astype(str).eq(str(combo)), list(needed)]
+    out: dict[tuple[str, str], int] = {}
+    for name, rows in table.groupby(table["UniqueName"].map(_name), sort=False):
+        if name not in ends:
+            continue
+        rows = rows.sort_values("Station", kind="stable")
+        x = pd.to_numeric(rows["Station"], errors="coerce").to_numpy(float)
+        moment = pd.to_numeric(rows["M3"], errors="coerce").to_numpy(float)
+        shear = pd.to_numeric(rows["V2"], errors="coerce").to_numpy(float)
+        if len(x) < 2 or np.isnan(moment).any() or np.isnan(shear).any():
+            continue
+        found = statics_shear([(x, moment, shear)])
+        if found is None:
+            continue
+        q = found[0]
+        limit = max(PUSH_SHARE * float(np.max(np.abs(q))), PUSH_FLOOR)
+        for joint, up in ((ends[name][0], float(q[0])), (ends[name][1], -float(q[-1]))):
+            out[(name, joint)] = 1 if up > limit else (-1 if up < -limit else 0)
+    return out
+
+
 class BeamNetwork:
     """Which beams meet, and which of them can reach a support.
 
@@ -224,23 +276,28 @@ class BeamNetwork:
     end of one lies on the centre line of the other (a girder ETABS has not
     split there; this needs the joint coordinates).
 
-    The load path gives every beam line a rank: 0 when the line rests on a
-    support, 1 when it rests only on lines of rank 0, and so on. A line is
-    the pieces of one tagged beam line, or pieces that continue each other
-    in a straight line.
+    ``held_at`` answers what the deflection check, the support status and
+    the carrier rule need: is a beam end held up, or is it a free end that
+    only carries what sits on it?
 
-    ``held_at`` answers what the deflection check and the support status
-    need: is a beam end held up, or is it a free end that only carries what
-    hangs on it? An end is held when a support is there, or when another
-    line there is nearer to the supports (a lower rank), or as near (the
-    same rank) and running through the joint. A line further from the
-    supports cannot hold it: an edge beam on the tips of cantilever girders
-    rests on them, so the tips stay free. Two lines of the same rank that
-    both end at the joint, such as two cantilevers meeting at a corner, do
-    not hold each other either.
+    The shear and moment diagrams of the analysis come first (``pushes``,
+    from ``end_pushes``): an end that is pushed up is held, an end with a
+    downward force on it is free and carries what is there. That is the
+    load path as the structure really takes it, whatever the framing looks
+    like: an edge beam can carry the girders that end on it, or rest on the
+    tips of cantilever girders, and only the diagrams tell which.
+
+    Where the diagrams are not there, or the end force is too small to
+    read, the geometry decides. Every beam line has a rank: 0 when it rests
+    on a support, 1 when it rests only on lines of rank 0, and so on (a line
+    is the pieces of one tagged line, or pieces that continue each other in
+    a straight line). An end is then held when another line there is nearer
+    to the supports, or as near and running through the joint.
     """
 
-    def __init__(self, connectivity: pd.DataFrame | None, points: pd.DataFrame | None = None):
+    def __init__(self, connectivity: pd.DataFrame | None, points: pd.DataFrame | None = None,
+                 pushes: dict[tuple[str, str], int] | None = None):
+        self.pushes = pushes or {}
         self.beams: dict[str, tuple[str, str]] = {}
         self.supports: set[str] = set()
         self.at_joint: dict[str, list[str]] = {}
@@ -421,12 +478,24 @@ class BeamNetwork:
                     queue.append(other)
         return False
 
+    def push_at(self, joint, own) -> int:
+        """+1, -1 or 0 for the end of the line ``own`` at ``joint`` (see ``end_pushes``);
+        0 as well where the line goes on through the joint, which is then not an end."""
+        joint = _name(joint)
+        enders = [m for m in own if joint in self.beams.get(_name(m), ())]
+        if len(enders) != 1:
+            return 0
+        return self.pushes.get((_name(enders[0]), joint), 0)
+
     def held_at(self, joint, own) -> bool:
         """Whether the end of the beams ``own`` at ``joint`` is held up (see the class)."""
         joint = _name(joint)
         if joint in self.supports:
             return True
         own = {_name(m) for m in own}
+        push = self.push_at(joint, own)
+        if push:                                 # the diagrams say: pushed up, or loaded
+            return push > 0
         own_lines = {self.line.get(m) for m in own}
         mine = self.rank_of(own)
         for other in self.others_at(joint, own):
@@ -444,7 +513,8 @@ class BeamNetwork:
 
 
 def add_carrier_depth_check(results: pd.DataFrame, connectivity: pd.DataFrame,
-                            points: pd.DataFrame | None) -> pd.DataFrame:
+                            points: pd.DataFrame | None,
+                            pushes: dict[tuple[str, str], int] | None = None) -> pd.DataFrame:
     """Add ``Carried_Beam_Depth`` and ``Carrier_Depth_Check`` to the beam results.
 
     A beam shallower than a beam it carries fails; a passing beam then gets
@@ -453,7 +523,7 @@ def add_carrier_depth_check(results: pd.DataFrame, connectivity: pd.DataFrame,
     out = results.copy()
     names = out["UniqueName"].astype(str)
     depth_of = dict(zip(names, pd.to_numeric(out["Depth"], errors="coerce")))
-    carried = carried_beams(connectivity, points)
+    carried = carried_beams(connectivity, points, pushes)
     out["Carried_Beam_Depth"] = float("nan")
     out["Carrier_Depth_Check"] = NOT_A_CARRIER
     for carrier, beams in carried.items():

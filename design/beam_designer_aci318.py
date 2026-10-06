@@ -91,6 +91,7 @@ def identify_cantilever_beams(
     frame_df: pd.DataFrame,
     conn_df: pd.DataFrame,
     points: pd.DataFrame | None = None,
+    pushes: dict | None = None,
 ) -> pd.DataFrame:
     """Classify the supports of every beam.
 
@@ -149,7 +150,7 @@ def identify_cantilever_beams(
     beams = conn.loc[conn["DesignType"].eq("Beam")].copy()
     has_support_i = beams["UniquePtI"].isin(support_joints)
     has_support_j = beams["UniquePtJ"].isin(support_joints)
-    held = end_conditions(conn, points)
+    held = end_conditions(conn, points, pushes)
     held_i = pd.Series([held.get((_name(n), _name(j))) == BEAM_END for n, j in
                         zip(beams["UniqueName"], beams["UniquePtI"])], index=beams.index)
     held_j = pd.Series([held.get((_name(n), _name(j))) == BEAM_END for n, j in
@@ -2132,7 +2133,8 @@ def _support_widths(frame_df: pd.DataFrame, conn_df: pd.DataFrame) -> pd.DataFra
 
 def prepare_beam_table(frame_df: pd.DataFrame, conn_df: pd.DataFrame,
                        bars: dict, earth_cover_stories=(),
-                       points: pd.DataFrame | None = None) -> pd.DataFrame:
+                       points: pd.DataFrame | None = None,
+                       pushes: dict | None = None) -> pd.DataFrame:
     """The beams of FRAME DATA with their support status and the bar inputs.
 
     ``bars`` has dm (main bar), ds (stirrup), dw (web bar) in mm, fyw (web bar
@@ -2145,7 +2147,7 @@ def prepare_beam_table(frame_df: pd.DataFrame, conn_df: pd.DataFrame,
     conn_df = conn_df.copy()
     frame_df.columns = [str(c).strip() for c in frame_df.columns]
     conn_df.columns = [str(c).strip() for c in conn_df.columns]
-    support_df = identify_cantilever_beams(frame_df, conn_df, points)
+    support_df = identify_cantilever_beams(frame_df, conn_df, points, pushes)
     support_df = support_df.merge(_support_widths(frame_df, conn_df), on="UniqueName",
                                   how="left")
     beam_df = frame_df.merge(support_df, on="UniqueName", how="left")
@@ -2307,6 +2309,27 @@ def ask_deflection_stages(title: str = "Beam Design - Deflection") -> Deflection
     return stages
 
 
+def load_path_pushes(tables: dict, gravity_combo: str | None = None) -> dict:
+    """What the shear and moment diagrams say holds each beam end, for the
+    support status and the carrier rule (``beam_carriers.end_pushes``).
+
+    Read under the full service load (DEF 101) when the model has the
+    deflection combinations, otherwise under the factored gravity
+    combination of the seismic shear. Empty when neither is there: the
+    geometry of the framing then decides.
+    """
+    from design.beam_carriers import end_pushes
+    from design.beam_deflection import COMBO_FULL
+
+    connectivity = tables.get("CONNECTIVITY")
+    service = tables.get("SERVICE LOADS")
+    if service is not None and len(service) and "V2" in service.columns:
+        pushes = end_pushes(service, COMBO_FULL, connectivity)
+        if pushes:
+            return pushes
+    return end_pushes(tables.get("FACTORED LOADS"), gravity_combo, connectivity)
+
+
 def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict,
                  long_limit_divisor: int = LIMIT_DAMAGED, progress=None,
                  earth_cover_stories=(), carrier_depth: bool = False,
@@ -2329,8 +2352,9 @@ def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict
     are active (``dcr_targets.use``). Returns the results, two rows (TOP,
     BOTTOM) per beam.
     """
+    pushes = load_path_pushes(tables, gravity_combo)
     beam_props = prepare_beam_table(tables["FRAME DATA"], tables["CONNECTIVITY"], bars,
-                                    earth_cover_stories, tables.get("POINTS"))
+                                    earth_cover_stories, tables.get("POINTS"), pushes)
     results = execute_beam_design(
         df_beam_props=beam_props,
         df_frame_forces=tables["FACTORED LOADS"],
@@ -2350,7 +2374,8 @@ def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict
     if carrier_depth and not results.empty:
         from design.beam_carriers import add_carrier_depth_check
 
-        results = add_carrier_depth_check(results, tables["CONNECTIVITY"], tables.get("POINTS"))
+        results = add_carrier_depth_check(results, tables["CONNECTIVITY"], tables.get("POINTS"),
+                                          pushes)
     return sort_beam_rows(results)
 
 

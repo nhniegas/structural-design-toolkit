@@ -15,11 +15,11 @@ For each beam, after its bars are chosen:
    The whole beam line is taken as one chain and cut where it is supported:
    at a joint with a column below it or a wall; at a joint, or inside a
    member, where the shear of the full service load jumps up, which is a
-   support pushing up (a girder that carries the line); and at an end where
-   another beam can reach a support without passing through this line
-   (``beam_carriers.BeamNetwork``). A planted column and a beam that only
-   hangs on the line are loads: the span runs on through them, and an end
-   that carries only such a beam is a free end.
+   support pushing up (a girder that carries the line). An end of the line
+   is held when the diagrams show it pushed up; with a downward force on it
+   it is a free end, whatever beam is there (``beam_carriers.BeamNetwork``).
+   A planted column and a beam that rests on the line are loads: the span
+   runs on through them.
 4. Long-term factor lambda = xi / (1 + 50 rho'), rho' the compression steel
    at midspan (at the support of a cantilever); xi = 2.0 for 5 years or more.
 5. Checks (Table 24.2.2):
@@ -840,9 +840,10 @@ def add_deflection_columns(results, service, long_limit_divisor: float = LIMIT_D
 
     checked: dict[str, DeflectionResult] = {}
     if has_lines:
-        from design.beam_carriers import BeamNetwork
+        from design.beam_carriers import BeamNetwork, end_pushes
 
-        network = BeamNetwork(connectivity, points)
+        network = BeamNetwork(connectivity, points,
+                              end_pushes(service, COMBO_FULL, connectivity))
         for chain in beam_spans(connectivity, names, points, through_supports=True):
             tell(chain)
             found = by_structure(chain)
