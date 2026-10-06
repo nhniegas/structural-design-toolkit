@@ -321,3 +321,25 @@ def test_a_top_story_with_no_structure_fails_because_the_height_is_too_long():
     assert empty and empty[0].status == mc.FAIL and "RD" in empty[0].text
     assert not [f for f in mc.check_seismic(with_footing_level("GF", "RD"))
                 if "has no structure" in f.text]
+
+
+def test_typed_coefficients_are_traced_back_to_their_site():
+    from etabs_api.workflows.ubc97 import seismic_coefficients, sites_of_coefficients
+
+    ca, cv = seismic_coefficients(0.4, "SD", "A", 8.0)        # Na 1.08, Nv 1.36
+    sites = sites_of_coefficients(ca, cv)
+    assert [(z, soil) for z, soil, _, _ in sites] == [(0.4, "SD")]
+    assert sites[0][3] == pytest.approx(1.36, abs=0.01)
+    assert sites_of_coefficients(0.123, 0.456) == []
+
+
+def test_the_zone_4_minimum_uses_the_nv_of_typed_coefficients():
+    """ETABS applies Eq. 208-11 with Nv = 1 when Ca, Cv are typed in."""
+    from etabs_api.workflows.ubc97 import seismic_coefficients
+
+    ca, cv = seismic_coefficients(0.4, "SD", "A", 8.0)
+    etabs = 0.8 * 0.4 * 1.0 * 1.0 / 8.5                         # with Nv = 1
+    low = mc.typed_minimum_finding("EQX", ca, cv, 1.0, 8.5, etabs)
+    assert low.status == mc.FAIL and "Nv 1.36" in low.text and "0.0512" in low.text
+    assert mc.typed_minimum_finding("EQX", ca, cv, 1.0, 8.5, etabs * 1.36) is None
+    assert mc.typed_minimum_finding("EQX", 0.123, 0.456, 1.0, 8.5, 0.01) is None   # no such site

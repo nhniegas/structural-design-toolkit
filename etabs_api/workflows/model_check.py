@@ -304,6 +304,42 @@ def drift_limit(period: float) -> float:
     return SEIS.drift_limit_short if period < SEIS.drift_period else SEIS.drift_limit_long
 
 
+def typed_minimum_finding(name: str, ca: float, cv: float, importance: float, r: float,
+                          used: float) -> Finding | None:
+    """The zone 4 minimum 0.8 Z Nv I / R (Eq. 208-11) of a pattern with typed Ca, Cv.
+
+    ETABS keeps no Z or Nv with typed coefficients and applies the minimum
+    with Nv = 1, which is too low near a source. The site is found again from
+    the two values (``sites_of_coefficients``); the pattern fails when its
+    V/W is under the minimum of every site they can belong to, and is
+    reported when only some of them ask for more. None when the values
+    belong to no zone 4 site, or the numbers are missing.
+    """
+    from etabs_api.workflows.ubc97 import sites_of_coefficients
+
+    if any(x != x for x in (ca, cv, importance, r, used)) or r <= 0:
+        return None
+    sites = sites_of_coefficients(ca, cv)
+    zone4 = [s for s in sites if s[0] >= SEIS.zone4_factor]
+    if not zone4:
+        return None
+    needs = {(soil, round(nv, 2)): SEIS.zone4_minimum * z * nv * importance / r
+             for z, soil, _, nv in zone4}
+    short = {key: v for key, v in needs.items() if used < v * (1.0 - COEFF_TOLERANCE)}
+    if not short:
+        return None
+    every = len(short) == len(needs) and len(zone4) == len(sites)
+    listed = "; ".join(f"soil {soil} with Nv {nv:g}: {v:.4f}" for (soil, nv), v in
+                       sorted(short.items()))
+    return Finding("Seismic", FAIL if every else WARN,
+                   f"{name}: V/W {used:.4f} is under the zone 4 minimum 0.8 Z Nv I / R of the "
+                   f"site that Ca {ca:g}, Cv {cv:g} belong to ({listed}). ETABS takes Nv = 1 "
+                   "with typed coefficients: scale the pattern up by the difference, or define "
+                   "the site (zone, soil, source and distance) in the pattern"
+                   + ("" if every else " - several sites give these values, confirm yours"),
+                   "NSCP 208.5.2.1 Eq. 208-11")
+
+
 def story_range_findings(d: ModelData, group: str, rows: pd.DataFrame, bottom: str, top: str,
                          reference: str, what: str) -> list[Finding]:
     """Whether the lateral load patterns cover the right stories.
@@ -397,8 +433,8 @@ def check_seismic(d: ModelData, settings: dict | None = None) -> list[Finding]:
         else:
             out.append(Finding("Seismic", INFO, "Ca, Cv are user defined: ETABS keeps no zone, "
                                "soil or source with them, so zone 4 is assumed for the period "
-                               "cap and the 0.8 Z Nv I / R minimum is not checked",
-                               "NSCP Table 208-3"))
+                               "cap, and the 0.8 Z Nv I / R minimum is checked with the Nv "
+                               "that the values of Ca and Cv belong to", "NSCP Table 208-3"))
         typed = zone4 and not str(r.get("NearSrcOpt", "Per Code")).startswith("Per Code")
         try:
             if not has_site:
@@ -602,7 +638,6 @@ def _check_static_results(d: ModelData, seismic: pd.DataFrame, bottom: str) -> l
     if "CoeffUsed" not in seismic:
         return out
     names = [n for n, _ in d.stories]
-    elevations = [z for _, z in d.stories]
     elevation = dict(d.stories)
 
     def stories_of(row) -> tuple[str, str]:
@@ -636,6 +671,16 @@ def _check_static_results(d: ModelData, seismic: pd.DataFrame, bottom: str) -> l
                                 "range)"), "NSCP 208.5.2.1, 208.6.1"))
         drift = kind == SEISMIC_DRIFT
         z, nv = _num(r.get("Z")), _num(r.get("Nv"), 1.0)  # no Z when Ca, Cv are typed
+        if z != z:
+            low_v = typed_minimum_finding(name, _num(r["Ca"]), _num(r["Cv"]), _num(r["I"]),
+                                          _num(r["R"]), used)
+            if low_v is not None and low_v.text not in {f.text for f in out}:
+                out.append(low_v)
+            from etabs_api.workflows.ubc97 import sites_of_coefficients
+
+            if any(s[0] >= SEIS.zone4_factor for s in
+                   sites_of_coefficients(_num(r["Ca"]), _num(r["Cv"]))):
+                z, nv = SEIS.zone4_factor, 1.0   # what ETABS applies; the finding above has the Nv
         want = nscp_coefficient(_num(r["Ca"]), _num(r["Cv"]), _num(r["I"]), _num(r["R"]),
                                 period, z, nv, drift)
         good = abs(used - want) <= COEFF_TOLERANCE * want

@@ -1108,18 +1108,29 @@ def run_design_loop(bench: Workbench) -> dict:
     status = "not converged"
     seismic = settings.smrf
     beams, report = pd.DataFrame(), None
+    # The designs of an iteration that changed no section: the model is still the one
+    # they were made on, so the next iteration takes them and does not analyse again.
+    unchanged: tuple | None = None
 
     def step(label: str, columns: bool, allow_shrink: bool):
-        nonlocal iteration
+        nonlocal iteration, unchanged
         iteration += 1
         bench.stage = f"Round {round_number} - Iteration {iteration}: {label}"
         bench.log("")
         bench.log(f"=== Iteration {iteration}: {label} ===")
         start = time.time()
-        bench.analyze()
-        bench.extract()
-        beam_table = bench.design_beams()
-        column_report = bench.design_columns(beam_table) if columns else None
+        if unchanged is None:
+            bench.analyze()
+            bench.extract()
+            beam_table, column_report = bench.design_beams(), None
+        else:
+            beam_table, column_report = unchanged
+            bench.log("  no section changed in the last iteration: its analysis and its "
+                      "design are those of this model, and are used as they are")
+        if not columns:
+            column_report = None
+        elif column_report is None:
+            column_report = bench.design_columns(beam_table)
         sections = bench.sections()
         actions = beam_actions(beam_table, sections, bench.lengths(), grown, settings, seismic,
                                allow_shrink, bench.lines(), bench.directions())
@@ -1144,6 +1155,7 @@ def run_design_loop(bench: Workbench) -> dict:
         all_changes.extend(changes)
         bench.log(f"  {len(changes)} section changes, {time.time() - start:.0f} s")
         bench.last = f"Last iteration: {summary}; {len(changes)} section changes"
+        unchanged = None if changes else (beam_table, column_report)
         return changes, beam_table, column_report
 
     round_number = 0

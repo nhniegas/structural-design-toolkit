@@ -88,6 +88,7 @@ The loop stops when the final check changes nothing (converged) or after the num
 Changing the size of one member shifts the forces in the others, so no member is judged on old forces:
 
 - **Every iteration designs every member again** on the forces of the analysis just run, whether its own size changed or not.
+- **An iteration that follows one with no section change does not analyse again.** The model is the one the last analysis and design were made on, so they are used as they are: the first column iteration after the beams settle, and the final check after the columns settle. The log says so. Nothing is carried over once a section has changed.
 - **Every round ends with a final check of every member**, beams and columns together, with no member made smaller. The results that are written come from the last such pass, on the final sizes and their forces.
 - **Converged** means that a final check changed nothing: nothing fails that a size can fix. If the final check still has to make a member larger, another round starts, up to the largest number of rounds. The log and the summary say whether the loop converged or stopped at that limit.
 
@@ -96,6 +97,10 @@ What "optimal" means here: within a round, a member whose ratios are all under t
 Members that no size fixes are listed apart in the log and the summary, by what stops them: at the largest size allowed, shear that grows with the section, or a deflection that the support governs.
 
 ## Time
+
+Beam design reads each beam's forces once and cuts the zones of every combination from arrays. On a real model of 2,114 beams, the beam design with deflection and carrier depth takes about 100 s where it took 295 s, with every value of every row the same.
+
+A round whose iterations settle needs fewer analyses than iterations: on the 4-story test model a round of six iterations (three for the beams, two for the columns, the final check) runs four analyses, since two of them follow an iteration that changed nothing.
 
 Column design is vectorized: the interaction surface of a bar layout is computed in closed form (no polygon clipping per grid point) and every demand of a column is checked against it in one call. On a 48-column, 4-story SMRF test model with 20 combinations column design takes about 5 s (it was 16 s), and a non-SMRF set of 20 columns with 80 load sets about 2 s (it was 20 s). Most of an iteration is now the ETABS analysis and extraction; sizing on the current forces cuts the number of those.
 

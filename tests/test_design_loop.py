@@ -468,3 +468,82 @@ def test_the_members_a_larger_size_does_not_fix_are_named_with_the_reason():
     kinds = stuck_by_kind(stuck)
     assert list(kinds.values()) == [["2GX-1"], ["2GX-2"], ["2GX-3"]]
     assert any("support rotates" in kind for kind in kinds)
+
+
+class _CountingBench:
+    """A workbench that counts its analyses and designs; the sizes come from a script."""
+
+    def __init__(self, script, **settings):
+        self.settings = LoopSettings(combos=[], **settings)
+        self.script = list(script)       # the section changes of each iteration, in order
+        self.calls = {"analyze": 0, "extract": 0, "beams": 0, "columns": 0}
+        self.lines_logged = []
+
+    def log(self, text=""):
+        self.lines_logged.append(text)
+
+    def analyze(self):
+        self.calls["analyze"] += 1
+
+    def extract(self):
+        self.calls["extract"] += 1
+
+    def design_beams(self):
+        self.calls["beams"] += 1
+        return pd.DataFrame({"UniqueName": ["B1"], "Design_Status": ["OK"]})
+
+    def design_columns(self, beams):
+        self.calls["columns"] += 1
+        return pd.DataFrame({"UniqueName": ["C1"], "Column_Design_Status": ["OK"]})
+
+    def sections(self):
+        return {}
+
+    def lengths(self):
+        return {}
+
+    lines = directions = above = lengths
+
+    def angles(self, columns):
+        return {}
+
+    def members(self):
+        return ["B1"], ["C1"]
+
+    def column_sizer(self):
+        return None
+
+    def apply(self, actions, current, grown):
+        return self.script.pop(0) if self.script else []
+
+
+def _loop_without_actions(monkeypatch, script, **settings):
+    from etabs_api.workflows import design_loop as dl
+
+    monkeypatch.setattr(dl, "beam_actions", lambda *a, **k: {})
+    monkeypatch.setattr(dl, "column_actions", lambda *a, **k: {})
+    bench = _CountingBench(script, **settings)
+    return bench, dl.run_design_loop(bench)
+
+
+def test_an_iteration_after_one_that_changed_nothing_does_not_analyse_again(monkeypatch):
+    """Beams, columns and the final check of an unchanged model are one analysis and one
+    design of each kind, where they were three analyses."""
+    bench, summary = _loop_without_actions(monkeypatch, [])
+    assert summary["status"] == "converged" and summary["iterations"] == 3
+    assert bench.calls == {"analyze": 1, "extract": 1, "beams": 1, "columns": 1}
+    assert len(summary["beams"]) == 1 and len(summary["columns"]) == 1   # the final results
+    assert sum("are used as they are" in line for line in bench.lines_logged) == 2
+
+
+def test_an_iteration_after_a_section_change_analyses_again(monkeypatch):
+    from etabs_api.workflows.design_loop import Change
+
+    beam = [Change("B1", "G_300X500_C05_G60", "G_300X600_C05_G60", "grow (failed)")]
+    column = [Change("C1", "CR_500X500_C05_G60", "CR_600X600_C05_G60", "grow (failed)")]
+    # beams: change, none | columns: change, none | final check: none
+    bench, summary = _loop_without_actions(monkeypatch, [beam, [], column, [], []])
+    assert summary["status"] == "converged" and summary["iterations"] == 5
+    # analysed for iterations 1, 2 and 4; iteration 3 (columns) and 5 (final) reuse
+    assert bench.calls["analyze"] == 3 and bench.calls["beams"] == 3
+    assert bench.calls["columns"] == 2      # iterations 3 and 4; the final check reuses the last

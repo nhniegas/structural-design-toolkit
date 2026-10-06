@@ -423,7 +423,7 @@ Units inside the column designer are N, mm and MPa. ETABS reports compression as
 
 ## Column schedule
 
-Asks for the output folder and for the interior tie style, then writes `Column_Schedule.dxf` with one cell per column mark and story: the section drawn to scale with bars, hoops and interior ties, and rows for size, vertical bars, joint ties, confinement ties and general ties. Bars are written as `18-25mmØ` and ties as `12mmØ @ 100mm`. Joint and confinement ties are shown at 100 mm and general ties at 150 mm (set in the configuration); the confinement row shows the designed spacing instead when the design needs less than 100 mm. Circular columns are drawn with a circular outline and spiral.
+Asks for the output folder and for the interior tie style, then writes `Column_Schedule.dxf` with one cell per column mark and story: the section drawn to scale with bars, hoops and interior ties, and rows for size, vertical bars, joint ties, confinement ties and general ties. Bars are written as `18-25mmØ` and ties as `12mmØ @ 100mm`. Joint and confinement ties are shown at 100 mm and general ties at 150 mm (set in the configuration); the confinement row shows the designed spacing instead when the design needs less than 100 mm. Circular columns are drawn with a circular outline and spiral. The curved corners of hoops and ties are drawn with as few points as keep them within 0.05 mm of the true outline, which keeps the file of a large model about a third of the size it had.
 
 The drawing uses the exact bar layout the design selected. The report stores it in the `Bar Layout Data (x, y, n)` column as `x,y,count` per bar position (mm from the bottom-left corner of the section; from the centre for circular columns). A report written before that column existed is drawn from the bundle summary instead, which cannot always tell two similar layouts apart, so run the column design again before exporting.
 
@@ -484,6 +484,8 @@ Beam report, per beam:
 The design results hold the bars, legs and spacings; depths, strengths and ratios in the report are worked out again from them with the same design classes.
 
 Column report, per column: section and vertical bars, then the governing combination at each end for axial load and flexure, slenderness about each axis (lu, k, k lu/r, the limit, Cm, Pc and the largest δns), column shear, strong column-weak beam (per axis), then joint shear per axis (it does not depend on the load combination, so none is named), the transverse reinforcement values and the design status. Each column ends with a 3D figure of its layout's design interaction surface, with every combination at both ends, the hull vertices and the governing demand. The strong column-weak beam check is not drawn there: it uses the nominal surface and belongs to the joint, not to one column. The caption under the figure gives its lowest ratio along X and Y and the result.
+
+The figures are compressed images at 110 dpi, so the report of a large model stays small enough to open and send: about 24 MB of figures for 497 columns, where it was 107 MB.
 
 The reports need a LaTeX install with `pdflatex` (MiKTeX or TeX Live), like the wind and composite reports. It is not part of the toolkit or of the packaged program. When it is missing, the results and schedules are still written and the summary gives the command to install it (`winget install MiKTeX.MiKTeX`); `sdt doctor` shows whether it is found.
 

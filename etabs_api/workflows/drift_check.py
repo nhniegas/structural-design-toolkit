@@ -235,6 +235,32 @@ def story_table_text(rows: list[tuple]) -> list[str]:
     return lines
 
 
+def typed_minimum_findings(seismic: pd.DataFrame, pattern_types: dict[str, int]
+                           ) -> list[mc.Finding]:
+    """The drift patterns whose forces are under the zone 4 minimum of Eq. 208-11.
+
+    With Ca and Cv typed in, ETABS applies the minimum with Nv = 1
+    (``model_check.typed_minimum_finding``), so the drift read on such a
+    pattern is too small by the same share. One finding for each pattern.
+    """
+    out, seen = [], set()
+    if seismic.empty or not {"Name", "Ca", "Cv", "I", "R", "CoeffUsed"} <= set(seismic.columns):
+        return out
+    for _, r in seismic.iterrows():
+        parent = str(r["Name"]).split("(")[0]
+        typed = "Z" not in r.index or pd.isna(r.get("Z"))
+        if parent in seen or not typed or pattern_types.get(parent) != mc.SEISMIC_DRIFT:
+            continue
+        finding = mc.typed_minimum_finding(parent, mc._num(r["Ca"]), mc._num(r["Cv"]),
+                                           mc._num(r["I"]), mc._num(r["R"]),
+                                           mc._num(r["CoeffUsed"]))
+        if finding is not None:
+            seen.add(parent)
+            finding.text += ". The drift of this pattern is too small by the same share"
+            out.append(finding)
+    return out
+
+
 def level_findings(drifts: dict[str, tuple[float, str]], seismic: pd.DataFrame,
                    pattern_types: dict[str, int], wind_denominator: float,
                    drift_cases: dict[str, tuple[str, bool]] | None = None,
@@ -524,8 +550,8 @@ def run_drift(connector, reference: str = CENTER,
                     if period == period:
                         periods[parent] = max(period, periods.get(parent, 0.0))
             report.levels.append((level, level_findings(
-                drifts, pattern_table, pattern_types, wind_denominator, drift_cases, r_factor),
-                periods))
+                drifts, pattern_table, pattern_types, wind_denominator, drift_cases, r_factor)
+                + typed_minimum_findings(pattern_table, pattern_types), periods))
             used_r = r_factor
             if not used_r and "R" in pattern_table.columns:
                 values = pd.to_numeric(pattern_table["R"], errors="coerce").dropna()

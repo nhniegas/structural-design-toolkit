@@ -155,3 +155,20 @@ def test_the_service_stiffness_factor_can_be_the_engineers():
     assert own.beam == pytest.approx(0.56) and own.column == 1.0        # never above gross
     assert "1.6" in own.name and "your factor" in own.reference
     assert not dc.stiffness_levels(1.6)[1].at_least_modelled             # the strength level is the code's
+
+
+def test_a_drift_pattern_under_the_zone_4_minimum_is_reported():
+    """Typed Ca, Cv: ETABS takes Nv = 1 in Eq. 208-11, and the drift is too small with it."""
+    from etabs_api.workflows.ubc97 import seismic_coefficients
+
+    ca, cv = seismic_coefficients(0.4, "SD", "A", 8.0)                    # Nv 1.36
+    table = pd.DataFrame({"Name": ["EQXSD", "EQXSD(2/3)", "EQX"], "Ca": [ca] * 3, "Cv": [cv] * 3,
+                          "I": [1.0] * 3, "R": [8.5] * 3,
+                          "CoeffUsed": [0.8 * 0.4 / 8.5] * 3})
+    types = {"EQXSD": mc.SEISMIC_DRIFT, "EQX": mc.SEISMIC}
+    found = dc.typed_minimum_findings(table, types)
+    assert len(found) == 1 and found[0].status == mc.FAIL
+    assert found[0].text.startswith("EQXSD:") and "too small by the same share" in found[0].text
+    table["CoeffUsed"] = 0.8 * 0.4 * 1.36 / 8.5
+    assert dc.typed_minimum_findings(table, types) == []
+    assert dc.typed_minimum_findings(pd.DataFrame({"Name": []}), types) == []

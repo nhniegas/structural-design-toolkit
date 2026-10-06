@@ -61,6 +61,37 @@ def seismic_coefficients(
     return ca, cv
 
 
+def sites_of_coefficients(ca: float, cv: float, tolerance: float = 0.005
+                          ) -> list[tuple[float, str, float, float]]:
+    """The sites whose Ca and Cv are the given ones: [(Z, soil, Na, Nv)].
+
+    With typed coefficients ETABS keeps no zone, soil or source, so they are
+    found again from Tables 208-7 and 208-8: every zone and soil profile, and
+    in zone 4 every source type and distance (the near-source factors of one
+    source at one distance must give both values). A pair that no site gives
+    returns an empty list; one that several give returns each of them.
+    """
+    found: dict[tuple, tuple[float, str, float, float]] = {}
+
+    def close(a: float, b: float) -> bool:
+        return abs(a - b) <= tolerance * max(abs(b), 1e-9)
+
+    for index, zone in enumerate(ZONE_FACTORS):
+        zone4 = abs(zone - _SEISMIC.zone4_factor) < 1e-9
+        for soil in SOIL_TYPES:
+            base_ca, base_cv = _SEISMIC.ca[soil][index], _SEISMIC.cv[soil][index]
+            if not base_ca or not base_cv:
+                continue
+            factors = [(1.0, 1.0)]
+            if zone4:
+                factors += [near_source_factors(source, tenth / 10.0)
+                            for source in SOURCE_TYPES for tenth in range(0, 201)]
+            for na, nv in factors:
+                if close(base_ca * na, ca) and close(base_cv * nv, cv):
+                    found.setdefault((zone, soil, round(nv, 2)), (zone, soil, na, nv))
+    return list(found.values())
+
+
 def vertical_effect_factor(ca: float, importance: float) -> float:
     """Ev as a fraction of the dead load: Ev = 0.5 Ca I D."""
     return NSCP.load_factors.vertical_effect * ca * importance
