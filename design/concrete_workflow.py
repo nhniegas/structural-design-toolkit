@@ -310,6 +310,9 @@ def run_beams() -> DesignStore | None:
     office_bar_spacing = ask_bar_spacing(title, last)
     if office_bar_spacing is None:
         return None
+    exempt_short_spans = ask_short_span_girders(title, last) if smrf else False
+    if exempt_short_spans is None:
+        return None
     folder = select_output_directory("Folder for the beam results, calculations and schedules")
     if not folder:
         return None
@@ -317,7 +320,8 @@ def run_beams() -> DesignStore | None:
                "gravity_combo": gravity, **bars, "beam_earth_cover_stories": earth_stories,
                "carrier_depth": carrier_depth,
                "compatibility_torsion": compatibility_torsion,
-               "office_bar_spacing": office_bar_spacing})
+               "office_bar_spacing": office_bar_spacing,
+               "exempt_short_spans": exempt_short_spans})
 
     stem = os.path.splitext(os.path.basename(model_path))[0]
     with dcr_targets.use(targets), LoadingWindow("Beam design") as window:
@@ -331,6 +335,7 @@ def run_beams() -> DesignStore | None:
             "dcr_targets": targets.to_saved(), "carrier_depth": carrier_depth,
             "compatibility_torsion": compatibility_torsion,
             "office_bar_spacing": office_bar_spacing,
+            "exempt_short_spans": exempt_short_spans,
             "sources": {"model": list(ready.sources.model),
                         "answered": list(ready.sources.answered),
                         "assumed": list(ready.sources.assumed)},
@@ -338,7 +343,8 @@ def run_beams() -> DesignStore | None:
         results = design_beams(tables, smrf, gravity, bars, divisor, progress=window.update,
                                earth_cover_stories=earth_stories, carrier_depth=carrier_depth,
                                compatibility_torsion=compatibility_torsion,
-                               office_bar_spacing=office_bar_spacing)
+                               office_bar_spacing=office_bar_spacing,
+                               exempt_short_spans=exempt_short_spans)
         store.beam_results = results
         store.save()
         window.update("Saving 1 of 3: the results workbook (.xlsx)")
@@ -357,6 +363,7 @@ def run_beams() -> DesignStore | None:
         summary.note(TORSION_NOTE)
     summary.add("Beam bar spacing", "office rule, 150 mm clear" if office_bar_spacing
                 else "crack control only (ACI 24.3.2)")
+    add_short_spans_to(summary, results, exempt_short_spans)
     ready.sources.add_to(summary)
     for note in notes:
         summary.note(note)
@@ -644,6 +651,60 @@ def ask_bar_spacing(title: str, last: dict | None = None) -> bool | None:
         [SPACING_OFFICE, SPACING_CODE],
         default_index=1 if (last or {}).get("office_bar_spacing") is False else 0)
     return None if chosen is None else chosen == SPACING_OFFICE
+
+
+SHORT_SPAN_KEEP = "Apply the SMRF rules to them, as to every girder"
+SHORT_SPAN_EXEMPT = "Design them without the SMRF rules"
+SHORT_SPAN_NOTE = ("Girders with a clear span under 4d were designed without the SMRF rules of "
+                   "ACI 18.6 (strength ratios, 2.5 % steel limit, probable-moment shear, hoops), "
+                   "because they do not qualify as beams of a special moment frame (ACI "
+                   "18.6.2.1(a)). They are listed in the 'Seismic rules' column. The columns "
+                   "still count their strength in the joint shear and strong column - weak "
+                   "beam checks. Each of them is also a deep beam by ACI 9.9.1.1 (clear span at "
+                   "most 4h) and is designed here as an ordinary beam: the strut-and-tie or "
+                   "nonlinear strain design and the distributed steel of ACI 9.9 are not "
+                   "covered. Confirm how each is meant to resist the earthquake.")
+
+
+def ask_short_span_girders(title: str, last: dict | None = None) -> bool | None:
+    """Whether the girders with a clear span under 4d are designed without the
+    SMRF rules. True to leave them out, False to keep them, None when closed."""
+    from utilities._gui_helpers import select_option
+
+    chosen = select_option(
+        title, "Girders with a clear span under 4d.\n\nA beam of a special moment frame "
+        "must have a clear span of at least 4 times its effective depth (ACI 18.6.2.1(a)). A "
+        "shorter girder does not qualify, and the SMRF rules give it a very large probable-"
+        "moment shear that a larger section does not solve. You can design such girders "
+        "without the SMRF rules (strength ratios, 2.5 % steel limit, probable-moment shear, "
+        "hoops): for the forces of the analysis only. Such a girder is also a deep beam "
+        "by ACI 9.9.1.1, which this design does not cover: it is designed as an ordinary "
+        "beam. The results say which girders this was applied to.",
+        [SHORT_SPAN_KEEP, SHORT_SPAN_EXEMPT],
+        default_index=1 if (last or {}).get("exempt_short_spans") else 0)
+    return None if chosen is None else chosen == SHORT_SPAN_EXEMPT
+
+
+def short_span_members(results) -> list[str]:
+    """The girders the SMRF rules were not applied to for their short span."""
+    from design.beam_designer_aci318 import SMRF_SHORT_SPAN
+
+    if results is None or getattr(results, "empty", True) or "Seismic_Rules" not in results:
+        return []
+    rows = results[results["Seismic_Rules"].astype(str).str.startswith(SMRF_SHORT_SPAN)]
+    return sorted(set(rows["UniqueName"].astype(str)))
+
+
+def add_short_spans_to(summary, results, exempt_short_spans: bool) -> None:
+    """The summary line and note of the short-span choice (nothing when it is off)."""
+    if not exempt_short_spans:
+        return
+    members = short_span_members(results)
+    shown = ", ".join(members[:8]) + (f", ... ({len(members)} in all)" if len(members) > 8 else "")
+    summary.add("Girders under 4d", f"designed without the SMRF rules: {shown}" if members
+                else "none found (the SMRF rules apply to every girder)")
+    if members:
+        summary.note(SHORT_SPAN_NOTE)
 
 
 def add_targets_to(summary, targets: dcr_targets.Targets, members: tuple[str, ...]) -> None:

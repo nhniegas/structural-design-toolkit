@@ -63,7 +63,7 @@ Every story is included, those below the ground level too. A model set up before
 | | Effective cracked-section I, the member modifier times the section modifier as ETABS applies them, of 0.35 (beams) and 0.70 (columns). A modifier assigned to both the members and the sections is applied twice: 0.12 / 0.49 | 208.6.2, 406.6.3.1.1 |
 | | Mass and weight modifiers equal to 1 (any other value reduces W) | 208.6.1 |
 | | Rigid end zone factor | 406.6.2.3 |
-| SMRF (R 8.5) | Girder width at least the smaller of 0.3h and 250 mm; clear span at least 4d | 418.6.2.1 |
+| SMRF (R 8.5) | Girder width at least the smaller of 0.3h and 250 mm; clear span at least 4d (a warning: `sdt beams` and `sdt design` can design the shorter girders without the SMRF rules, see [the design guide](concrete_beam_column_design.md#girders-with-a-clear-span-under-4d)) | 418.6.2.1 |
 | | Column side at least 300 mm; side ratio at least 0.4 | 418.7.2.1 |
 | | Concrete at least 21 MPa; rebar at most 420 MPa | 418.2.5.1, 418.2.6.1, 420.2.2.5 |
 

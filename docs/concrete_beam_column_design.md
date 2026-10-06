@@ -28,6 +28,7 @@ sdt columns    # design the columns from the stored beam step, save the column o
 | Target ratios | Use the code limits (every ratio 1.00), the targets saved for this model, or set them: one dialog for girders and one for beams, with a box for each check. See [Target ratios](#target-ratios) |
 | Beam torsion | Design for the analysis torsion, or take it as at most φTcr (compatibility torsion, ACI 22.7.3.2). See [Beam torsion](#beam-torsion) |
 | Beam bar spacing | The office rule (at most 150 mm clear between the bars of a face), or the code only (crack control, ACI 24.3.2). See [Beam bar spacing](#beam-bar-spacing) |
+| Girders under 4d | Only with SMRF: apply the SMRF rules to girders with a clear span under 4d, as to every girder, or design them without. See [Girders with a clear span under 4d](#girders-with-a-clear-span-under-4d) |
 | Depth of a beam that carries others | Whether a girder or beam must be at least as deep as the beams that frame into it. See [Carrier depth](#carrier-depth) |
 | Output folder | For the results, the calculations and the schedules |
 
@@ -246,6 +247,24 @@ A beam face needs enough bars to keep them close together. There are two rules f
 - **Code only:** the crack control spacing of ACI 24.3.2, about 250 mm centre to centre for Grade 414 bars with 40 mm cover.
 
 The choice matters for seismic design. The extra bars of the office rule raise the probable moments of the beam, and with them the capacity shear Ve of the beam and the joint shear and capacity shear of the columns. On a wide beam with a short span this can be the whole reason the shear check fails. The summary and the calculation report say which rule was used.
+
+### Girders with a clear span under 4d
+
+A beam of a special moment frame must have a clear span of at least 4 times its effective depth (ACI 18.6.2.1(a), NSCP 418.6.2.1(a)). A shorter girder does not qualify. Designed with the SMRF rules anyway, it gets a very large capacity shear, because Ve = (Mpr1 + Mpr2) / ln divides by a short span, and a larger section makes it worse: this is the usual cause of a girder that fails in shear at every size.
+
+With SMRF on, `sdt beams` and `sdt design` ask what to do with these girders:
+
+- **Apply the SMRF rules to them, as to every girder** (the default, and what earlier versions did).
+- **Design them without the SMRF rules.** They are designed for the forces of the analysis only: no strength ratios along the span (ACI 18.6.3.2), no 2.5 % steel limit (18.6.3.1), no probable-moment shear (18.6.5.1) and no hoop spacing of 18.6.4.
+
+What to know before choosing the second:
+
+- **It is your judgement, not a code exemption.** The code does not say such a girder may be designed as an ordinary beam; it says it is not a beam of a special moment frame. Confirm how each one is meant to resist the earthquake.
+- **Each is also a deep beam.** A clear span under 4d is under 4h, so ACI 9.9.1.1 applies: design by strut-and-tie or by a nonlinear strain distribution, with distributed steel on both faces (ACI 9.9.3 and 9.9.4). This toolkit does not do that. It designs the girder as an ordinary beam.
+- **The columns are not relieved.** Joint shear, strong column - weak beam and the column capacity shear still count the strength of these girders, since the columns remain part of the special moment frame.
+- **Cantilevers and gravity beams are not affected.** A cantilever keeps its treatment; a gravity beam never had the SMRF rules.
+
+The effective depth is taken to the centre of one layer of bars: d = h - cover - stirrup - half a bar. When the option is on, the results have a "Seismic rules" column that says for every beam whether the SMRF rules were applied and why not, the summary lists the girders left out, and their calculation sheets say so.
 
 ### Carrier depth
 
