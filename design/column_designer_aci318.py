@@ -1429,9 +1429,13 @@ def _end_force_rows(forces: pd.DataFrame) -> dict:
         grouped = valid["Station"].groupby(names[valid.index], sort=False)
         lowest, highest = grouped.idxmin(), grouped.idxmax()
         # the two end rows of each combination as plain records: they are read some
-        # hundreds of thousands of times, and a table row is slow to read from
-        for combo in lowest.index:
-            index[combo] = (valid.loc[lowest[combo]].to_dict(), valid.loc[highest[combo]].to_dict())
+        # hundreds of thousands of times, and a table row is slow to read from. The
+        # rows are taken in two reads, not one per combination: a table is indexed
+        # again for every size and bar layout that is tried.
+        first = valid.loc[lowest.to_numpy()].to_dict("records")
+        last = valid.loc[highest.to_numpy()].to_dict("records")
+        for combo, low_row, high_row in zip(lowest.index, first, last):
+            index[combo] = (low_row, high_row)
     _END_FORCE_INDEX[id(forces)] = (forces, index)
     return index
 
@@ -6482,15 +6486,25 @@ def _visible_tie_shapes(
     return visible
 
 
+DXF_OUTLINE_TOLERANCE = 0.05   # mm: a tie outline is drawn within this of its true shape
+
+
 def _draw_tie_bars(modelspace, bars: list[TieBar], bar_thickness: float) -> None:
     """Draw the visible outline of every tie bar as closed polylines."""
     for bar, shape in _visible_tie_shapes(bars, bar_thickness):
         for polygon in getattr(shape, "geoms", [shape]):
             if polygon.geom_type != "Polygon" or polygon.is_empty:
                 continue
+            # The outline of a bent bar has hundreds of points, most of them on straight
+            # runs or closer together than a plotter can show: points that move the line
+            # by less than DXF_OUTLINE_TOLERANCE are left out, and the rest are written
+            # to a hundredth of a millimetre. A schedule of 500 columns was 44 MB.
+            polygon = polygon.simplify(DXF_OUTLINE_TOLERANCE, preserve_topology=True)
+            if polygon.is_empty or polygon.geom_type != "Polygon":
+                continue
             for ring in (polygon.exterior, *polygon.interiors):
                 modelspace.add_lwpolyline(
-                    list(ring.coords)[:-1],
+                    [(round(x, 2), round(y, 2)) for x, y in list(ring.coords)[:-1]],
                     close=True,
                     dxfattribs={"layer": bar.layer, "lineweight": 18},
                 )
