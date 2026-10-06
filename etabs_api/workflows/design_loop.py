@@ -1334,10 +1334,13 @@ def final_drift_check(bench: Workbench, options, folder: str, stem: str) -> dict
     from etabs_api.workflows.drift_check import failures, run_drift, save_report
 
     bench.stage = "Final drift check (final sizes; no resizing for drift)"
+    from etabs_api.workflows.drift_check import stiffness_levels
+
     report = run_drift(bench.connector, options.reference, options.wind_denominator,
+                       stiffness_levels(options.service_factor),
                        progress=lambda text: bench.show(text), seismic=options.seismic,
                        combos=options.combos, drift_cases=options.drift_cases,
-                       r_factor=options.r_factor)
+                       r_factor=options.r_factor, cases=options.cases)
     path = save_report(report, os.path.join(folder, f"{stem} - Drift.txt"))
     failed = failures(report)
     bench.log("")

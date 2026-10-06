@@ -344,26 +344,29 @@ def read_load_path(forces: pd.DataFrame | None, combo: str | None,
                     end_moves(forces, combo, connectivity))
 
 
-_NETWORKS: dict[tuple, "BeamNetwork"] = {}
+_NETWORKS: dict[tuple, tuple] = {}
 
 
 def network_for(connectivity, points=None, pushes=None) -> "BeamNetwork":
     """The beam network of these tables, built once and kept while the same tables are
     in use: the support status, the carriers and the deflection all ask for it, and
     building it goes through every beam of the model."""
-    framing = (id(connectivity), id(points),
-               0 if connectivity is None else len(connectivity), 0 if points is None else len(points))
+    framing = (id(connectivity), id(points))
     key = framing + (id(pushes),)
-    network = _NETWORKS.get(key)
-    if network is None:
-        if len(_NETWORKS) >= 8:
-            _NETWORKS.clear()
-        # what meets what and the ranks depend on the framing alone: found once, and
-        # shared by the readings of the load path made on the same framing
-        base = _NETWORKS.get(framing)
-        if base is None:
-            base = _NETWORKS[framing] = BeamNetwork(connectivity, points)
-        network = _NETWORKS[key] = base.with_load_path(pushes)
+    # The tables are kept with what was built from them: the key is the identity of an
+    # object, and that is only safe while the object is alive.
+    kept = _NETWORKS.get(key)
+    if kept is not None and kept[1] is connectivity and kept[2] is points and kept[3] is pushes:
+        return kept[0]
+    if len(_NETWORKS) >= 8:
+        _NETWORKS.clear()
+    # what meets what and the ranks depend on the framing alone: found once, and
+    # shared by the readings of the load path made on the same framing
+    base = _NETWORKS.get(framing)
+    if base is None or base[1] is not connectivity or base[2] is not points:
+        base = _NETWORKS[framing] = (BeamNetwork(connectivity, points), connectivity, points, None)
+    network = base[0].with_load_path(pushes)
+    _NETWORKS[key] = (network, connectivity, points, pushes)
     return network
 
 

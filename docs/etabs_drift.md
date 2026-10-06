@@ -45,6 +45,13 @@ For the spectrum combinations, ETABS gives Max and Min envelopes. The centre-of-
 
 ## Checks (per level)
 
+**A model with no DRIFT combinations.** `sdt drift` then asks what to check the drift on:
+
+- **The drift load cases** (`EQXSD`, `EQYSD` and the wind patterns), when the model has them. The seismic ones use the forces of the period without its cap, which is what NSCP 208.6.5.2 allows for drift. No gravity load acts with them, so the P-delta effect of the 208.6.4.1 combinations is not in the values; the report says so.
+- **Combinations you pick.** Strength combinations usually carry the forces of the capped period, and give a larger drift than the code asks for.
+
+**The service level stiffness** is asked with the wind limit: the factor on the strength level, 1.4 by ACI 6.6.3.2.2. Give another value when your office uses one; it is capped at the gross stiffness, and the report names it as yours. At the service level a member that was modelled stiffer than the level keeps its own stiffness: a beam modelled at 0.5 Ig is not set to 0.49.
+
 **Every story is listed.** Under the checks of each stiffness level the report has a table with one row per story, the top first: the largest seismic drift ratio of the combinations checked, ΔM = 0.7 R times it, the combination it comes from, and the same for wind as h/x. The checks above the table give only the worst story of each load case, and one very flexible level, such as a small deck at the top, would otherwise hide that the storeys below it are over the limit too.
 
 - **Seismic** (`DRIFT` combinations: 203-5 and 203-7, E from `EQXSD`, `EQYSD`, `RSAXD` and `RSAYD`, ρ = 1.0): ΔM = 0.7 R ΔS, at most 0.025h when T < 0.7 s, otherwise 0.020h (NSCP 208.6.5.1). T is the drift pattern period from the same run. The worst combination of each case is reported.

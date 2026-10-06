@@ -51,27 +51,37 @@ class StiffnessLevel:
     beam: float | None  # None: the modifiers as assigned in the model
     column: float | None
     reference: str
+    at_least_modelled: bool = False  # a member modelled stiffer than the level keeps its own I
 
     @property
     def as_modelled(self) -> bool:
         return self.beam is None
 
 
-def stiffness_levels() -> list[StiffnessLevel]:
-    """As modelled, strength level (ACI 6.6.3.1.1) and service level, 1.4 times
-    (ACI 6.6.3.2.2)."""
+def stiffness_levels(service_factor: float | None = None) -> list[StiffnessLevel]:
+    """As modelled, strength level (ACI 6.6.3.1.1) and service level.
+
+    The service level is ``service_factor`` times the strength level, 1.4 by
+    the code (ACI 6.6.3.2.2) unless the engineer gives another, never above
+    the gross stiffness. At the service level a member that was modelled
+    stiffer than the level keeps its own stiffness, so that a beam given
+    0.5 Ig for its flange is not made softer than it was modelled.
+    """
     k = NSCP.analysis
+    factor = k.service_stiffness_factor if not service_factor else float(service_factor)
 
     def service(value: float) -> float:
-        return min(k.service_stiffness_factor * value, k.max_inertia)
+        return min(factor * value, k.max_inertia)
 
     return [
         StiffnessLevel("As modelled", None, None, "your frame modifiers"),
         StiffnessLevel("Strength level", k.beam_inertia, k.column_inertia,
                        "ACI 6.6.3.1.1, NSCP 406.6.3.1.1"),
-        StiffnessLevel(f"Service level ({k.service_stiffness_factor:g} x)",
+        StiffnessLevel(f"Service level ({factor:g} x)",
                        service(k.beam_inertia), service(k.column_inertia),
-                       "ACI 6.6.3.2.2, NSCP 406.6.3.2.2"),
+                       "ACI 6.6.3.2.2, NSCP 406.6.3.2.2" if factor == k.service_stiffness_factor
+                       else f"your factor; ACI 6.6.3.2.2 gives {k.service_stiffness_factor:g}",
+                       at_least_modelled=True),
     ]
 
 
@@ -366,11 +376,30 @@ def _drift_combinations(model, seismic: str = BOTH) -> list[str]:
                                seismic)
 
 
-def _read(connector, name: str, combos: list[str]) -> pd.DataFrame:
+def _read(connector, name: str, combos: list[str], cases: list[str] | None = None
+          ) -> pd.DataFrame:
     tables = connector.sap_model.DatabaseTables
-    tables.SetLoadCasesSelectedForDisplay([])
+    tables.SetLoadCasesSelectedForDisplay(list(cases or []))
     tables.SetLoadCombinationsSelectedForDisplay(list(combos))
     return connector._read_database_table(name)
+
+
+def drift_load_cases(connector) -> dict[str, tuple[str, bool]]:
+    """The load cases a drift can be read on directly: {case: (case, is wind)}.
+
+    The static seismic drift patterns (EQXSD, EQYSD: the forces of the period
+    without its cap, NSCP 208.6.5.2) and the wind patterns, where each is a
+    linear static load case of the model.
+    """
+    model = connector.sap_model
+    patterns = [str(n) for n in as_list(model.LoadPatterns.GetNameList(0, [])[1])]
+    cases = {str(n) for n in as_list(model.LoadCases.GetNameList(0, [])[1])}
+    out = {}
+    for name in patterns:
+        kind = int(model.LoadPatterns.GetLoadType(name)[0])
+        if name in cases and kind in (mc.SEISMIC_DRIFT, mc.WIND):
+            out[name] = (name, kind == mc.WIND)
+    return out
 
 
 def run_drift(connector, reference: str = CENTER,
@@ -378,7 +407,7 @@ def run_drift(connector, reference: str = CENTER,
               levels: list[StiffnessLevel] | None = None, progress=None,
               seismic: str = BOTH, combos: list[str] | None = None,
               drift_cases: dict[str, tuple[str, bool]] | None = None,
-              r_factor: float | None = None) -> DriftReport:
+              r_factor: float | None = None, cases: list[str] | None = None) -> DriftReport:
     """Drift at each stiffness level on the open model, then restore it (see the module).
 
     ``seismic`` picks the seismic drift combinations: on the static drift
@@ -387,6 +416,8 @@ def run_drift(connector, reference: str = CENTER,
 
     ``combos`` with ``drift_cases`` are the combinations the user picked on a
     model that has no DRIFT / WDRIFT combinations (``resolve_drift_combinations``).
+    ``cases`` are load cases to read the drift on directly, in place of
+    combinations (``drift_load_cases``).
     """
     from etabs_api.workflows.model_analysis import scale_spectrum_to_static
 
@@ -397,11 +428,19 @@ def run_drift(connector, reference: str = CENTER,
     report = DriftReport(model_path=model_file(model), reference=reference,
                          wind_denominator=wind_denominator, seismic=seismic)
     picked = bool(combos)
-    combos = list(combos) if combos else _drift_combinations(model, seismic)
-    if not combos:
+    cases = list(cases or [])
+    combos = list(combos) if combos else ([] if cases else _drift_combinations(model, seismic))
+    if cases:
+        report.picked = list(cases)
+        report.notes.append(
+            "The drift is read on the lateral load cases themselves (" + ", ".join(cases) + "): "
+            "the seismic ones are the drift patterns, on the forces of the period without its "
+            "cap (NSCP 208.6.5.2). No gravity load acts with them, so the P-delta effect of the "
+            "combinations of 208.6.4.1 is not in these values.")
+    elif not combos:
         raise RuntimeError("The model has no DRIFT / WDRIFT combinations and none was picked: "
                            "run sdt drift to pick them, or sdt setup to add the standard ones.")
-    if picked:
+    if picked and not cases:
         report.picked = list(combos)
         report.notes.append(
             "The drift is on combinations you picked: their factors and load cases are yours "
@@ -448,7 +487,10 @@ def run_drift(connector, reference: str = CENTER,
                 section = section_mods.get(section_of.get(name, ""), [1.0] * 8)
                 values = list(original[name])
                 for index in (I22, I33):
-                    values[index] = target / section[index] if section[index] else target
+                    wanted = target
+                    if level.at_least_modelled:   # not softer than it was modelled
+                        wanted = max(target, min(effective[name][index], NSCP.analysis.max_inertia))
+                    values[index] = wanted / section[index] if section[index] else wanted
                 if not _ok(model.FrameObj.SetModifiers(name, values)):
                     report.notes.append(f"Could not set the modifiers of {name}.")
             say(f"{level.name}: running the analysis")
@@ -458,11 +500,12 @@ def run_drift(connector, reference: str = CENTER,
                 scale_spectrum_to_static(connector, run)
             say(f"{level.name}: reading the drift")
             if reference == CORNERS:
-                moved = _read(connector, "Joint Drifts", combos)
+                moved = _read(connector, "Joint Drifts", combos, cases)
                 drifts = corner_drifts(moved, corners)
                 by_story = corner_story_drifts(moved, corners)
             else:
-                moved = _read(connector, "Diaphragm Center Of Mass Displacements", combos)
+                moved = _read(connector, "Diaphragm Center Of Mass Displacements", combos,
+                              cases)
                 drifts = center_drifts(moved, base_elevation)
                 by_story = center_story_drifts(moved, base_elevation)
             # the pattern definitions read only with the patterns selected for display
@@ -521,6 +564,8 @@ class DriftOptions:
     combos: list[str] | None = None
     drift_cases: dict[str, tuple[str, bool]] | None = None
     r_factor: float | None = None
+    cases: list[str] | None = None        # load cases to read the drift on, in place of combinations
+    service_factor: float | None = None   # service stiffness over strength stiffness (1.4 if None)
 
 
 def resolve_drift_combinations(connector, model_path: str, title: str,
@@ -536,15 +581,36 @@ def resolve_drift_combinations(connector, model_path: str, title: str,
 
     if _drift_combinations(connector.sap_model, options.seismic):
         return options
-    combinations = mi.read_combinations(connector)
-    picked = mi.ask_drift_combinations(connector, model_path, title, combinations)
-    if picked is None:
-        return None
-    options.combos = picked
-    options.drift_cases = mi.drift_cases(combinations, picked)
-    # the spectrum is scaled only when a picked combination has a spectrum case
-    spectral = any(combinations.terms[name].spectral for name in picked)
-    options.seismic = BOTH if spectral else STATIC
+    direct = drift_load_cases(connector)
+    on_cases = False
+    if any(not wind for _, wind in direct.values()):
+        from utilities._gui_helpers import select_option
+
+        on_patterns = "On the drift load cases: " + ", ".join(direct)
+        chosen = select_option(
+            title, "This model has no DRIFT / WDRIFT combinations. What should the drift be "
+            "checked on?\n\nThe drift load cases use the seismic forces of the period without "
+            "its cap, which is what NSCP 208.6.5.2 allows for drift. Combinations of your own "
+            "usually carry the strength forces, with the capped period, and give a larger "
+            "drift than the code asks for.",
+            [on_patterns, "On combinations I pick"])
+        if chosen is None:
+            return None
+        on_cases = chosen == on_patterns
+    if on_cases:
+        options.cases = list(direct)
+        options.drift_cases = dict(direct)
+        options.seismic = STATIC
+    else:
+        combinations = mi.read_combinations(connector)
+        picked = mi.ask_drift_combinations(connector, model_path, title, combinations)
+        if picked is None:
+            return None
+        options.combos = picked
+        options.drift_cases = mi.drift_cases(combinations, picked)
+        # the spectrum is scaled only when a picked combination has a spectrum case
+        spectral = any(combinations.terms[name].spectral for name in picked)
+        options.seismic = BOTH if spectral else STATIC
     model_values = mi.read_seismic(connector)
     answer = mi.ask_seismic_values(model_path, title, model_values,
                                    mi.load(model_path).get("seismic", {}), ("r_factor",))
@@ -582,23 +648,29 @@ def ask_drift_options(title: str, standard: bool = True) -> DriftOptions | None:
     if which is None:
         return None
     label = "Wind drift limit: h /"
+    stiffer = "Service level stiffness, times the strength level (ACI 6.6.3.2.2: 1.4)"
+    code_factor = NSCP.analysis.service_stiffness_factor
     while True:
         typed = enter_values(title, "Story drift limit under the wind combinations (NSCP 207 "
-                             "sets none; seismic drift follows NSCP 208.6.5).", [label],
-                             {label: f"{NSCP.wind.drift_limit_denominator:g}"})
+                             "sets none; seismic drift follows NSCP 208.6.5), and the stiffness "
+                             "of the service level.", [label, stiffer],
+                             {label: f"{NSCP.wind.drift_limit_denominator:g}",
+                              stiffer: f"{code_factor:g}"})
         if typed is None:
             return None
         try:
             denominator = float(typed[label])
-            if denominator <= 0:
+            factor = float(typed.get(stiffer, code_factor))
+            if denominator <= 0 or not 1.0 <= factor <= 3.0:
                 raise ValueError
             break
         except ValueError:
-            show_warning("The wind drift limit must be a positive number.", title=title)
+            show_warning("The wind drift limit must be a positive number and the service "
+                         "stiffness factor from 1 to 3.", title=title)
     return DriftOptions(
         CENTER if where.startswith("Diaphragm") else CORNERS,
         BOTH if which == "Both" else (STATIC if which.startswith("Static") else SPECTRUM),
-        denominator)
+        denominator, service_factor=None if factor == code_factor else factor)
 
 
 def failures(report: DriftReport) -> list[tuple[str, mc.Finding]]:
@@ -634,7 +706,7 @@ def run_drift_check() -> DriftReport | None:
     options = resolve_drift_combinations(connector, path, title, options)
     if options is None:
         return None
-    levels = stiffness_levels()
+    levels = stiffness_levels(options.service_factor)
     text = "\n".join(f"  {lv.name}: " + ("your modifiers" if lv.as_modelled else
                                          f"beams {lv.beam:.2f}, columns {lv.column:.2f}")
                      for lv in levels)
@@ -649,7 +721,7 @@ def run_drift_check() -> DriftReport | None:
         with LoadingWindow("Story drift") as window:
             report = run_drift(connector, options.reference, options.wind_denominator, levels,
                                window.update, options.seismic, options.combos,
-                               options.drift_cases, options.r_factor)
+                               options.drift_cases, options.r_factor, options.cases)
     except RuntimeError as error:
         show_warning(str(error), title=title)
         return None

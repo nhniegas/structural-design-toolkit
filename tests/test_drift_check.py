@@ -145,3 +145,13 @@ def test_the_drift_of_every_story_is_listed_not_only_the_worst():
     text = "\n".join(dc.story_table_text(rows))
     assert "h/400" in text and "0.0363" in text and "DECK" in text       # 2F: h/400, 0.0363
     assert dc.story_table({}, ["2F"], lambda c: False, 8.5) == []
+
+
+def test_the_service_stiffness_factor_can_be_the_engineers():
+    code = dc.stiffness_levels()[2]
+    assert (code.beam, code.column) == (pytest.approx(0.49), pytest.approx(0.98))
+    assert code.at_least_modelled and "ACI 6.6.3.2.2" in code.reference
+    own = dc.stiffness_levels(1.6)[2]
+    assert own.beam == pytest.approx(0.56) and own.column == 1.0        # never above gross
+    assert "1.6" in own.name and "your factor" in own.reference
+    assert not dc.stiffness_levels(1.6)[1].at_least_modelled             # the strength level is the code's
