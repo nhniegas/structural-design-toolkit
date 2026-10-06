@@ -41,7 +41,7 @@ Every story is included, those below the ground level too. A model set up before
 |---|---|---|
 | Model | Every frame tagged and on a setup section (warnings only: the design runs on untagged members and reads other sections from ETABS); floors with a diaphragm and a slab section; supports at the column bases; beams with a free end | 208.5.1.3 |
 | Loads | Gravity patterns with no loads; roof live assigned; self weight counted once; reducible live above 4.8 kPa | 205, 205.4, 205.5 |
-| Seismic | Story range from the ground level (the story at elevation 0 when there is a footing level) to the roof | 208.5.2.3 |
+| Seismic | Story range: from the ground level (the story at elevation 0 when there is a footing level) or below it, up to the highest level with structure. A base below the ground level, such as the bottom of the foundation, is your choice: it is reported for you to confirm, not failed. Patterns that start above the ground level fail. A top story with no structure fails: the height hn, and with it the period cap, come out too long and the base shear too small | 208.5.2.3, 208.5.2.2 |
 | | Accidental eccentricity 0.05 | 208.5.1.3 |
 | | Z is 0.20 or 0.40 (only zones 2 and 4) | Table 208-3 |
 | | Ca and Cv against soil, zone, source type and distance; Na above 1.1; within 2 km of a fault | Tables 208-5 to 208-8, 208.4.4.3 |
@@ -52,7 +52,7 @@ Every story is included, those below the ground level too. A model set up before
 | | Spectrum cases have accidental eccentricity | 208.5.3.5.6 |
 | | Height hn (75 m or more needs the dynamic procedure) | 208.4.8 |
 | Seismic, with results | V/W of every static pattern = Cv I/(R T), at most 2.5 Ca I/R, at least 0.11 Ca I and, in zone 4, 0.8 Z Nv I/R; drift patterns without the lower limits | 208.5.2.1, 208.6.5.2 |
-| | Period T at most 1.3 T_A in zone 4 (1.4 T_A in zone 2), T_A = Ct hn^(3/4) from the ground | 208.5.2.2 |
+| | Period T at most 1.3 T_A in zone 4 (1.4 T_A in zone 2), T_A = Ct hn^(3/4). hn is the height between the bottom and top stories of each pattern, as ETABS takes it; the message gives the height and the stories it runs between. The weight W is checked over the same stories | 208.5.2.2, 208.6.1 |
 | | Spectrum base shear: OK at 100 % of static, WARN from 90 % (only for regular structures), FAIL below 90 % | 208.5.3.5.4 |
 | | Modal participating mass at least 90 % | 208.5.3.5.2 |
 | | Drift ΔM = 0.7 R ΔS at most 0.025 h (T < 0.7 s) or 0.020 h, from the drift patterns and the spectrum drift cases (names ending in D) | 208.6.4.2, 208.6.5.1 |
