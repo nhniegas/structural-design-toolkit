@@ -122,3 +122,26 @@ def test_modelled_text_and_your_modifiers_are_judged():
     assert dc._modelled_text(effective, {"C1"}) == "beams I 0.35, columns I 0.70"
     findings = mc.modifier_findings(effective, {"C1"}, group="Modifiers")
     assert [f.status for f in findings] == [mc.OK, mc.FAIL]  # I right, column mass 0.7
+
+
+def test_the_drift_of_every_story_is_listed_not_only_the_worst():
+    """A deck at the top with a very large drift must not hide the storeys below it."""
+    table = pd.DataFrame({
+        "Story": ["DECK", "DECK", "3F", "3F", "2F", "2F", "2F"],
+        "UniqueName": ["1", "1", "2", "2", "3", "3", "3"],
+        "OutputCase": ["DRIFT 1", "WDRIFT 1", "DRIFT 1", "WDRIFT 1", "DRIFT 1", "DRIFT 2",
+                       "WDRIFT 1"],
+        "DriftX": [0.0300, 0.0020, 0.0040, 0.0010, 0.0050, 0.0061, 0.0025],
+        "DriftY": [0.0100, 0.0001, 0.0045, 0.0002, 0.0010, 0.0010, 0.0001]})
+    corners = {"DECK": ["1"], "3F": ["2"], "2F": ["3"]}
+    by_story = dc.corner_story_drifts(table, corners)
+    assert by_story[("DRIFT 1", "3F")] == 0.0045 and by_story[("DRIFT 2", "2F")] == 0.0061
+    rows = dc.story_table(by_story, ["DECK", "3F", "2F"],
+                          lambda combo: combo.startswith("WDRIFT"), 8.5)
+    assert [r[0] for r in rows] == ["DECK", "3F", "2F"]
+    story, seismic, delta_m, combo, wind, wind_combo = rows[2]
+    assert (seismic, combo, wind_combo) == (0.0061, "DRIFT 2", "WDRIFT 1")
+    assert delta_m == pytest.approx(0.7 * 8.5 * 0.0061) and wind == 0.0025
+    text = "\n".join(dc.story_table_text(rows))
+    assert "h/400" in text and "0.0363" in text and "DECK" in text       # 2F: h/400, 0.0363
+    assert dc.story_table({}, ["2F"], lambda c: False, 8.5) == []
