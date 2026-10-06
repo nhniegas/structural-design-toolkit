@@ -808,6 +808,16 @@ class Workbench:
         return {str(name): str(line) for name, line in zip(table["UniqueName"], table["Line"])
                 if line is not None and str(line) != "nan"}
 
+    def load_path(self) -> dict:
+        """What holds each beam end, read from the diagrams of the first analysis
+        of the loop and kept: read again after every resizing, a stiffer member
+        attracts more load and the classification and the sizes chase each other."""
+        if getattr(self, "_load_path", None) is None:
+            from design.beam_designer_aci318 import load_path_pushes
+
+            self._load_path = load_path_pushes(self.tables, self.settings.gravity_combo)
+        return self._load_path
+
     def lengths(self) -> dict[str, float]:
         table = self._table("Beam Object Connectivity")
         return dict(zip(table["UniqueName"].astype(str), pd.to_numeric(table["Length"])))
@@ -903,7 +913,8 @@ class Workbench:
                             compatibility_torsion=self.settings.compatibility_torsion,
                             office_bar_spacing=self.settings.office_bar_spacing,
                             exempt_short_spans=self.settings.exempt_short_spans,
-                            deflection_stages=self.settings.deflection_stages)
+                            deflection_stages=self.settings.deflection_stages,
+                            load_path=self.load_path())
 
     def design_columns(self, beams: pd.DataFrame) -> pd.DataFrame:
         from design.column_designer_aci318 import design_columns

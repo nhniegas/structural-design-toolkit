@@ -621,7 +621,8 @@ def beam_spans(connectivity, members: list[str], points=None,
 
 def add_deflection_columns(results, service, long_limit_divisor: float = LIMIT_DAMAGED,
                            connectivity=None, progress=None,
-                           stages: DeflectionStages | None = None, points=None):
+                           stages: DeflectionStages | None = None, points=None,
+                           pushes: dict | None = None):
     """Add the deflection checks to the beam design results (TOP and BOTTOM rows).
 
     ``service`` is the SERVICE LOADS table and ``connectivity`` the
@@ -630,7 +631,8 @@ def add_deflection_columns(results, service, long_limit_divisor: float = LIMIT_D
     ``stages`` (when the partitions are built) deducts the long-term
     deflection before them and adds the deflection at those stages.
     ``points`` (the joint coordinates) lets an end on an unsplit girder count
-    as supported (see ``beam_spans``).
+    as supported (see ``beam_spans``). ``pushes`` is what holds each beam end
+    (``beam_carriers.end_pushes``); it is read from ``service`` when not given.
     """
     import pandas as pd
 
@@ -842,8 +844,8 @@ def add_deflection_columns(results, service, long_limit_divisor: float = LIMIT_D
     if has_lines:
         from design.beam_carriers import BeamNetwork, end_pushes
 
-        network = BeamNetwork(connectivity, points,
-                              end_pushes(service, COMBO_FULL, connectivity))
+        network = BeamNetwork(connectivity, points, pushes if pushes is not None
+                              else end_pushes(service, COMBO_FULL, connectivity))
         for chain in beam_spans(connectivity, names, points, through_supports=True):
             tell(chain)
             found = by_structure(chain)

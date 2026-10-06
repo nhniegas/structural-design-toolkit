@@ -2336,7 +2336,8 @@ def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict
                  compatibility_torsion: bool = False,
                  office_bar_spacing: bool = True,
                  exempt_short_spans: bool = False,
-                 deflection_stages: DeflectionStages | None = None) -> pd.DataFrame:
+                 deflection_stages: DeflectionStages | None = None,
+                 load_path: dict | None = None) -> pd.DataFrame:
     """Design every beam from the extracted tables; deflection when service loads exist.
 
     ``tables`` holds FACTORED LOADS, FRAME DATA, CONNECTIVITY and (optional)
@@ -2348,11 +2349,14 @@ def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict
     spacing then comes from crack control (ACI 24.3.2). ``exempt_short_spans``
     designs the girders with a clear span under 4d without the SMRF rules
     (ACI 18.6.2.1(a)). ``deflection_stages`` (when the partitions are built)
-    deducts the long-term deflection before them. The target ratios are those that
+    deducts the long-term deflection before them. ``load_path`` is what holds
+    each beam end (``load_path_pushes``); it is read from the tables when not
+    given, and the design loop gives the reading of its first analysis so
+    that it does not change as the sizes do. The target ratios are those that
     are active (``dcr_targets.use``). Returns the results, two rows (TOP,
     BOTTOM) per beam.
     """
-    pushes = load_path_pushes(tables, gravity_combo)
+    pushes = load_path_pushes(tables, gravity_combo) if load_path is None else load_path
     beam_props = prepare_beam_table(tables["FRAME DATA"], tables["CONNECTIVITY"], bars,
                                     earth_cover_stories, tables.get("POINTS"), pushes)
     results = execute_beam_design(
@@ -2370,7 +2374,8 @@ def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict
     if service is not None and len(service) and not results.empty:
         results = add_deflection_columns(results, service, long_limit_divisor,
                                          tables["CONNECTIVITY"], progress=progress,
-                                         stages=deflection_stages, points=tables.get("POINTS"))
+                                         stages=deflection_stages, points=tables.get("POINTS"),
+                                         pushes=pushes)
     if carrier_depth and not results.empty:
         from design.beam_carriers import add_carrier_depth_check
 

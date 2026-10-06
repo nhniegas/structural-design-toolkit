@@ -192,7 +192,7 @@ The diagrams are those of the full service load (`DEF 101`) when the model has t
 
 Where there are no diagrams to read, the framing decides. Every beam line gets a rank: 0 when it rests on a column or a wall, 1 when it rests only on lines of rank 0, and so on. A line nearer to the supports holds the end of one further away; two lines of the same rank hold each other only where one runs through the joint. A column counts as a support at the joint on its top; a column that only starts at a joint (a planted column) is a load.
 
-Because the diagrams come from the analysis, the reading can change when the sizes change a great deal. It is taken again at every analysis of the design loop.
+Because the diagrams come from the analysis, the reading can change when the sizes change a great deal. `sdt beams` reads it from the analysis in the model. The design loop reads it once, from its first analysis, and keeps it: read again after every resizing, a member made stiffer attracts more load, and the classification and the sizes would chase each other.
 
 `Supported Both Ends` is a member on a column or wall at one end at least and held at the other. `Cantilever (Free at PtI / PtJ)` is on a column or wall at one end and truly free at the other. Before version 0.3.1 a beam from a column to a girder was taken as a cantilever, with a short clear span and a capacity shear far too large.
 
