@@ -32,6 +32,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+FIGURE_REPORT_DPI = 110     # the surface figure in the calculation report
+FIGURE_JPEG_QUALITY = 80
 N_ANGLES = 72        # neutral-axis angles over 360 degrees (5 degrees)
 N_DEPTHS = 120       # neutral-axis depths per angle (chords of a convex surface: conservative, ~0.1 %)
 _CACHE: dict[tuple, "InteractionSurface | None"] = {}
@@ -499,6 +501,11 @@ def plot_surface(surface: InteractionSurface, demands: np.ndarray, path: str, ti
         axes.set_title(title, fontsize=9)
     axes.legend(loc="upper left", fontsize=7)
     figure.tight_layout()
-    figure.savefig(path)
+    if str(path).lower().endswith((".jpg", ".jpeg")):
+        # a report of hundreds of columns holds one of these each: a JPEG at this
+        # size is about a quarter of the PNG, with the text still sharp on the page
+        figure.savefig(path, dpi=FIGURE_REPORT_DPI, pil_kwargs={"quality": FIGURE_JPEG_QUALITY})
+    else:
+        figure.savefig(path)
     plt.close(figure)
     return path

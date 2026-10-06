@@ -1428,19 +1428,22 @@ def _end_force_rows(forces: pd.DataFrame) -> dict:
     if not valid.empty:
         grouped = valid["Station"].groupby(names[valid.index], sort=False)
         lowest, highest = grouped.idxmin(), grouped.idxmax()
+        # the two end rows of each combination as plain records: they are read some
+        # hundreds of thousands of times, and a table row is slow to read from
         for combo in lowest.index:
-            index[combo] = (valid.loc[lowest[combo]], valid.loc[highest[combo]])
+            index[combo] = (valid.loc[lowest[combo]].to_dict(), valid.loc[highest[combo]].to_dict())
     _END_FORCE_INDEX[id(forces)] = (forces, index)
     return index
 
 
 def _column_force_at_end(
     forces: pd.DataFrame, combo: str, at_i_end: bool
-) -> pd.Series:
+) -> dict:
     """Select the first/last station for a member and load combination.
 
     ETABS frame stations are treated as increasing from connectivity I to J.
     The member's table is indexed by combination the first time it is used.
+    The record returned is shared: read it, do not change it.
     """
     index = _end_force_rows(forces)
     if str(combo) not in index:
@@ -1448,7 +1451,7 @@ def _column_force_at_end(
     rows = index[str(combo)]
     if rows is None:
         raise ValueError(f"Column force stations for combo {combo!r} are not numeric.")
-    return (rows[0] if at_i_end else rows[1]).copy()
+    return rows[0] if at_i_end else rows[1]
 
 
 def _evaluate_column_candidate(
@@ -4823,19 +4826,21 @@ def design_columns(
         )
         initial_joints = _skip_joint_checks(initial_joints, skipped_joints)
 
+        # the joints as plain records, read at every pass of the loop below
+        joint_records = initial_joints.to_dict("records")
         while not initial_joints.empty:
             exempt = (initial_joints["BCC_Exempt"].eq(True)
                       if "BCC_Exempt" in initial_joints.columns
                       else pd.Series(False, index=initial_joints.index))
+            strong_column = dcr_targets.limit(dcr_targets.COLUMN, dcr_targets.STRONG_COLUMN)
+            below = pd.Series([current_joint_ratio(record) < strong_column - 1e-9
+                               for record in joint_records], index=initial_joints.index,
+                              dtype=bool)
             failing_rows = initial_joints.loc[
                 initial_joints["Sum_Column_Mn_kNm"].notna()
                 & initial_joints["Sum_Beam_Mn_kNm"].notna()
                 & ~exempt
-                & initial_joints.apply(
-                    lambda row: current_joint_ratio(row)
-                    < dcr_targets.limit(dcr_targets.COLUMN, dcr_targets.STRONG_COLUMN) - 1e-9,
-                    axis=1,
-                )
+                & below
             ]
             if failing_rows.empty:
                 break
@@ -7236,7 +7241,8 @@ def _bcc_caption(rows: pd.DataFrame) -> str:
 
 def column_interaction_figure(rows: pd.DataFrame, path: str, dmain: float, dties: float,
                               cover: float, is_smrf: bool) -> str | None:
-    """Save the 3D P-Mx-My surface of a column's final layout with its demands (PNG).
+    """Save the 3D P-Mx-My surface of a column's final layout with its demands (PNG, or a
+    compact JPEG when the path ends in .jpg, as the calculation report asks).
 
     The demands are every combination at both ends; the hull vertices and the
     governing demand are marked. None when the layout has no surface.
@@ -7292,7 +7298,7 @@ def build_column_calc_report(report: pd.DataFrame, filepath: str, information: l
         os.makedirs(os.path.join(folder, figure_dir), exist_ok=True)
         for name, rows in report.groupby("UniqueName", sort=False):
             safe = re.sub(r"[^A-Za-z0-9_-]", "_", str(name))
-            relative = f"{figure_dir}/{safe}.png"
+            relative = f"{figure_dir}/{safe}.jpg"
             if column_interaction_figure(rows, os.path.join(folder, relative), **figure_options):
                 figures[name] = (relative, "Design interaction surface (phi Pn, phi Mnx, phi "
                                  "Mny) of the final bar layout with every combination at both "
