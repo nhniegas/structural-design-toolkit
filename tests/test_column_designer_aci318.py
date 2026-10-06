@@ -1649,3 +1649,14 @@ def test_the_clear_height_never_exceeds_the_station_span_and_falls_back_to_it():
     assert clear(0.0, 4000.0, 500.0) == 4000.0         # joint coordinates not known
     assert clear(400.0, 300.0, 500.0) == 300.0         # a beam deeper than the stub
     assert clear(4500.0, 4500.0, 0.0) == 4500.0        # no beam at the top
+
+
+def test_a_confinement_ratio_equal_to_the_required_one_passes_whatever_the_last_digit():
+    """The tie spacing is the one at which provided = required: values of a real column
+    came out one digit apart, and failed or passed by chance."""
+    from design.column_designer_aci318 import _meets
+
+    assert _meets(0.01220294102960668, 0.012202941029606682)     # one ulp under: the same number
+    assert _meets(0.012182885935757375, 0.012182885935757377)
+    assert _meets(0.0123, 0.0122)
+    assert not _meets(0.0122029, 0.0122030)                       # a real shortfall still fails

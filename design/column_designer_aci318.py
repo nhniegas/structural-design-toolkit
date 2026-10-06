@@ -1714,6 +1714,20 @@ def _strong_column_hull_combos(combos: list[str], columns: list[str], joint: str
     return [combo for index, combo in enumerate(combos) if index in keep]
 
 
+RATIO_TOLERANCE = 1e-9
+
+
+def _meets(provided: float, required: float) -> bool:
+    """Whether a provided ratio meets the required one.
+
+    The tie spacing is often the very spacing at which the provided
+    confinement equals the required one, so the two numbers differ only in
+    the last digit of the arithmetic: a plain >= then passes or fails by
+    chance. A relative tolerance of 1e-9 settles it.
+    """
+    return provided >= required * (1.0 - RATIO_TOLERANCE)
+
+
 def _smrf_so_limit(code: AciCode, hx: float | None = None) -> float:
     """Hoop spacing limit 'so' of ACI 18.7.5.3: 100 + (350 - hx)/3, kept within 100..150 mm."""
     cfg = code.column_seismic
@@ -1808,8 +1822,8 @@ def _column_transverse_candidate_passes(
             transverse["Transverse_Spacing_Provided_mm"] * core_height
         )
         confinement_passes = (
-            provided_x >= transverse["Required_Confinement_Ratio_X"]
-            and provided_y >= transverse["Required_Confinement_Ratio_Y"]
+            _meets(provided_x, transverse["Required_Confinement_Ratio_X"])
+            and _meets(provided_y, transverse["Required_Confinement_Ratio_Y"])
         )
     elif is_smrf:
         confinement_passes = (
@@ -1928,7 +1942,7 @@ def _smrf_transverse_design(
         clear_spacing = spacing - engine.dties
         check = (
             "PASS"
-            if provided_ratio >= required_ratio
+            if _meets(provided_ratio, required_ratio)
             and engine.code.column_transverse.spiral_clear_spacing_min
             <= clear_spacing
             <= engine.code.column_transverse.spiral_clear_spacing_max
@@ -2019,8 +2033,8 @@ def _smrf_transverse_design(
     provided_ratio_x = required_legs_x * tie_area / (spacing * core_width)
     provided_ratio_y = required_legs_y * tie_area / (spacing * core_height)
     confinement_pass = (
-        provided_ratio_x >= required_ratio
-        and provided_ratio_y >= required_ratio
+        _meets(provided_ratio_x, required_ratio)
+        and _meets(provided_ratio_y, required_ratio)
     )
 
     return {
@@ -5257,10 +5271,10 @@ def design_columns(
             )
             transverse["Confinement_Check"] = (
                 "PASS"
-                if transverse["Provided_Ash_s_Ratio_X"]
-                >= transverse["Required_Confinement_Ratio_X"]
-                and transverse["Provided_Ash_s_Ratio_Y"]
-                >= transverse["Required_Confinement_Ratio_Y"]
+                if _meets(transverse["Provided_Ash_s_Ratio_X"],
+                          transverse["Required_Confinement_Ratio_X"])
+                and _meets(transverse["Provided_Ash_s_Ratio_Y"],
+                           transverse["Required_Confinement_Ratio_Y"])
                 else "FAIL"
             )
         if transverse["Confinement_Check"] == "FAIL":

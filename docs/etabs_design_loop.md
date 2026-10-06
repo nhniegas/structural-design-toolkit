@@ -102,6 +102,8 @@ Beam design reads each beam's forces once and cuts the zones of every combinatio
 
 A round whose iterations settle needs fewer analyses than iterations: on the 4-story test model a round of six iterations (three for the beams, two for the columns, the final check) runs four analyses, since two of them follow an iteration that changed nothing.
 
+Reading the results is done on numbers, not on the ETABS display tables: 78 s on that model where it took 224 s. One full iteration there (analysis, reading, beam and column design) is now about 5 minutes.
+
 Column design is vectorized: the interaction surface of a bar layout is computed in closed form (no polygon clipping per grid point) and every demand of a column is checked against it in one call. On a 48-column, 4-story SMRF test model with 20 combinations column design takes about 5 s (it was 16 s), and a non-SMRF set of 20 columns with 80 load sets about 2 s (it was 20 s). Most of an iteration is now the ETABS analysis and extraction; sizing on the current forces cuts the number of those.
 
 ## Not covered yet

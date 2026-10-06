@@ -102,7 +102,7 @@ The two questions:
 
 What is read:
 
-- **Element forces** (`Element Forces - Beams`, `Element Forces - Columns`) for the load cases in the chosen combinations. The stations are those ETABS reports: they start and end at the faces of the end offsets.
+- **Element forces** of beams and columns for the load cases in the chosen combinations. They are read as numbers straight from the analysis results (`Results.FrameForce`), not from the `Element Forces` display tables: ETABS then builds no table and formats no text, which is about three times faster on a large model. The rows are the same as the tables' rows. The forces are the full numbers, where the tables round them (by 0.005 N at most); the stations are rounded to 0.01 mm as the tables give them. If ETABS does not give the results this way, the tables are read and a note says so. The stations are those ETABS reports: they start and end at the faces of the end offsets.
 - **Load Combination Definitions**: each combination is expanded to its load cases with their factors, including combinations used inside combinations. Envelope combinations cannot be picked: they are not one set of forces.
 - **Everything else** (frame assignments, section definitions, reinforcing, material properties, connectivity) is read once.
 
@@ -466,7 +466,7 @@ Axial load and biaxial bending are checked on the ACI 318M-14 design interaction
 - **Capacity-design shear.** Mpr (1.25 fy) is read from the probable-strength surface along the principal axis, through a (P, Mn) table built once per direction.
 - **Speed.** The compression zone of every grid point is the section clipped by a half-plane; it is computed in closed form for all 8,640 points at once (Green's theorem over the kept edges of the outline and of each bar hole), with the same result as polygon clipping. The surface is built from the bar layout directly, without meshing a concreteproperties section, and every demand of a column is looked up in one vectorized call. A surface takes about 40 ms instead of 0.65 s; a 48-column SMRF model with 20 combinations is designed in about 5 s.
 
-SMRF confinement (ACI 18.7.5.4) uses bc and Ach measured to the outside of the hoops (Dc to the outside of the spiral, rho_s = 4 Asp / (Dc s)), and kn counts bar positions, a bundle once. Ties are at least 10 mm, and 12 mm for bars over 32 mm or bundled bars (NSCP 425.7.2.2).
+A provided confinement ratio meets the required one within a relative 1e-9: the tie spacing is often the very spacing at which the two are equal, and the last digit of the arithmetic must not decide. SMRF confinement (ACI 18.7.5.4) uses bc and Ach measured to the outside of the hoops (Dc to the outside of the spiral, rho_s = 4 Asp / (Dc s)), and kn counts bar positions, a bundle once. Ties are at least 10 mm, and 12 mm for bars over 32 mm or bundled bars (NSCP 425.7.2.2).
 
 ## Calculation reports (PDF)
 
