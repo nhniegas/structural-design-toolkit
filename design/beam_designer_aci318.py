@@ -1314,13 +1314,17 @@ def execute_beam_design(
     # 2. BUILD EXTRACTION DEMANDS DATAFRAME PER COMBO
     # =============================================================================
     design_rows = []
+    # The rows of each beam, found once: looking through the whole force table again for
+    # every beam took most of the time on a large model. The rows keep their order.
+    forces_of = {name: rows for name, rows in df_frame_forces.groupby("UniqueName", sort=False)}
+    no_forces = df_frame_forces.iloc[0:0]
 
     for _, prop_row in df_beam_props.iterrows():
         u_name = prop_row["UniqueName"]
         h = prop_row.get("Depth", prop_row.get("Height", 500))
         two_h = seismic_cfg.hoop_zone_depth_factor * h
 
-        df_forces_beam = df_frame_forces[df_frame_forces["UniqueName"] == u_name]
+        df_forces_beam = forces_of.get(u_name, no_forces)
 
         if not df_forces_beam.empty:
             min_st = df_forces_beam["Station"].min()
@@ -2357,6 +2361,9 @@ def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict
     are active (``dcr_targets.use``). Returns the results, two rows (TOP,
     BOTTOM) per beam.
     """
+    from design.beam_carriers import forget_networks
+
+    forget_networks()   # the tables of this design are new: nothing kept from another one
     pushes = load_path_pushes(tables, gravity_combo) if load_path is None else load_path
     beam_props = prepare_beam_table(tables["FRAME DATA"], tables["CONNECTIVITY"], bars,
                                     earth_cover_stories, tables.get("POINTS"), pushes)

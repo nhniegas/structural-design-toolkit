@@ -87,7 +87,13 @@ def carried_beams(connectivity: pd.DataFrame, points: pd.DataFrame | None,
         return "through" if ON_LINE < along < length - ON_LINE else "end"
 
     directions = {name: unit(name) for name in beams}
-    network = BeamNetwork(connectivity, points, pushes)
+    network = network_for(connectivity, points, pushes)
+    # the beams near each level, so that a joint is compared with those and not with all
+    by_level: dict[int, list[str]] = {}
+    for other, (a, b) in beams.items():
+        low, high = sorted((round(xyz[a][2] / SAME_LEVEL), round(xyz[b][2] / SAME_LEVEL)))
+        for level in range(low, high + 1):
+            by_level.setdefault(level, []).append(other)
     out: dict[str, list[str]] = {}
     for name, ends in beams.items():
         own = directions[name]
@@ -100,7 +106,10 @@ def carried_beams(connectivity: pd.DataFrame, points: pd.DataFrame | None,
             push = network.pushes.get((name, joint), 0)
             if push < 0:
                 continue                   # a downward force on this end: nothing carries it here
-            meeting = [(other, meets(other, joint)) for other in beams if other != name]
+            level = round(xyz[joint][2] / SAME_LEVEL)
+            near = {o for k in range(level - 2, level + 3) for o in by_level.get(k, ())}
+            meeting = [(other, meets(other, joint)) for other in beams
+                       if other != name and other in near]
             meeting = [(other, how) for other, how in meeting
                        if how and directions[other] is not None]
             for other, how in meeting:
@@ -193,7 +202,7 @@ def end_conditions(connectivity: pd.DataFrame, points: pd.DataFrame | None,
                 return True
         return False
 
-    network = BeamNetwork(connectivity, points, pushes)
+    network = network_for(connectivity, points, pushes)
     raw: dict[tuple[str, str], str | list[str]] = {}
     for name, ends in beams.items():
         own = directions[name]
@@ -333,6 +342,28 @@ def read_load_path(forces: pd.DataFrame | None, combo: str | None,
     has the joint movements, the deflected shape."""
     return LoadPath(end_pushes(forces, combo, connectivity),
                     end_moves(forces, combo, connectivity))
+
+
+_NETWORKS: dict[tuple, "BeamNetwork"] = {}
+
+
+def network_for(connectivity, points=None, pushes=None) -> "BeamNetwork":
+    """The beam network of these tables, built once and kept while the same tables are
+    in use: the support status, the carriers and the deflection all ask for it, and
+    building it goes through every beam of the model."""
+    key = (id(connectivity), id(points), id(pushes),
+           0 if connectivity is None else len(connectivity), 0 if points is None else len(points))
+    network = _NETWORKS.get(key)
+    if network is None:
+        if len(_NETWORKS) >= 6:
+            _NETWORKS.clear()
+        network = _NETWORKS[key] = BeamNetwork(connectivity, points, pushes)
+    return network
+
+
+def forget_networks() -> None:
+    """Drop the networks kept by ``network_for`` (the tables may be changed next)."""
+    _NETWORKS.clear()
 
 
 class BeamNetwork:
