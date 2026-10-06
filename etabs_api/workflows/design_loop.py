@@ -104,6 +104,7 @@ class LoopSettings:
     carrier_depth: bool = False  # a beam is at least as deep as the beams it carries
     compatibility_torsion: bool = False  # beam torsion at most phi Tcr (ACI 22.7.3.2)
     office_bar_spacing: bool = True  # beam bars at most 150 mm clear (False: crack control)
+    exempt_short_spans: bool = False  # girders under 4d clear span without the SMRF rules
 
 
 @dataclass
@@ -310,6 +311,7 @@ def beam_comfortable(rows: pd.DataFrame, ratio: float, seismic: bool) -> bool:
     """A passing beam whose steel, shear and deflection all stay below ``ratio`` of the
     limits. With target ratios, below ``ratio`` of the targets."""
     from design import dcr_targets
+    from design.beam_designer_aci318 import smrf_applies
 
     top = rows.iloc[0]
     kind = dcr_targets.beam_type(top.get("SupportStatus", ""))
@@ -318,7 +320,7 @@ def beam_comfortable(rows: pd.DataFrame, ratio: float, seismic: bool) -> bool:
     deflection_ratio = ratio * dcr_targets.limit(kind, dcr_targets.DEFLECTION)
     fc, fy = float(top["f'c"]), float(top["fy"])
     limit = _tension_controlled_rho(fc, fy)
-    if seismic and not str(top.get("SupportStatus", "")).startswith("Beam-Framed"):
+    if seismic and smrf_applies(top):
         limit = min(limit, SMRF_RHO_LIMIT)
     for _, row in rows.iterrows():
         if max(_beam_rho(row, z) for z in ("left", "mid", "right")) > flexure * limit:
@@ -771,7 +773,8 @@ class Workbench:
                             earth_cover_stories=self.settings.beam_earth_cover_stories,
                             carrier_depth=self.settings.carrier_depth,
                             compatibility_torsion=self.settings.compatibility_torsion,
-                            office_bar_spacing=self.settings.office_bar_spacing)
+                            office_bar_spacing=self.settings.office_bar_spacing,
+                            exempt_short_spans=self.settings.exempt_short_spans)
 
     def design_columns(self, beams: pd.DataFrame) -> pd.DataFrame:
         from design.column_designer_aci318 import design_columns
@@ -1252,6 +1255,11 @@ def run_design_cli() -> dict | None:
     office_bar_spacing = ask_bar_spacing(title, last)
     if office_bar_spacing is None:
         return None
+    from design.concrete_workflow import ask_short_span_girders
+
+    exempt_short_spans = ask_short_span_girders(title, last) if smrf else False
+    if exempt_short_spans is None:
+        return None
     from etabs_api.workflows.drift_check import ask_drift_options, has_standard_combinations
 
     drift_options = ask_drift_options(title + ": drift of the final sizes",
@@ -1338,6 +1346,7 @@ def run_design_cli() -> dict | None:
         targets=targets, carrier_depth=carrier_depth,
         compatibility_torsion=compatibility_torsion,
         office_bar_spacing=office_bar_spacing,
+        exempt_short_spans=exempt_short_spans,
     )
 
     # the working copy: the original model is not changed
@@ -1359,6 +1368,9 @@ def run_design_cli() -> dict | None:
             bench.log("Beam torsion at most phi Tcr (compatibility torsion, ACI 22.7.3.2).")
         bench.log("Beam bar spacing: " + ("office rule, 150 mm clear." if office_bar_spacing
                                           else "crack control only (ACI 24.3.2)."))
+        if exempt_short_spans:
+            bench.log("Girders with a clear span under 4d are designed without the SMRF rules "
+                      "(ACI 18.6.2.1(a)).")
         bench.log(f"Combinations: {len(combos)} ULS ({seismic})")
         bench.log("Size ranges (from, to, step): " + "; ".join(
             f"{family} " + " x ".join(
@@ -1441,6 +1453,9 @@ def loop_summary(summary: dict, settings: LoopSettings, original: str, working: 
         out.note(TORSION_NOTE)
     out.add("Beam bar spacing", "office rule, 150 mm clear" if settings.office_bar_spacing
             else "crack control only (ACI 24.3.2)")
+    from design.concrete_workflow import add_short_spans_to
+
+    add_short_spans_to(out, beams, settings.exempt_short_spans)
     if settings.sources is not None:
         settings.sources.add_to(out)
     if settings.beam_earth_cover_stories:
@@ -1479,6 +1494,7 @@ def save_final_design(bench: Workbench, summary: dict, working: str, folder: str
     beams, columns = summary.get("beams"), summary.get("columns")
     store = DesignStore(working, os.path.getmtime(working), bench.tables, {
         "combos": settings.combos, "smrf": settings.smrf, "gravity_combo": settings.gravity_combo,
+        "exempt_short_spans": settings.exempt_short_spans,
         "beam_bars": settings.beam_bars, "column_bars": settings.column_bars,
         "long_limit": settings.long_limit,
         "beam_earth_cover_stories": list(settings.beam_earth_cover_stories),

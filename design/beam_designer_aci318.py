@@ -44,6 +44,48 @@ def is_gravity_beam(support_status: object) -> bool:
     return str(support_status).strip() == GRAVITY_BEAM_STATUS
 
 
+SMRF_APPLIED = "SMRF rules applied"
+SMRF_NOT_APPLIED = "Not applied"
+SMRF_GRAVITY = SMRF_NOT_APPLIED + ": gravity beam, not part of the moment frame"
+# A clear span under 4d is also under 4h, so such a girder is a deep beam by ACI 9.9.1.1(a).
+SMRF_SHORT_SPAN = (SMRF_NOT_APPLIED + ": clear span under 4d (ACI 18.6.2.1(a)); a deep beam by "
+                   "ACI 9.9.1.1, designed here as an ordinary beam")
+
+
+def short_span_girder(clear_span: float, depth: float, cover: float, d_stirrup: float,
+                      d_main: float, code: AciCode = CODE) -> bool:
+    """Whether a girder is shorter than a beam of a special moment frame may be:
+    clear span under 4d (ACI 18.6.2.1(a)), d to the centre of one layer of bars."""
+    d = depth - cover - d_stirrup - d_main / 2.0
+    return clear_span < code.beam_seismic.min_clear_span_to_depth * d
+
+
+def seismic_rules_of(support_status: object, clear_span: float, depth: float, cover: float,
+                     d_stirrup: float, d_main: float, exempt_short_spans: bool,
+                     code: AciCode = CODE) -> str:
+    """Which seismic treatment a beam gets, as a text for the results.
+
+    A gravity beam is never part of the moment frame. With
+    ``exempt_short_spans`` a girder with a clear span under 4d is left out of
+    the SMRF rules as well (the engineer's choice: such a member does not
+    qualify as a beam of a special moment frame). A cantilever keeps its
+    treatment. The text starts with ``SMRF_NOT_APPLIED`` when they do not apply.
+    """
+    if is_gravity_beam(support_status):
+        return SMRF_GRAVITY
+    if exempt_short_spans and "Cantilever" not in str(support_status) and short_span_girder(
+            clear_span, depth, cover, d_stirrup, d_main, code):
+        return SMRF_SHORT_SPAN
+    return SMRF_APPLIED
+
+
+def smrf_applies(row) -> bool:
+    """Whether a results row was designed with the SMRF rules (when SMRF design is on)."""
+    if is_gravity_beam(row.get("SupportStatus", "")):
+        return False
+    return not str(row.get("Seismic_Rules", "")).startswith(SMRF_NOT_APPLIED)
+
+
 def identify_cantilever_beams(
     frame_df: pd.DataFrame,
     conn_df: pd.DataFrame,
@@ -1242,8 +1284,13 @@ def execute_beam_design(
     code: AciCode = CODE,
     progress=None,
     compatibility_torsion: bool = False,
+    exempt_short_spans: bool = False,
 ) -> pd.DataFrame:
     """Executes the full beam design pipeline and returns the results DataFrame.
+
+    ``exempt_short_spans`` leaves the girders with a clear span under 4d out
+    of the SMRF rules (``seismic_rules_of``); the results then say for every
+    beam which treatment it got.
 
     ``compatibility_torsion`` designs for a torsion of at most phi Tcr (ACI
     22.7.3.2), which the code allows where the torsion comes from the twist
@@ -1408,10 +1455,12 @@ def execute_beam_design(
         c_cover = b_row.get("cc", 40)
         span_ln = b_row.get("ClearSpan_Ln", 6000)
 
-        # Seismic provisions apply to the frame members only, not to gravity beams.
-        seismic_here = enable_seismic_design and not is_gravity_beam(
-            b_row.get("SupportStatus", "")
-        )
+        # Seismic provisions apply to the frame members only: not to gravity beams,
+        # and not to short-span girders when the engineer left those out.
+        seismic_rules = seismic_rules_of(
+            b_row.get("SupportStatus", ""), span_ln, b_height, c_cover, d_s, d_m,
+            exempt_short_spans, code)
+        seismic_here = enable_seismic_design and seismic_rules == SMRF_APPLIED
 
         # Target ratios of this member type: the bars and stirrups are chosen for
         # the demand divided by the target, so demand / capacity stays at or
@@ -1886,6 +1935,8 @@ def execute_beam_design(
             summary["Alternating_Tie_Check"] = "PASSED"
             if compatibility_torsion:   # shown only when the option is on
                 summary["Torsion_Basis"] = torsion_basis
+            if exempt_short_spans and enable_seismic_design:   # shown only when the option is on
+                summary["Seismic_Rules"] = seismic_rules
             if dcr_targets.active().changed:   # shown only when the engineer set targets
                 summary["Target_DCR_Flexure"] = flexure_target
                 summary["Target_DCR_Shear"] = shear_target
@@ -2000,6 +2051,7 @@ _BEAM_RESULT_LABELS = {
     "Anchorage_Check": "Stirrup anchorage check",
     "Alternating_Tie_Check": "Alternating tie check",
     "Torsion_Basis": "Torsion designed for",
+    "Seismic_Rules": "Seismic rules",
     "Target_DCR_Flexure": "Target ratio, flexure",
     "Target_DCR_Shear": "Target ratio, shear and torsion",
     **DEFLECTION_COLUMNS,
@@ -2188,7 +2240,8 @@ def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict
                  long_limit_divisor: int = LIMIT_DAMAGED, progress=None,
                  earth_cover_stories=(), carrier_depth: bool = False,
                  compatibility_torsion: bool = False,
-                 office_bar_spacing: bool = True) -> pd.DataFrame:
+                 office_bar_spacing: bool = True,
+                 exempt_short_spans: bool = False) -> pd.DataFrame:
     """Design every beam from the extracted tables; deflection when service loads exist.
 
     ``tables`` holds FACTORED LOADS, FRAME DATA, CONNECTIVITY and (optional)
@@ -2197,7 +2250,9 @@ def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict
     least as deep as the beams it carries. ``compatibility_torsion`` limits
     the design torsion to phi Tcr (ACI 22.7.3.2). ``office_bar_spacing`` False
     drops the office rule of 150 mm clear between bars: the bar count for
-    spacing then comes from crack control (ACI 24.3.2). The target ratios are those that
+    spacing then comes from crack control (ACI 24.3.2). ``exempt_short_spans``
+    designs the girders with a clear span under 4d without the SMRF rules
+    (ACI 18.6.2.1(a)). The target ratios are those that
     are active (``dcr_targets.use``). Returns the results, two rows (TOP,
     BOTTOM) per beam.
     """
@@ -2210,6 +2265,7 @@ def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict
         gravity_combo_name=gravity_combo,
         progress=progress,
         compatibility_torsion=compatibility_torsion,
+        exempt_short_spans=exempt_short_spans,
         code=CODE if office_bar_spacing else override(
             CODE, beam_detailing__limit_clear_spacing=False),
     )
@@ -2689,7 +2745,8 @@ def _beam_calc_member(
     d_main, d_stirrup, cover = float(top["dm"]), float(top["ds"]), float(top["cc"])
     span = float(top["ClearSpan_Ln"])
     is_cantilever = "Cantilever" in str(top.get("SupportStatus", ""))
-    seismic = seismic and not is_gravity_beam(top.get("SupportStatus", ""))
+    short_span = str(top.get("Seismic_Rules", "")).startswith(SMRF_SHORT_SPAN)
+    seismic = seismic and smrf_applies(top)
 
     def bars(row: pd.Series, location: str) -> list[int]:
         return [int(float(row.get(f"n_{location}_L{layer}") or 0)) for layer in (1, 2, 3)]
@@ -2822,6 +2879,7 @@ def _beam_calc_member(
         "seismic rule requires it. The stirrups also carry the torsion steel At/s."
         + (" Torsion: " + str(top.get("Torsion_Basis")) + "."
            if str(top.get("Torsion_Basis", "")).startswith(COMPATIBILITY_TORSION[:13]) else "")
+        + (" Seismic (SMRF) rules: " + str(top.get("Seismic_Rules")) + "." if short_span else "")
         + (" " + target_note if target_note else ""),
     )
 

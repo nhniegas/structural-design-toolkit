@@ -944,7 +944,10 @@ def check_smrf_members(d: ModelData) -> list[Finding]:
                 f"{SMRF_BEAM.min_width_to_depth:g}h and {SMRF_BEAM.min_width:g} mm.",
                 ref + "418.6.2.1(b)"),
         Finding(group, WARN if short else OK, f"Girders with a span under "
-                f"{span_ratio:g}d (deep beams): {', '.join(short[:8])}" if short else
+                f"{span_ratio:g}d (deep beams): {', '.join(short[:8])}"
+                + (f", ... ({len(short)} in all)" if len(short) > 8 else "")
+                + " - they do not qualify as beams of a special moment frame; sdt beams and "
+                "sdt design can design them without the SMRF rules" if short else
                 f"Girder spans at least {span_ratio:g}d.", ref + "418.6.2.1(a)"),
         Finding(group, WARN if small_col else OK, f"Columns with a side under {least_side:g} mm: "
                 f"{', '.join(small_col[:8])}" if small_col else
