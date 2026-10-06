@@ -304,12 +304,20 @@ def run_beams() -> DesignStore | None:
     carrier_depth = ask_carrier_depth(title, last)
     if carrier_depth is None:
         return None
+    compatibility_torsion = ask_compatibility_torsion(title, last)
+    if compatibility_torsion is None:
+        return None
+    office_bar_spacing = ask_bar_spacing(title, last)
+    if office_bar_spacing is None:
+        return None
     folder = select_output_directory("Folder for the beam results, calculations and schedules")
     if not folder:
         return None
     _remember({**({"seismic": seismic_key} if seismic_key else {}), "smrf": smrf,
                "gravity_combo": gravity, **bars, "beam_earth_cover_stories": earth_stories,
-               "carrier_depth": carrier_depth})
+               "carrier_depth": carrier_depth,
+               "compatibility_torsion": compatibility_torsion,
+               "office_bar_spacing": office_bar_spacing})
 
     stem = os.path.splitext(os.path.basename(model_path))[0]
     with dcr_targets.use(targets), LoadingWindow("Beam design") as window:
@@ -321,12 +329,16 @@ def run_beams() -> DesignStore | None:
             "beam_earth_cover_stories": earth_stories,
             "deflection_roles": ready.deflection_roles,
             "dcr_targets": targets.to_saved(), "carrier_depth": carrier_depth,
+            "compatibility_torsion": compatibility_torsion,
+            "office_bar_spacing": office_bar_spacing,
             "sources": {"model": list(ready.sources.model),
                         "answered": list(ready.sources.answered),
                         "assumed": list(ready.sources.assumed)},
         })
         results = design_beams(tables, smrf, gravity, bars, divisor, progress=window.update,
-                               earth_cover_stories=earth_stories, carrier_depth=carrier_depth)
+                               earth_cover_stories=earth_stories, carrier_depth=carrier_depth,
+                               compatibility_torsion=compatibility_torsion,
+                               office_bar_spacing=office_bar_spacing)
         store.beam_results = results
         store.save()
         window.update("Saving 1 of 3: the results workbook (.xlsx)")
@@ -340,6 +352,11 @@ def run_beams() -> DesignStore | None:
     add_targets_to(summary, targets, beam_types)
     if carrier_depth:
         summary.add("Carrier depth", "a beam is at least as deep as the beams it carries")
+    if compatibility_torsion:
+        summary.add("Beam torsion", "at most phi Tcr (compatibility torsion, ACI 22.7.3.2)")
+        summary.note(TORSION_NOTE)
+    summary.add("Beam bar spacing", "office rule, 150 mm clear" if office_bar_spacing
+                else "crack control only (ACI 24.3.2)")
     ready.sources.add_to(summary)
     for note in notes:
         summary.note(note)
@@ -580,6 +597,53 @@ def ask_carrier_depth(title: str, last: dict | None = None) -> bool | None:
         [CARRIER_NO, CARRIER_YES],
         default_index=1 if (last or {}).get("carrier_depth") else 0)
     return None if chosen is None else chosen == CARRIER_YES
+
+
+TORSION_ANALYSIS = "The analysis torsion (as ETABS gives it)"
+TORSION_COMPATIBILITY = "At most phi Tcr: compatibility torsion (ACI 22.7.3.2)"
+TORSION_NOTE = (
+    "Beam torsion was limited to phi Tcr (ACI 22.7.3.2), which holds where the torsion can "
+    "redistribute after cracking. ACI 22.7.3.3 then requires the adjoining members to be "
+    "designed for the redistributed moments and shears: an analysis with the torsional "
+    "stiffness of the beams reduced (a small J modifier) gives them. Cantilevers keep their "
+    "analysis torsion.")
+
+
+def ask_compatibility_torsion(title: str, last: dict | None = None) -> bool | None:
+    """Whether the beam torsion is designed as compatibility torsion."""
+    from utilities._gui_helpers import select_option
+
+    chosen = select_option(
+        title, "Which torsion are the beams designed for?\n\nThe analysis torsion is right "
+        "for equilibrium torsion, and for a model whose beams have a reduced torsional "
+        "stiffness (J modifier). In a model with the full torsional stiffness, beams that "
+        "frame into each other pick up large compatibility torsion; ACI 22.7.3.2 lets that be "
+        "taken as at most phi Tcr, because it redistributes when the beam cracks. Cantilevers "
+        "keep the analysis torsion either way.",
+        [TORSION_ANALYSIS, TORSION_COMPATIBILITY],
+        default_index=1 if (last or {}).get("compatibility_torsion") else 0)
+    return None if chosen is None else chosen == TORSION_COMPATIBILITY
+
+
+SPACING_OFFICE = "Office rule: at most 150 mm clear between the bars of a face"
+SPACING_CODE = "Code only: crack control spacing (ACI 24.3.2)"
+
+
+def ask_bar_spacing(title: str, last: dict | None = None) -> bool | None:
+    """Whether the beams follow the office rule of 150 mm clear between bars.
+    True for the office rule, False for the code spacing, None when closed."""
+    from utilities._gui_helpers import select_option
+
+    chosen = select_option(
+        title, "How many bars does a beam face need for spacing?\n\nThe office rule keeps "
+        "the clear spacing at 150 mm or less, so a wide beam gets more bars than its strength "
+        "needs. The code limits the spacing for crack control only (ACI 24.3.2, about 250 mm "
+        "centre to centre). The extra bars of the office rule raise the probable moments of "
+        "the beam, and with them the capacity shear of the beam and the joint shear and "
+        "capacity shear of the columns.",
+        [SPACING_OFFICE, SPACING_CODE],
+        default_index=1 if (last or {}).get("office_bar_spacing") is False else 0)
+    return None if chosen is None else chosen == SPACING_OFFICE
 
 
 def add_targets_to(summary, targets: dcr_targets.Targets, members: tuple[str, ...]) -> None:

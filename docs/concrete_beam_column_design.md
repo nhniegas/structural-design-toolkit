@@ -26,6 +26,8 @@ sdt columns    # design the columns from the stored beam step, save the column o
 | Cover against earth | Whether the beams of any floor level need 75 mm cover (cast against or exposed to earth: footing tie beams, ground beams). If yes, pick the levels; the other beams keep the typed cover. Not asked when the typed cover is 75 mm or more. The levels are remembered and offered again |
 | Deflection limit | Partitions likely to be damaged (L/480) or not (L/240) |
 | Target ratios | Use the code limits (every ratio 1.00), the targets saved for this model, or set them: one dialog for girders and one for beams, with a box for each check. See [Target ratios](#target-ratios) |
+| Beam torsion | Design for the analysis torsion, or take it as at most φTcr (compatibility torsion, ACI 22.7.3.2). See [Beam torsion](#beam-torsion) |
+| Beam bar spacing | The office rule (at most 150 mm clear between the bars of a face), or the code only (crack control, ACI 24.3.2). See [Beam bar spacing](#beam-bar-spacing) |
 | Depth of a beam that carries others | Whether a girder or beam must be at least as deep as the beams that frame into it. See [Carrier depth](#carrier-depth) |
 | Output folder | For the results, the calculations and the schedules |
 
@@ -171,6 +173,14 @@ The seismic design shear is reported at each end as `Vₑ, left` and `Vₑ, righ
 
 A shear larger than phi (Vc + 0.66 √f'c bw d) (ACI 22.5.1.2), or a combined shear and torsion stress above ACI 22.7.7.1, fails the beam with `FAILED: SHEAR STRENGTH`: the section is too small, and more stirrup legs cannot fix it. Torsion steel uses fy and fyt of at most 420 MPa (ACI 20.2.2.4).
 
+**Support status.** Each beam is classified by what holds its two ends:
+
+- An end is on a support when a column or a wall is at its joint.
+- An end that another beam carries is supported too: a beam across it at the joint, or a girder whose centre line passes through the joint, also when ETABS has not split that girder there.
+- A beam that only continues in line does not hold an end by itself. The end is as held as the far end of that beam, so a cantilever that ETABS has in two pieces is still a cantilever.
+
+`Supported Both Ends` is a member on a column or wall at one end at least and held at the other. `Cantilever (Free at PtI / PtJ)` is on a column or wall at one end and truly free at the other. Before version 0.3.1 a beam from a column to a girder was taken as a cantilever, with a short clear span and a capacity shear far too large.
+
 A gravity beam, one with neither end on a column or wall (`Beam-Framed / Floating` in `SupportStatus`), is not part of the moment frame. It is designed for gravity only even when SMRF is on: no probable-moment shear, no seismic hoop spacing, no strength-ratio or 2.5 % checks.
 
 
@@ -218,6 +228,24 @@ How a target is applied:
 A flexure target below 1 on girders adds beam bars. More beam steel raises the probable moments, so the column capacity shear Ve and the joint shear demand rise with it; the summary says so when such a target is set.
 
 `sdt columns` asks the column targets; `sdt deflection` uses the targets of the beam design.
+
+### Beam torsion
+
+ETABS gives the torsion the elastic model attracts. With the full torsional stiffness of the beams (J modifier 1), beams that frame into each other pick up compatibility torsion several times their cracking torsion, and the section check of ACI 22.7.7.1 fails on beams that a real design would accept. There are two ways to deal with it:
+
+- **In the model:** reduce the torsional stiffness of the beams (a J modifier such as 0.01, as `sdt setup` assigns). The analysis then redistributes the torsion into bending of the slab and the adjoining beams. `sdt check` warns when beams keep the full J.
+- **In the design:** answer "At most φTcr" to the torsion question. ACI 22.7.3.2 allows it where the torsion can redistribute after cracking. The torsion in the results stays the analysis value; the "Torsion designed for" column and the calculation report say which was used. ACI 22.7.3.3 then requires the adjoining members to be designed for the redistributed moments and shears, which this option does not give you: only a model with reduced J does.
+
+A cantilever keeps its analysis torsion with either choice, since nothing else can take it. The default is the analysis torsion.
+
+### Beam bar spacing
+
+A beam face needs enough bars to keep them close together. There are two rules for how close:
+
+- **Office rule (the default):** at most 150 mm clear between the bars of a face. A wide beam then gets more bars than its strength needs.
+- **Code only:** the crack control spacing of ACI 24.3.2, about 250 mm centre to centre for Grade 414 bars with 40 mm cover.
+
+The choice matters for seismic design. The extra bars of the office rule raise the probable moments of the beam, and with them the capacity shear Ve of the beam and the joint shear and capacity shear of the columns. On a wide beam with a short span this can be the whole reason the shear check fails. The summary and the calculation report say which rule was used.
 
 ### Carrier depth
 

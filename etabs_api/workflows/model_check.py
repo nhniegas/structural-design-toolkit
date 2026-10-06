@@ -886,6 +886,16 @@ def modifier_findings(effective: dict[str, tuple], columns: set[str],
                    " (a modifier on both the frames and the sections is applied twice)"
                    if odd else f"Effective I: beams {MODEL.beam_inertia:g}, columns "
                    f"{MODEL.column_inertia:g}.", "NSCP 208.6.2 item 1, 406.6.3.1.1")]
+    # Torsional stiffness of the beams: with the full J, beams that frame into each
+    # other attract compatibility torsion far above what a cracked beam carries.
+    stiff = [member for member, values in effective.items()
+             if member not in columns and values[3] > 0.5]
+    beams = sum(1 for member in effective if member not in columns)
+    if stiff:
+        out.append(Finding(group, WARN, f"{len(stiff)} of {beams} beams have the full torsional "
+                           "stiffness (J modifier near 1): compatibility torsion will be large. "
+                           "Reduce J on the beams, or let sdt beams take the torsion as at most "
+                           "phi Tcr (ACI 22.7.3.2).", "NSCP 422.7.3.2 (ACI 22.7.3.2)"))
     if mass:
         out.append(Finding(group, FAIL, f"{len(mass)} frames with a mass or weight "
                            f"modifier other than 1 (the seismic weight W is reduced): "

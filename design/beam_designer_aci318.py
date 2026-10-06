@@ -15,7 +15,7 @@ import ezdxf
 import pandas as pd
 
 from design import dcr_targets
-from design.code_config import CODE, AciCode
+from design.code_config import CODE, AciCode, override
 from design.beam_deflection import (
     DEFLECTION_COLUMNS,
     LIMIT_DAMAGED,
@@ -47,11 +47,27 @@ def is_gravity_beam(support_status: object) -> bool:
 def identify_cantilever_beams(
     frame_df: pd.DataFrame,
     conn_df: pd.DataFrame,
+    points: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
-    """Classify beam supports from column and wall connectivity.
+    """Classify the supports of every beam.
 
-    `frame_df` remains in the signature for compatibility with existing
-    callers. Support joints are identified from `conn_df` only.
+    An end is on a support when a column or a wall is at its joint. With
+    ``points`` (the joint coordinates) an end that another beam carries is
+    supported too: a beam across it at the joint, or a girder whose centre
+    line passes through the joint and that ETABS has not split there. A beam
+    that only continues in line does not hold an end by itself: the end is as
+    held as the far end of that beam (``beam_carriers.end_conditions``).
+
+    * on a column or wall at one end at least, and held at the other:
+      ``Supported Both Ends`` (a frame member, with the seismic rules)
+    * on a column or wall at one end and free at the other:
+      ``Cantilever (Free at PtI / PtJ)``
+    * no column or wall at either end: a gravity beam
+
+    Without ``points`` an end with no column or wall counts as free, as it
+    did before the coordinates were used.
+
+    `frame_df` remains in the signature for compatibility with existing callers.
     """
     del frame_df
 
@@ -85,18 +101,24 @@ def identify_cantilever_beams(
         if pd.notna(point)
     }
 
+    from design.beam_carriers import BEAM_END, _name, end_conditions
+
     beams = conn.loc[conn["DesignType"].eq("Beam")].copy()
     has_support_i = beams["UniquePtI"].isin(support_joints)
     has_support_j = beams["UniquePtJ"].isin(support_joints)
+    held = end_conditions(conn, points)
+    held_i = pd.Series([held.get((_name(n), _name(j))) == BEAM_END for n, j in
+                        zip(beams["UniqueName"], beams["UniquePtI"])], index=beams.index)
+    held_j = pd.Series([held.get((_name(n), _name(j))) == BEAM_END for n, j in
+                        zip(beams["UniqueName"], beams["UniquePtJ"])], index=beams.index)
+    free_i, free_j = ~has_support_i & ~held_i, ~has_support_j & ~held_j
 
     beams["SupportStatus"] = GRAVITY_BEAM_STATUS
-    beams.loc[has_support_i & has_support_j, "SupportStatus"] = "Supported Both Ends"
-    beams.loc[has_support_i & ~has_support_j, "SupportStatus"] = (
-        "Cantilever (Free at PtJ)"
-    )
-    beams.loc[~has_support_i & has_support_j, "SupportStatus"] = (
-        "Cantilever (Free at PtI)"
-    )
+    # on a column or wall at one end at least, and held at the other: a frame member
+    beams.loc[(has_support_i | has_support_j) & ~free_i & ~free_j,
+              "SupportStatus"] = "Supported Both Ends"
+    beams.loc[has_support_i & free_j, "SupportStatus"] = "Cantilever (Free at PtJ)"
+    beams.loc[free_i & has_support_j, "SupportStatus"] = "Cantilever (Free at PtI)"
 
     return beams[["UniqueName", "SupportStatus"]].reset_index(drop=True)
 
@@ -197,13 +219,22 @@ class BeamFlexureDesign:
         return int((clear_width + min_spacing) // (self.dmain + min_spacing))
 
     def get_min_bars_for_150mm_spacing(self) -> int:
-        """Return the minimum bar count needed to limit longitudinal bar spacing to 150 mm."""
+        """The fewest bars on a face that keep the bar spacing within its limit.
+
+        With the office rule (``limit_clear_spacing``) the clear spacing is at
+        most 150 mm; without it the limit is the crack-control spacing of ACI
+        24.3.2, centre to centre.
+        """
         clear_center_width = self.width - 2 * (
             self.cc + self.dstirrup + (self.dmain / 2.0)
         )
         detailing = self.code.beam_detailing
-        # Convert the clear-spacing target (150 mm) to a center-to-center spacing limit.
-        max_center_spacing = detailing.max_clear_spacing_target + self.dmain
+        if detailing.limit_clear_spacing:
+            # Convert the clear-spacing target (150 mm) to a center-to-center spacing limit.
+            max_center_spacing = detailing.max_clear_spacing_target + self.dmain
+        else:
+            max_center_spacing = self.code.crack_control_spacing(
+                self.fy, self.cc + self.dstirrup)
         min_spaces = math.ceil(clear_center_width / max_center_spacing)
         return max(detailing.min_bars_per_face, min_spaces + 1)
 
@@ -1183,6 +1214,25 @@ def get_layer_columns(engine, is_top: bool) -> tuple:
         return l1, l2, l3
 
 
+COMPATIBILITY_TORSION = ("Compatibility torsion: Tu taken as at most phi Tcr (ACI 22.7.3.2); "
+                         "Tu in the table is the analysis value")
+ANALYSIS_TORSION = "Analysis torsion (a cantilever cannot shed its torsion)"
+
+
+def torsion_basis_of(support_status: object, compatibility_torsion: bool) -> str:
+    """Which torsion a beam is designed for, as text for the results."""
+    if not compatibility_torsion:
+        return "Analysis torsion"
+    return ANALYSIS_TORSION if "Cantilever" in str(support_status) else COMPATIBILITY_TORSION
+
+
+def _torsion_code(torsion_basis: str, code: AciCode) -> AciCode:
+    """The code values with the torsion reduction of ACI 22.7.3.2 on or off."""
+    if torsion_basis == COMPATIBILITY_TORSION:
+        return override(code, beam_torsion__allow_redistribution=True)
+    return code
+
+
 def execute_beam_design(
     df_beam_props: pd.DataFrame,
     df_frame_forces: pd.DataFrame,
@@ -1191,8 +1241,14 @@ def execute_beam_design(
     Pu_axial_load: float = 50.0,
     code: AciCode = CODE,
     progress=None,
+    compatibility_torsion: bool = False,
 ) -> pd.DataFrame:
     """Executes the full beam design pipeline and returns the results DataFrame.
+
+    ``compatibility_torsion`` designs for a torsion of at most phi Tcr (ACI
+    22.7.3.2), which the code allows where the torsion comes from the twist
+    of a statically indeterminate frame and can redistribute after cracking.
+    A cantilever keeps its analysis torsion: nothing else can take it.
 
     ``progress`` (optional) receives one status text at a time: the beam, its
     level, the load combination and the check being performed.
@@ -1363,6 +1419,8 @@ def execute_beam_design(
         member_type = dcr_targets.beam_type(b_row.get("SupportStatus", ""))
         flexure_target = dcr_targets.limit(member_type, dcr_targets.FLEXURE)
         shear_target = dcr_targets.limit(member_type, dcr_targets.SHEAR)
+        torsion_basis = torsion_basis_of(b_row.get("SupportStatus", ""), compatibility_torsion)
+        torsion_code = _torsion_code(torsion_basis, code)
 
         df_grav = df_b[df_b["Combo"] == gravity_combo_name]
         Vu_grav_left = df_grav["Vu_left"].max() if not df_grav.empty else 0.0
@@ -1427,7 +1485,7 @@ def execute_beam_design(
             torsion_eng_left, torsion_eng_mid, torsion_eng_right = (
                 BeamTorsionDesign(
                     b_width, b_height, d_eff_guess, fc_val, fy_val, fyt_val, d_s, c_cover,
-                    code=code,
+                    code=torsion_code,
                 )
                 for _ in range(3)
             )
@@ -1644,7 +1702,7 @@ def execute_beam_design(
                             fyt_val,
                             d_s,
                             c_cover,
-                            code=code,
+                            code=torsion_code,
                         )
 
                         s_r = shear.solve_shear_capacity(Vu_val)
@@ -1826,6 +1884,8 @@ def execute_beam_design(
                 "PASSED" if anchorage_passed_all else "ADJUSTED"
             )
             summary["Alternating_Tie_Check"] = "PASSED"
+            if compatibility_torsion:   # shown only when the option is on
+                summary["Torsion_Basis"] = torsion_basis
             if dcr_targets.active().changed:   # shown only when the engineer set targets
                 summary["Target_DCR_Flexure"] = flexure_target
                 summary["Target_DCR_Shear"] = shear_target
@@ -1939,6 +1999,7 @@ _BEAM_RESULT_LABELS = {
     "Vc_zero_right": "Concrete shear suppressed (right)",
     "Anchorage_Check": "Stirrup anchorage check",
     "Alternating_Tie_Check": "Alternating tie check",
+    "Torsion_Basis": "Torsion designed for",
     "Target_DCR_Flexure": "Target ratio, flexure",
     "Target_DCR_Shear": "Target ratio, shear and torsion",
     **DEFLECTION_COLUMNS,
@@ -2014,7 +2075,8 @@ def _support_widths(frame_df: pd.DataFrame, conn_df: pd.DataFrame) -> pd.DataFra
 
 
 def prepare_beam_table(frame_df: pd.DataFrame, conn_df: pd.DataFrame,
-                       bars: dict, earth_cover_stories=()) -> pd.DataFrame:
+                       bars: dict, earth_cover_stories=(),
+                       points: pd.DataFrame | None = None) -> pd.DataFrame:
     """The beams of FRAME DATA with their support status and the bar inputs.
 
     ``bars`` has dm (main bar), ds (stirrup), dw (web bar) in mm, fyw (web bar
@@ -2027,7 +2089,7 @@ def prepare_beam_table(frame_df: pd.DataFrame, conn_df: pd.DataFrame,
     conn_df = conn_df.copy()
     frame_df.columns = [str(c).strip() for c in frame_df.columns]
     conn_df.columns = [str(c).strip() for c in conn_df.columns]
-    support_df = identify_cantilever_beams(frame_df, conn_df)
+    support_df = identify_cantilever_beams(frame_df, conn_df, points)
     support_df = support_df.merge(_support_widths(frame_df, conn_df), on="UniqueName",
                                   how="left")
     beam_df = frame_df.merge(support_df, on="UniqueName", how="left")
@@ -2124,24 +2186,32 @@ def ask_deflection_limit() -> int | None:
 
 def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict,
                  long_limit_divisor: int = LIMIT_DAMAGED, progress=None,
-                 earth_cover_stories=(), carrier_depth: bool = False) -> pd.DataFrame:
+                 earth_cover_stories=(), carrier_depth: bool = False,
+                 compatibility_torsion: bool = False,
+                 office_bar_spacing: bool = True) -> pd.DataFrame:
     """Design every beam from the extracted tables; deflection when service loads exist.
 
     ``tables`` holds FACTORED LOADS, FRAME DATA, CONNECTIVITY and (optional)
     SERVICE LOADS. ``earth_cover_stories`` are the levels whose beams get the
     75 mm earth-contact cover. ``carrier_depth`` also requires a beam to be at
-    least as deep as the beams it carries. The target ratios are those that
+    least as deep as the beams it carries. ``compatibility_torsion`` limits
+    the design torsion to phi Tcr (ACI 22.7.3.2). ``office_bar_spacing`` False
+    drops the office rule of 150 mm clear between bars: the bar count for
+    spacing then comes from crack control (ACI 24.3.2). The target ratios are those that
     are active (``dcr_targets.use``). Returns the results, two rows (TOP,
     BOTTOM) per beam.
     """
     beam_props = prepare_beam_table(tables["FRAME DATA"], tables["CONNECTIVITY"], bars,
-                                    earth_cover_stories)
+                                    earth_cover_stories, tables.get("POINTS"))
     results = execute_beam_design(
         df_beam_props=beam_props,
         df_frame_forces=tables["FACTORED LOADS"],
         enable_seismic_design=smrf,
         gravity_combo_name=gravity_combo,
         progress=progress,
+        compatibility_torsion=compatibility_torsion,
+        code=CODE if office_bar_spacing else override(
+            CODE, beam_detailing__limit_clear_spacing=False),
     )
     service = tables.get("SERVICE LOADS")
     if service is not None and len(service) and not results.empty:
@@ -2722,7 +2792,8 @@ def _beam_calc_member(
         )
         shear_result = shear.solve_shear_capacity(design_shear)
         torsion_result = BeamTorsionDesign(
-            width, height, depth, fc, fy, fyt, d_stirrup, cover, code=code
+            width, height, depth, fc, fy, fyt, d_stirrup, cover,
+            code=_torsion_code(str(top.get("Torsion_Basis", "")), code)
         ).solve_torsion_capacity(torsion_demand, design_shear)
         steel_shear = (
             stirrup_area * fyt_shear * depth / spacing / 1000.0 if spacing > 0 else 0.0
@@ -2749,6 +2820,8 @@ def _beam_calc_member(
         "Forces in kN, torsion in kN-m, lengths in mm, At/s in mm2/mm, Al in mm2. "
         "Vu and Tu are the envelopes of all combinations. Vc is taken as zero where the "
         "seismic rule requires it. The stirrups also carry the torsion steel At/s."
+        + (" Torsion: " + str(top.get("Torsion_Basis")) + "."
+           if str(top.get("Torsion_Basis", "")).startswith(COMPATIBILITY_TORSION[:13]) else "")
         + (" " + target_note if target_note else ""),
     )
 

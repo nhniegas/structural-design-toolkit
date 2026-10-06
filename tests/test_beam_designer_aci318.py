@@ -927,3 +927,44 @@ def test_a_beam_too_narrow_for_its_stirrup_legs_fails_and_the_others_are_designe
     status = results.groupby("UniqueName")["Design_Status"].first()
     assert "STIRRUP LEGS" in status["NARROW"] and status["NARROW"].startswith("FAILED")
     assert status["B1"] == "OK"
+
+
+# --------------------------------------------------------------------------
+# COMPATIBILITY TORSION (ACI 22.7.3.2)
+# --------------------------------------------------------------------------
+def _torsion_forces(tu: float):
+    forces = _mock_force_table(wu=30.0)
+    forces["T"] = tu
+    return forces
+
+
+def test_compatibility_torsion_is_designed_for_at_most_phi_tcr():
+    """A 300 x 600 beam, fc 28: phi Tcr = 0.75 x 0.33 sqrt(28) x (300 x 600)^2 / 1800
+    = 23.6 kN-m. With 90 kN-m from the analysis the section fails as equilibrium
+    torsion and passes as compatibility torsion; the analysis value is reported."""
+    props = _mock_beam_properties()
+    analysis = beam.execute_beam_design(props, _torsion_forces(90.0), False, "GRAV")
+    assert analysis["Design_Status"].str.contains("torsion").all()
+    assert "Torsion_Basis" not in analysis.columns
+    reduced = beam.execute_beam_design(props, _torsion_forces(90.0), False, "GRAV",
+                                       compatibility_torsion=True)
+    assert (reduced["Design_Status"] == "OK").all()
+    assert reduced["Tu_left"].max() == pytest.approx(90.0)
+    assert (reduced["Torsion_Basis"] == beam.COMPATIBILITY_TORSION).all()
+
+
+def test_a_cantilever_keeps_its_analysis_torsion():
+    props = _mock_beam_properties(support="Cantilever (Free at PtJ)")
+    reduced = beam.execute_beam_design(props, _torsion_forces(90.0), False, "GRAV",
+                                       compatibility_torsion=True)
+    assert (reduced["Torsion_Basis"] == beam.ANALYSIS_TORSION).all()
+    assert reduced["Design_Status"].str.contains("torsion").all()
+
+
+def test_torsion_below_phi_tcr_is_not_changed_by_the_option():
+    props = _mock_beam_properties()
+    plain = beam.execute_beam_design(props, _torsion_forces(15.0), False, "GRAV")
+    option = beam.execute_beam_design(props, _torsion_forces(15.0), False, "GRAV",
+                                      compatibility_torsion=True)
+    for column in ("Stirrup_Legs", "Spacing_2H", "Spacing_Mid", "n_mid_L1"):
+        assert plain[column].tolist() == option[column].tolist()

@@ -529,3 +529,16 @@ def test_untagged_members_are_designed_as_they_are_by_default(monkeypatch, tmp_p
         {"picks": ["1.4D", "1.2D+1.6L"]})
     assert connector.include_numeric_members is True
     assert ready.gravity_default == "1.2D+1.6L"
+
+
+def test_the_check_warns_when_beams_keep_their_full_torsional_stiffness():
+    from etabs_api.workflows import model_check as mc
+
+    full = (1.0, 1.0, 1.0, 1.0, 0.35, 0.35, 1.0, 1.0)
+    reduced = (1.0, 1.0, 1.0, 0.01, 0.35, 0.35, 1.0, 1.0)
+    column = (1.0, 1.0, 1.0, 1.0, 0.7, 0.7, 1.0, 1.0)
+    findings = mc.modifier_findings({"B1": full, "B2": reduced, "C1": column}, {"C1"})
+    torsion = [f for f in findings if "torsional stiffness" in f.text]
+    assert len(torsion) == 1 and torsion[0].status == mc.WARN and "1 of 2 beams" in torsion[0].text
+    assert not [f for f in mc.modifier_findings({"B2": reduced, "C1": column}, {"C1"})
+                if "torsional" in f.text]
