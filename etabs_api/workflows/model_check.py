@@ -1099,7 +1099,9 @@ def read_model_data(connector, progress=None) -> ModelData:
     tables = model.DatabaseTables
     available = {str(t) for t in as_list(tables.GetAvailableTables()[1])}
     patterns = [str(n) for n in as_list(model.LoadPatterns.GetNameList(0, [])[1])]
-    d = ModelData(path=str(model.GetModelFilename()), analysed=_has_results(connector))
+    from etabs_api.core.connection import model_file
+
+    d = ModelData(path=model_file(model), analysed=_has_results(connector))
     d.pattern_types = {n: int(model.LoadPatterns.GetLoadType(n)[0]) for n in patterns}
     d.self_weight = {n: float(model.LoadPatterns.GetSelfWTMultiplier(n)[0]) for n in patterns}
     stories = model.Story.GetStories()
@@ -1234,7 +1236,9 @@ def run_model_check() -> list[Finding] | None:
         data.wind_drift_denominator = denominator
         findings = run_checks(data)
     print(report_text(data, findings))
-    check_summary(findings, str(connector.sap_model.GetModelFilename())).show(popup=True, echo=False)
+    from etabs_api.core.connection import model_file
+
+    check_summary(findings, model_file(connector.sap_model)).show(popup=True, echo=False)
     return findings
 
 

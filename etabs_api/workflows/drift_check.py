@@ -392,7 +392,9 @@ def run_drift(connector, reference: str = CENTER,
 
     model = connector.sap_model
     say = progress or (lambda text: None)
-    report = DriftReport(model_path=str(model.GetModelFilename()), reference=reference,
+    from etabs_api.core.connection import model_file
+
+    report = DriftReport(model_path=model_file(model), reference=reference,
                          wind_denominator=wind_denominator, seismic=seismic)
     picked = bool(combos)
     combos = list(combos) if combos else _drift_combinations(model, seismic)

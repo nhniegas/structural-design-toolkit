@@ -447,3 +447,24 @@ def test_a_beam_whose_deflection_does_not_come_down_is_not_made_larger_again():
     # and it stays stopped on the next pass
     third = actions()
     assert stop_unhelped_deflection_growth(third, sections, results(4.9, 0.9), ratios) == ["2GX-8"]
+
+
+def test_the_members_a_larger_size_does_not_fix_are_named_with_the_reason():
+    from etabs_api.workflows.design_loop import not_fixed_by_size, stuck_by_kind
+
+    small, big = g(300, 500), g(300, 600)
+    sections = {n: small for n in ("2GX-1", "2GX-2", "2GX-3", "2GX-4")}
+    actions = {
+        "2GX-1": (small, "deflection: no larger size within the limits"),
+        "2GX-2": (small, "made larger 3 times for shear and still fails: a larger section does "
+                         "not help (the capacity shear grows with it); check the span"),
+        "2GX-3": (small, "deflection ratio 4.90 was 5.00 before it was made larger: a larger "
+                         "section does not help (the rotation or the movement of its support "
+                         "governs); check the framing, not the size"),
+        "2GX-4": (big, "grow (deflection)"),                       # this one is being fixed
+    }
+    stuck = not_fixed_by_size(actions, sections)
+    assert sorted(stuck) == ["2GX-1", "2GX-2", "2GX-3"]
+    kinds = stuck_by_kind(stuck)
+    assert list(kinds.values()) == [["2GX-1"], ["2GX-2"], ["2GX-3"]]
+    assert any("support rotates" in kind for kind in kinds)

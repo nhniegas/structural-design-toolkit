@@ -407,7 +407,9 @@ def analyze_model(connector, zone_factor: float | None = None, ct: float | None 
     """Reset the spectrum to g I / R, run, scale it to the static base shear, run
     again, and check periods, mass and weight. ``progress`` gets each step."""
     say = progress or (lambda text: None)
-    report = AnalysisReport(model_path=str(connector.sap_model.GetModelFilename()))
+    from etabs_api.core.connection import model_file
+
+    report = AnalysisReport(model_path=model_file(connector.sap_model))
     if scale:
         say("Putting the response spectrum cases back to g I / R")
         if reset_spectrum_scale(connector) is None and spectrum_cases(connector):

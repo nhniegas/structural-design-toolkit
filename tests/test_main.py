@@ -241,3 +241,18 @@ def test_the_units_are_put_back_even_when_the_command_fails(monkeypatch):
     with pytest.raises(RuntimeError):
         main.main(["beams"])
     assert model.units == 6
+
+
+def test_the_model_is_named_by_its_edb_also_after_an_analysis():
+    from etabs_api.core.connection import model_file
+
+    class Model:
+        def __init__(self, name):
+            self.name = name
+
+        def GetModelFilename(self):
+            return self.name
+
+    assert model_file(Model(r"C:\job\tower.$et")).endswith("tower.EDB")
+    assert model_file(Model(r"C:\job\tower.EDB")).endswith("tower.EDB")
+    assert model_file(Model("")) == "" and model_file(Model(None)) == ""
