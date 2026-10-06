@@ -9,9 +9,17 @@ For each beam, after its bars are chosen:
 2. Ie of each zone (Eq. 24.2.3.5a) at Ma = the largest moment of the full
    service load (DL + LL) in the zone. The same Ie is used for every load:
    once cracked under the full service load the beam stays cracked.
-3. Deflection along the clear span: the curvature M / (Ec Ie) integrated
-   twice, with zero deflection at both supports. A cantilever is fixed at its
-   root and the deflection from the support rotation of the analysis is added.
+3. Deflection along the span: the curvature M / (Ec Ie) integrated twice,
+   with zero deflection at both supports. A cantilever is fixed at its root
+   and the deflection from the support rotation of the analysis is added.
+   The whole beam line is taken as one chain and cut where it is supported:
+   at a joint with a column below it or a wall; at a joint, or inside a
+   member, where the shear of the full service load jumps up, which is a
+   support pushing up (a girder that carries the line); and at an end where
+   another beam can reach a support without passing through this line
+   (``beam_carriers.BeamNetwork``). A planted column and a beam that only
+   hangs on the line are loads: the span runs on through them, and an end
+   that carries only such a beam is a free end.
 4. Long-term factor lambda = xi / (1 + 50 rho'), rho' the compression steel
    at midspan (at the support of a cantilever); xi = 2.0 for 5 years or more.
 5. Checks (Table 24.2.2):
@@ -282,6 +290,69 @@ class SpanPart:
     x: np.ndarray                    # positions along the span (mm)
     moments: dict[str, np.ndarray]   # DEF combination -> M3 (kN-m) at x
     compression_zone: str = "mid"    # where rho' is taken
+    zones: np.ndarray | None = None  # zone of each position, when the part is a cut of a member
+
+
+def _zones(x: np.ndarray) -> np.ndarray:
+    """Zone (left, mid, right) of each position of a member: its end quarters and the rest."""
+    length = float(x.max() - x.min())
+    t = (x - x.min()) / length if length > 0 else np.zeros_like(x)
+    return np.where(t <= ZONE_FRACTION, "left", np.where(t >= 1 - ZONE_FRACTION, "right", "mid"))
+
+
+SUPPORT_SHARE = 0.05   # a shear jump above this share of the largest shear nearby is a support
+SUPPORT_FLOOR = 0.5    # kN: smaller jumps are not read at all
+
+
+def statics_shear(pieces: list[tuple[np.ndarray, np.ndarray, np.ndarray]]
+                  ) -> list[np.ndarray] | None:
+    """The shear of each piece with the sign of dM/dx, whatever sign the analysis uses.
+
+    ``pieces`` are (x, M, V) along the span, x rising. With Q = dM/dx a load
+    pushing down makes Q fall along the span and a support pushing up makes
+    it jump up. None when the moments and shears do not tell the sign apart.
+    """
+    total = 0.0
+    for x, moment, shear in pieces:
+        dx = np.diff(x)
+        ok = dx > 1e-6
+        if ok.any():
+            total += float(np.sum(np.diff(moment)[ok] * ((shear[1:] + shear[:-1]) / 2.0)[ok]))
+    if abs(total) < 1e-9:
+        return None
+    sign = 1.0 if total > 0 else -1.0
+    return [sign * np.asarray(shear, float) for _, _, shear in pieces]
+
+
+def support_cuts(xs: list[np.ndarray], qs: list[np.ndarray],
+                 share: float = SUPPORT_SHARE) -> list[tuple[int, int]]:
+    """Where a chain of pieces is supported, from its shear Q = dM/dx.
+
+    A cut (k, i) is in front of position i of piece k; (0, 0) is the start
+    of the chain and (number of pieces, 0) its end. Supported means an upward
+    force acts there: Q above zero at the start, below zero at the end, and
+    a jump up between two pieces or inside one (the analysis gives two values
+    at such a position). A jump down is a load: the span runs on through it.
+    """
+    peaks = [float(np.max(np.abs(q))) if len(q) else 0.0 for q in qs]
+
+    def enough(value: float, *pieces: int) -> bool:
+        return value > max(share * max(peaks[k] for k in pieces), SUPPORT_FLOOR)
+
+    count = len(qs)
+    cuts = []
+    if count and len(qs[0]) and enough(qs[0][0], 0):
+        cuts.append((0, 0))
+    for k in range(count):
+        x, q = xs[k], qs[k]
+        if k and len(q) and len(qs[k - 1]) and enough(q[0] - qs[k - 1][-1], k - 1, k):
+            cuts.append((k, 0))
+        for i in range(1, len(q)):
+            if x[i] - x[i - 1] <= 1e-6 and enough(q[i] - q[i - 1], k):
+                cuts.append((k, i))
+    if count and len(qs[-1]) and enough(-qs[-1][-1], count - 1):
+        cuts.append((count, 0))
+    return cuts
 
 
 def _stiffness(part: SpanPart) -> tuple[dict[str, float], np.ndarray, float]:
@@ -293,10 +364,7 @@ def _stiffness(part: SpanPart) -> tuple[dict[str, float], np.ndarray, float]:
     ig = b * h**3 / 12.0
     mcr = 0.62 * math.sqrt(fc) * ig / (h / 2.0) / 1e6  # kN-m
     x = part.x
-    length = float(x.max() - x.min())
-    t = (x - x.min()) / length if length > 0 else np.zeros_like(x)
-    zone_of = np.where(t <= ZONE_FRACTION, "left",
-                       np.where(t >= 1 - ZONE_FRACTION, "right", "mid"))
+    zone_of = _zones(x) if part.zones is None else np.asarray(part.zones)
     full = np.asarray(part.moments[COMBO_FULL], float)
     top_depths = layer_depths(h, sec.cover, sec.stirrup, sec.bar, top=True)
     bottom_depths = layer_depths(h, sec.cover, sec.stirrup, sec.bar, top=False)
@@ -427,13 +495,21 @@ class Span:
     end_supported: bool = True
 
 
-def beam_spans(connectivity, members: list[str]) -> list[Span]:
+def beam_spans(connectivity, members: list[str], points=None,
+               through_supports: bool = False) -> list[Span]:
     """Join the segments of each tagged beam line into spans.
 
     Segments of one line (same level, type and number: 2GX-1, 2GX-1A, ...)
     meeting at a joint with no column or wall continue one span. A span end
     is supported when a column, a wall or another member is there; it is free
-    when nothing else connects (a cantilever tip). The line of a member comes
+    when nothing else connects (a cantilever tip). With ``points`` (the joint
+    coordinates) an end that rests on a girder ETABS has not split there is
+    supported too: the centre line of that girder passes through the joint,
+    but no member of it ends there, so counting the members at the joint
+    misses it and a supported line was checked as a cantilever.
+    ``through_supports`` joins the segments of a line through columns and
+    walls as well: the whole line as one chain, for ``support_cuts`` to cut
+    where the forces say it is supported. The line of a member comes
     from the ``Line`` column of the table when it has one (the extraction
     fills it: from the tag, or from the geometry for members with other
     names); without it, members without a tag are spans of their own.
@@ -455,6 +531,16 @@ def beam_spans(connectivity, members: list[str]) -> list[Span]:
     ends = {m: (str(beams.at[m, "UniquePtI"]), str(beams.at[m, "UniquePtJ"])) for m in wanted}
     length = {m: float(beams.at[m, "Length"]) if "Length" in beams.columns else 0.0
               for m in wanted}
+
+    held: dict[tuple[str, str], str] = {}
+    if points is not None and len(points):
+        from design.beam_carriers import FREE_END, _name, end_conditions
+
+        for (member, joint), state in end_conditions(connectivity, points).items():
+            if state != FREE_END:
+                held[(str(member), str(joint))] = state
+        # the same names as here, whatever their type in the tables
+        held.update({(_name(m), _name(j)): s for (m, j), s in list(held.items())})
 
     line_of = {}
     if "Line" in beams.columns:
@@ -478,7 +564,7 @@ def beam_spans(connectivity, members: list[str]) -> list[Span]:
             for joint in ends[m]:
                 at_joint.setdefault(joint, []).append(m)
         links = {joint: ms for joint, ms in at_joint.items()
-                 if len(ms) == 2 and joint not in supports}
+                 if len(ms) == 2 and (through_supports or joint not in supports)}
         seen: set[str] = set()
         for first in segments:
             if first in seen:
@@ -518,17 +604,18 @@ def beam_spans(connectivity, members: list[str]) -> list[Span]:
                 joint = far
             first_joint = start_joint
 
-            def supported(jt: str) -> bool:
-                return jt in supports or count.get(jt, 0) > 1
+            def supported(jt: str, member: str) -> bool:
+                return jt in supports or count.get(jt, 0) > 1 or (member, jt) in held
 
             spans.append(Span(members_in, flipped, offsets, lengths,
-                              supported(first_joint), supported(chain_joint)))
+                              supported(first_joint, members_in[0]),
+                              supported(chain_joint, members_in[-1])))
     return spans
 
 
 def add_deflection_columns(results, service, long_limit_divisor: float = LIMIT_DAMAGED,
                            connectivity=None, progress=None,
-                           stages: DeflectionStages | None = None):
+                           stages: DeflectionStages | None = None, points=None):
     """Add the deflection checks to the beam design results (TOP and BOTTOM rows).
 
     ``service`` is the SERVICE LOADS table and ``connectivity`` the
@@ -536,6 +623,8 @@ def add_deflection_columns(results, service, long_limit_divisor: float = LIMIT_D
     one span. A beam that fails turns from OK to DEFLECTION_FAILED.
     ``stages`` (when the partitions are built) deducts the long-term
     deflection before them and adds the deflection at those stages.
+    ``points`` (the joint coordinates) lets an end on an unsplit girder count
+    as supported (see ``beam_spans``).
     """
     import pandas as pd
 
@@ -554,10 +643,8 @@ def add_deflection_columns(results, service, long_limit_divisor: float = LIMIT_D
     by_member = {str(k): v for k, v in service.groupby(service["UniqueName"].astype(str))}
     rows_of = {str(k): v for k, v in out.groupby(out["UniqueName"].astype(str))}
     names = list(rows_of)
-    if connectivity is not None and len(connectivity):
-        spans = beam_spans(connectivity, names)
-    else:
-        spans = []
+    has_lines = connectivity is not None and len(connectivity)
+    spans = beam_spans(connectivity, names, points) if has_lines else []
     in_span = {m for span in spans for m in span.members}
     for m in names:
         if m not in in_span:
@@ -595,7 +682,30 @@ def add_deflection_columns(results, service, long_limit_divisor: float = LIMIT_D
                 moments[COMBO_FULL] - moments[COMBO_DEAD])
         return x, moments
 
-    for span in spans:
+    def shear_of(name: str, count: int):
+        """V2 of the full service load at the positions of ``moments_of``, or None."""
+        svc = by_member.get(name)
+        if svc is None or "V2" not in svc.columns:
+            return None
+        full = svc[svc["Combo"].astype(str).eq(COMBO_FULL)].sort_values("Station", kind="stable")
+        shear = pd.to_numeric(full["V2"], errors="coerce").to_numpy(float)
+        return shear if len(shear) == count and not np.isnan(shear).any() else None
+
+    def on_roof(name: str) -> bool:
+        svc = by_member[name]
+        return "Roof level" in svc.columns and bool(
+            svc["Roof level"].astype(str).str.upper().eq("TRUE").any())
+
+    def rotation_of(name: str, at_i: bool, length: float):
+        """Downward movement per mm of reach from the rotation of a member's end."""
+        svc = by_member[name]
+        column = _TIP_I if at_i else _TIP_J
+        if column not in svc.columns or length <= 0:
+            return None
+        return {c: v / length for c, v in
+                svc.groupby(svc["Combo"].astype(str))[column].first().items()}
+
+    def tell(span: Span) -> None:
         if progress is not None:
             story = rows_of[span.members[0]].iloc[0].get("Story", "-")
             members = span.members[0] if len(span.members) == 1 else \
@@ -603,25 +713,21 @@ def add_deflection_columns(results, service, long_limit_divisor: float = LIMIT_D
             progress(f"Beam {members}  |  Level {story}\nCombo: DEF 100 to DEF 103 "
                      "(service)\nCheck: Deflection (Ie, long-term, live load and after "
                      "attachment of partitions)")
-        parts, roof, ok = [], False, True
+
+    def by_geometry(span: Span):
+        """The checks of a span whose supports come from what meets its ends."""
+        parts, roof = [], False
         single = len(span.members) == 1 and span.lengths[0] == 0.0
         for name, flip, offset, seg in zip(span.members, span.reversed, span.offsets,
                                            span.lengths):
             top, section = section_of(name)
             x, moments = moments_of(name)
             if section is None or x is None:
-                ok = False
-                break
+                return None
             seg = seg or float(x.max())
             position = offset + (seg - x if flip else x)
             parts.append(SpanPart(name, section, position, moments))
-            svc = by_member[name]
-            if "Roof level" in svc.columns:
-                roof = roof or bool(svc["Roof level"].astype(str).str.upper().eq("TRUE").any())
-        if not ok:
-            for name in span.members:
-                out.loc[rows_of[name].index, "Deflection_Check"] = "NO SERVICE LOADS"
-            continue
+            roof = roof or on_roof(name)
         root, rotation = None, None
         if single:
             status = str(rows_of[span.members[0]].iloc[0].get("SupportStatus", ""))
@@ -635,51 +741,155 @@ def add_deflection_columns(results, service, long_limit_divisor: float = LIMIT_D
             index = 0 if root == "start" else -1
             name, flip = span.members[index], span.reversed[index]
             support_at_i = (root == "start") != flip
-            column = _TIP_I if support_at_i else _TIP_J
-            svc = by_member[name]
             seg = span.lengths[index] or float(parts[index].x.max() - parts[index].x.min())
-            if column in svc.columns and seg > 0:
-                rotation = {c: v / seg for c, v in
-                            svc.groupby(svc["Combo"].astype(str))[column].first().items()}
-            zone = "left" if support_at_i else "right"
-            parts[index].compression_zone = zone
-        results_by_part = span_deflection(parts, root, rotation, roof, long_limit_divisor,
-                                          stages)
-        for name, result in results_by_part.items():
-            index = rows_of[name].index
-            values = {
-                "Defl_Ie_left": round(result.ie["left"]),
-                "Defl_Ie_mid": round(result.ie["mid"]),
-                "Defl_Ie_right": round(result.ie["right"]),
-                "Defl_lambda": round(result.lam, 3),
-                "Defl_live_mm": round(result.live, 2),
-                "Defl_live_limit_mm": round(result.live_limit, 2),
-                "Defl_roof_mm": None if result.roof is None else round(result.roof, 2),
-                "Defl_roof_limit_mm": (None if result.roof_limit is None
-                                       else round(result.roof_limit, 2)),
-                "Defl_long_mm": round(result.long_term, 2),
-                "Defl_long_limit_mm": round(result.long_limit, 2),
-                "Defl_creep_mm": round(result.creep, 2),
-                "Defl_total_mm": round(result.total, 2),
-                "Defl_ratio": round(result.ratio, 3),
-            }
-            if staged:
-                values.update({
-                    "Defl_first_load_mm": round(result.at_first_load, 2),
-                    "Defl_at_partitions_mm": round(result.at_partitions, 2),
-                    "Defl_deducted_mm": round(result.deducted, 2),
-                    "Defl_stages": stages.describe(),
-                })
-            # the target ratio of this member type (1.0 unless the engineer set one)
-            status = rows_of[name].iloc[0].get("SupportStatus", "")
-            target = dcr_targets.limit(dcr_targets.beam_type(status), dcr_targets.DEFLECTION)
-            passed = result.ratio <= target + 1e-9
-            values["Deflection_Check"] = "PASS" if passed else (
-                "FAIL" if target >= 1.0 else f"FAIL: above the target ratio {target:g}")
-            for key, value in values.items():
-                out.loc[index, key] = value
-            if not passed:
-                passing = out.loc[index, "Design_Status"].astype(str).eq("OK").to_numpy()
-                out.loc[index[passing], "Design_Status"] = DEFLECTION_FAILED
+            rotation = rotation_of(name, support_at_i, seg)
+            parts[index].compression_zone = "left" if support_at_i else "right"
+        return span_deflection(parts, root, rotation, roof, long_limit_divisor, stages)
+
+    def by_structure(chain: Span):
+        """The checks of a whole beam line, cut where it is supported.
+
+        None when the data of a member is missing, or when nothing shows a
+        support: the line is then checked by ``by_geometry``.
+        """
+        pieces = []
+        position = 0.0
+        for name, flip, seg in zip(chain.members, chain.reversed, chain.lengths):
+            top, section = section_of(name)
+            x, moments = moments_of(name)
+            if section is None or x is None or name not in network.beams:
+                return None
+            shear = shear_of(name, len(x))
+            seg = seg or float(x.max())
+            if flip:   # the member runs against the line: turn it round
+                along = (seg - x)[::-1]
+                moments = {c: m[::-1] for c, m in moments.items()}
+                shear = None if shear is None else -shear[::-1]
+            else:
+                along = x
+            i, j = network.beams[name]
+            pieces.append({"name": name, "flip": flip, "length": seg, "section": section,
+                           "x": position + along, "moments": moments, "shear": shear,
+                           "zones": _zones(along), "from": j if flip else i,
+                           "to": i if flip else j})
+            position += seg
+        count = len(pieces)
+        own = set(chain.members)
+        cuts = set()
+        if network.held_at(pieces[0]["from"], own):
+            cuts.add((0, 0))
+        if network.held_at(pieces[-1]["to"], own):
+            cuts.add((count, 0))
+        for k in range(1, count):
+            if pieces[k]["from"] in network.supports:
+                cuts.add((k, 0))
+        if all(q["shear"] is not None for q in pieces):
+            shears = statics_shear([(q["x"], q["moments"][COMBO_FULL], q["shear"])
+                                    for q in pieces])
+            if shears is not None:   # a support pushing up inside the line
+                cuts |= {c for c in support_cuts([q["x"] for q in pieces], shears)
+                         if c not in ((0, 0), (count, 0))}
+        if not cuts:
+            return None
+        cuts = sorted(cuts)
+        first, last = (0, 0), (count, 0)
+        stretches = []                         # (from, to, root of a cantilever or None)
+        if cuts[0] != first:
+            stretches.append((first, cuts[0], "end"))
+        stretches += [(a, b, None) for a, b in zip(cuts, cuts[1:])]
+        if cuts[-1] != last:
+            stretches.append((cuts[-1], last, "start"))
+        found: dict[str, DeflectionResult] = {}
+        for (k0, i0), (k1, i1), root in stretches:
+            parts, used = [], []
+            for k in range(k0, min(k1, count - 1) + 1):
+                piece = pieces[k]
+                lo = i0 if k == k0 else 0
+                hi = i1 if k == k1 else len(piece["x"])
+                if hi - lo < 2:
+                    continue
+                parts.append(SpanPart(
+                    piece["name"], piece["section"], piece["x"][lo:hi],
+                    {c: m[lo:hi] for c, m in piece["moments"].items()},
+                    zones=piece["zones"][lo:hi]))
+                used.append((k, lo, hi))
+            if not parts:
+                continue
+            rotation = None
+            if root:
+                index = 0 if root == "start" else -1
+                k, lo, hi = used[index]
+                piece = pieces[k]
+                at_joint = lo == 0 if root == "start" else hi == len(piece["x"])
+                support_at_i = (root == "start") != piece["flip"]
+                if at_joint:   # the rotation of the analysis is known at the joints only
+                    rotation = rotation_of(piece["name"], support_at_i, piece["length"])
+                parts[index].compression_zone = "left" if support_at_i else "right"
+            roof = any(on_roof(part.name) for part in parts)
+            for name, result in span_deflection(parts, root, rotation, roof,
+                                                long_limit_divisor, stages).items():
+                if name not in found or result.ratio > found[name].ratio:
+                    found[name] = result      # a member cut in two keeps its worse stretch
+        return found if set(found) >= own else None
+
+    checked: dict[str, DeflectionResult] = {}
+    if has_lines:
+        from design.beam_carriers import BeamNetwork
+
+        network = BeamNetwork(connectivity, points)
+        for chain in beam_spans(connectivity, names, points, through_supports=True):
+            tell(chain)
+            found = by_structure(chain)
+            if found is not None:
+                checked.update(found)
+    for span in spans:
+        if all(name in checked for name in span.members):
+            continue
+        tell(span)
+        found = by_geometry(span)
+        if found is None:
+            for name in span.members:
+                if name not in checked:
+                    out.loc[rows_of[name].index, "Deflection_Check"] = "NO SERVICE LOADS"
+            continue
+        for name, result in found.items():
+            checked.setdefault(name, result)
+
+    for name, result in checked.items():
+        index = rows_of[name].index
+        values = {
+            "Defl_Ie_left": round(result.ie["left"]),
+            "Defl_Ie_mid": round(result.ie["mid"]),
+            "Defl_Ie_right": round(result.ie["right"]),
+            "Defl_lambda": round(result.lam, 3),
+            "Defl_live_mm": round(result.live, 2),
+            "Defl_live_limit_mm": round(result.live_limit, 2),
+            "Defl_roof_mm": None if result.roof is None else round(result.roof, 2),
+            "Defl_roof_limit_mm": (None if result.roof_limit is None
+                                   else round(result.roof_limit, 2)),
+            "Defl_long_mm": round(result.long_term, 2),
+            "Defl_long_limit_mm": round(result.long_limit, 2),
+            "Defl_creep_mm": round(result.creep, 2),
+            "Defl_total_mm": round(result.total, 2),
+            "Defl_ratio": round(result.ratio, 3),
+        }
+        if staged:
+            values.update({
+                "Defl_first_load_mm": round(result.at_first_load, 2),
+                "Defl_at_partitions_mm": round(result.at_partitions, 2),
+                "Defl_deducted_mm": round(result.deducted, 2),
+                "Defl_stages": stages.describe(),
+            })
+        # the target ratio of this member type (1.0 unless the engineer set one)
+        status = rows_of[name].iloc[0].get("SupportStatus", "")
+        target = dcr_targets.limit(dcr_targets.beam_type(status), dcr_targets.DEFLECTION)
+        passed = result.ratio <= target + 1e-9
+        values["Deflection_Check"] = "PASS" if passed else (
+            "FAIL" if target >= 1.0 else f"FAIL: above the target ratio {target:g}")
+        for key, value in values.items():
+            out.loc[index, key] = value
+        if not passed:
+            passing = out.loc[index, "Design_Status"].astype(str).eq("OK").to_numpy()
+            out.loc[index[passing], "Design_Status"] = DEFLECTION_FAILED
     order = [c for c in out.columns if c != "Design_Status"] + ["Design_Status"]
     return out[order]

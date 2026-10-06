@@ -109,10 +109,12 @@ def end_conditions(connectivity: pd.DataFrame, points: pd.DataFrame | None
     """What holds each beam end: {(beam, joint): "column", "beam" or "free"}.
 
     * ``column``: a column or a wall is at the joint.
-    * ``beam``: another beam carries the end. It ends at the joint across the
-      beam's line, or its centre line passes through the joint (a girder ETABS
-      has not split there).
-    * ``free``: nothing holds it.
+    * ``beam``: another beam carries the end: one that is nearer to the
+      supports along the load path, or as near and running through the joint
+      (``BeamNetwork.held_at``). It may end at the joint or pass through it
+      (a girder ETABS has not split there).
+    * ``free``: nothing holds it. A beam that only rests on this one does not:
+      a cantilever with an edge beam on its tip is still free at the tip.
 
     An end that only meets a beam continuing in line is as held as the far end
     of that beam: a cantilever ETABS has in two pieces is still free at its
@@ -169,6 +171,7 @@ def end_conditions(connectivity: pd.DataFrame, points: pd.DataFrame | None
                 return True
         return False
 
+    network = BeamNetwork(connectivity, points)
     raw: dict[tuple[str, str], str | list[str]] = {}
     for name, ends in beams.items():
         own = directions[name]
@@ -177,12 +180,12 @@ def end_conditions(connectivity: pd.DataFrame, points: pd.DataFrame | None
                 raw[(name, joint)] = COLUMN_END
                 continue
             others = [o for o in at_joint.get(joint, []) if o != name]
-            across = [o for o in others if own is None or directions[o] is None
-                      or abs(own[0] * directions[o][0] + own[1] * directions[o][1]) < IN_LINE]
-            if across or passes_through(name, joint):
+            in_line = [o for o in others if own is not None and directions[o] is not None
+                       and abs(own[0] * directions[o][0] + own[1] * directions[o][1]) >= IN_LINE]
+            if network.held_at(joint, [name] + in_line):
                 raw[(name, joint)] = BEAM_END
-            elif others:
-                raw[(name, joint)] = others          # only beams continuing in line
+            elif in_line:
+                raw[(name, joint)] = in_line         # the line goes on: as held as its far end
             else:
                 raw[(name, joint)] = FREE_END
 
@@ -201,6 +204,234 @@ def end_conditions(connectivity: pd.DataFrame, points: pd.DataFrame | None
         return FREE_END
 
     return {key: resolve(key[0], key[1], frozenset({key[0]})) for key in raw}
+
+
+class BeamNetwork:
+    """Which beams meet, and which of them can reach a support.
+
+    A support is a joint with a column below it or a wall. A column that
+    only starts at a joint (a planted column) is a load on the beam there,
+    not a support. Two beams meet when they share an end joint, or when the
+    end of one lies on the centre line of the other (a girder ETABS has not
+    split there; this needs the joint coordinates).
+
+    The load path gives every beam line a rank: 0 when the line rests on a
+    support, 1 when it rests only on lines of rank 0, and so on. A line is
+    the pieces of one tagged beam line, or pieces that continue each other
+    in a straight line.
+
+    ``held_at`` answers what the deflection check and the support status
+    need: is a beam end held up, or is it a free end that only carries what
+    hangs on it? An end is held when a support is there, or when another
+    line there is nearer to the supports (a lower rank), or as near (the
+    same rank) and running through the joint. A line further from the
+    supports cannot hold it: an edge beam on the tips of cantilever girders
+    rests on them, so the tips stay free. Two lines of the same rank that
+    both end at the joint, such as two cantilevers meeting at a corner, do
+    not hold each other either.
+    """
+
+    def __init__(self, connectivity: pd.DataFrame | None, points: pd.DataFrame | None = None):
+        self.beams: dict[str, tuple[str, str]] = {}
+        self.supports: set[str] = set()
+        self.at_joint: dict[str, list[str]] = {}
+        self.passing: dict[str, list[str]] = {}
+        self.neighbours: dict[str, set[str]] = {}
+        self.grounded: set[str] = set()
+        self.line: dict[str, str] = {}
+        self.rank: dict[str, float] = {}
+        self.line_ends: dict[str, set[str]] = {}
+        if connectivity is None or len(connectivity) == 0:
+            return
+        xyz: dict[str, tuple[float, float, float]] = {}
+        if points is not None and len(points):
+            xyz = {_name(n): (float(x), float(y), float(z)) for n, x, y, z in zip(
+                points["UniqueName"], pd.to_numeric(points["X"], errors="coerce"),
+                pd.to_numeric(points["Y"], errors="coerce"),
+                pd.to_numeric(points["Z"], errors="coerce")) if x == x and y == y and z == z}
+        kind = connectivity["DesignType"].astype(str).str.strip().str.casefold()
+        known = [c for c in ("UniquePtI", "UniquePtJ", "UniquePt1", "UniquePt2", "UniquePt3",
+                             "UniquePt4") if c in connectivity.columns]
+
+        def joints(row) -> list[str]:
+            return [_name(row[c]) for c in known
+                    if row[c] is not None and str(row[c]) not in ("nan", "None", "")]
+
+        for row in connectivity.loc[kind.eq("wall")].to_dict("records"):
+            self.supports |= set(joints(row))
+        for row in connectivity.loc[kind.eq("column")].to_dict("records"):
+            i, j = _name(row["UniquePtI"]), _name(row["UniquePtJ"])
+            if i in xyz and j in xyz:      # the top joint has the column below it
+                self.supports.add(j if xyz[j][2] >= xyz[i][2] else i)
+            else:
+                self.supports.add(j)       # ETABS draws a column from its base up
+        for row in connectivity.loc[kind.eq("beam")].drop_duplicates("UniqueName").to_dict(
+                "records"):
+            name = _name(row["UniqueName"])
+            self.beams[name] = (_name(row["UniquePtI"]), _name(row["UniquePtJ"]))
+        for name, ends in self.beams.items():
+            self.neighbours.setdefault(name, set())
+            for joint in ends:
+                self.at_joint.setdefault(joint, []).append(name)
+            if ends[0] in self.supports or ends[1] in self.supports:
+                self.grounded.add(name)
+        self._find_passing(xyz)
+        for joint, names in self.at_joint.items():
+            met = set(names) | set(self.passing.get(joint, []))
+            for name in met:
+                self.neighbours.setdefault(name, set()).update(met - {name})
+        self._find_lines(connectivity, xyz)
+        self._find_ranks()
+
+    def _find_lines(self, connectivity: pd.DataFrame, xyz: dict) -> None:
+        """Group the pieces into lines: the same tag line, or in a straight line at a joint."""
+        import re
+
+        parent = {name: name for name in self.beams}
+
+        def root(name: str) -> str:
+            while parent[name] != name:
+                parent[name] = parent[parent[name]]
+                name = parent[name]
+            return name
+
+        def join(a: str, b: str) -> None:
+            parent[root(a)] = root(b)
+
+        tagged: dict[str, str] = {}
+        if "Line" in connectivity.columns:
+            for name, value in zip(connectivity["UniqueName"], connectivity["Line"]):
+                if value is not None and str(value) not in ("nan", "None", ""):
+                    tagged[_name(name)] = str(value)
+        mark = re.compile(r"^(.*?)(BX|BY|GX|GY)-(\d+)([A-Z]*)$", re.IGNORECASE)
+        first: dict[str, str] = {}
+        for name in self.beams:
+            match = mark.match(name)
+            key = tagged.get(name) or (
+                (match.group(1) + match.group(2) + "-" + match.group(3)).upper() if match else None)
+            if key is None:
+                continue
+            if key in first:
+                join(name, first[key])
+            else:
+                first[key] = name
+
+        def direction(name: str):
+            i, j = self.beams[name]
+            if i not in xyz or j not in xyz:
+                return None
+            dx, dy = xyz[j][0] - xyz[i][0], xyz[j][1] - xyz[i][1]
+            length = math.hypot(dx, dy)
+            return (dx / length, dy / length) if length > ON_LINE else None
+
+        for names in self.at_joint.values():
+            for index, a in enumerate(names):
+                da = direction(a)
+                for b in names[index + 1:]:
+                    db = direction(b)
+                    if da and db and abs(da[0] * db[0] + da[1] * db[1]) >= IN_LINE:
+                        join(a, b)
+        self.line = {name: root(name) for name in self.beams}
+        count: dict[tuple[str, str], int] = {}
+        for name, ends in self.beams.items():
+            for joint in ends:
+                key = (self.line[name], joint)
+                count[key] = count.get(key, 0) + 1
+        for (line, joint), pieces in count.items():
+            if pieces == 1:                      # one piece of the line ends there: a line end
+                self.line_ends.setdefault(line, set()).add(joint)
+
+    def _find_ranks(self) -> None:
+        """Rank of every line: 0 on a support, otherwise one more than the nearest line it meets."""
+        meets: dict[str, set[str]] = {}
+        for name, others in self.neighbours.items():
+            meets.setdefault(self.line[name], set()).update(
+                self.line[o] for o in others if self.line[o] != self.line[name])
+        level = {self.line[name] for name in self.grounded}
+        rank = 0
+        while level:
+            for line in level:
+                self.rank[line] = rank
+            level = {o for line in level for o in meets.get(line, ()) if o not in self.rank}
+            rank += 1
+
+    def rank_of(self, members) -> float:
+        """The rank of the line(s) of some pieces: the nearest to the supports. Infinite
+        when they reach no support at all."""
+        return min((self.rank.get(self.line.get(_name(m), ""), math.inf) for m in members),
+                   default=math.inf)
+
+    def _find_passing(self, xyz: dict) -> None:
+        """The beams whose centre line runs through each beam end joint, inside their length."""
+        located = {n: e for n, e in self.beams.items() if e[0] in xyz and e[1] in xyz}
+        by_level: dict[int, list[str]] = {}
+        for name, ends in located.items():
+            for joint in ends:
+                by_level.setdefault(round(xyz[joint][2] / SAME_LEVEL), []).append(name)
+        for joint in self.at_joint:
+            if joint not in xyz:
+                continue
+            x, y, z = xyz[joint]
+            level = round(z / SAME_LEVEL)
+            found = []
+            for other in {o for k in (level - 1, level, level + 1) for o in by_level.get(k, [])}:
+                if joint in located[other]:
+                    continue
+                (x1, y1, z1), (x2, y2, z2) = (xyz[q] for q in located[other])
+                if abs(z - (z1 + z2) / 2.0) > SAME_LEVEL + abs(z2 - z1) / 2.0:
+                    continue
+                dx, dy = x2 - x1, y2 - y1
+                length = math.hypot(dx, dy)
+                if length <= ON_LINE:
+                    continue
+                along = ((x - x1) * dx + (y - y1) * dy) / length
+                off = abs((x - x1) * dy - (y - y1) * dx) / length
+                if off <= ON_LINE and ON_LINE < along < length - ON_LINE:
+                    found.append(other)
+            if found:
+                self.passing[joint] = sorted(found)
+
+    def others_at(self, joint, own) -> set[str]:
+        """The beams that end at a joint or pass through it, apart from ``own``."""
+        joint = _name(joint)
+        return (set(self.at_joint.get(joint, [])) | set(self.passing.get(joint, []))) - set(own)
+
+    def reaches_support(self, starts, without) -> bool:
+        """Whether any of the beams ``starts`` reaches a support through the
+        beams it meets, never passing through the beams ``without``."""
+        without = set(without)
+        seen = set(starts) - without
+        queue = list(seen)
+        while queue:
+            name = queue.pop()
+            if name in self.grounded:
+                return True
+            for other in self.neighbours.get(name, ()):
+                if other not in seen and other not in without:
+                    seen.add(other)
+                    queue.append(other)
+        return False
+
+    def held_at(self, joint, own) -> bool:
+        """Whether the end of the beams ``own`` at ``joint`` is held up (see the class)."""
+        joint = _name(joint)
+        if joint in self.supports:
+            return True
+        own = {_name(m) for m in own}
+        own_lines = {self.line.get(m) for m in own}
+        mine = self.rank_of(own)
+        for other in self.others_at(joint, own):
+            line = self.line.get(other)
+            if line in own_lines:
+                continue                         # the same line going on: not a support
+            theirs = self.rank.get(line, math.inf)
+            if theirs < mine:
+                return True                      # nearer to the supports: it carries this end
+            runs_through = joint not in self.line_ends.get(line, ()) \
+                or other in self.passing.get(joint, ())
+            if theirs == mine and theirs != math.inf and runs_through:
+                return True
+        return False
 
 
 def add_carrier_depth_check(results: pd.DataFrame, connectivity: pd.DataFrame,

@@ -138,3 +138,33 @@ def test_a_split_span_deflects_like_the_whole_span():
     split = bd.span_deflection(halves)
     assert max(split["L"].live, split["R"].live) == pytest.approx(one.live, rel=1e-6)
     assert split["L"].span == pytest.approx(L)
+
+
+def test_a_line_that_ends_on_an_unsplit_girder_is_supported_there_not_a_cantilever():
+    """Two pieces of a beam line from a column to a girder that ETABS has not
+    split where the line meets it: no member of the girder ends at that joint."""
+    rows = [("C1", "Column", "c0", "a"), ("C2", "Column", "h1", "g1"), ("C3", "Column", "h2", "g2"),
+            ("2BY-3", "Beam", "a", "m"), ("2BY-3A", "Beam", "m", "e"),
+            ("2BX-9", "Beam", "m", "s"),                   # a beam framing in at mid length
+            ("2GX-1", "Beam", "g1", "g2")]                 # the girder under the end e
+    table = pd.DataFrame(rows, columns=["UniqueName", "DesignType", "UniquePtI", "UniquePtJ"])
+    table["Length"] = [3000.0, 3000.0, 3000.0, 3000.0, 3000.0, 2000.0, 8000.0]
+    points = pd.DataFrame({
+        "UniqueName": ["c0", "a", "m", "e", "s", "g1", "g2", "h1", "h2"],
+        "X": [0.0, 0.0, 0.0, 0.0, 2000.0, -4000.0, 4000.0, -4000.0, 4000.0],
+        "Y": [0.0, 0.0, 3000.0, 6000.0, 3000.0, 6000.0, 6000.0, 6000.0, 6000.0],
+        "Z": [0.0, 3000.0, 3000.0, 3000.0, 3000.0, 3000.0, 3000.0, 0.0, 0.0]})
+    line = ["2BY-3", "2BY-3A"]
+
+    def ends(coordinates=None):
+        span = next(s for s in bd.beam_spans(table, line, coordinates)
+                    if sorted(s.members) == line)
+        return sorted([span.start_supported, span.end_supported])
+
+    assert ends() == [False, True]             # counting the members at the joint: a cantilever
+    assert ends(points) == [True, True]        # with the coordinates: supported at both ends
+
+    # a line that truly ends in the air stays a cantilever
+    free = points.copy()
+    free.loc[free["UniqueName"].isin(["g1", "g2"]), "Y"] = 9000.0
+    assert ends(free) == [False, True]

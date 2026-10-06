@@ -229,12 +229,14 @@ def test_an_end_on_an_unsplit_girder_is_carried_not_free():
 
 def chain(tip_held: bool):
     """A column at a; beam pieces a-b and b-c in line; c free, or on a girder."""
-    points = pd.DataFrame({"UniqueName": ["a0", "a", "b", "c", "g1", "g2"],
-                           "X": [0, 0, 2000, 4000, 4000, 4000], "Y": [0, 0, 0, 0, -3000, 3000],
-                           "Z": [0, 3000, 3000, 3000, 3000, 3000]})
+    points = pd.DataFrame({"UniqueName": ["a0", "a", "b", "c", "g1", "g2", "h1", "h2"],
+                           "X": [0, 0, 2000, 4000, 4000, 4000, 4000, 4000],
+                           "Y": [0, 0, 0, 0, -3000, 3000, -3000, 3000],
+                           "Z": [0, 3000, 3000, 3000, 3000, 3000, 0, 0]})
     rows = [("C1", "Column", "a0", "a"), ("R", "Beam", "a", "b"), ("T", "Beam", "b", "c")]
-    if tip_held:
-        rows.append(("G", "Beam", "g1", "g2"))            # a girder across the tip, not split
+    if tip_held:   # a girder on its own columns across the tip, not split there
+        rows += [("G", "Beam", "g1", "g2"), ("C2", "Column", "h1", "g1"),
+                 ("C3", "Column", "h2", "g2")]
     return pd.DataFrame(rows, columns=["UniqueName", "DesignType", "UniquePtI", "UniquePtJ"]), points
 
 

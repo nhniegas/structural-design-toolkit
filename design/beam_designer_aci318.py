@@ -2346,7 +2346,7 @@ def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict
     if service is not None and len(service) and not results.empty:
         results = add_deflection_columns(results, service, long_limit_divisor,
                                          tables["CONNECTIVITY"], progress=progress,
-                                         stages=deflection_stages)
+                                         stages=deflection_stages, points=tables.get("POINTS"))
     if carrier_depth and not results.empty:
         from design.beam_carriers import add_carrier_depth_check
 
