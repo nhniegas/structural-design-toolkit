@@ -351,13 +351,19 @@ def network_for(connectivity, points=None, pushes=None) -> "BeamNetwork":
     """The beam network of these tables, built once and kept while the same tables are
     in use: the support status, the carriers and the deflection all ask for it, and
     building it goes through every beam of the model."""
-    key = (id(connectivity), id(points), id(pushes),
-           0 if connectivity is None else len(connectivity), 0 if points is None else len(points))
+    framing = (id(connectivity), id(points),
+               0 if connectivity is None else len(connectivity), 0 if points is None else len(points))
+    key = framing + (id(pushes),)
     network = _NETWORKS.get(key)
     if network is None:
-        if len(_NETWORKS) >= 6:
+        if len(_NETWORKS) >= 8:
             _NETWORKS.clear()
-        network = _NETWORKS[key] = BeamNetwork(connectivity, points, pushes)
+        # what meets what and the ranks depend on the framing alone: found once, and
+        # shared by the readings of the load path made on the same framing
+        base = _NETWORKS.get(framing)
+        if base is None:
+            base = _NETWORKS[framing] = BeamNetwork(connectivity, points)
+        network = _NETWORKS[key] = base.with_load_path(pushes)
     return network
 
 
@@ -583,6 +589,15 @@ class BeamNetwork:
                     seen.add(other)
                     queue.append(other)
         return False
+
+    def with_load_path(self, pushes) -> "BeamNetwork":
+        """The same framing with another reading of the load path (nothing is found again)."""
+        import copy
+
+        other = copy.copy(self)
+        other.moves = getattr(pushes, "moves", None) or {}
+        other.pushes = (pushes.pushes if isinstance(pushes, LoadPath) else pushes) or {}
+        return other
 
     def push_at(self, joint, own) -> int:
         """+1, -1 or 0 for the end of the line ``own`` at ``joint`` (see ``end_pushes``);

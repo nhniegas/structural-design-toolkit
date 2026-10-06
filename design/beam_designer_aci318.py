@@ -1494,10 +1494,24 @@ def execute_beam_design(
         story = b_row.get("Story", "-")
         moments = df_b[["Mu_left", "Mu_mid", "Mu_right"]].max(axis=1)
         governing = df_b.loc[moments.idxmax(), "Combo"] if len(df_b) else "-"
+        # The envelopes of the beam, taken once: they do not change while its bars are
+        # chosen, and asking the table for them again at every pass took most of the time.
+        combo_names = df_b["Combo"].unique()
+        combo_count = df_b["Combo"].nunique()
+        moment_columns = ["Mu_left", "Mu_mid", "Mu_right"]
+        face_max = {face: df_b.loc[df_b["Face"] == face, moment_columns].max()
+                    for face in ("TOP", "BOTTOM")}
+        all_max = df_b[["Vu_left", "Vu_mid_2h", "Vu_right",
+                        "Tu_left", "Tu_mid_2h", "Tu_right"]].max()
+        top_face = df_b[df_b["Face"] == "TOP"]
+        top_of: dict = {}
+        for position, combo_name in enumerate(top_face["Combo"].to_numpy()):
+            if combo_name not in top_of:
+                top_of[combo_name] = top_face.iloc[position]
         while True:
             # --- STEP 3A: Flexure Design ---
             report(unique_name, story,
-                   f"envelope of {df_b['Combo'].nunique()} (largest moment: {governing})",
+                   f"envelope of {combo_count} (largest moment: {governing})",
                    "Flexure at the left support, midspan and right support")
             flex_eng_left, flex_eng_mid, flex_eng_right = (
                 BeamFlexureDesign(
@@ -1507,30 +1521,30 @@ def execute_beam_design(
                 for _ in range(3)
             )
 
-            flex_eng_left.Mu_neg = df_b[df_b["Face"] == "TOP"]["Mu_left"].max() \
+            flex_eng_left.Mu_neg = face_max["TOP"]["Mu_left"] \
                 / flexure_target
-            flex_eng_left.Mu_pos = df_b[df_b["Face"] == "BOTTOM"]["Mu_left"].max() \
-                / flexure_target
-
-            flex_eng_mid.Mu_neg = df_b[df_b["Face"] == "TOP"]["Mu_mid"].max() \
-                / flexure_target
-            flex_eng_mid.Mu_pos = df_b[df_b["Face"] == "BOTTOM"]["Mu_mid"].max() \
+            flex_eng_left.Mu_pos = face_max["BOTTOM"]["Mu_left"] \
                 / flexure_target
 
-            flex_eng_right.Mu_neg = df_b[df_b["Face"] == "TOP"]["Mu_right"].max() \
+            flex_eng_mid.Mu_neg = face_max["TOP"]["Mu_mid"] \
                 / flexure_target
-            flex_eng_right.Mu_pos = df_b[df_b["Face"] == "BOTTOM"]["Mu_right"].max() \
+            flex_eng_mid.Mu_pos = face_max["BOTTOM"]["Mu_mid"] \
+                / flexure_target
+
+            flex_eng_right.Mu_neg = face_max["TOP"]["Mu_right"] \
+                / flexure_target
+            flex_eng_right.Mu_pos = face_max["BOTTOM"]["Mu_right"] \
                 / flexure_target
 
             max_Tu_left, max_Tu_mid, max_Tu_right = (
-                df_b["Tu_left"].max(),
-                df_b["Tu_mid_2h"].max(),
-                df_b["Tu_right"].max(),
+                all_max["Tu_left"],
+                all_max["Tu_mid_2h"],
+                all_max["Tu_right"],
             )
             max_Vu_left, max_Vu_mid, max_Vu_right = (
-                df_b["Vu_left"].max(),
-                df_b["Vu_mid_2h"].max(),
-                df_b["Vu_right"].max(),
+                all_max["Vu_left"],
+                all_max["Vu_mid_2h"],
+                all_max["Vu_right"],
             )
             real_Vu_left, real_Vu_right = max_Vu_left, max_Vu_right
             max_Tu_left, max_Tu_mid, max_Tu_right = (
@@ -1698,10 +1712,8 @@ def execute_beam_design(
             min_s_left = min_s_mid = min_s_right = detailing.max_spacing_default
             section_failures: list[str] = []
 
-            for combo_name in df_b["Combo"].unique():
-                df_c_top = df_b[
-                    (df_b["Combo"] == combo_name) & (df_b["Face"] == "TOP")
-                ].iloc[0]
+            for combo_name in combo_names:
+                df_c_top = top_of[combo_name]
 
                 Vu_L = (
                     max(df_c_top["Vu_left"], seismic_res["Vu_seismic_left"])
@@ -1899,17 +1911,17 @@ def execute_beam_design(
             summary = b_row.to_dict()
             summary["Combo"] = "ENVELOPE (ALL COMBOS)"
             summary["Face"] = face_str
-            summary["Mu_left"] = df_b[df_b["Face"] == face_str]["Mu_left"].max()
-            summary["Mu_mid"] = df_b[df_b["Face"] == face_str]["Mu_mid"].max()
-            summary["Mu_right"] = df_b[df_b["Face"] == face_str]["Mu_right"].max()
+            summary["Mu_left"] = face_max[face_str]["Mu_left"]
+            summary["Mu_mid"] = face_max[face_str]["Mu_mid"]
+            summary["Mu_right"] = face_max[face_str]["Mu_right"]
 
             # Shear/Torsion envelope is identical for top and bottom rows
-            summary["Vu_left"] = df_b["Vu_left"].max()
-            summary["Vu_mid_2h"] = df_b["Vu_mid_2h"].max()
-            summary["Vu_right"] = df_b["Vu_right"].max()
-            summary["Tu_left"] = df_b["Tu_left"].max()
-            summary["Tu_mid_2h"] = df_b["Tu_mid_2h"].max()
-            summary["Tu_right"] = df_b["Tu_right"].max()
+            summary["Vu_left"] = all_max["Vu_left"]
+            summary["Vu_mid_2h"] = all_max["Vu_mid_2h"]
+            summary["Vu_right"] = all_max["Vu_right"]
+            summary["Tu_left"] = all_max["Tu_left"]
+            summary["Tu_mid_2h"] = all_max["Tu_mid_2h"]
+            summary["Tu_right"] = all_max["Tu_right"]
 
             summary["n_left_L1"], summary["n_left_L2"], summary["n_left_L3"] = (
                 get_layer_columns(flex_eng_left, is_top=is_top_face)
