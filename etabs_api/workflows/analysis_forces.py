@@ -32,6 +32,7 @@ import numpy as np
 import pandas as pd
 
 from design.code_config import NSCP
+from etabs_api.core.helpers import as_list, return_code
 from etabs_api.workflows.tributary import HEAVY_TOLERANCE_M2, Tributary
 
 _LLR = NSCP.live_load_reduction
@@ -592,6 +593,72 @@ def _read(connector, name: str, cases: list[str] | None = None) -> pd.DataFrame:
     return connector._read_database_table(name)
 
 
+RESULT_STEP_TYPES = {"Single Value": None, "Step": "Step By Step"}   # as the tables name them
+RESULT_CASE_TYPES = {"Linear Static": "LinStatic", "Response Spectrum": "LinRespSpec"}
+RESULT_GROUP = "All"            # the ETABS group of every object
+GROUP_ITEMS, STEP_BY_STEP = 2, 2
+
+
+def frame_force_arrays(connector, cases: list[str], case_types: dict[str, str]
+                       ) -> dict[str, pd.DataFrame] | None:
+    """The frame forces of ``cases`` as numbers, straight from the analysis results.
+
+    One call of ``Results.FrameForce`` on the group of all objects, in place
+    of the "Element Forces" display tables: ETABS then builds no table and
+    formats no text, which was most of the time of reading a large model.
+    The rows are those of the tables, in the same order, with the same
+    columns. The forces are the full numbers, where the tables round them
+    (to 0.005 N at most). The stations are rounded to 0.01 mm as the tables
+    give them, so that a station on the boundary of a design zone stays in
+    the zone it was in. Returns {"beam": table, "column": table}, or None when
+    ETABS does not give the results this way (the tables are read then).
+    """
+    model = connector.sap_model
+    try:
+        with connector.extraction_units():
+            setup = model.Results.Setup
+            if return_code(setup.DeselectAllCasesAndCombosForOutput()) != 0:
+                return None
+            for case in cases:
+                if return_code(setup.SetCaseSelectedForOutput(case)) != 0:
+                    return None
+            setup.SetOptionMultiStepStatic(STEP_BY_STEP)   # every step, as the tables give
+            got = model.Results.FrameForce(RESULT_GROUP, GROUP_ITEMS, 0, [], [], [], [], [], [],
+                                           [], [], [], [], [], [], [])
+    except Exception:  # an ETABS without this call, or a COM failure
+        return None
+    if return_code(got) != 0 or not int(got[0]):
+        return None
+    names = ("UniqueName", "Station", "Element", "ElemStation", "OutputCase", "StepType",
+             "StepNumber", *FORCES)
+    data = pd.DataFrame({name: np.asarray(as_list(values)) for name, values in
+                         zip(names, got[1:14])})
+    for column in ("Station", "ElemStation"):          # half up, as ETABS writes its tables
+        data[column] = np.floor(data[column].to_numpy(dtype=float) * 100.0 + 0.5) / 100.0
+    kinds = set(data["StepType"].unique())
+    if not kinds <= {"Single Value", "Step", "Max", "Min"}:
+        return None                                     # a result kind the tables are needed for
+    stepped = data["StepType"].to_numpy() == "Step"
+    data["StepNumber"] = np.where(stepped, data["StepNumber"].astype(int).astype(str), None)
+    data["StepType"] = data["StepType"].map(lambda kind: RESULT_STEP_TYPES.get(kind, kind))
+    data["CaseType"] = data["OutputCase"].map(
+        lambda case: RESULT_CASE_TYPES.get(case_types.get(str(case), ""), ""))
+    out = {}
+    for kind, table_name, label, bay in (("beam", "Beam Object Connectivity", "Beam", "BeamBay"),
+                                         ("column", "Column Object Connectivity", "Column",
+                                          "ColumnBay")):
+        members = _read(connector, table_name)
+        if members.empty or bay not in members.columns:
+            return None
+        unique = members["UniqueName"].astype(str)
+        story, bays = dict(zip(unique, members["Story"])), dict(zip(unique, members[bay]))
+        own = data[data["UniqueName"].astype(str).isin(set(unique))].copy()
+        own.insert(0, "Story", own["UniqueName"].map(story))
+        own.insert(1, label, own["UniqueName"].map(bays))
+        out[kind] = own.reset_index(drop=True)
+    return out
+
+
 def pattern_types(connector) -> dict[str, int]:
     """ETABS type of every load pattern (see DEAD_TYPES, LIVE_TYPES)."""
     patterns = connector.sap_model.LoadPatterns
@@ -698,9 +765,14 @@ def factored_forces(
                          "live pattern?")
     out, reductions = [], {}
     releases = frame_releases(connector) if options.pattern_factor else {}
+    arrays = None if getattr(connector, "read_force_tables", False) else         frame_force_arrays(connector, sorted(needed), case_types)
+    if arrays is None and not getattr(connector, "read_force_tables", False):
+        notes.append("ETABS did not give the frame forces as numbers: they were read from "
+                     "its tables, which takes longer.")
     for kind, table_name, label in (("beam", "Element Forces - Beams", "Beam"),
                                     ("column", "Element Forces - Columns", "Column")):
-        table = _read(connector, table_name, sorted(needed))
+        table = arrays[kind] if arrays is not None else _read(connector, table_name,
+                                                             sorted(needed))
         if table.empty:
             continue
         if members:

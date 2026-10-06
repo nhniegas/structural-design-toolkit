@@ -1649,3 +1649,26 @@ def test_the_clear_height_never_exceeds_the_station_span_and_falls_back_to_it():
     assert clear(0.0, 4000.0, 500.0) == 4000.0         # joint coordinates not known
     assert clear(400.0, 300.0, 500.0) == 300.0         # a beam deeper than the stub
     assert clear(4500.0, 4500.0, 0.0) == 4500.0        # no beam at the top
+
+
+def test_a_confinement_ratio_equal_to_the_required_one_passes_whatever_the_last_digit():
+    """The tie spacing is the one at which provided = required: values of a real column
+    came out one digit apart, and failed or passed by chance."""
+    from design.column_designer_aci318 import _meets
+
+    assert _meets(0.01220294102960668, 0.012202941029606682)     # one ulp under: the same number
+    assert _meets(0.012182885935757375, 0.012182885935757377)
+    assert _meets(0.0123, 0.0122)
+    assert not _meets(0.0122029, 0.0122030)                       # a real shortfall still fails
+
+
+def test_names_are_cleaned_once_for_each_different_name():
+    from design.column_designer_aci318 import _normalize_names, _normalize_object_name
+
+    names = pd.Series([502.0, "C1 ", None, 502, "007.0", float("nan"), "C1 ", 12.5, "3.0"],
+                      index=list("abcdefghi"), name="UniqueName")
+    cleaned = _normalize_names(names)
+    assert list(cleaned) == [_normalize_object_name(v) for v in names]
+    assert list(cleaned) == ["502", "C1", "", "502", "007.0", "", "C1", "12.5", "3"]
+    assert list(cleaned.index) == list("abcdefghi") and cleaned.name == "UniqueName"
+    assert _normalize_names(pd.Series([], dtype=object)).empty

@@ -37,6 +37,7 @@ Supporting code:
 - `utilities/_calc_report.py`: layout of the beam and column PDF calculation reports.
 - `utilities/run_summary.py`: the summary every command shows in a window when it finishes (the terminal keeps the detailed results).
 - `utilities/doctor.py`: `sdt doctor`, the check that a machine can run the toolkit.
+- `design/parallel.py`: the processes that share the beam design of a large model between the cores (`SDT_WORKERS=1` keeps one).
 - `build_exe.ps1`: builds the packaged program `sdt.exe`.
 - `utilities/_xlsx_values.py`: rounded numbers and stated blanks of the result workbooks.
 - `main.qmd`: Quarto template for written reports.
@@ -47,7 +48,7 @@ Supporting code:
 1. Open the [Releases](https://github.com/nhniegas/structural-design-toolkit/releases) page and download `sdt-<version>-windows.zip` of the latest release.
 2. Unzip it anywhere and open the `sdt` folder. Keep the files of the folder together.
 3. Double-click `sdt.exe`. A terminal opens with the menu of commands: type a number or a name, and the menu comes back when the command ends.
-4. Run `doctor` first. It checks that ETABS, the dialogs and LaTeX are in place on your machine.
+4. Run `doctor` first. It checks that ETABS, the dialogs and LaTeX are in place on your machine, and that the design processes start.
 
 Windows may warn that the program is from an unknown publisher (it is not signed): choose **More info**, then **Run anyway**. ETABS must be installed for the ETABS commands.
 
@@ -155,7 +156,7 @@ This defines the materials, frame sections, load patterns, UBC 97 response spect
 
 `sdt check` checks the open model against NSCP 2015 without changing it, and prints one line per check in the terminal. It covers missing loads, supports and diaphragms; the seismic inputs against the Section 208 tables (Z, Na, Nv, Ca, Cv, I, R, Ct); the story ranges and the Ev term in the combinations; P-delta, the mass source and the cracked-section modifiers; and the Section 418 member limits. After `sdt analyze` it also recomputes the base shear coefficient and period cap, and checks the spectrum scaling, modal mass and the drift ΔM = 0.7RΔS. See [Model check](docs/etabs_model_check.md).
 
-`sdt drift` checks the story drift of the `DRIFT` and `WDRIFT` combinations (or of the combinations you pick, when the model has none under those names) using the drift stiffness: strength level (0.35 / 0.70) and service level (1.4 times). It works on the open model: it sets the modifiers, analyses, reports and restores the model. The drift is read at the diaphragm centre of mass or at the four outer column joints of each story. See [Story drift](docs/etabs_drift.md).
+`sdt drift` checks the story drift of the `DRIFT` and `WDRIFT` combinations (or, when the model has none under those names, of its drift load cases or of the combinations you pick) using the drift stiffness: strength level (0.35 / 0.70) and service level (1.4 times, or the factor you give). It works on the open model: it sets the modifiers, analyses, reports and restores the model. The drift is read at the diaphragm centre of mass or at the four outer column joints of each story. See [Story drift](docs/etabs_drift.md).
 
 `sdt design` runs the analysis and the beam and column design again and again on a copy of the model, resizing the members until they pass (deflection included). See [Design loop](docs/etabs_design_loop.md).
 

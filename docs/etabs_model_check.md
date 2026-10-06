@@ -51,7 +51,8 @@ Every story is included, those below the ground level too. A model set up before
 | | Spectrum function Ca and Cv match the patterns | 208.5.3.2, Fig. 208-3 |
 | | Spectrum cases have accidental eccentricity | 208.5.3.5.6 |
 | | Height hn (75 m or more needs the dynamic procedure) | 208.4.8 |
-| Seismic, with results | V/W of every static pattern = Cv I/(R T), at most 2.5 Ca I/R, at least 0.11 Ca I and, in zone 4, 0.8 Z Nv I/R; drift patterns without the lower limits | 208.5.2.1, 208.6.5.2 |
+| Seismic, with results | V/W of every static pattern = Cv I/(R T), at most 2.5 Ca I/R, at least 0.11 Ca I and, in zone 4, 0.8 Z Nv I/R; drift patterns without the 0.11 Ca I limit and the period cap | 208.5.2.1, 208.6.5.2 |
+| | With Ca and Cv typed in, ETABS keeps no zone or Nv and applies 0.8 Z Nv I/R with Nv = 1. The check finds the site the two values belong to (zone, soil and Nv, from Tables 208-5 to 208-8) and fails a pattern whose V/W, with the scale factor of the pattern in its load case, is under the minimum with that Nv. `sdt analyze` sets that factor for the drift patterns. When several sites give the same values it warns and lists each | 208.5.2.1 Eq. 208-11 |
 | | Period T at most 1.3 T_A in zone 4 (1.4 T_A in zone 2), T_A = Ct hn^(3/4). hn is the height between the bottom and top stories of each pattern, as ETABS takes it; the message gives the height and the stories it runs between. The weight W is checked over the same stories | 208.5.2.2, 208.6.1 |
 | | Spectrum base shear: OK at 100 % of static, WARN from 90 % (only for regular structures), FAIL below 90 % | 208.5.3.5.4 |
 | | Modal participating mass at least 90 % | 208.5.3.5.2 |

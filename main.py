@@ -58,7 +58,7 @@ import argparse
 import sys
 from pathlib import Path
 
-VERSION = "0.3.4"  # the same as in pyproject.toml (tests/test_main.py checks it)
+VERSION = "0.3.5"  # the same as in pyproject.toml (tests/test_main.py checks it)
 # Hidden first argument: this process is the progress window of another one
 # (utilities/_gui_helpers.LoadingWindow). It is how the packaged program,
 # which has no separate Python to start, opens that window.
@@ -285,6 +285,9 @@ def main(argv: list[str] | None = None) -> int:
 
         run_loading_window(argv[1] if len(argv) > 1 else "")
         return 0
+    from design import parallel
+
+    parallel.enable()   # the member designs of a large model are shared between the cores
     parser = build_parser()
     arguments = parser.parse_args(argv)
     if arguments.command is None:
@@ -297,4 +300,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    import multiprocessing
+
+    multiprocessing.freeze_support()   # the packaged program starts its design processes itself
     raise SystemExit(main())

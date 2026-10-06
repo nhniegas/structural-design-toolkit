@@ -843,9 +843,9 @@ def add_deflection_columns(results, service, long_limit_divisor: float = LIMIT_D
 
     checked: dict[str, DeflectionResult] = {}
     if has_lines:
-        from design.beam_carriers import BeamNetwork, read_load_path
+        from design.beam_carriers import network_for, read_load_path
 
-        network = BeamNetwork(connectivity, points, pushes if pushes is not None
+        network = network_for(connectivity, points, pushes if pushes is not None
                               else read_load_path(service, COMBO_FULL, connectivity))
         for chain in beam_spans(connectivity, names, points, through_supports=True):
             tell(chain)

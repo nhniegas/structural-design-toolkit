@@ -284,17 +284,26 @@ def magnify_member(forces: pd.DataFrame, section: ColumnSection,
     moment_columns = {axis: table.columns.get_loc(f"M{axis}") for axis in AXES}
     for column in ("M2", "M3"):
         table[column] = pd.to_numeric(table[column], errors="coerce").astype(float)
-    for combo, index in stations.dropna().groupby(combos, sort=False).groups.items():
-        rows = stations.loc[index]
-        at = {"I": rows.idxmin(), "J": rows.idxmax()}
-        ends = {end: table.loc[label] for end, label in at.items()}
-        axial = {end: float(pd.to_numeric(row["P"], errors="coerce")) for end, row in ends.items()}
+    # The numbers as arrays, taken once: reading the table row by row for every
+    # combination took most of the time of the slenderness check.
+    station = stations.to_numpy(dtype=float)
+    axial_of = pd.to_numeric(table["P"], errors="coerce").to_numpy(dtype=float)
+    sustained_of = (pd.to_numeric(table["P_sustained"], errors="coerce").to_numpy(dtype=float)
+                    if has_sustained else None)
+    moment_of = {axis: table[f"M{axis}"].to_numpy(dtype=float, copy=True) for axis in AXES}
+    placed = np.flatnonzero(~np.isnan(station))
+    codes, names = pd.factorize(combos.to_numpy()[placed], sort=False)   # in order of appearance
+    order = np.argsort(codes, kind="stable")
+    groups = np.split(placed[order], np.cumsum(np.bincount(codes, minlength=len(names)))[:-1])
+    for combo, rows in zip(names, groups):
+        at = {"I": int(rows[np.argmin(station[rows])]), "J": int(rows[np.argmax(station[rows])])}
+        ends = at
+        axial = {end: float(axial_of[row]) for end, row in at.items()}
         pu = max(axial.values())
         beta = cfg.default_sustained_ratio
         beta_basis = "assumed"
         if has_sustained and pu > 0:
-            sustained = max(float(pd.to_numeric(ends[end].get("P_sustained"), errors="coerce"))
-                            for end in ends)
+            sustained = max(float(sustained_of[at[end]]) for end in ends)
             if math.isfinite(sustained):
                 beta = min(max(sustained / pu, 0.0), 1.0)
                 beta_basis = "dead load share of Pu"
@@ -303,14 +312,14 @@ def magnify_member(forces: pd.DataFrame, section: ColumnSection,
         statuses = []
         per_end = {end: dict(shared) for end in ends}
         for axis in AXES:
-            moment = {end: float(row[f"M{axis}"]) for end, row in ends.items()}
+            moment = {end: float(moment_of[axis][row]) for end, row in at.items()}
             result = axis_result(moment["I"], moment["J"], pu, geometry[axis], section, axis,
                                  beta, combo in spectral, code)
             if result.slender:
                 out.slender = True
                 end = result.governing_end
                 sign = -1.0 if moment[end] < 0 else 1.0
-                table.iat[table.index.get_loc(at[end]), moment_columns[axis]] = sign * result.design
+                table.iat[at[end], moment_columns[axis]] = sign * result.design
             if result.status.startswith("FAIL"):
                 out.failed = True
                 statuses.append(f"axis {axis}: {result.status}")

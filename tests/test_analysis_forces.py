@@ -281,3 +281,69 @@ def test_column_reduction_uses_levels_and_heavy_area(levels, heavy, percent, lim
     result = af.live_load_reduction(forces, "column", {"C1": area}, ["DEAD"], ["LRED"])["C1"]
     assert result.percent == pytest.approx(percent)
     assert result.limit == limit
+
+
+class _Results:
+    """Results.FrameForce of a model with one beam, one column and one brace."""
+
+    def __init__(self, fail=False):
+        self.Setup, self.selected, self.fail = self, [], fail
+
+    def DeselectAllCasesAndCombosForOutput(self):
+        return 0
+
+    def SetCaseSelectedForOutput(self, case):
+        self.selected.append(case)
+        return 0
+
+    def SetOptionMultiStepStatic(self, option):
+        return 0
+
+    def FrameForce(self, name, item_type, *outputs):
+        members = ["B1", "B1", "C1", "C1", "C1", "C1", "D9"]
+        stations = [0.0, 3000.004, 0.0, 2800.0, 0.0, 2800.0, 0.0]
+        cases = ["DEAD", "DEAD", "WX", "WX", "WX", "WX", "DEAD"]
+        kinds = ["Single Value"] * 2 + ["Step"] * 4 + ["Single Value"]
+        steps = [0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 0.0]
+        forces = [[float(i + 10 * k) + 0.123456 for i in range(7)] for k in range(6)]
+        return (len(members), members, stations, members, stations, cases, kinds, steps,
+                *forces, 1 if self.fail else 0)
+
+
+class _ResultsConnector:
+    def __init__(self, fail=False):
+        from contextlib import nullcontext
+        from types import SimpleNamespace
+
+        self.sap_model = SimpleNamespace(Results=_Results(fail))
+        self.extraction_units = nullcontext
+
+
+def _connectivity(connector, name, cases=None):
+    kind = "Beam" if name.startswith("Beam") else "Column"
+    return pd.DataFrame({"UniqueName": ["B1" if kind == "Beam" else "C1"], "Story": ["2F"],
+                         f"{kind}Bay": ["B7" if kind == "Beam" else "C3"]})
+
+
+def test_frame_forces_come_as_numbers_in_the_layout_of_the_tables(monkeypatch):
+    monkeypatch.setattr(af, "_read", _connectivity)
+    connector = _ResultsConnector()
+    got = af.frame_force_arrays(connector, ["DEAD", "WX"], {"DEAD": "Linear Static",
+                                                           "WX": "Linear Static"})
+    assert connector.sap_model.Results.selected == ["DEAD", "WX"]
+    beam, column = got["beam"], got["column"]
+    assert list(beam["UniqueName"]) == ["B1", "B1"] and list(column["UniqueName"]) == ["C1"] * 4
+    assert list(beam.columns[:2]) == ["Story", "Beam"] and beam["Beam"].iloc[0] == "B7"
+    assert column["Column"].iloc[0] == "C3" and set(column["CaseType"]) == {"LinStatic"}
+    assert beam["StepType"].isna().all() and beam["StepNumber"].isna().all()
+    assert list(column["StepType"]) == ["Step By Step"] * 4
+    assert list(column["StepNumber"]) == ["1", "1", "2", "2"]
+    assert beam["Station"].iloc[1] == 3000.0          # to 0.01 mm, as the tables give stations
+    assert beam["P"].iloc[0] == 0.123456              # the forces are not rounded
+    forces = af.case_forces(column, "Column")                                   # as a table would
+    assert forces.steps == {"WX": ["WX#1", "WX#2"]} and forces.values["WX#2"].shape == (2, 6)
+
+
+def test_the_tables_are_read_when_etabs_gives_no_numbers(monkeypatch):
+    monkeypatch.setattr(af, "_read", _connectivity)
+    assert af.frame_force_arrays(_ResultsConnector(fail=True), ["DEAD"], {}) is None

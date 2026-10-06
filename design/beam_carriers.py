@@ -87,7 +87,13 @@ def carried_beams(connectivity: pd.DataFrame, points: pd.DataFrame | None,
         return "through" if ON_LINE < along < length - ON_LINE else "end"
 
     directions = {name: unit(name) for name in beams}
-    network = BeamNetwork(connectivity, points, pushes)
+    network = network_for(connectivity, points, pushes)
+    # the beams near each level, so that a joint is compared with those and not with all
+    by_level: dict[int, list[str]] = {}
+    for other, (a, b) in beams.items():
+        low, high = sorted((round(xyz[a][2] / SAME_LEVEL), round(xyz[b][2] / SAME_LEVEL)))
+        for level in range(low, high + 1):
+            by_level.setdefault(level, []).append(other)
     out: dict[str, list[str]] = {}
     for name, ends in beams.items():
         own = directions[name]
@@ -100,7 +106,10 @@ def carried_beams(connectivity: pd.DataFrame, points: pd.DataFrame | None,
             push = network.pushes.get((name, joint), 0)
             if push < 0:
                 continue                   # a downward force on this end: nothing carries it here
-            meeting = [(other, meets(other, joint)) for other in beams if other != name]
+            level = round(xyz[joint][2] / SAME_LEVEL)
+            near = {o for k in range(level - 2, level + 3) for o in by_level.get(k, ())}
+            meeting = [(other, meets(other, joint)) for other in beams
+                       if other != name and other in near]
             meeting = [(other, how) for other, how in meeting
                        if how and directions[other] is not None]
             for other, how in meeting:
@@ -193,7 +202,7 @@ def end_conditions(connectivity: pd.DataFrame, points: pd.DataFrame | None,
                 return True
         return False
 
-    network = BeamNetwork(connectivity, points, pushes)
+    network = network_for(connectivity, points, pushes)
     raw: dict[tuple[str, str], str | list[str]] = {}
     for name, ends in beams.items():
         own = directions[name]
@@ -333,6 +342,37 @@ def read_load_path(forces: pd.DataFrame | None, combo: str | None,
     has the joint movements, the deflected shape."""
     return LoadPath(end_pushes(forces, combo, connectivity),
                     end_moves(forces, combo, connectivity))
+
+
+_NETWORKS: dict[tuple, tuple] = {}
+
+
+def network_for(connectivity, points=None, pushes=None) -> "BeamNetwork":
+    """The beam network of these tables, built once and kept while the same tables are
+    in use: the support status, the carriers and the deflection all ask for it, and
+    building it goes through every beam of the model."""
+    framing = (id(connectivity), id(points))
+    key = framing + (id(pushes),)
+    # The tables are kept with what was built from them: the key is the identity of an
+    # object, and that is only safe while the object is alive.
+    kept = _NETWORKS.get(key)
+    if kept is not None and kept[1] is connectivity and kept[2] is points and kept[3] is pushes:
+        return kept[0]
+    if len(_NETWORKS) >= 8:
+        _NETWORKS.clear()
+    # what meets what and the ranks depend on the framing alone: found once, and
+    # shared by the readings of the load path made on the same framing
+    base = _NETWORKS.get(framing)
+    if base is None or base[1] is not connectivity or base[2] is not points:
+        base = _NETWORKS[framing] = (BeamNetwork(connectivity, points), connectivity, points, None)
+    network = base[0].with_load_path(pushes)
+    _NETWORKS[key] = (network, connectivity, points, pushes)
+    return network
+
+
+def forget_networks() -> None:
+    """Drop the networks kept by ``network_for`` (the tables may be changed next)."""
+    _NETWORKS.clear()
 
 
 class BeamNetwork:
@@ -552,6 +592,15 @@ class BeamNetwork:
                     seen.add(other)
                     queue.append(other)
         return False
+
+    def with_load_path(self, pushes) -> "BeamNetwork":
+        """The same framing with another reading of the load path (nothing is found again)."""
+        import copy
+
+        other = copy.copy(self)
+        other.moves = getattr(pushes, "moves", None) or {}
+        other.pushes = (pushes.pushes if isinstance(pushes, LoadPath) else pushes) or {}
+        return other
 
     def push_at(self, joint, own) -> int:
         """+1, -1 or 0 for the end of the line ``own`` at ``joint`` (see ``end_pushes``);

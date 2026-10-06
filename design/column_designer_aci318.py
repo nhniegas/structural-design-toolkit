@@ -549,6 +549,16 @@ def _normalize_object_name(value) -> str:
     return text
 
 
+def _normalize_names(names: pd.Series) -> pd.Series:
+    """``_normalize_object_name`` of every value of a column, worked out once for each
+    different name: the force table repeats a few thousand names millions of times."""
+    codes, different = pd.factorize(names, use_na_sentinel=True)     # a missing name: -1
+    cleaned = np.empty(len(different) + 1, dtype=object)
+    cleaned[:-1] = [_normalize_object_name(name) for name in different]
+    cleaned[-1] = _normalize_object_name(None)
+    return pd.Series(cleaned[codes], index=names.index, name=names.name)
+
+
 class IncompleteJointDataError(ValueError):
     """Signal that SMRF joint checks lack a framing member's design/load data."""
 
@@ -1428,19 +1438,26 @@ def _end_force_rows(forces: pd.DataFrame) -> dict:
     if not valid.empty:
         grouped = valid["Station"].groupby(names[valid.index], sort=False)
         lowest, highest = grouped.idxmin(), grouped.idxmax()
-        for combo in lowest.index:
-            index[combo] = (valid.loc[lowest[combo]], valid.loc[highest[combo]])
+        # the two end rows of each combination as plain records: they are read some
+        # hundreds of thousands of times, and a table row is slow to read from. The
+        # rows are taken in two reads, not one per combination: a table is indexed
+        # again for every size and bar layout that is tried.
+        first = valid.loc[lowest.to_numpy()].to_dict("records")
+        last = valid.loc[highest.to_numpy()].to_dict("records")
+        for combo, low_row, high_row in zip(lowest.index, first, last):
+            index[combo] = (low_row, high_row)
     _END_FORCE_INDEX[id(forces)] = (forces, index)
     return index
 
 
 def _column_force_at_end(
     forces: pd.DataFrame, combo: str, at_i_end: bool
-) -> pd.Series:
+) -> dict:
     """Select the first/last station for a member and load combination.
 
     ETABS frame stations are treated as increasing from connectivity I to J.
     The member's table is indexed by combination the first time it is used.
+    The record returned is shared: read it, do not change it.
     """
     index = _end_force_rows(forces)
     if str(combo) not in index:
@@ -1448,7 +1465,7 @@ def _column_force_at_end(
     rows = index[str(combo)]
     if rows is None:
         raise ValueError(f"Column force stations for combo {combo!r} are not numeric.")
-    return (rows[0] if at_i_end else rows[1]).copy()
+    return rows[0] if at_i_end else rows[1]
 
 
 def _evaluate_column_candidate(
@@ -1707,6 +1724,20 @@ def _strong_column_hull_combos(combos: list[str], columns: list[str], joint: str
     return [combo for index, combo in enumerate(combos) if index in keep]
 
 
+RATIO_TOLERANCE = 1e-9
+
+
+def _meets(provided: float, required: float) -> bool:
+    """Whether a provided ratio meets the required one.
+
+    The tie spacing is often the very spacing at which the provided
+    confinement equals the required one, so the two numbers differ only in
+    the last digit of the arithmetic: a plain >= then passes or fails by
+    chance. A relative tolerance of 1e-9 settles it.
+    """
+    return provided >= required * (1.0 - RATIO_TOLERANCE)
+
+
 def _smrf_so_limit(code: AciCode, hx: float | None = None) -> float:
     """Hoop spacing limit 'so' of ACI 18.7.5.3: 100 + (350 - hx)/3, kept within 100..150 mm."""
     cfg = code.column_seismic
@@ -1801,8 +1832,8 @@ def _column_transverse_candidate_passes(
             transverse["Transverse_Spacing_Provided_mm"] * core_height
         )
         confinement_passes = (
-            provided_x >= transverse["Required_Confinement_Ratio_X"]
-            and provided_y >= transverse["Required_Confinement_Ratio_Y"]
+            _meets(provided_x, transverse["Required_Confinement_Ratio_X"])
+            and _meets(provided_y, transverse["Required_Confinement_Ratio_Y"])
         )
     elif is_smrf:
         confinement_passes = (
@@ -1921,7 +1952,7 @@ def _smrf_transverse_design(
         clear_spacing = spacing - engine.dties
         check = (
             "PASS"
-            if provided_ratio >= required_ratio
+            if _meets(provided_ratio, required_ratio)
             and engine.code.column_transverse.spiral_clear_spacing_min
             <= clear_spacing
             <= engine.code.column_transverse.spiral_clear_spacing_max
@@ -2012,8 +2043,8 @@ def _smrf_transverse_design(
     provided_ratio_x = required_legs_x * tie_area / (spacing * core_width)
     provided_ratio_y = required_legs_y * tie_area / (spacing * core_height)
     confinement_pass = (
-        provided_ratio_x >= required_ratio
-        and provided_ratio_y >= required_ratio
+        _meets(provided_ratio_x, required_ratio)
+        and _meets(provided_ratio_y, required_ratio)
     )
 
     return {
@@ -2517,7 +2548,7 @@ def _evaluate_smrf_joints(
     beam_design = restore_beam_result_labels(beam_design)
     for frame in (connectivity, frame_data, factored_loads, beam_design, column_results):
         if "UniqueName" in frame.columns:
-            frame["UniqueName"] = frame["UniqueName"].map(_normalize_object_name)
+            frame["UniqueName"] = _normalize_names(frame["UniqueName"])
     for point_column in ("UniquePtI", "UniquePtJ"):
         connectivity[point_column] = connectivity[point_column].map(
             _normalize_object_name
@@ -2598,11 +2629,16 @@ def _evaluate_smrf_joints(
             frame_rows[member] = design_by_name.loc[member]
         return frame_rows[member]
 
+    beam_geometry_rows: dict[str, pd.Series] = {}
+
     def beam_geometry_row(member: str) -> pd.Series:
-        """Return beam geometry from BEAM DESIGN, falling back to FRAME DATA."""
-        if member in beam_result_groups:
-            return beam_result_groups[member].iloc[0]
-        return frame_data_row(member)
+        """Return beam geometry from BEAM DESIGN, falling back to FRAME DATA (read once
+        for each beam: the joint checks ask for it tens of thousands of times)."""
+        if member not in beam_geometry_rows:
+            beam_geometry_rows[member] = (beam_result_groups[member].iloc[0]
+                                          if member in beam_result_groups
+                                          else frame_data_row(member))
+        return beam_geometry_rows[member]
 
     def joint_column_reinforcement(joint: str, members: list[str]) -> str:
         """Summarize reinforcement for every designed column framing into a joint."""
@@ -4290,7 +4326,7 @@ def design_columns(
     factored_loads, combo_display = _expand_combo_permutations(factored_loads)
     for frame in (frame_data, connectivity, factored_loads, beam_design):
         if "UniqueName" in frame.columns:
-            frame["UniqueName"] = frame["UniqueName"].map(_normalize_object_name)
+            frame["UniqueName"] = _normalize_names(frame["UniqueName"])
     for point_column in ("UniquePtI", "UniquePtJ"):
         if point_column in connectivity.columns:
             connectivity[point_column] = connectivity[point_column].map(
@@ -4823,19 +4859,21 @@ def design_columns(
         )
         initial_joints = _skip_joint_checks(initial_joints, skipped_joints)
 
+        # the joints as plain records, read at every pass of the loop below
+        joint_records = initial_joints.to_dict("records")
         while not initial_joints.empty:
             exempt = (initial_joints["BCC_Exempt"].eq(True)
                       if "BCC_Exempt" in initial_joints.columns
                       else pd.Series(False, index=initial_joints.index))
+            strong_column = dcr_targets.limit(dcr_targets.COLUMN, dcr_targets.STRONG_COLUMN)
+            below = pd.Series([current_joint_ratio(record) < strong_column - 1e-9
+                               for record in joint_records], index=initial_joints.index,
+                              dtype=bool)
             failing_rows = initial_joints.loc[
                 initial_joints["Sum_Column_Mn_kNm"].notna()
                 & initial_joints["Sum_Beam_Mn_kNm"].notna()
                 & ~exempt
-                & initial_joints.apply(
-                    lambda row: current_joint_ratio(row)
-                    < dcr_targets.limit(dcr_targets.COLUMN, dcr_targets.STRONG_COLUMN) - 1e-9,
-                    axis=1,
-                )
+                & below
             ]
             if failing_rows.empty:
                 break
@@ -5248,10 +5286,10 @@ def design_columns(
             )
             transverse["Confinement_Check"] = (
                 "PASS"
-                if transverse["Provided_Ash_s_Ratio_X"]
-                >= transverse["Required_Confinement_Ratio_X"]
-                and transverse["Provided_Ash_s_Ratio_Y"]
-                >= transverse["Required_Confinement_Ratio_Y"]
+                if _meets(transverse["Provided_Ash_s_Ratio_X"],
+                          transverse["Required_Confinement_Ratio_X"])
+                and _meets(transverse["Provided_Ash_s_Ratio_Y"],
+                           transverse["Required_Confinement_Ratio_Y"])
                 else "FAIL"
             )
         if transverse["Confinement_Check"] == "FAIL":
@@ -5565,7 +5603,7 @@ def column_size_passes(
     left to the full design.
     """
     forces, _ = _expand_combo_permutations(_to_compression_positive(_clean_table(forces)))
-    forces["UniqueName"] = forces["UniqueName"].map(_normalize_object_name)
+    forces["UniqueName"] = _normalize_names(forces["UniqueName"])
     row = frame_row.copy()
     row["UniqueName"] = _normalize_object_name(row["UniqueName"])
     engine, _ = _build_column_section(row, 4, dmain, dties, cover, is_smrf)
@@ -6477,15 +6515,25 @@ def _visible_tie_shapes(
     return visible
 
 
+DXF_OUTLINE_TOLERANCE = 0.05   # mm: a tie outline is drawn within this of its true shape
+
+
 def _draw_tie_bars(modelspace, bars: list[TieBar], bar_thickness: float) -> None:
     """Draw the visible outline of every tie bar as closed polylines."""
     for bar, shape in _visible_tie_shapes(bars, bar_thickness):
         for polygon in getattr(shape, "geoms", [shape]):
             if polygon.geom_type != "Polygon" or polygon.is_empty:
                 continue
+            # The outline of a bent bar has hundreds of points, most of them on straight
+            # runs or closer together than a plotter can show: points that move the line
+            # by less than DXF_OUTLINE_TOLERANCE are left out, and the rest are written
+            # to a hundredth of a millimetre. A schedule of 500 columns was 44 MB.
+            polygon = polygon.simplify(DXF_OUTLINE_TOLERANCE, preserve_topology=True)
+            if polygon.is_empty or polygon.geom_type != "Polygon":
+                continue
             for ring in (polygon.exterior, *polygon.interiors):
                 modelspace.add_lwpolyline(
-                    list(ring.coords)[:-1],
+                    [(round(x, 2), round(y, 2)) for x, y in list(ring.coords)[:-1]],
                     close=True,
                     dxfattribs={"layer": bar.layer, "lineweight": 18},
                 )
@@ -7236,7 +7284,8 @@ def _bcc_caption(rows: pd.DataFrame) -> str:
 
 def column_interaction_figure(rows: pd.DataFrame, path: str, dmain: float, dties: float,
                               cover: float, is_smrf: bool) -> str | None:
-    """Save the 3D P-Mx-My surface of a column's final layout with its demands (PNG).
+    """Save the 3D P-Mx-My surface of a column's final layout with its demands (PNG, or a
+    compact JPEG when the path ends in .jpg, as the calculation report asks).
 
     The demands are every combination at both ends; the hull vertices and the
     governing demand are marked. None when the layout has no surface.
@@ -7292,7 +7341,7 @@ def build_column_calc_report(report: pd.DataFrame, filepath: str, information: l
         os.makedirs(os.path.join(folder, figure_dir), exist_ok=True)
         for name, rows in report.groupby("UniqueName", sort=False):
             safe = re.sub(r"[^A-Za-z0-9_-]", "_", str(name))
-            relative = f"{figure_dir}/{safe}.png"
+            relative = f"{figure_dir}/{safe}.jpg"
             if column_interaction_figure(rows, os.path.join(folder, relative), **figure_options):
                 figures[name] = (relative, "Design interaction surface (phi Pn, phi Mnx, phi "
                                  "Mny) of the final bar layout with every combination at both "

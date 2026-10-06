@@ -36,7 +36,7 @@ sdt design
 | Size ranges | For section families that have none in the setup inputs (for example `FTB` tie beams). When the model has no setup inputs of its own (no `<model>.setup.json` beside it), every family is shown with a range to confirm or change, since the loop makes members smaller down to the first size of the range. The dialog lists the sizes the model has now, and the range shown always holds them: the default range widened where needed, or, for a family with no default (circular columns), from the smallest size in the model to two steps above the largest. Saved with the model's setup inputs |
 | Seismic values | Z and Ct for the period cap are read from the model's UBC 97 seismic patterns. Asked only when the model has none, or when a value differs from the one saved before |
 
-The model is saved as `<model> - DESIGN.EDB` and the loop works on that copy; the original is not changed. At the end the final design is written to the output folder (results, calculations, schedules, as `sdt beams` and `sdt columns` do) and stored in `<model> - DESIGN - design data.pkl`, so `sdt columns` can be run again on it. The log `<model> - DESIGN log.txt` lists every iteration: each analysis, the spectrum scaling and every section change with its reason. The terminal lists the same lines as it runs. When the loop finishes, a separate window shows its summary, also saved as `<model> - DESIGN summary.txt` in the output folder: the status and the number of iterations, how many beams and columns were designed and fail, the net size changes (first size to final size, members grouped; a member that returned to its first size is not listed), what still fails, the drift result and the files.
+The model is saved as `<model> - DESIGN.EDB` and the loop works on that copy; the original is not changed. At the end the final design is written to the output folder (results, calculations, schedules, as `sdt beams` and `sdt columns` do) and stored in `<model> - DESIGN - design data.pkl`, so `sdt columns` can be run again on it. The log `<model> - DESIGN log.txt` lists every iteration: each analysis, the spectrum scaling and every section change with its reason. Each iteration ends with its time and how it divides: analysis, reading the results, beam design, column design, choosing the sizes and resizing. The terminal lists the same lines as it runs. When the loop finishes, a separate window shows its summary, also saved as `<model> - DESIGN summary.txt` in the output folder: the status and the number of iterations, how many beams and columns were designed and fail, the net size changes (first size to final size, members grouped; a member that returned to its first size is not listed), what still fails, the drift result and the files.
 
 **Drift.** Drift depends on the final member sizes, so it is checked once at the end, with `sdt drift` on the final working copy, and saved as `<model> - DESIGN - Drift.txt` in the output folder. The sections are **not** resized for drift. If a check fails, the log and the terminal say so: reconfigure the model for drift (stiffer members or walls) and run `sdt design` again.
 
@@ -83,7 +83,30 @@ The loop stops when the final check changes nothing (converged) or after the num
 - **Downsizing**: a passing member whose ratios are all below the threshold goes one size smaller and the next analysis confirms it. Beams: tension steel ratio, shear and deflection ratio; columns: flexure, shear and joint shear utilization, steel ratio, beam-column strength ratio at least 1.2 / threshold. A member that grew in this run is never made smaller again, and beams never go below the ACI 318-14 Table 9.3.1.1 depth (L/16, cantilevers L/8).
 - Sizes follow the setup ranges of the family, then grow by the increment up to the largest size given. Missing sections are created with the setup rebar data and no stiffness modifiers; the modifiers assigned to the frames stay with them when their section changes. Concrete and rebar never change.
 
+## When the loop is done
+
+Changing the size of one member shifts the forces in the others, so no member is judged on old forces:
+
+- **Every iteration designs every member again** on the forces of the analysis just run, whether its own size changed or not.
+- **An iteration that follows one with no section change does not analyse again.** The model is the one the last analysis and design were made on, so they are used as they are: the first column iteration after the beams settle, and the final check after the columns settle. The log says so. Nothing is carried over once a section has changed.
+- **Every round ends with a final check of every member**, beams and columns together, with no member made smaller. The results that are written come from the last such pass, on the final sizes and their forces.
+- **Converged** means that a final check changed nothing: nothing fails that a size can fix. If the final check still has to make a member larger, another round starts, up to the largest number of rounds. The log and the summary say whether the loop converged or stopped at that limit.
+
+What "optimal" means here: within a round, a member whose ratios are all under the "make smaller" threshold goes one size down, and a member that had to grow is not made smaller again. So the loop ends where no member that was trimmed can lose another size without failing. It is not a least-weight or least-cost design: members are moved one at a time, with no objective for the whole frame, and a threshold close to 1.0 leaves little room between "can shrink" and "must grow", which takes more rounds to settle.
+
+Members that no size fixes are listed apart in the log and the summary, by what stops them: at the largest size allowed, shear that grows with the section, or a deflection that the support governs.
+
 ## Time
+
+Beam design reads each beam's forces once and cuts the zones of every combination from arrays. On a real model of 2,114 beams, the beam design with deflection and carrier depth takes about 100 s where it took 295 s, with every value of every row the same.
+
+A round whose iterations settle needs fewer analyses than iterations: on the 4-story test model a round of six iterations (three for the beams, two for the columns, the final check) runs four analyses, since two of them follow an iteration that changed nothing.
+
+Reading the results is done on numbers, not on the ETABS display tables: 78 s on that model where it took 224 s.
+
+On a model of 200 beams or more, `sdt` shares the beam design between the cores of the machine: up to 8 processes, each designing a part of the beams, with the results joined in the order one process gives them. The values are the same; on that model the beam design takes 31 s where one process takes 61 s. `SDT_WORKERS=1` in the environment keeps one process, and another number sets how many. `sdt doctor` says whether the processes start on this machine. The column design stays in one process: sharing it was tried and was no faster, since the columns of a joint and of a stack depend on each other and the forces must be passed between the processes.
+
+One full iteration on that model (analysis 84 s, reading 78 s, beam design 31 s, column design about 115 s the first time and 60 s after) is about 4 to 5 minutes, where it was 18 to 25.
 
 Column design is vectorized: the interaction surface of a bar layout is computed in closed form (no polygon clipping per grid point) and every demand of a column is checked against it in one call. On a 48-column, 4-story SMRF test model with 20 combinations column design takes about 5 s (it was 16 s), and a non-SMRF set of 20 columns with 80 load sets about 2 s (it was 20 s). Most of an iteration is now the ETABS analysis and extraction; sizing on the current forces cuts the number of those.
 

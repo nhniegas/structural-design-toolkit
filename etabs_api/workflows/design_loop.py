@@ -882,6 +882,10 @@ class Workbench:
         for item in report.scaling:
             self.log(f"  {item.direction}: static {item.static_shear / 1e3:,.0f} kN, "
                      f"{item.spectrum_case} x {item.factor:.3f}")
+        for m in report.minimum_scaling:
+            if m.factor > 1.0:
+                self.log(f"  {m.case}: scaled x {m.factor:.3f} to the zone 4 minimum "
+                         f"(V/W {m.minimum:.4f}, Nv {m.nv:g})")
         if report.governing_period:
             self.log("  periods: " + ", ".join(
                 f"{d} {t:.3f} s" for d, t in report.governing_period.items()))
@@ -1071,29 +1075,74 @@ def stop_unhelped_deflection_growth(actions: dict, sections: dict, results: pd.D
     return stopped
 
 
+STUCK_KINDS = (
+    ("no larger size within the limits", "at the largest size allowed"),
+    ("for shear and still fails", "shear: the capacity shear grows with the section"),
+    ("a larger section does not help", "deflection: the support rotates or moves"),
+)
+
+
+def not_fixed_by_size(actions: dict, sections: dict) -> dict[str, str]:
+    """The members of ``actions`` that keep their size although they fail, with why:
+    at the largest size allowed, or stopped because growing did not help."""
+    return {name: reason for name, (new, reason) in actions.items()
+            if new == sections.get(name) and any(key in reason for key, _ in STUCK_KINDS)}
+
+
+def stuck_by_kind(stuck: dict[str, str]) -> dict[str, list[str]]:
+    """{what stops them: the members}, in the order of ``STUCK_KINDS``."""
+    out: dict[str, list[str]] = {}
+    for key, kind in STUCK_KINDS:
+        names = sorted(name for name, reason in stuck.items() if key in reason
+                       and not any(name in found for found in out.values()))
+        if names:
+            out[kind] = names
+    return out
+
+
 def run_design_loop(bench: Workbench) -> dict:
     """The loop. Returns a summary: status, iterations, changes and what still fails."""
     settings = bench.settings
     grown: set[str] = set()
     shear_growths: dict[str, int] = {}
     deflection_ratios: dict[str, float] = {}
+    stuck: dict[str, str] = {}      # members a larger size does not fix, with the reason
     all_changes: list[Change] = []
     iteration = 0
     status = "not converged"
     seismic = settings.smrf
     beams, report = pd.DataFrame(), None
+    # The designs of an iteration that changed no section: the model is still the one
+    # they were made on, so the next iteration takes them and does not analyse again.
+    unchanged: tuple | None = None
 
     def step(label: str, columns: bool, allow_shrink: bool):
-        nonlocal iteration
+        nonlocal iteration, unchanged
         iteration += 1
         bench.stage = f"Round {round_number} - Iteration {iteration}: {label}"
         bench.log("")
         bench.log(f"=== Iteration {iteration}: {label} ===")
         start = time.time()
-        bench.analyze()
-        bench.extract()
-        beam_table = bench.design_beams()
-        column_report = bench.design_columns(beam_table) if columns else None
+        spent: dict[str, float] = {}     # seconds of each part of the iteration, for the log
+
+        def timed(part: str, work):
+            began = time.time()
+            result = work()
+            spent[part] = spent.get(part, 0.0) + time.time() - began
+            return result
+
+        if unchanged is None:
+            timed("analysis", bench.analyze)
+            timed("reading the results", bench.extract)
+            beam_table, column_report = timed("beam design", bench.design_beams), None
+        else:
+            beam_table, column_report = unchanged
+            bench.log("  no section changed in the last iteration: its analysis and its "
+                      "design are those of this model, and are used as they are")
+        if not columns:
+            column_report = None
+        elif column_report is None:
+            column_report = timed("column design", lambda: bench.design_columns(beam_table))
         sections = bench.sections()
         actions = beam_actions(beam_table, sections, bench.lengths(), grown, settings, seismic,
                                allow_shrink, bench.lines(), bench.directions())
@@ -1104,6 +1153,7 @@ def run_design_loop(bench: Workbench) -> dict:
             sizer = bench.column_sizer() if settings.size_on_forces else None
             actions.update(column_actions(column_report, sections, bench.angles(column_names),
                                           bench.above(), grown, settings, allow_shrink, sizer))
+        stuck.update(not_fixed_by_size(actions, sections))
         failing = beam_table.groupby("UniqueName")["Design_Status"].apply(
             lambda s: any(v != "OK" for v in s.astype(str))).sum()
         summary = f"beams failing {failing} of {beam_table['UniqueName'].nunique()}"
@@ -1113,10 +1163,16 @@ def run_design_loop(bench: Workbench) -> dict:
                 lambda s: (s.astype(str) == "FAIL").any()).sum()
             bench.log(f"  columns failing: {failing} of {column_report['UniqueName'].nunique()}")
             summary += f", columns failing {failing} of {column_report['UniqueName'].nunique()}"
-        changes = bench.apply(actions, sections, grown)
+        sizing = time.time() - start - sum(spent.values())
+        changes = timed("resizing", lambda: bench.apply(actions, sections, grown))
         all_changes.extend(changes)
-        bench.log(f"  {len(changes)} section changes, {time.time() - start:.0f} s")
+        spent["choosing the sizes"] = sizing
+        parts = ", ".join(f"{part} {seconds:.0f} s" for part, seconds in spent.items()
+                          if seconds >= 0.5)
+        bench.log(f"  {len(changes)} section changes, {time.time() - start:.0f} s"
+                  + (f" ({parts})" if parts else ""))
         bench.last = f"Last iteration: {summary}; {len(changes)} section changes"
+        unchanged = None if changes else (beam_table, column_report)
         return changes, beam_table, column_report
 
     round_number = 0
@@ -1145,8 +1201,11 @@ def run_design_loop(bench: Workbench) -> dict:
               f"{len(all_changes)} section changes.")
     if still_failing:
         bench.log("Still failing: " + ", ".join(still_failing))
+    stuck = {name: reason for name, reason in stuck.items() if name in set(still_failing)}
+    for kind, names in stuck_by_kind(stuck).items():
+        bench.log(f"Not fixed by a larger size ({kind}): " + ", ".join(names))
     return {"status": status, "iterations": iteration, "changes": all_changes,
-            "failing": still_failing, "beams": beams, "columns": report}
+            "failing": still_failing, "beams": beams, "columns": report, "stuck": stuck}
 
 
 # =============================================================================
@@ -1304,10 +1363,13 @@ def final_drift_check(bench: Workbench, options, folder: str, stem: str) -> dict
     from etabs_api.workflows.drift_check import failures, run_drift, save_report
 
     bench.stage = "Final drift check (final sizes; no resizing for drift)"
+    from etabs_api.workflows.drift_check import stiffness_levels
+
     report = run_drift(bench.connector, options.reference, options.wind_denominator,
+                       stiffness_levels(options.service_factor),
                        progress=lambda text: bench.show(text), seismic=options.seismic,
                        combos=options.combos, drift_cases=options.drift_cases,
-                       r_factor=options.r_factor)
+                       r_factor=options.r_factor, cases=options.cases)
     path = save_report(report, os.path.join(folder, f"{stem} - Drift.txt"))
     failed = failures(report)
     bench.log("")
@@ -1575,6 +1637,8 @@ def run_design_cli() -> dict | None:
                       "(ACI 18.6.2.1(a)).")
         bench.log("Deflection stages: " + deflection_stages.describe() + ".")
         bench.log(f"Combinations: {len(combos)} ULS ({seismic})")
+        bench.log("The loop sizes the members for strength and deflection. Drift is checked at "
+                  "the end, on the final sizes: the members are not resized for it.")
         bench.log("Size ranges (from, to, step): " + "; ".join(
             f"{family} " + " x ".join(
                 "-".join(f"{float(v):g}" for v in span) for span in spans.values() if span)
@@ -1638,6 +1702,9 @@ def loop_summary(summary: dict, settings: LoopSettings, original: str, working: 
                 else "every check passes")
     if summary.get("failing"):
         out.fail("Members still failing: " + listed(summary["failing"]))
+    for kind, names in stuck_by_kind(summary.get("stuck") or {}).items():
+        out.fail(f"Not fixed by a larger size ({kind}): " + listed(names)
+                 + ". Change the framing, the span or the support, not the section.")
     if drift.get("failed"):
         out.fail("Drift fails: the sections are not resized for drift. Reconfigure the model "
                  "(stiffer members, walls) and run sdt design again.")

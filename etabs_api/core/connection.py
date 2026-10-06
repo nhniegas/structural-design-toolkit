@@ -124,6 +124,22 @@ def use_working_units(model) -> None:
                    f"SetPresentUnits({UNIT_NAMES[EXTRACTION_UNITS]})")
 
 
+def model_file(model) -> str:
+    """The path of the open model as the user knows it: its .EDB.
+
+    After an analysis ETABS names the model by its text copy (``.$et``); the
+    reports and summaries show the .EDB the user opened. Empty for a model
+    that is not saved yet.
+    """
+    import os
+
+    name = str(model.GetModelFilename() or "").strip()
+    if not name:
+        return ""
+    stem, extension = os.path.splitext(os.path.normpath(name))
+    return stem + ".EDB" if extension.lower() in (".$et", ".e2k", "") else stem + extension
+
+
 def restore_units() -> None:
     """Put back the units of every model a command worked on (``use_working_units``).
 

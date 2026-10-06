@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Dict, List
 
 import ezdxf
+import numpy as np
 import pandas as pd
 
 from design import dcr_targets
@@ -1277,7 +1278,81 @@ def _torsion_code(torsion_basis: str, code: AciCode) -> AciCode:
     return code
 
 
+def _smallest(values: np.ndarray):
+    """The smallest of ``values`` as a table column gives it: NaN left out, NaN when none is left."""
+    valid = values[~np.isnan(values)]
+    return valid.min() if valid.size else np.nan
+
+
+def _largest(values: np.ndarray):
+    """The largest of ``values``, NaN left out; NaN when none is left."""
+    valid = values[~np.isnan(values)]
+    return valid.max() if valid.size else np.nan
+
+
+def _beam_design_part(arguments: tuple) -> pd.DataFrame:
+    """The design of one part of the beams, in a process of its own."""
+    targets, props, forces, options = arguments
+    dcr_targets.use(targets)     # the active target ratios are per process
+    return _execute_beam_design(props, forces, progress=None, **options)
+
+
 def execute_beam_design(
+    df_beam_props: pd.DataFrame,
+    df_frame_forces: pd.DataFrame,
+    enable_seismic_design: bool,
+    gravity_combo_name: str,
+    Pu_axial_load: float = 50.0,
+    code: AciCode = CODE,
+    progress=None,
+    compatibility_torsion: bool = False,
+    exempt_short_spans: bool = False,
+) -> pd.DataFrame:
+    """The beam design, shared between several processes on a large model.
+
+    Each beam is designed on its own forces, whatever the others are, so the
+    beams are split into consecutive parts of their sorted names, each part
+    is designed by ``_execute_beam_design`` in a process, and the results are
+    joined in that order: the rows and the values are those of one process.
+    One process is used when ``design.parallel`` is not enabled, on a small
+    model, or if the processes fail to start.
+    """
+    from design import parallel
+
+    options = dict(enable_seismic_design=enable_seismic_design,
+                   gravity_combo_name=gravity_combo_name, Pu_axial_load=Pu_axial_load,
+                   code=code, compatibility_torsion=compatibility_torsion,
+                   exempt_short_spans=exempt_short_spans)
+    names = df_beam_props["UniqueName"] if "UniqueName" in df_beam_props.columns else []
+    workers = parallel.workers_for(len(names))
+    if workers > 1 and all(isinstance(name, str) for name in names):
+        try:
+            ordered = sorted(set(names))                    # the order of the results
+            parts = parallel.chunks(ordered, workers)
+            part_of = {name: index for index, part in enumerate(parts) for name in part}
+            prop_part = df_beam_props["UniqueName"].map(part_of)
+            force_part = df_frame_forces["UniqueName"].map(part_of)
+            targets = dcr_targets.active()
+            jobs = [(targets, df_beam_props[prop_part == index],
+                     df_frame_forces[force_part == index], options)
+                    for index in range(len(parts))]
+            if progress is not None:
+                progress(f"Beam design in {workers} processes\n{len(ordered)} beams")
+            done, results = 0, []
+            for part, result in zip(parts, parallel.pool(workers).map(_beam_design_part, jobs)):
+                results.append(result)
+                done += len(part)
+                if progress is not None:
+                    progress(f"Beam design in {workers} processes\n"
+                             f"{done} of {len(ordered)} beams designed")
+            results = [r for r in results if not r.empty]
+            return pd.concat(results, ignore_index=True) if results else pd.DataFrame()
+        except Exception:   # the processes could not start or stopped: design here
+            parallel.shutdown()
+    return _execute_beam_design(df_beam_props, df_frame_forces, progress=progress, **options)
+
+
+def _execute_beam_design(
     df_beam_props: pd.DataFrame,
     df_frame_forces: pd.DataFrame,
     enable_seismic_design: bool,
@@ -1314,13 +1389,17 @@ def execute_beam_design(
     # 2. BUILD EXTRACTION DEMANDS DATAFRAME PER COMBO
     # =============================================================================
     design_rows = []
+    # The rows of each beam, found once: looking through the whole force table again for
+    # every beam took most of the time on a large model. The rows keep their order.
+    forces_of = {name: rows for name, rows in df_frame_forces.groupby("UniqueName", sort=False)}
+    no_forces = df_frame_forces.iloc[0:0]
 
     for _, prop_row in df_beam_props.iterrows():
         u_name = prop_row["UniqueName"]
         h = prop_row.get("Depth", prop_row.get("Height", 500))
         two_h = seismic_cfg.hoop_zone_depth_factor * h
 
-        df_forces_beam = df_frame_forces[df_frame_forces["UniqueName"] == u_name]
+        df_forces_beam = forces_of.get(u_name, no_forces)
 
         if not df_forces_beam.empty:
             min_st = df_forces_beam["Station"].min()
@@ -1352,62 +1431,51 @@ def execute_beam_design(
                    f"all {len(combos)} combinations" if len(combos) != 1 else combos[0],
                    "Demands: Mu, Vu and Tu at the supports and midspan")
 
+            # The numbers of the beam as arrays, taken once: the zones of every
+            # combination are then cut from them, not from the table each time.
+            combo_of = df_forces_beam["Combo"].to_numpy()
+            station = df_forces_beam["Station"].to_numpy(dtype=float)
+            moment = df_forces_beam["M3"].to_numpy(dtype=float)
+            shear = np.abs(df_forces_beam["V2"].to_numpy(dtype=float))
+            torsion = np.abs(df_forces_beam["T"].to_numpy(dtype=float))
+            base_row = prop_row.to_dict()
+
             for combo in combos:
-                df_combo = df_forces_beam[df_forces_beam["Combo"] == combo]
+                own = combo_of == combo
+                at, m3 = station[own], moment[own]
+                v2, tu = shear[own], torsion[own]
 
-                df_left_m = df_combo[df_combo["Station"] <= m_left_boundary]
-                df_mid_m = df_combo[
-                    (df_combo["Station"] > m_left_boundary)
-                    & (df_combo["Station"] < m_right_boundary)
-                ]
-                df_right_m = df_combo[df_combo["Station"] >= m_right_boundary]
+                left_m = at <= m_left_boundary
+                mid_m = (at > m_left_boundary) & (at < m_right_boundary)
+                right_m = at >= m_right_boundary
 
-                df_left_vt = df_combo[df_combo["Station"] <= v_left_boundary]
-                df_mid_vt = df_combo[
-                    (df_combo["Station"] >= v_left_boundary)
-                    & (df_combo["Station"] <= v_right_boundary)
-                ]
-                df_right_vt = df_combo[df_combo["Station"] >= v_right_boundary]
+                left_vt = at <= v_left_boundary
+                mid_vt = (at >= v_left_boundary) & (at <= v_right_boundary)
+                right_vt = at >= v_right_boundary
 
                 # Convert negative M3 values into positive design-demand magnitudes for the top face.
-                Mneg_left = (
-                    abs(min(0.0, df_left_m["M3"].min())) if not df_left_m.empty else 0.0
-                )
+                Mneg_left = abs(min(0.0, _smallest(m3[left_m]))) if left_m.any() else 0.0
                 # Positive M3 envelope is assigned to bottom-face flexural design.
-                Mpos_left = (
-                    max(0.0, df_left_m["M3"].max()) if not df_left_m.empty else 0.0
-                )
+                Mpos_left = max(0.0, _largest(m3[left_m])) if left_m.any() else 0.0
 
-                Mneg_mid = (
-                    abs(min(0.0, df_mid_m["M3"].min())) if not df_mid_m.empty else 0.0
-                )
-                Mpos_mid = max(0.0, df_mid_m["M3"].max()) if not df_mid_m.empty else 0.0
+                Mneg_mid = abs(min(0.0, _smallest(m3[mid_m]))) if mid_m.any() else 0.0
+                Mpos_mid = max(0.0, _largest(m3[mid_m])) if mid_m.any() else 0.0
 
-                Mneg_right = (
-                    abs(min(0.0, df_right_m["M3"].min()))
-                    if not df_right_m.empty
-                    else 0.0
-                )
-                Mpos_right = (
-                    max(0.0, df_right_m["M3"].max()) if not df_right_m.empty else 0.0
-                )
+                Mneg_right = abs(min(0.0, _smallest(m3[right_m]))) if right_m.any() else 0.0
+                Mpos_right = max(0.0, _largest(m3[right_m])) if right_m.any() else 0.0
 
                 # Absolute peak shear in each end zone is used as the transverse design demand.
-                Vd_left = df_left_vt["V2"].abs().max() if not df_left_vt.empty else 0.0
-                V2h = df_mid_vt["V2"].abs().max() if not df_mid_vt.empty else 0.0
-                Vd_right = (
-                    df_right_vt["V2"].abs().max() if not df_right_vt.empty else 0.0
-                )
+                Vd_left = _largest(v2[left_vt]) if left_vt.any() else 0.0
+                V2h = _largest(v2[mid_vt]) if mid_vt.any() else 0.0
+                Vd_right = _largest(v2[right_vt]) if right_vt.any() else 0.0
 
                 # Absolute peak torsion is paired with the shear demand for each zone.
-                Td_left = df_left_vt["T"].abs().max() if not df_left_vt.empty else 0.0
-                T2h = df_mid_vt["T"].abs().max() if not df_mid_vt.empty else 0.0
-                Td_right = (
-                    df_right_vt["T"].abs().max() if not df_right_vt.empty else 0.0
-                )
+                Td_left = _largest(tu[left_vt]) if left_vt.any() else 0.0
+                T2h = _largest(tu[mid_vt]) if mid_vt.any() else 0.0
+                Td_right = _largest(tu[right_vt]) if right_vt.any() else 0.0
 
                 # Top Row
-                top_row = prop_row.to_dict()
+                top_row = dict(base_row)
                 top_row["Combo"] = combo
                 top_row["Face"] = "TOP"
                 top_row["ClearSpan_Ln"] = clear_span
@@ -1423,7 +1491,7 @@ def execute_beam_design(
                 design_rows.append(top_row)
 
                 # Bottom Row
-                bot_row = prop_row.to_dict()
+                bot_row = dict(base_row)
                 bot_row["Combo"] = combo
                 bot_row["Face"] = "BOTTOM"
                 bot_row["ClearSpan_Ln"] = clear_span
@@ -1488,10 +1556,24 @@ def execute_beam_design(
         story = b_row.get("Story", "-")
         moments = df_b[["Mu_left", "Mu_mid", "Mu_right"]].max(axis=1)
         governing = df_b.loc[moments.idxmax(), "Combo"] if len(df_b) else "-"
+        # The envelopes of the beam, taken once: they do not change while its bars are
+        # chosen, and asking the table for them again at every pass took most of the time.
+        combo_names = df_b["Combo"].unique()
+        combo_count = df_b["Combo"].nunique()
+        moment_columns = ["Mu_left", "Mu_mid", "Mu_right"]
+        face_max = {face: df_b.loc[df_b["Face"] == face, moment_columns].max()
+                    for face in ("TOP", "BOTTOM")}
+        all_max = df_b[["Vu_left", "Vu_mid_2h", "Vu_right",
+                        "Tu_left", "Tu_mid_2h", "Tu_right"]].max()
+        top_face = df_b[df_b["Face"] == "TOP"]
+        top_of: dict = {}
+        for position, combo_name in enumerate(top_face["Combo"].to_numpy()):
+            if combo_name not in top_of:
+                top_of[combo_name] = top_face.iloc[position]
         while True:
             # --- STEP 3A: Flexure Design ---
             report(unique_name, story,
-                   f"envelope of {df_b['Combo'].nunique()} (largest moment: {governing})",
+                   f"envelope of {combo_count} (largest moment: {governing})",
                    "Flexure at the left support, midspan and right support")
             flex_eng_left, flex_eng_mid, flex_eng_right = (
                 BeamFlexureDesign(
@@ -1501,30 +1583,30 @@ def execute_beam_design(
                 for _ in range(3)
             )
 
-            flex_eng_left.Mu_neg = df_b[df_b["Face"] == "TOP"]["Mu_left"].max() \
+            flex_eng_left.Mu_neg = face_max["TOP"]["Mu_left"] \
                 / flexure_target
-            flex_eng_left.Mu_pos = df_b[df_b["Face"] == "BOTTOM"]["Mu_left"].max() \
-                / flexure_target
-
-            flex_eng_mid.Mu_neg = df_b[df_b["Face"] == "TOP"]["Mu_mid"].max() \
-                / flexure_target
-            flex_eng_mid.Mu_pos = df_b[df_b["Face"] == "BOTTOM"]["Mu_mid"].max() \
+            flex_eng_left.Mu_pos = face_max["BOTTOM"]["Mu_left"] \
                 / flexure_target
 
-            flex_eng_right.Mu_neg = df_b[df_b["Face"] == "TOP"]["Mu_right"].max() \
+            flex_eng_mid.Mu_neg = face_max["TOP"]["Mu_mid"] \
                 / flexure_target
-            flex_eng_right.Mu_pos = df_b[df_b["Face"] == "BOTTOM"]["Mu_right"].max() \
+            flex_eng_mid.Mu_pos = face_max["BOTTOM"]["Mu_mid"] \
+                / flexure_target
+
+            flex_eng_right.Mu_neg = face_max["TOP"]["Mu_right"] \
+                / flexure_target
+            flex_eng_right.Mu_pos = face_max["BOTTOM"]["Mu_right"] \
                 / flexure_target
 
             max_Tu_left, max_Tu_mid, max_Tu_right = (
-                df_b["Tu_left"].max(),
-                df_b["Tu_mid_2h"].max(),
-                df_b["Tu_right"].max(),
+                all_max["Tu_left"],
+                all_max["Tu_mid_2h"],
+                all_max["Tu_right"],
             )
             max_Vu_left, max_Vu_mid, max_Vu_right = (
-                df_b["Vu_left"].max(),
-                df_b["Vu_mid_2h"].max(),
-                df_b["Vu_right"].max(),
+                all_max["Vu_left"],
+                all_max["Vu_mid_2h"],
+                all_max["Vu_right"],
             )
             real_Vu_left, real_Vu_right = max_Vu_left, max_Vu_right
             max_Tu_left, max_Tu_mid, max_Tu_right = (
@@ -1692,10 +1774,8 @@ def execute_beam_design(
             min_s_left = min_s_mid = min_s_right = detailing.max_spacing_default
             section_failures: list[str] = []
 
-            for combo_name in df_b["Combo"].unique():
-                df_c_top = df_b[
-                    (df_b["Combo"] == combo_name) & (df_b["Face"] == "TOP")
-                ].iloc[0]
+            for combo_name in combo_names:
+                df_c_top = top_of[combo_name]
 
                 Vu_L = (
                     max(df_c_top["Vu_left"], seismic_res["Vu_seismic_left"])
@@ -1893,17 +1973,17 @@ def execute_beam_design(
             summary = b_row.to_dict()
             summary["Combo"] = "ENVELOPE (ALL COMBOS)"
             summary["Face"] = face_str
-            summary["Mu_left"] = df_b[df_b["Face"] == face_str]["Mu_left"].max()
-            summary["Mu_mid"] = df_b[df_b["Face"] == face_str]["Mu_mid"].max()
-            summary["Mu_right"] = df_b[df_b["Face"] == face_str]["Mu_right"].max()
+            summary["Mu_left"] = face_max[face_str]["Mu_left"]
+            summary["Mu_mid"] = face_max[face_str]["Mu_mid"]
+            summary["Mu_right"] = face_max[face_str]["Mu_right"]
 
             # Shear/Torsion envelope is identical for top and bottom rows
-            summary["Vu_left"] = df_b["Vu_left"].max()
-            summary["Vu_mid_2h"] = df_b["Vu_mid_2h"].max()
-            summary["Vu_right"] = df_b["Vu_right"].max()
-            summary["Tu_left"] = df_b["Tu_left"].max()
-            summary["Tu_mid_2h"] = df_b["Tu_mid_2h"].max()
-            summary["Tu_right"] = df_b["Tu_right"].max()
+            summary["Vu_left"] = all_max["Vu_left"]
+            summary["Vu_mid_2h"] = all_max["Vu_mid_2h"]
+            summary["Vu_right"] = all_max["Vu_right"]
+            summary["Tu_left"] = all_max["Tu_left"]
+            summary["Tu_mid_2h"] = all_max["Tu_mid_2h"]
+            summary["Tu_right"] = all_max["Tu_right"]
 
             summary["n_left_L1"], summary["n_left_L2"], summary["n_left_L3"] = (
                 get_layer_columns(flex_eng_left, is_top=is_top_face)
@@ -2357,6 +2437,9 @@ def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict
     are active (``dcr_targets.use``). Returns the results, two rows (TOP,
     BOTTOM) per beam.
     """
+    from design.beam_carriers import forget_networks
+
+    forget_networks()   # the tables of this design are new: nothing kept from another one
     pushes = load_path_pushes(tables, gravity_combo) if load_path is None else load_path
     beam_props = prepare_beam_table(tables["FRAME DATA"], tables["CONNECTIVITY"], bars,
                                     earth_cover_stories, tables.get("POINTS"), pushes)

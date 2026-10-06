@@ -70,11 +70,24 @@ class ShearScaling:
 
 
 @dataclass
+class MinimumScaling:
+    """A drift load case raised to the zone 4 minimum of Eq. 208-11."""
+
+    case: str
+    coefficient: float           # V/W of the pattern as ETABS computed it
+    minimum: float               # 0.8 Z Nv I / R
+    factor: float                # scale factor of the pattern in its load case (1 = not needed)
+    soil: str
+    nv: float
+
+
+@dataclass
 class AnalysisReport:
     """What ``analyze_model`` found."""
 
     model_path: str = ""
     scaling: list[ShearScaling] = field(default_factory=list)
+    minimum_scaling: list[MinimumScaling] = field(default_factory=list)
     periods: pd.DataFrame = field(default_factory=pd.DataFrame)
     governing_period: dict[str, float] = field(default_factory=dict)
     method_a: float | None = None
@@ -104,6 +117,14 @@ class AnalysisReport:
             )
         if not self.scaling:
             lines.append("No static and spectrum cases were found to compare.")
+        raised = [m for m in self.minimum_scaling if m.factor > 1.0]
+        if raised:
+            lines += ["", "--- Drift load cases raised to the zone 4 minimum 0.8 Z Nv I / R "
+                      "(Eq. 208-11) ---"]
+            lines += [f"{m.case}: V/W {m.coefficient:.4f} -> {m.minimum:.4f} (soil {m.soil}, Nv "
+                      f"{m.nv:g}): the pattern is scaled x {m.factor:.3f} in its load case"
+                      for m in raised]
+            lines.append("Ca and Cv are typed in, and ETABS then takes Nv = 1 in the minimum.")
         lines += ["", "--- Periods ---"]
         for direction, period in self.governing_period.items():
             lines.append(f"Governing modal period {direction}: {period:.3f} s")
@@ -402,12 +423,113 @@ def reopen_model(connector) -> bool:
     return opened
 
 
+def static_case_scales(model, cases: list[str]) -> dict[str, float]:
+    """The scale factor of each linear static case's own load pattern (1 when not read)."""
+    out = {}
+    api = model.LoadCases.StaticLinear
+    for case in cases:
+        try:
+            loads = api.GetLoads(case)
+            names = [str(n) for n in as_list(loads[2])]
+            factors = [float(f) for f in as_list(loads[3])]
+            out[case] = factors[names.index(case)] if case in names else 1.0
+        except Exception:
+            out[case] = 1.0
+    return out
+
+
+def _set_static_case_scale(model, case: str, factor: float) -> bool:
+    api = model.LoadCases.StaticLinear
+    loads = api.GetLoads(case)
+    kinds, names = [str(k) for k in as_list(loads[1])], [str(n) for n in as_list(loads[2])]
+    factors = [float(f) for f in as_list(loads[3])]
+    if case not in names:
+        return False
+    factors[names.index(case)] = float(factor)
+    if model.GetModelIsLocked():
+        model.SetModelIsLocked(False)
+    result = api.SetLoads(case, len(names), kinds, names, factors)
+    return (result[-1] if isinstance(result, (list, tuple)) else result) == 0
+
+
+def minimum_scalings(patterns: pd.DataFrame, cases: list[str]) -> list[MinimumScaling]:
+    """What each drift case needs to meet Eq. 208-11, from the seismic pattern table.
+
+    Only the cases whose pattern has Ca and Cv typed in, when the two values
+    belong to one zone 4 site (``ubc97.typed_zone4_minimum``): ETABS applies
+    the minimum itself, with the right Nv, to a pattern defined by its site.
+    """
+    from etabs_api.workflows.ubc97 import typed_zone4_minimum
+
+    out = []
+    needed = {"Name", "Ca", "Cv", "I", "R", "CoeffUsed"}
+    if patterns is None or patterns.empty or not needed <= set(patterns.columns):
+        return out
+    parents = patterns["Name"].astype(str).str.split("(").str[0]
+    for case in cases:
+        rows = patterns[parents == case]
+        if rows.empty:
+            continue
+        r = rows.iloc[0]
+        if "Z" in rows.columns and pd.notna(r.get("Z")):
+            continue                                    # defined by its site: ETABS has the Nv
+        try:
+            ca, cv, importance, r_factor = (float(r[k]) for k in ("Ca", "Cv", "I", "R"))
+            used = float(pd.to_numeric(rows["CoeffUsed"], errors="coerce").max())
+        except (TypeError, ValueError):
+            continue
+        found = typed_zone4_minimum(ca, cv, importance, r_factor)
+        if found is None or not used > 0:
+            continue
+        minimum, soil, nv = found
+        factor = minimum / used if minimum > used * (1.0 + SCALE_TOLERANCE / 10) else 1.0
+        out.append(MinimumScaling(case, used, minimum, factor, soil, nv))
+    return out
+
+
+def raise_drift_cases_to_minimum(connector, run, progress=None) -> list[MinimumScaling]:
+    """Scale the drift load cases up to the zone 4 minimum 0.8 Z Nv I / R (Eq. 208-11).
+
+    With Ca and Cv typed in, ETABS keeps no Nv and applies the minimum with
+    Nv = 1, so a drift pattern of a long-period building near a source gets
+    too little force. The pattern keeps its definition; its scale factor in
+    its own load case becomes minimum / (V/W ETABS computed), or 1 when the
+    minimum does not govern, and ``run`` analyses again if a factor changed.
+    Called after every analysis, since the factor follows the period.
+    """
+    model = connector.sap_model
+    cases = seismic_static_cases(connector, SEISMIC_DRIFT_PATTERN_TYPE)
+    if not cases:
+        return []
+    names = [str(n) for n in as_list(model.LoadPatterns.GetNameList(0, [])[1])]
+    model.DatabaseTables.SetLoadPatternsSelectedForDisplay(names)
+    try:
+        patterns = connector._read_database_table(
+            "Load Pattern Definitions - Auto Seismic - UBC 97")
+    except Exception:  # no UBC 97 pattern in this model
+        return []
+    wanted = minimum_scalings(patterns, cases)
+    now = static_case_scales(model, [m.case for m in wanted])
+    changed = [m for m in wanted if abs(now[m.case] - m.factor) > 1e-4 * m.factor]
+    for m in changed:
+        if not _set_static_case_scale(model, m.case, m.factor):
+            raise RuntimeError(f"Could not set the scale factor of {m.case}.")
+    if changed:
+        (progress or (lambda text: None))(
+            "Running the analysis again with the drift cases at the zone 4 minimum\n"
+            + ", ".join(f"{m.case} x {m.factor:.3f}" for m in changed))
+        run()
+    return wanted
+
+
 def analyze_model(connector, zone_factor: float | None = None, ct: float | None = None,
                   scale: bool = True, progress=None) -> AnalysisReport:
     """Reset the spectrum to g I / R, run, scale it to the static base shear, run
     again, and check periods, mass and weight. ``progress`` gets each step."""
     say = progress or (lambda text: None)
-    report = AnalysisReport(model_path=str(connector.sap_model.GetModelFilename()))
+    from etabs_api.core.connection import model_file
+
+    report = AnalysisReport(model_path=model_file(connector.sap_model))
     if scale:
         say("Putting the response spectrum cases back to g I / R")
         if reset_spectrum_scale(connector) is None and spectrum_cases(connector):
@@ -429,6 +551,8 @@ def analyze_model(connector, zone_factor: float | None = None, ct: float | None 
     say("Running every load case")
     run()
     if scale:
+        say("Checking the drift patterns against the zone 4 minimum")
+        report.minimum_scaling = raise_drift_cases_to_minimum(connector, run, say)
         say("Comparing the spectrum and static base shears")
         report.scaling = scale_spectrum_to_static(connector, run, say)
         if not report.scaling:
@@ -579,6 +703,10 @@ def analysis_summary(report: AnalysisReport, model_path: str | None = None):
     for item in report.scaling:
         summary.add(f"{item.spectrum_case} to {item.static_case}",
                     f"{item.spectrum_after / 1e3:,.0f} kN (x {item.factor:.3f})")
+    for m in report.minimum_scaling:
+        if m.factor > 1.0:
+            summary.add(f"{m.case} to Eq. 208-11", f"V/W {m.minimum:.4f} with Nv {m.nv:g} "
+                                                  f"(x {m.factor:.3f})")
     for direction, period in report.governing_period.items():
         summary.add(f"Period {direction}", f"{period:.3f} s")
     if report.method_a is not None and report.height is not None:
