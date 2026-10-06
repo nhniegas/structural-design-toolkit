@@ -1119,10 +1119,18 @@ def run_design_loop(bench: Workbench) -> dict:
         bench.log("")
         bench.log(f"=== Iteration {iteration}: {label} ===")
         start = time.time()
+        spent: dict[str, float] = {}     # seconds of each part of the iteration, for the log
+
+        def timed(part: str, work):
+            began = time.time()
+            result = work()
+            spent[part] = spent.get(part, 0.0) + time.time() - began
+            return result
+
         if unchanged is None:
-            bench.analyze()
-            bench.extract()
-            beam_table, column_report = bench.design_beams(), None
+            timed("analysis", bench.analyze)
+            timed("reading the results", bench.extract)
+            beam_table, column_report = timed("beam design", bench.design_beams), None
         else:
             beam_table, column_report = unchanged
             bench.log("  no section changed in the last iteration: its analysis and its "
@@ -1130,7 +1138,7 @@ def run_design_loop(bench: Workbench) -> dict:
         if not columns:
             column_report = None
         elif column_report is None:
-            column_report = bench.design_columns(beam_table)
+            column_report = timed("column design", lambda: bench.design_columns(beam_table))
         sections = bench.sections()
         actions = beam_actions(beam_table, sections, bench.lengths(), grown, settings, seismic,
                                allow_shrink, bench.lines(), bench.directions())
@@ -1151,9 +1159,14 @@ def run_design_loop(bench: Workbench) -> dict:
                 lambda s: (s.astype(str) == "FAIL").any()).sum()
             bench.log(f"  columns failing: {failing} of {column_report['UniqueName'].nunique()}")
             summary += f", columns failing {failing} of {column_report['UniqueName'].nunique()}"
-        changes = bench.apply(actions, sections, grown)
+        sizing = time.time() - start - sum(spent.values())
+        changes = timed("resizing", lambda: bench.apply(actions, sections, grown))
         all_changes.extend(changes)
-        bench.log(f"  {len(changes)} section changes, {time.time() - start:.0f} s")
+        spent["choosing the sizes"] = sizing
+        parts = ", ".join(f"{part} {seconds:.0f} s" for part, seconds in spent.items()
+                          if seconds >= 0.5)
+        bench.log(f"  {len(changes)} section changes, {time.time() - start:.0f} s"
+                  + (f" ({parts})" if parts else ""))
         bench.last = f"Last iteration: {summary}; {len(changes)} section changes"
         unchanged = None if changes else (beam_table, column_report)
         return changes, beam_table, column_report

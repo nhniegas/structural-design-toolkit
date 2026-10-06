@@ -672,7 +672,7 @@ def _check_static_results(d: ModelData, seismic: pd.DataFrame, bottom: str) -> l
         drift = kind == SEISMIC_DRIFT
         z, nv = _num(r.get("Z")), _num(r.get("Nv"), 1.0)  # no Z when Ca, Cv are typed
         if z != z:
-            low_v = typed_minimum_finding(name, _num(r["Ca"]), _num(r["Cv"]), _num(r["I"]),
+            low_v = typed_minimum_finding(str(name).split("(")[0], _num(r["Ca"]), _num(r["Cv"]), _num(r["I"]),
                                           _num(r["R"]), used)
             if low_v is not None and low_v.text not in {f.text for f in out}:
                 out.append(low_v)
