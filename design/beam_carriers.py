@@ -6,12 +6,17 @@ the carried beam pass under the girder's bottom bars and cannot be supported
 by it. The rule is a detailing choice of the engineer, not a code clause, so
 it is applied only when asked (``sdt beams`` and ``sdt design`` ask).
 
-The carrier of a beam end is found from the model geometry:
+The carrier of a beam end is found from the model geometry and the load path:
 
 * a beam whose centre line passes through that end joint, whether ETABS has
   it as one member from column to column or as two pieces in line that meet
   at the joint;
-* never a beam that only continues the carried beam in line.
+* never a beam that only continues the carried beam in line;
+* a beam that only ends at the joint when it is nearer to the supports, as
+  the tip of a cantilever girder under an edge beam;
+* never a beam further from the supports than the one that ends on it
+  (``BeamNetwork``): an edge beam across the tips of cantilever girders
+  rests on the girders, it does not carry them.
 """
 
 from __future__ import annotations
@@ -75,11 +80,13 @@ def carried_beams(connectivity: pd.DataFrame, points: pd.DataFrame | None
         return "through" if ON_LINE < along < length - ON_LINE else "end"
 
     directions = {name: unit(name) for name in beams}
+    network = BeamNetwork(connectivity, points)
     out: dict[str, list[str]] = {}
     for name, ends in beams.items():
         own = directions[name]
         if own is None:
             continue
+        rank = network.rank_of([name])
         for joint in ends:
             if joint in column_joints:
                 continue
@@ -93,8 +100,10 @@ def carried_beams(connectivity: pd.DataFrame, points: pd.DataFrame | None
                 if how == "end":           # a girder in two pieces: its partner is in line
                     partner = any(abs(d[0] * directions[third][0] + d[1] * directions[third][1])
                                   >= IN_LINE for third, _ in meeting if third != other)
-                    if not partner:
-                        continue
+                    if not partner and network.rank_of([other]) >= rank:
+                        continue           # it only ends here, and is no nearer to the supports
+                if network.rank_of([other]) > rank:
+                    continue               # it rests on this beam: the load path runs the other way
                 carried = out.setdefault(other, [])
                 if name not in carried:
                     carried.append(name)
