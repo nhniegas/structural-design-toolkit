@@ -281,14 +281,15 @@ class BeamNetwork:
     only carries what sits on it?
 
     The shear and moment diagrams of the analysis come first (``pushes``,
-    from ``end_pushes``): an end that is pushed up is held, an end with a
-    downward force on it is free and carries what is there. That is the
-    load path as the structure really takes it, whatever the framing looks
-    like: an edge beam can carry the girders that end on it, or rest on the
-    tips of cantilever girders, and only the diagrams tell which.
+    from ``end_pushes``): an end that is pushed up is held, whatever the
+    framing looks like. An edge beam that the girders ending on it push
+    down, while their own ends are pushed up, carries those girders.
 
-    Where the diagrams are not there, or the end force is too small to
-    read, the geometry decides. Every beam line has a rank: 0 when it rests
+    A downward force on an end does not settle it. A free tip that carries
+    a beam and an end that a girder holds down (the back span of a see-saw)
+    have the same diagrams; only the deflected shape tells them apart, and
+    the tables do not have it. There, and where the diagrams are missing or
+    too small to read, the geometry decides. Every beam line has a rank: 0 when it rests
     on a support, 1 when it rests only on lines of rank 0, and so on (a line
     is the pieces of one tagged line, or pieces that continue each other in
     a straight line). An end is then held when another line there is nearer
@@ -493,9 +494,10 @@ class BeamNetwork:
         if joint in self.supports:
             return True
         own = {_name(m) for m in own}
-        push = self.push_at(joint, own)
-        if push:                                 # the diagrams say: pushed up, or loaded
-            return push > 0
+        if self.push_at(joint, own) > 0:
+            return True                          # the diagrams show it pushed up: it is carried
+        # A downward force on the end does not settle it: a free tip that carries a beam and
+        # an end that a girder holds down have the same diagrams. The framing decides then.
         own_lines = {self.line.get(m) for m in own}
         mine = self.rank_of(own)
         for other in self.others_at(joint, own):

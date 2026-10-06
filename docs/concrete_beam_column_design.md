@@ -184,9 +184,9 @@ A shear larger than phi (Vc + 0.66 √f'c bw d) (ACI 22.5.1.2), or a combined sh
 **The load path.** Whether a beam carries or is carried is read from the shear and moment diagrams of the analysis, not from the framing alone. For each beam end, under gravity load:
 
 - **Pushed up:** something carries the beam there. The end is supported.
-- **A downward force on it:** the end is free, and carries what sits on it. A girder like this is a cantilever, whatever beam is at its tip.
+- **A downward force on it:** not settled by the diagrams. A free tip that carries a beam and an end that a girder holds down (the back span of a see-saw) have the same shear and moment diagrams; only the deflected shape tells them apart, and it is not read yet. The framing decides there, by the ranks below.
 
-So the same framing can be read both ways, and only the diagrams tell which. An edge beam with girders ending on it carries those girders when their ends are pushed up, and rests on them when they are cantilevers with the edge beam on their tips.
+So an edge beam with girders ending on it is their carrier when the girder ends are pushed up, even though it reaches no column itself. A cantilever girder with an edge beam on its tip stays a cantilever when that edge beam is further from the supports than the girder; where the edge beam is as near to the supports and runs through the tip, the tip is taken as held, which can miss a cantilever. Check the "Span checked" column for girders you know to be cantilevers.
 
 The diagrams are those of the full service load (`DEF 101`) when the model has the deflection combinations, otherwise those of the factored gravity combination. The sign of the shear is taken from the slope of the moment, so it does not depend on the sign convention of the analysis. An end force below 5 % of the largest shear of the member, or below 0.5 kN, is too small to read.
 
@@ -254,7 +254,7 @@ A line is supported:
 
 - at a joint with a column below it or a wall;
 - where the shear of the full service load jumps up, at a joint or inside a member. That is a support pushing up, such as a girder that carries the line and that ETABS has not split there;
-- at an end that the diagrams show pushed up (see "The load path" under [Beam design](#beam-design)). An end with a downward force on it is free.
+- at an end that the diagrams show pushed up (see "The load path" under [Beam design](#beam-design)). Where the end has a downward force on it, the framing decides.
 
 A planted column and a beam that rests on the line are loads: the span runs on through them. A stretch beyond the last support to a free end is a cantilever: it is fixed at that support, and the deflection from the rotation of the support (from the analysis) is added. A cantilever with an edge beam on its tip is still a cantilever.
 
@@ -327,7 +327,7 @@ The effective depth is taken to the centre of one layer of bars: d = h - cover -
 
 Where a girder is shallower than a beam it carries, the bottom bars of that beam pass below the girder's bottom bars and cannot rest on them. When you answer yes to "should a girder or beam be at least as deep as the beams that frame into it", every carrier is checked:
 
-- The carrier follows the load path, read from the shear and moment diagrams: a beam end that is pushed up is carried by the beam running through its joint; an end with a downward force on it is not carried, and the girder it belongs to carries what sits on its tip. An edge beam can therefore be the carrier of the girders that end on it, or be carried by them.
+- The carrier follows the load path, read from the shear and moment diagrams: a beam end that is pushed up is carried by the beam running through its joint, and an end with a downward force on it is not carried there. An edge beam can therefore be the carrier of the girders that end on it.
 - The carrier of a beam end is the beam whose centre line passes through it, whether ETABS has that girder as one member from column to column or as pieces that meet at the joint. Beams that only continue each other are not carriers.
 - A carrier shallower than a beam it carries gets `FAILED: DEPTH BELOW THE BEAM IT CARRIES`, with both depths in the "Depth against the beams it carries" column.
 - It is a detailing rule of your own, not a code clause, so it is off unless you ask for it. It needs the joint coordinates, which the extraction provides.

@@ -158,16 +158,14 @@ def test_a_cantilever_that_carries_a_beam_at_its_tip_is_still_a_cantilever():
     free = bd.add_deflection_columns(results, service({"2GX-7": cantilever}), connectivity=corner)
     assert top(free, "2GX-7")["Defl_live_mm"] == row["Defl_live_mm"]
 
-    # a girder runs through the tip between its own columns. The diagrams still show a
-    # downward force on the tip, so it is a cantilever that carries that girder there
+    # a girder runs through the tip between its own columns. A downward force on the tip
+    # does not tell a carried load from a hold-down, so the framing decides: it is held
     through = connectivity([("2GX-7", "a", "t"), ("2GY-9", "s", "t"), ("2GY-9A", "t", "u")],
                            [("C1", "a0", "a"), ("C2", "s0", "s"), ("C3", "u0", "u")])
-    loaded = bd.add_deflection_columns(results, service({"2GX-7": cantilever}), connectivity=through)
-    assert top(loaded, "2GX-7")["Defl_live_mm"] == row["Defl_live_mm"]
-    # without the diagrams the framing decides: that girder holds the tip, a span
-    framed = bd.add_deflection_columns(results, service({"2GX-7": cantilever}, with_shear=False),
-                                       connectivity=through)
-    assert top(framed, "2GX-7")["Defl_live_mm"] < 0.1 * expected
+    for with_shear in (True, False):
+        held = bd.add_deflection_columns(results, service({"2GX-7": cantilever}, 1.0, with_shear),
+                                         connectivity=through)
+        assert top(held, "2GX-7")["Defl_live_mm"] < 0.1 * expected
 
 
 def test_an_edge_beam_on_the_tips_of_cantilevers_does_not_hold_them_and_rests_on_them():
