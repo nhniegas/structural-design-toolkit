@@ -2268,12 +2268,15 @@ def _column_shear_checks(
     clear_height: float | None = None,
     beam_moment_limits: dict[tuple[str, str], float] | None = None,
     capacity_design: bool = True,
+    capacity_note: str | None = None,
 ) -> tuple[list[dict], int]:
     """Check column shear in both local directions and size transverse legs.
 
     ``capacity_design`` False leaves out the probable-moment shear Ve of a
     special moment frame column and designs for the analysis shear (the user's
-    choice for the short foundation-level columns); Vc is still taken as zero.
+    choice for the short foundation-level columns and for the topmost
+    columns); Vc is still taken as zero. ``capacity_note`` is what the
+    results then say in place of Ve.
 
     ``clear_height`` is the clear height lu between the beams (mm) for the
     capacity shear Ve of a special moment frame column. ``beam_moment_limits``
@@ -2469,7 +2472,8 @@ def _column_shear_checks(
                         "Analysis_Shear_kN": analysis_shear,
                         "Capacity_Based_Ve_kN": capacity_shear_kN,
                         "Capacity_Shear_Note": (
-                            "" if use_capacity or not is_smrf else CAPACITY_SHEAR_SKIPPED),
+                            "" if use_capacity or not is_smrf
+                            else capacity_note or CAPACITY_SHEAR_SKIPPED),
                         "Design_Shear_kN": design_shear,
                         "Vc_kN": shear_concrete / 1000.0,
                         "Concrete_Shear_Strength_Neglected": is_smrf,
@@ -3301,6 +3305,7 @@ BCC_EXEMPT_TEXT = ("N/A - ACI 18.7.3.1: the column stops at this joint and "
 TOP_LEVEL_SKIPPED = "Not checked - topmost level (user choice)"
 FOUNDATION_LEVEL_SKIPPED = "Not checked - foundation level (user choice)"
 CAPACITY_SHEAR_SKIPPED = "Not used - foundation level (user choice): analysis shear"
+TOP_CAPACITY_SHEAR_SKIPPED = "Not used - topmost level (user choice): analysis shear"
 
 
 def _skip_joint_checks(joints: pd.DataFrame, reasons: dict[str, str]) -> pd.DataFrame:
@@ -4276,7 +4281,9 @@ def design_columns(
     forces already (the ETABS P-delta analysis).
 
     ``check_top_level`` False leaves out the strong column - weak beam and
-    joint shear checks at the joints on top of the columns (no column above).
+    joint shear checks at the joints on top of the columns (no column above),
+    and designs the shear of those topmost columns for the analysis shear
+    instead of the probable-moment shear Ve.
     ``check_foundation_level`` False leaves them out at the joints of the
     bottom-most story columns, whose shear is then designed for the analysis
     shear instead of the probable-moment shear Ve. Both are asked by
@@ -4677,13 +4684,15 @@ def design_columns(
     # Levels where the user chose not to run the capacity-design checks.
     skipped_joints: dict[str, str] = {}
     foundation_columns: set[str] = set()
+    top_columns: set[str] = set()       # no column stands on them
     if is_smrf and not (check_top_level and check_foundation_level):
         ends_of = {member: column_ends(member) for member in column_candidates}
         if not check_top_level:
             bottoms = {bottom for bottom, _ in ends_of.values()}
-            for _, top in ends_of.values():
+            for member, (_, top) in ends_of.items():
                 if top not in bottoms:
                     skipped_joints[top] = TOP_LEVEL_SKIPPED
+                    top_columns.add(member)
         if not check_foundation_level:
             story_of = {str(member): str(story) for member, story in story_by_member.items()}
             order = _story_order_from_stacks(connectivity, story_of)
@@ -5241,7 +5250,9 @@ def design_columns(
                 progress=report_progress,
                 clear_height=clear_heights.get(member),
                 beam_moment_limits=beam_moment_limits.get(member),
-                capacity_design=member not in foundation_columns,
+                capacity_design=member not in foundation_columns and member not in top_columns,
+                capacity_note=(CAPACITY_SHEAR_SKIPPED if member in foundation_columns
+                               else TOP_CAPACITY_SHEAR_SKIPPED),
             )
             return checks
 
@@ -5467,6 +5478,11 @@ def design_columns(
     # lu and k of every column, for sizing trial sections on the same forces
     report.attrs["slenderness_geometry"] = slender_geometry
     report.attrs["foundation_columns"] = sorted(foundation_columns)
+    report.attrs["top_columns"] = sorted(top_columns)
+    # what the capacity shear Ve of each column was worked out with, for the same trials
+    report.attrs["clear_heights"] = dict(clear_heights)
+    report.attrs["beam_moment_limits"] = {member: dict(limits) for member, limits
+                                          in beam_moment_limits.items()}
     report.attrs["skipped_joints"] = dict(skipped_joints)
     return report, report_groups, joint_results
 
@@ -5585,14 +5601,23 @@ def column_size_passes(
     is_smrf: bool,
     slenderness_geometry: dict | None = None,
     capacity_design: bool = True,
+    clear_height: float | None = None,
+    beam_moment_limits: dict | None = None,
 ) -> tuple[bool, str]:
     """Whether a column section can be reinforced for its forces, and why not.
 
     ``slenderness_geometry`` is the column's lu and k per axis from the last
     design (``report.attrs["slenderness_geometry"]``): the trial section is
     then checked with its own slenderness. ``capacity_design`` False designs the
-    shear for the analysis shear (a foundation-level column the user chose
-    not to check for Ve).
+    shear for the analysis shear (a foundation-level or topmost column the
+    user chose not to check for Ve). ``clear_height`` and
+    ``beam_moment_limits`` are those of the last design
+    (``report.attrs["clear_heights"]``, ``["beam_moment_limits"]``): the
+    capacity shear Ve of a trial section is then the one the design would
+    use, over the clear height and no more than the beams can deliver (ACI
+    18.7.6.1.1). Without them Ve comes from the column's own probable moments
+    over its whole length, which grows faster than the section's shear
+    strength: no size would ever pass.
 
     The same member checks as ``design_columns`` that depend on the section size
     alone: a bar layout within the steel limit that passes flexure and axial load
@@ -5651,6 +5676,7 @@ def column_size_passes(
                 )["Transverse_Spacing_Provided_mm"])
             shear, _ = _column_shear_checks(
                 row, forces, layout_engine, bars, spacing, 2, is_smrf, bundle_layout=layout,
+                clear_height=clear_height, beam_moment_limits=beam_moment_limits,
                 capacity_design=capacity_design)
             if all(check["Shear_Check"] == "PASS" for check in shear):
                 return True, "passes"
@@ -5782,7 +5808,7 @@ def ask_column_design_options(
 
 TOP_LEVEL_OPTIONS = {
     "Yes - check them (ACI 18.7.3, 18.8)": True,
-    "No - leave them out at the topmost level": False,
+    "No - leave them out; design the topmost columns for the analysis shear": False,
 }
 FOUNDATION_LEVEL_OPTIONS = {
     "Yes - check them (ACI 18.7.3, 18.7.6, 18.8)": True,
@@ -5805,9 +5831,10 @@ def ask_capacity_check_levels(is_smrf: bool, last: dict | None = None
     last = last or {}
     chosen = select_option(
         "Column Design - Topmost Level",
-        "Run the strong column - weak beam (BCC) and joint shear checks at the joints on top "
-        "of the columns (roof level)? No column stands above these joints, so one column "
-        "alone must be 1.2 times stronger than the beams and the check often fails.",
+        "Run the strong column - weak beam (BCC), joint shear and probable-moment shear "
+        "(Ve) checks at the topmost level (the joints on top of the columns with no column "
+        "above, and those columns)? One column alone must there be 1.2 times stronger than "
+        "the beams, and the check often fails.",
         list(TOP_LEVEL_OPTIONS),
         default_index=0 if last.get("check_top_level", True) else 1)
     if chosen is None:

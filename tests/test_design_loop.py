@@ -299,11 +299,63 @@ def test_a_failing_column_jumps_to_the_first_size_that_passes_on_the_forces():
     assert "first size that passes" in actions["2-C1"][1]
 
 
-def test_without_a_passing_size_the_column_goes_to_the_largest():
+def test_without_a_passing_size_the_column_grows_one_size_not_to_the_largest():
+    """A check that no size passes is often one a larger section does not help: on a real
+    model 42 columns went to 2000 mm this way, and 160 more below them."""
     report = pd.DataFrame(column_rows("2-C1", Flexure_Check="FAIL"))
-    actions = column_actions(report, {"2-C1": cr(1100, 1100)}, {}, {}, set(), SETTINGS,
-                             allow_shrink=False, sizer=lambda member, sizes: None)
-    assert actions["2-C1"][0] == cr(1200, 1200)
+
+    def sizer(member, sizes):
+        return None
+
+    sizer.why = {"2-C1": "column shear (section too small for the shear steel)"}
+    actions = column_actions(report, {"2-C1": cr(500, 500)}, {}, {}, set(), SETTINGS,
+                             allow_shrink=False, sizer=sizer)
+    new, reason = actions["2-C1"]
+    assert new == cr(600, 600)                               # one step, with many sizes above it
+    assert "no size up to" in reason and "one size larger" in reason
+    assert "column shear" in reason                          # the check that stopped the trials
+    plain = column_actions(report, {"2-C1": cr(500, 500)}, {}, {}, set(), SETTINGS,
+                           allow_shrink=False, sizer=lambda member, sizes: None)
+    assert plain["2-C1"][0] == cr(600, 600)                  # a sizer that keeps no reason
+
+
+def test_a_column_whose_shear_does_not_come_down_is_not_made_larger_again():
+    from etabs_api.workflows.design_loop import (
+        column_fails_shear_only,
+        stop_unhelped_column_growth,
+        stuck_by_kind,
+        not_fixed_by_size,
+    )
+
+    failing = pd.DataFrame(column_rows("2-C1", Shear_Check="FAIL", Shear_Utilization=1.30)
+                           + column_rows("2-C2", Shear_Check="FAIL", Flexure_Check="FAIL",
+                                         Shear_Utilization=1.30))
+    rows = dict(tuple(failing.groupby("UniqueName")))
+    assert column_fails_shear_only(rows["2-C1"]) and not column_fails_shear_only(rows["2-C2"])
+    sections = {"2-C1": cr(600, 600), "2-C2": cr(600, 600), "1-C1": cr(600, 600)}
+    ratios: dict[str, float] = {}
+
+    def actions():
+        return {"2-C1": (cr(700, 700), "grow (square)"), "2-C2": (cr(700, 700), "grow (square)"),
+                "1-C1": (cr(700, 700), "not smaller than 2-C1 above")}
+
+    first = actions()
+    assert stop_unhelped_column_growth(first, sections, failing, ratios) == []   # first growth
+    assert ratios == {"2-C1": 1.30} and first["2-C1"][0] == cr(700, 700)
+    sections = {"2-C1": cr(700, 700), "2-C2": cr(700, 700), "1-C1": cr(700, 700)}
+    worse = failing.assign(Shear_Utilization=1.28)             # 1.5 % better: not helped
+    again = {"2-C1": (cr(800, 800), "grow (square)"), "2-C2": (cr(800, 800), "grow (square)"),
+             "1-C1": (cr(800, 800), "not smaller than 2-C1 above")}
+    assert stop_unhelped_column_growth(again, sections, worse, ratios) == ["2-C1"]
+    assert again["2-C1"][0] == cr(700, 700) and "capacity shear" in again["2-C1"][1]
+    assert again["2-C2"][0] == cr(800, 800)                    # it fails flexure too: it grows
+    assert "1-C1" not in again                                 # it only followed the stopped one
+    kinds = stuck_by_kind(not_fixed_by_size(again, sections))
+    assert kinds == {"shear: the capacity shear grows with the section": ["2-C1"]}
+    helped = failing.assign(Shear_Utilization=1.05)            # 19 % better: it may grow
+    more = {"2-C1": (cr(800, 800), "grow (square)")}
+    assert stop_unhelped_column_growth(more, sections, helped, ratios) == []
+    assert more["2-C1"][0] == cr(800, 800) and ratios["2-C1"] == 1.05
 
 
 def test_joint_failures_still_grow_one_side_one_step():
@@ -335,6 +387,34 @@ def test_column_size_passes_on_real_forces():
     assert not smrf_small and "18.7.2.1" in reason
 
 
+def test_a_size_trial_uses_the_capacity_shear_of_the_design():
+    """Ve from the column's own probable moments over its whole length grows faster than
+    the shear strength of the section: no size passes. The design takes the clear height
+    and stops Ve at what the beams deliver (ACI 18.7.6.1.1); so must the trial."""
+    import numpy as np
+
+    from design.column_designer_aci318 import column_size_passes
+
+    def row(side):
+        return pd.Series({"UniqueName": "2-C1", "Story": "2F", "DesignType": "Column",
+                          "Width": side, "Depth": side, "Diameter": np.nan,
+                          "f'c": 28.0, "fy": 415.0, "fys": 415.0})
+
+    forces = pd.DataFrame([{"UniqueName": "2-C1", "Combo": "ULS1", "Station": st, "P": -1500.0,
+                            "V2": 50.0, "V3": 20.0, "M2": 60.0, "M3": 150.0}
+                           for st in (0.0, 1500.0)])
+    beams = {(direction, end): 250.0 for direction in ("V2", "V3") for end in ("I", "J")}
+    for side in (500.0, 900.0, 1200.0):
+        alone, reason = column_size_passes(row(side), forces, 25.0, 10.0, 40.0, True)
+        assert not alone and "column shear" in reason        # at every size: the old trial
+        as_designed, _ = column_size_passes(row(side), forces, 25.0, 10.0, 40.0, True,
+                                            clear_height=1500.0, beam_moment_limits=beams)
+        assert as_designed
+        analysis_shear, _ = column_size_passes(row(side), forces, 25.0, 10.0, 40.0, True,
+                                               capacity_design=False)
+        assert analysis_shear                                # a level left out of Ve
+
+
 def test_workbench_sizer_tries_the_sizes_on_the_extracted_forces():
     import numpy as np
 
@@ -356,6 +436,9 @@ def test_workbench_sizer_tries_the_sizes_on_the_extracted_forces():
     index = sizer("2-C1", [cr(350, 350), cr(400, 400), cr(500, 500), cr(600, 600)])
     assert index in (1, 2)  # 400 or 500: the first that carries 4000 kN
     assert sizer("missing", [cr(400, 400)]) is None
+    assert sizer.why == {}                                   # a size passed: nothing to explain
+    assert sizer("2-C1", [cr(300, 300), cr(320, 320)]) is None
+    assert "flexure and axial load" in sizer.why["2-C1"]     # what stopped the largest tried
 
 
 def test_the_range_shown_holds_the_sizes_the_model_has():
