@@ -1020,7 +1020,8 @@ def column_summary(report: pd.DataFrame, command: str, model_path: str | None = 
         summary.add("Slender columns", f"{slender} (member effects, ACI 6.6.4.5; sway effects "
                                        "from the ETABS P-delta analysis)")
     if not check_top_level:
-        summary.note("BCC and joint shear were not checked at the topmost level (your choice).")
+        summary.note("BCC, joint shear and Ve were not checked at the topmost level "
+                     "(your choice).")
     if not check_foundation_level:
         summary.note("BCC, joint shear and the probable-moment shear Ve were not checked at "
                      "the foundation level (your choice): those columns use the analysis shear.")

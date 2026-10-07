@@ -97,7 +97,7 @@ class LoopSettings:
     ct: float = 0.03
     size_on_forces: bool = True  # failing columns jump to the first passing size
     beam_earth_cover_stories: tuple = ()  # levels whose beams get the 75 mm earth cover
-    check_top_level: bool = True  # BCC and joint shear at the topmost joints
+    check_top_level: bool = True  # BCC, joint shear and Ve at the topmost level
     check_foundation_level: bool = True  # BCC, joint shear and Ve at the bottom-most story
     inner_tie_style: str = "crossties"  # how the column schedule draws the interior ties
     # {standard deflection combination: the model's combination for that role}
@@ -680,7 +680,11 @@ def column_actions(report: pd.DataFrame, sections: dict[str, Section], angles: d
     ``sizes`` that passes the member checks on the forces of the current analysis,
     or None. With it, a column that fails flexure, axial load, the steel limit or
     shear goes straight to that size in one iteration instead of one size per
-    analysis; the next analysis then only confirms it.
+    analysis; the next analysis then only confirms it. When no size passes the
+    column grows one size and the reason names the check that stopped the
+    largest size tried (``sizer.why``, when the sizer keeps it): a check that
+    no size passes is often one that a larger section does not help, and the
+    largest size would then be the worst answer.
     """
     out: dict[str, tuple[Section, str]] = {}
     for name, rows in report.groupby(report["UniqueName"].astype(str)):
@@ -700,8 +704,10 @@ def column_actions(report: pd.DataFrame, sections: dict[str, Section], angles: d
                         reason += f"; {new.width}x{new.depth} is the first size that passes " \
                                   "on the current forces"
                     elif sizes:
-                        new = sizes[-1]
-                        reason += "; no size within the limits passes on the current forces"
+                        why = getattr(sizer, "why", {}).get(name)
+                        reason += (f"; no size up to {sizes[-1].width}x{sizes[-1].depth} passes "
+                                   "on the current forces" + (f" ({why})" if why else "")
+                                   + ": one size larger")
             else:
                 axis = next(iter(needs))
                 along_depth = axis == "Y"  # Y: the beams run along the depth (local 2)
@@ -937,6 +943,10 @@ class Workbench:
             check_foundation_level=self.settings.check_foundation_level)
         self.column_geometry = report.attrs.get("slenderness_geometry", {})
         self.foundation_columns = set(report.attrs.get("foundation_columns", []))
+        # the columns designed for the analysis shear, and what Ve was worked out with
+        self.no_capacity_shear = self.foundation_columns | set(report.attrs.get("top_columns", []))
+        self.clear_heights = dict(report.attrs.get("clear_heights", {}))
+        self.beam_moment_limits = dict(report.attrs.get("beam_moment_limits", {}))
         return report
 
     def column_sizer(self):
@@ -954,6 +964,8 @@ class Workbench:
             loads["UniqueName"].astype(str))}
         bars = self.settings.column_bars
 
+        why: dict[str, str] = {}      # what stopped the largest size tried, per column
+
         def sizer(member: str, sizes: list[Section]) -> int | None:
             if member not in rows or member not in forces:
                 return None
@@ -964,14 +976,21 @@ class Workbench:
                 else:
                     row["Width"], row["Depth"] = float(size.width), float(size.depth)
                 self.show("Column sizing on the current forces", f"{member}: {size.name}")
-                passes, _ = column_size_passes(
+                passes, reason = column_size_passes(
                     row, forces[member], bars["dmain"], bars["dties"], bars["cover"],
                     self.settings.smrf, getattr(self, "column_geometry", {}).get(member),
-                    capacity_design=member not in getattr(self, "foundation_columns", ()))
+                    capacity_design=member not in (
+                        getattr(self, "no_capacity_shear", None)
+                        or getattr(self, "foundation_columns", ())),
+                    clear_height=getattr(self, "clear_heights", {}).get(member),
+                    beam_moment_limits=getattr(self, "beam_moment_limits", {}).get(member))
                 if passes:
+                    why.pop(member, None)
                     return index
+                why[member] = reason
             return None
 
+        sizer.why = why
         return sizer
 
     def apply(self, actions: dict[str, tuple[Section, str]], current: dict[str, Section],
@@ -1031,6 +1050,66 @@ def stop_runaway_growth(actions: dict, sections: dict, shear_growths: dict[str, 
             stopped.append(name)
     for name, (new, reason) in list(actions.items()):
         if any(reason == f"same beam line as {leader}" for leader in stopped):
+            del actions[name]
+    return stopped
+
+
+MIN_SHEAR_GAIN = 0.05   # a larger column must bring its shear ratio down by this much
+
+
+def column_fails_shear_only(rows: pd.DataFrame) -> bool:
+    """A column whose only failing member check is its shear (see ``column_needs``)."""
+    def text(column: str) -> str:
+        return " ".join(rows.get(column, pd.Series(dtype=str)).astype(str)).upper()
+
+    if "FAIL" not in text("Shear_Check"):
+        return False
+    if any("FAIL" in text(column) for column in ("Flexure_Check", "Axial_Check",
+                                                 "Slenderness_Check", "SMRF_Dimension_Check")):
+        return False
+    if "NO PASSING BAR COUNT" in text("Design_Status_Reason"):
+        return False
+    rho = [_number(v) for v in rows.get("Reinforcement_Ratio", [])]
+    return not any(r is not None and r > COLUMN_RHO_LIMIT for r in rho)
+
+
+def stop_unhelped_column_growth(actions: dict, sections: dict, report: pd.DataFrame,
+                                ratios: dict[str, float]) -> list[str]:
+    """Stop enlarging columns whose shear does not come down as they grow.
+
+    The capacity shear Ve of a special moment frame column comes from its own
+    probable moments, which grow with the section and its bars: a larger
+    column can need more shear, not less (a short clear height is the usual
+    cause). A column that fails in shear alone, was made larger for it, and
+    whose shear ratio came down by less than ``MIN_SHEAR_GAIN`` keeps its size
+    and is reported; a column below it that only followed it keeps its own.
+    ``ratios`` holds the ratio each such column had when it was last made
+    larger; ``actions`` is changed in place. Returns the stopped columns.
+    """
+    if report is None or report.empty or "Shear_Utilization" not in report.columns:
+        return []
+    names = report["UniqueName"].astype(str)
+    now = pd.to_numeric(report["Shear_Utilization"], errors="coerce").groupby(names).max()
+    groups = dict(tuple(report.groupby(names)))
+    stopped = []
+    for name, (new, reason) in list(actions.items()):
+        current = sections.get(name)
+        if current is None or current.is_beam or new == current or new.area <= current.area:
+            continue
+        if not reason.startswith("grow (") or name not in groups \
+                or not column_fails_shear_only(groups[name]):
+            continue
+        ratio, before = float(now.get(name, float("nan"))), ratios.get(name)
+        if before is not None and ratio == ratio and ratio > before * (1.0 - MIN_SHEAR_GAIN):
+            actions[name] = (current, f"shear ratio {ratio:.2f} was {before:.2f} before it was "
+                             "made larger for shear and still fails: a larger section does not "
+                             "help (the capacity shear Ve grows with the section); check the "
+                             "clear height and the beams at its joints")
+            stopped.append(name)
+        elif ratio == ratio:
+            ratios[name] = ratio
+    for name, (new, reason) in list(actions.items()):
+        if any(reason == f"not smaller than {leader} above" for leader in stopped):
             del actions[name]
     return stopped
 
@@ -1106,6 +1185,7 @@ def run_design_loop(bench: Workbench) -> dict:
     grown: set[str] = set()
     shear_growths: dict[str, int] = {}
     deflection_ratios: dict[str, float] = {}
+    column_shear_ratios: dict[str, float] = {}
     stuck: dict[str, str] = {}      # members a larger size does not fix, with the reason
     all_changes: list[Change] = []
     iteration = 0
@@ -1151,8 +1231,11 @@ def run_design_loop(bench: Workbench) -> dict:
         if columns:
             _, column_names = bench.members()
             sizer = bench.column_sizer() if settings.size_on_forces else None
-            actions.update(column_actions(column_report, sections, bench.angles(column_names),
-                                          bench.above(), grown, settings, allow_shrink, sizer))
+            column_changes = column_actions(column_report, sections, bench.angles(column_names),
+                                            bench.above(), grown, settings, allow_shrink, sizer)
+            stop_unhelped_column_growth(column_changes, sections, column_report,
+                                        column_shear_ratios)
+            actions.update(column_changes)
         stuck.update(not_fixed_by_size(actions, sections))
         failing = beam_table.groupby("UniqueName")["Design_Status"].apply(
             lambda s: any(v != "OK" for v in s.astype(str))).sum()
@@ -1733,7 +1816,7 @@ def loop_summary(summary: dict, settings: LoopSettings, original: str, working: 
     if settings.beam_earth_cover_stories:
         out.note("75 mm beam cover on: " + ", ".join(settings.beam_earth_cover_stories))
     if not settings.check_top_level:
-        out.note("BCC and joint shear were not checked at the topmost level (your choice).")
+        out.note("BCC, joint shear and Ve were not checked at the topmost level (your choice).")
     if not settings.check_foundation_level:
         out.note("BCC, joint shear and Ve were not checked at the foundation level "
                  "(your choice).")
