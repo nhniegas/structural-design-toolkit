@@ -260,6 +260,8 @@ A line is supported:
 
 A planted column and a beam that rests on the line are loads: the span runs on through them. A stretch beyond the last support to a free end is a cantilever: it is fixed at that support, and the deflection from the rotation of the support (from the analysis) is added. A cantilever with an edge beam on its tip is still a cantilever.
 
+For a cantilever the results also give "Δ / limit from the rotation of the support alone": the same checks on the movement that a rigid rotation of its support gives it, with no bending of the cantilever itself. It is the part of the governing ratio that no section of the cantilever reduces. When it is over 1.0 the beam cannot pass at any size, and the answer is in what holds its support. A span between supports has none (0).
+
 The "Span checked" and "Span length checked" columns say which members were checked together, whether as a cantilever, and over what length. Earlier versions counted the members at a joint to decide whether an end was supported, and joined the pieces of a line through every joint without a column. That read a line ending on an unsplit girder as a cantilever, joined an edge beam resting on several girders into one very long span, and called a cantilever supported when an edge beam sat on its tip.
 
 Two things the check does not do. It measures a span from its own supports, so the movement of a girder is not added to the beam it carries. And where a cantilever is cut inside a member, away from a joint, the rotation of its support is not known and is taken as zero.
