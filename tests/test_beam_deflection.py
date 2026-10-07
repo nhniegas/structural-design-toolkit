@@ -168,3 +168,26 @@ def test_a_line_that_ends_on_an_unsplit_girder_is_supported_there_not_a_cantilev
     free = points.copy()
     free.loc[free["UniqueName"].isin(["g1", "g2"]), "Y"] = 9000.0
     assert ends(free) == [False, True]
+
+
+def test_the_part_of_a_cantilever_deflection_that_its_support_gives_is_told_apart():
+    """A rigid rotation of the support moves the tip whatever the section: that part of the
+    ratio is what no size takes away (the design loop asks it before growing a beam)."""
+    w_dead, w_live = 0.004, 0.002
+    reach = X                                              # fixed at the start
+    shape = -(L - X) ** 2 / 2 / 1000.0
+    moments = {bd.COMBO_DEAD: w_dead * shape, bd.COMBO_FULL: (w_dead + w_live) * shape,
+               bd.COMBO_SUSTAINED: (w_dead + 0.25 * w_live) * shape}
+    alone = bd.beam_deflection(section(), X, moments, cantilever_root="start")
+    assert alone.support == 0.0                            # the support does not rotate
+    tip = {bd.COMBO_DEAD: 20.0, bd.COMBO_FULL: 32.0, bd.COMBO_SUSTAINED: 23.0}   # mm at the tip
+    turned = bd.beam_deflection(section(), X, moments, cantilever_root="start",
+                                root_rotation=tip)
+    live_part = (32.0 - 20.0) / (L / 360)
+    long_part = (turned.lam * 23.0 + 32.0 - 23.0) / (L / bd.LIMIT_DAMAGED)
+    assert turned.support == pytest.approx(max(live_part, long_part), rel=1e-6)
+    assert turned.ratio > turned.support > 0               # the bending comes on top of it
+    assert turned.ratio - turned.support == pytest.approx(alone.ratio, rel=0.05)
+    assert reach[-1] == L
+    spans = bd.beam_deflection(section(), X, {k: -v for k, v in moments.items()})
+    assert spans.support == 0.0                            # a span between supports has none

@@ -235,6 +235,9 @@ class DeflectionResult:
     at_first_load: float | None = None    # when the dead load is first carried (stages)
     at_partitions: float | None = None    # just before the partitions are built (stages)
     label: str = ""                       # the members checked together as this span
+    # the largest (deflection / limit) that the rotation of the support gives by itself, with
+    # no bending of the span at all: what no section of the span can take away
+    support: float = 0.0
 
     @property
     def ratio(self) -> float:
@@ -271,6 +274,7 @@ DEFLECTION_COLUMNS = {
     "Defl_span": "Span checked (members and kind)",
     "Defl_span_mm": "Span length checked (mm)",
     "Defl_ratio": "Δ / limit (governing)",
+    "Defl_support_ratio": "Δ / limit from the rotation of the support alone",
     "Deflection_Check": "Deflection check",
 }
 # shown only when the engineer gave the stages
@@ -443,9 +447,34 @@ def span_deflection(parts: list[SpanPart], cantilever_root: str | None = None,
     long_curve = creep_curve - deducted_curve + full - sustained
     total_curve = full + creep_curve
     roof_curve = profile(COMBO_ROOF) - dead if roof and COMBO_ROOF in combos else None
+
+    # The same checks on the movement that the rotation of the support gives by itself (a
+    # rigid rotation of the cantilever, no bending): the part no section of the span reduces.
+    support_live = support_long = support_roof = None
+    if cantilever_root and root_rotation:
+        reach = (x - x.min()) if cantilever_root == "start" else (x.max() - x)
+
+        def rigid(combo: str) -> np.ndarray:
+            return root_rotation.get(combo, 0.0) * reach
+
+        rigid_dead, rigid_full, rigid_sustained = (rigid(COMBO_DEAD), rigid(COMBO_FULL),
+                                                   rigid(COMBO_SUSTAINED))
+        rigid_deducted = ((lam / XI_LONG_TERM) * time_factor(stages.months_before_partitions)
+                          * stages.dead_share_before * rigid_dead) if staged \
+            else np.zeros_like(rigid_dead)
+        support_live = rigid_full - rigid_dead
+        support_long = lam * rigid_sustained - rigid_deducted + rigid_full - rigid_sustained
+        if roof_curve is not None:
+            support_roof = rigid(COMBO_ROOF) - rigid_dead
     out = {}
     for i, (part, (ie, _, part_lam)) in enumerate(zip(parts, stiffness)):
         mine = owner == i
+        from_support = 0.0
+        if support_live is not None and span > 0:
+            from_support = max(float(support_live[mine].max()) / (span / 360.0),
+                               float(support_long[mine].max()) / (span / long_limit_divisor))
+            if support_roof is not None:
+                from_support = max(from_support, float(support_roof[mine].max()) / (span / 180.0))
         out[part.name] = DeflectionResult(
             ie=ie, lam=part_lam, live=float(live_curve[mine].max()),
             roof=None if roof_curve is None else float(roof_curve[mine].max()),
@@ -460,6 +489,7 @@ def span_deflection(parts: list[SpanPart], cantilever_root: str | None = None,
             label=(parts[0].name if len(parts) == 1 or parts[0].name == parts[-1].name
                    else f"{parts[0].name} to {parts[-1].name}")
             + (", cantilever" if cantilever_root else ""),
+            support=max(from_support, 0.0),
         )
     return out
 
@@ -884,6 +914,7 @@ def add_deflection_columns(results, service, long_limit_divisor: float = LIMIT_D
             "Defl_span": result.label,
             "Defl_span_mm": round(result.span),
             "Defl_ratio": round(result.ratio, 3),
+            "Defl_support_ratio": round(result.support, 3),
         }
         if staged:
             values.update({

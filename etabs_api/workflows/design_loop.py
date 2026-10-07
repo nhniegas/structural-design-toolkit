@@ -90,6 +90,7 @@ class LoopSettings:
     span_similarity: float = 0.30
     line_max_bend: float = 15.0  # degrees: members of a line share a size up to this bend
     line_demand_share: float = 0.75  # and with at least this share of the governing moment and shear
+    share_line_sizes: bool = True    # False: each beam is sized alone (the pieces of one span apart)
     max_rounds: int = 5
     max_inner: int = 10          # beam iterations within a round
     max_inner_columns: int = 10  # column iterations within a round
@@ -502,6 +503,8 @@ def beam_actions(results: pd.DataFrame, sections: dict[str, Section], lengths: d
         """Whether ``b`` takes the size of ``a``, the member that governs."""
         if a in span_of and span_of[a] == span_of.get(b):
             return True                          # pieces of one span: one size
+        if not settings.share_line_sizes:
+            return False                         # the engineer's choice: each span its own size
         if a in support and b in support and support[a] != support[b]:
             return False
         if share > 0 and a in demands and b in demands:
@@ -1118,28 +1121,73 @@ DEFLECTION_REASON = "grow (deflection)"
 MIN_DEFLECTION_GAIN = 0.05   # a larger beam must bring its deflection ratio down by this much
 
 
-def stop_unhelped_deflection_growth(actions: dict, sections: dict, results: pd.DataFrame,
-                                    ratios: dict[str, float]) -> list[str]:
-    """Stop enlarging beams whose deflection does not come down as they grow.
+def least_deflection_ratio(ratio: float, support: float, section: Section, limits) -> float:
+    """The deflection ratio a beam could reach at the largest size allowed, at best.
 
-    A deflection that the beam's own stiffness governs falls by a quarter or
-    more for each step of depth. One that hardly moves comes from elsewhere:
-    the rotation of the support of a cantilever, or the movement of what
-    carries the beam. Such a beam keeps its size and is reported; so are the
-    beams that only followed it along its line. ``ratios`` holds the ratio
-    each beam had when it was last made larger; ``actions`` is changed in
-    place. Returns the stopped beams.
+    The part that comes from the rotation of its support stays (``support``);
+    the rest is the bending of the span, which falls with the stiffness b h^3
+    of the section. Cracking, the heavier section and the forces a stiffer
+    beam attracts are left out, and all of them make the real value larger:
+    a beam whose best value is over its limit cannot pass at any size.
+    """
+    support = min(max(support, 0.0), ratio)
+    largest = max(limits.beam_max_width, section.width) * max(limits.beam_max_depth,
+                                                              section.depth) ** 3
+    stiffness = section.width * section.depth ** 3
+    return support + (ratio - support) * (stiffness / largest if largest > 0 else 1.0)
+
+
+def stop_unhelped_deflection_growth(actions: dict, sections: dict, results: pd.DataFrame,
+                                    ratios: dict[str, float], limits=None) -> list[str]:
+    """Stop enlarging beams for a deflection that no size can bring under its limit.
+
+    Asked before a beam is made larger, with ``limits`` (the largest beam
+    size): can any size pass? Not when the rotation of its support alone
+    gives more than the limit, and not when the bending part, at the largest
+    size allowed, still leaves it over (``least_deflection_ratio``). Such a
+    beam keeps its size and is reported at once, with the part that comes
+    from its support.
+
+    Asked after it was made larger: did it help? A deflection that the beam's
+    own stiffness governs falls by a quarter or more for each step of depth.
+    One that came down by less than ``MIN_DEFLECTION_GAIN`` comes from
+    elsewhere: the movement of what carries the beam.
+
+    The beams that only followed a stopped beam along its line keep their
+    size too. ``ratios`` holds the ratio each beam had when it was last made
+    larger; ``actions`` is changed in place. Returns the stopped beams.
     """
     if results is None or results.empty or "Defl_ratio" not in results.columns:
         return []
-    now = pd.to_numeric(results["Defl_ratio"], errors="coerce").groupby(
-        results["UniqueName"].astype(str)).max()
+    from design import dcr_targets
+
+    names = results["UniqueName"].astype(str)
+    now = pd.to_numeric(results["Defl_ratio"], errors="coerce").groupby(names).max()
+    from_support = (pd.to_numeric(results["Defl_support_ratio"], errors="coerce").groupby(
+        names).max() if "Defl_support_ratio" in results.columns else pd.Series(dtype=float))
+    status = results.groupby(names)["SupportStatus"].first() \
+        if "SupportStatus" in results.columns else pd.Series(dtype=str)
     stopped = []
     for name, (new, reason) in list(actions.items()):
         if reason != DEFLECTION_REASON or new == sections.get(name):
             continue
         ratio = float(now.get(name, float("nan")))
         before = ratios.get(name)
+        support = float(from_support.get(name, 0.0))
+        support = 0.0 if support != support else support
+        target = dcr_targets.limit(dcr_targets.beam_type(status.get(name, "")),
+                                   dcr_targets.DEFLECTION)
+        if limits is not None and ratio == ratio and name in sections:
+            best = least_deflection_ratio(ratio, support, sections[name], limits)
+            if best > target + 1e-9:
+                part = (f", of which {support:.2f} from the rotation of its support alone"
+                        if support > 0.005 else "")
+                actions[name] = (sections[name], f"deflection ratio {ratio:.2f}{part}: at the "
+                                 f"largest size allowed it would still be {best:.2f} at best, "
+                                 f"over {target:.2f}: a larger section does not help (no size "
+                                 "passes); check the framing and the support, not the size")
+                stopped.append(name)
+                continue
         if before is not None and ratio == ratio and ratio > before * (1.0 - MIN_DEFLECTION_GAIN):
             actions[name] = (sections[name], f"deflection ratio {ratio:.2f} was {before:.2f} "
                              "before it was made larger: a larger section does not help "
@@ -1227,7 +1275,8 @@ def run_design_loop(bench: Workbench) -> dict:
         actions = beam_actions(beam_table, sections, bench.lengths(), grown, settings, seismic,
                                allow_shrink, bench.lines(), bench.directions())
         stop_runaway_growth(actions, sections, shear_growths)
-        stop_unhelped_deflection_growth(actions, sections, beam_table, deflection_ratios)
+        stop_unhelped_deflection_growth(actions, sections, beam_table, deflection_ratios,
+                                        settings.limits)
         if columns:
             _, column_names = bench.members()
             sizer = bench.column_sizer() if settings.size_on_forces else None
@@ -1310,6 +1359,42 @@ LOOP_FIELDS = {
     "Make smaller when every ratio is below": ("downsize_ratio", 0.7),
     "Rounds (beams, columns, final check) at most": ("max_rounds", 5),
 }
+
+
+LINE_FIELDS = ("span_similarity", "line_max_bend", "line_demand_share")
+LINE_SHARING_OPTIONS = {
+    "Yes - one size along a line, where the members are alike (the next dialog sets how alike)":
+        True,
+    "No - every beam and girder takes the size it needs by itself": False,
+}
+
+
+def line_sharing_text(settings: LoopSettings) -> str:
+    """The engineer's choice for the sizes along a beam line, for the log and the summary."""
+    if not settings.share_line_sizes:
+        return "every beam and girder takes its own size (the pieces of one span, one size)"
+    return ("one size along a line where the members are held alike, their spans differ by "
+            f"at most {settings.span_similarity * 100:g} %, they bend by at most "
+            f"{settings.line_max_bend:g} degrees and carry at least "
+            f"{settings.line_demand_share * 100:g} % of the governing moment and shear")
+
+
+def ask_line_sharing(title: str, last: dict | None = None) -> bool | None:
+    """Ask whether the beams and girders of one line take one size. None when closed."""
+    from utilities._gui_helpers import select_option
+
+    chosen = select_option(
+        title + ": beam lines",
+        "Should the beams and girders of one line take one size?\n\n"
+        "Yes: when a member of a line is made larger, the others of that line take its size, "
+        "provided they are held the same way (cantilever, span between supports, gravity "
+        "beam), have a similar span, run nearly straight on and carry a comparable moment "
+        "and shear. The next dialog sets those three limits.\n\n"
+        "No: each member is sized on its own results, so a line can change size from one "
+        "span to the next. The pieces ETABS cuts one span into still take one size.",
+        list(LINE_SHARING_OPTIONS),
+        default_index=0 if (last or {}).get("share_line_sizes", True) else 1)
+    return None if chosen is None else LINE_SHARING_OPTIONS[chosen]
 
 
 def _saved(name: str) -> dict:
@@ -1618,12 +1703,18 @@ def run_design_cli() -> dict | None:
 
     # loop limits
     last = _saved("design_loop")
-    defaults = {label: f"{last.get(key, value):g}" for label, (key, value) in LOOP_FIELDS.items()}
-    typed = enter_values(title, "How the members are resized.", list(LOOP_FIELDS), defaults)
+    share_lines = ask_line_sharing(title, last)
+    if share_lines is None:
+        return None
+    fields = {label: field for label, field in LOOP_FIELDS.items()
+              if share_lines or field[0] not in LINE_FIELDS}
+    defaults = {label: f"{last.get(key, value):g}" for label, (key, value) in fields.items()}
+    typed = enter_values(title, "How the members are resized.", list(fields), defaults)
     if typed is None:
         return None
     try:
-        values = {key: float(typed.get(label, default))
+        # a setting that was not asked keeps the value it had
+        values = {key: float(typed.get(label, last.get(key, default)))
                   for label, (key, default) in LOOP_FIELDS.items()}
         if values["column_max_ratio"] < 1.0 or min(
                 values["max_inner"], values["max_inner_columns"], values["max_rounds"]) < 1 \
@@ -1638,7 +1729,7 @@ def run_design_cli() -> dict | None:
                      "30 to 100 % of the depth (30 % is the least for a special moment frame, "
                      "ACI 18.6.2.1).", title=title)
         return None
-    _save("design_loop", values)
+    _save("design_loop", {**values, "share_line_sizes": share_lines})
 
     # setup inputs: ranges and seismic values
     settings_file = settings_path(original)
@@ -1683,6 +1774,7 @@ def run_design_cli() -> dict | None:
         span_similarity=values["span_similarity"] / 100.0,
         line_max_bend=values["line_max_bend"],
         line_demand_share=values["line_demand_share"] / 100.0,
+        share_line_sizes=share_lines,
         max_rounds=int(values["max_rounds"]), max_inner=int(values["max_inner"]),
         max_inner_columns=int(values["max_inner_columns"]),
         zone_factor=seismic_values["zone_factor"], ct=seismic_values["ct"],
@@ -1719,6 +1811,7 @@ def run_design_cli() -> dict | None:
             bench.log("Girders with a clear span under 4d are designed without the SMRF rules "
                       "(ACI 18.6.2.1(a)).")
         bench.log("Deflection stages: " + deflection_stages.describe() + ".")
+        bench.log("Beam lines: " + line_sharing_text(settings) + ".")
         bench.log(f"Combinations: {len(combos)} ULS ({seismic})")
         bench.log("The loop sizes the members for strength and deflection. Drift is checked at "
                   "the end, on the final sizes: the members are not resized for it.")
@@ -1811,6 +1904,7 @@ def loop_summary(summary: dict, settings: LoopSettings, original: str, working: 
     add_short_spans_to(out, beams, settings.exempt_short_spans)
     if settings.deflection_stages is not None:
         out.add("Deflection stages", settings.deflection_stages.describe())
+    out.add("Beam lines", line_sharing_text(settings))
     if settings.sources is not None:
         settings.sources.add_to(out)
     if settings.beam_earth_cover_stories:

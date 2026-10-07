@@ -630,3 +630,79 @@ def test_an_iteration_after_a_section_change_analyses_again(monkeypatch):
     # analysed for iterations 1, 2 and 4; iteration 3 (columns) and 5 (final) reuse
     assert bench.calls["analyze"] == 3 and bench.calls["beams"] == 3
     assert bench.calls["columns"] == 2      # iterations 3 and 4; the final check reuses the last
+
+
+def test_the_engineer_can_have_every_beam_sized_alone():
+    """Yes keeps the sharing with its conditions; No leaves each member to its own results,
+    but the pieces of one span still take one size."""
+    from etabs_api.workflows.design_loop import line_sharing_text
+
+    rows = pd.DataFrame(beam_rows("2GX-1", status="FAILED: DEFLECTION (ACI 24.2.2)")
+                        + beam_rows("2GX-1A") + beam_rows("2GX-1B"))
+    sections = {name: g(300, 500) for name in ("2GX-1", "2GX-1A", "2GX-1B")}
+    lengths = {name: 6000.0 for name in sections}
+    shared = beam_actions(rows, sections, lengths, set(), SETTINGS, allow_shrink=False)
+    assert set(shared) == {"2GX-1", "2GX-1A", "2GX-1B"}
+    alone_settings = LoopSettings(combos=[], limits=Limits(), ranges=RANGES,
+                                  share_line_sizes=False)
+    alone = beam_actions(rows, sections, lengths, set(), alone_settings, allow_shrink=False)
+    assert set(alone) == {"2GX-1"}
+    one_span = rows.assign(Defl_span="2GX-1 to 2GX-1A", Defl_span_mm=12000.0)
+    one_span.loc[one_span["UniqueName"] == "2GX-1B", ["Defl_span", "Defl_span_mm"]] = [
+        "2GX-1B", 6000.0]
+    pieces = beam_actions(one_span, sections, lengths, set(), alone_settings, allow_shrink=False)
+    assert set(pieces) == {"2GX-1", "2GX-1A"}                # the two pieces of one span
+    assert "its own size" in line_sharing_text(alone_settings)
+    assert "30 %" in line_sharing_text(SETTINGS) and "75 %" in line_sharing_text(SETTINGS)
+
+
+def test_a_beam_no_size_can_bring_under_its_deflection_limit_is_stopped_at_once():
+    """A cantilever whose support rotates gained 6 to 8 % a step and grew to the largest
+    size, still failing. The question is whether any size can pass."""
+    import pytest
+
+    from etabs_api.workflows.design_loop import (
+        DEFLECTION_REASON,
+        least_deflection_ratio,
+        not_fixed_by_size,
+        stop_unhelped_deflection_growth,
+        stuck_by_kind,
+    )
+
+    limits = Limits(beam_max_width=800, beam_max_depth=1200)
+    section = g(400, 600)
+    # all of it bending: at 800 x 1200 the stiffness is 16 times larger
+    assert least_deflection_ratio(4.0, 0.0, section, limits) == pytest.approx(0.25)
+    # 1.3 of it from the support: that part stays
+    assert least_deflection_ratio(4.0, 1.3, section, limits) == pytest.approx(1.3 + 2.7 / 16)
+    assert least_deflection_ratio(2.0, 5.0, section, limits) == pytest.approx(2.0)   # never above
+
+    def results(ratio, support):
+        rows = pd.DataFrame(beam_rows("2BX-2", status="FAILED: DEFLECTION (ACI 24.2.2)",
+                                      support="Cantilever (Free at PtJ)")
+                            + beam_rows("2BX-3", status="FAILED: DEFLECTION (ACI 24.2.2)"))
+        rows["Defl_ratio"] = rows["UniqueName"].map({"2BX-2": ratio, "2BX-3": 4.0})
+        rows["Defl_support_ratio"] = rows["UniqueName"].map({"2BX-2": support, "2BX-3": 0.0})
+        return rows
+
+    sections = {"2BX-2": g(400, 600), "2BX-3": g(400, 600), "2BX-2A": g(400, 600)}
+
+    def actions():
+        return {"2BX-2": (g(400, 700), DEFLECTION_REASON),
+                "2BX-3": (g(400, 700), DEFLECTION_REASON),
+                "2BX-2A": (g(400, 700), "same beam line as 2BX-2")}
+
+    first = actions()
+    stopped = stop_unhelped_deflection_growth(first, sections, results(2.6, 1.3), {}, limits)
+    assert stopped == ["2BX-2"]                              # at the first iteration, no history
+    assert first["2BX-2"][0] == g(400, 600) and "1.30 from the rotation" in first["2BX-2"][1]
+    assert "2BX-2A" not in first                             # it only followed
+    assert first["2BX-3"][0] == g(400, 700)                  # bending only: 4.0 / 16 passes
+    kinds = stuck_by_kind(not_fixed_by_size(first, sections))
+    assert list(kinds) == ["deflection: the support rotates or moves"]
+    # the support part is small: the beam may grow
+    again = actions()
+    assert stop_unhelped_deflection_growth(again, sections, results(2.6, 0.3), {}, limits) == []
+    # without the limits the question is not asked (the older behaviour)
+    plain = actions()
+    assert stop_unhelped_deflection_growth(plain, sections, results(2.6, 1.3), {}) == []
