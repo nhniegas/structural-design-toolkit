@@ -14,11 +14,11 @@ from pathlib import Path
 
 
 SIZES = (16, 24, 32, 48, 64, 128, 256)
-BACKGROUND = (15, 31, 48, 255)
-PANEL = (24, 52, 72, 255)
-STEEL = (230, 239, 242, 255)
-TEAL = (54, 208, 190, 255)
-ORANGE = (255, 167, 69, 255)
+BACKGROUND = (226, 234, 243, 255)
+BLUE = (30, 112, 204, 255)
+DEEP_BLUE = (16, 68, 137, 255)
+LIGHT_BLUE = (71, 157, 231, 255)
+WHITE = (249, 252, 255, 255)
 
 
 def png_chunk(kind: bytes, data: bytes) -> bytes:
@@ -46,6 +46,15 @@ def draw_icon(size: int) -> bytes:
             for x in range(max(0, round(x0 * scale)), min(width, round(x1 * scale) + 1)):
                 set_pixel(x, y, color)
 
+    def rounded_rect(x0: float, y0: float, x1: float, y1: float, radius: float, color: tuple[int, int, int, int]) -> None:
+        for y in range(max(0, round(y0 * scale)), min(height, round(y1 * scale) + 1)):
+            for x in range(max(0, round(x0 * scale)), min(width, round(x1 * scale) + 1)):
+                px, py = x / scale, y / scale
+                nearest_x = min(max(px, x0 + radius), x1 - radius)
+                nearest_y = min(max(py, y0 + radius), y1 - radius)
+                if (px - nearest_x) ** 2 + (py - nearest_y) ** 2 <= radius**2:
+                    set_pixel(x, y, color)
+
     def line(points: list[tuple[float, float]], thickness: float, color: tuple[int, int, int, int]) -> None:
         radius = max(1, thickness * scale / 2)
         for (x0, y0), (x1, y1) in zip(points, points[1:]):
@@ -69,29 +78,40 @@ def draw_icon(size: int) -> bytes:
                 if (x - cx) ** 2 + (y - cy) ** 2 <= radius**2:
                     set_pixel(x, y, color)
 
-    # Technical panel and a subtle roof line.
-    rect(1.5, 1.5, size - 1.5, size - 1.5, PANEL)
-    line([(3, 7), (size / 2, 3), (size - 3, 7)], 1.2, TEAL)
+    # Layered badge inspired by engineering software marks.
+    rounded_rect(11, 11, size - 11, size - 11, 12, BLUE)
+    rect(11, size * 0.72, size - 11, size - 11, DEEP_BLUE)
+    line([(11, size * 0.72), (size - 11, size * 0.72)], 1.2, LIGHT_BLUE)
 
-    # Structural frame: columns, floor beams, and foundation.
-    left, right = 4.5, size - 4.5
-    top, base = 7.5, size - 4.5
-    line([(left, top), (left, base)], 2.0, STEEL)
-    line([(right, top), (right, base)], 2.0, STEEL)
-    line([(left, top), (right, top)], 2.0, STEEL)
-    line([(left, size * 0.42), (right, size * 0.42)], 1.5, STEEL)
-    line([(left, size * 0.64), (right, size * 0.64)], 1.5, STEEL)
-    line([(left - 1, base), (right + 1, base)], 2.2, STEEL)
-    line([(left, size * 0.42), (size / 2, top)], 1.0, TEAL)
-    line([(size / 2, top), (right, size * 0.42)], 1.0, TEAL)
+    # Bold block lettering keeps the product name readable in Explorer.
+    unit = size / 256
+    def glyph_s(x: float, y: float) -> None:
+        rect(x, y, x + 42 * unit, y + 10 * unit, WHITE)
+        rect(x, y, x + 10 * unit, y + 31 * unit, WHITE)
+        rect(x, y + 25 * unit, x + 42 * unit, y + 35 * unit, WHITE)
+        rect(x + 32 * unit, y + 30 * unit, x + 42 * unit, y + 61 * unit, WHITE)
+        rect(x, y + 56 * unit, x + 42 * unit, y + 66 * unit, WHITE)
 
-    # Analysis result/check mark.
-    circle(size * 0.73, size * 0.76, size * 0.15, ORANGE)
-    line(
-        [(size * 0.65, size * 0.76), (size * 0.71, size * 0.82), (size * 0.82, size * 0.69)],
-        max(1.2, size * 0.055),
-        BACKGROUND,
-    )
+    def glyph_d(x: float, y: float) -> None:
+        rect(x, y, x + 10 * unit, y + 66 * unit, WHITE)
+        rect(x + 8 * unit, y, x + 31 * unit, y + 10 * unit, WHITE)
+        rect(x + 8 * unit, y + 56 * unit, x + 31 * unit, y + 66 * unit, WHITE)
+        rect(x + 31 * unit, y + 8 * unit, x + 41 * unit, y + 58 * unit, WHITE)
+
+    def glyph_t(x: float, y: float) -> None:
+        rect(x, y, x + 44 * unit, y + 10 * unit, WHITE)
+        rect(x + 17 * unit, y, x + 27 * unit, y + 66 * unit, WHITE)
+
+    letter_y = size * 0.29
+    glyph_s(size * 0.16, letter_y)
+    glyph_d(size * 0.38, letter_y)
+    glyph_t(size * 0.62, letter_y)
+
+    # Beam, column, and triangulated roof accents.
+    line([(size * 0.18, size * 0.86), (size * 0.82, size * 0.86)], 2.0, LIGHT_BLUE)
+    line([(size * 0.30, size * 0.86), (size * 0.30, size * 0.76)], 1.4, LIGHT_BLUE)
+    line([(size * 0.70, size * 0.86), (size * 0.70, size * 0.76)], 1.4, LIGHT_BLUE)
+    line([(size * 0.30, size * 0.76), (size / 2, size * 0.70), (size * 0.70, size * 0.76)], 1.2, LIGHT_BLUE)
 
     # Average the supersampled pixels down to a clean multi-size icon.
     output = bytearray(size * size * 4)
