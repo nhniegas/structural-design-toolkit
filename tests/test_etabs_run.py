@@ -246,3 +246,19 @@ def test_the_report_says_passed_only_when_everything_was_compared():
     text = er.report_text("s.json", [ok, differs], {})
     assert "FAILED" in text and "columns[Pu]" in text
     assert "FAILED" in er.report_text("s.json", [], {})
+
+
+def test_only_a_box_about_the_drawing_of_etabs_is_closed_by_a_run():
+    from tools import etabs_run
+
+    assert etabs_run.is_harmless("Error initializing shader. Error is HRESULT: [0x80070057]")
+    assert not etabs_run.is_harmless("The model is unstable. Do you want to continue?")
+    assert not etabs_run.is_harmless("")
+
+
+def test_a_process_with_no_window_has_no_message_box():
+    import os
+
+    from tools import etabs_run
+
+    assert etabs_run.message_boxes(os.getpid()) == []

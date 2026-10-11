@@ -313,3 +313,16 @@ def test_no_command_prints_equation_source():
     quantities = cq.measure([column], [cq.FloorShell("S", "2F", [
         (0, 0), (6000.0, 0), (6000.0, 4000.0), (0, 4000.0)], 150.0)], ["2F"], 100.0)
     assert unrendered(cq.quantities_report(quantities).equation_lines()) == []
+
+
+def test_a_symbol_the_console_cannot_encode_does_not_stop_a_command(tmp_path):
+    """A report printed to a file in a Windows code page: the symbols are replaced."""
+    import subprocess
+
+    code = ("import sys; sys.path.insert(0, r'%s'); from utilities.terminal import safe_output; "
+            "safe_output(); print('theta \u2264 0.10, \u03b4\u2098\u2090\u2093 \u21d2 irregular')"
+            % str(Path(__file__).resolve().parents[1]))
+    done = subprocess.run([sys.executable, "-X", "utf8=0", "-c", code], capture_output=True,
+                          env={**__import__("os").environ, "PYTHONIOENCODING": "cp1252"})
+    assert done.returncode == 0, done.stderr.decode(errors="replace")
+    assert b"irregular" in done.stdout and b"0.10" in done.stdout

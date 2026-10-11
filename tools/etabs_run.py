@@ -542,6 +542,97 @@ def report_text(scenario_path: str, results: list[StepResult], times: dict[str, 
     return "\n".join(lines)
 
 
+# -----------------------------------------------------------------------------
+# MESSAGE BOXES OF ETABS
+# -----------------------------------------------------------------------------
+# ETABS draws its model window with DirectX, and now and then that fails after an
+# analysis: a box "Error initializing shader" waits for OK, and until then no
+# call to its API returns. Nobody watches a test run, so the run presses OK on
+# that box. Any other box is left as it is and named in the report.
+HARMLESS_BOXES = ("error initializing shader",)
+
+
+def message_boxes(pid: int) -> list[tuple[int, str, int | None]]:
+    """The message boxes a process shows: (window, its text, its OK button)."""
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    callback = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+
+    def text_of(hwnd) -> str:
+        length = user32.GetWindowTextLengthW(hwnd)
+        buffer = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(hwnd, buffer, length + 1)
+        return buffer.value
+
+    def class_of(hwnd) -> str:
+        buffer = ctypes.create_unicode_buffer(64)
+        user32.GetClassNameW(hwnd, buffer, 64)
+        return buffer.value
+
+    boxes: list[int] = []
+
+    def top(hwnd, _):
+        owner = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+        if owner.value == pid and user32.IsWindowVisible(hwnd) and class_of(hwnd) == "#32770":
+            boxes.append(hwnd)
+        return True
+
+    user32.EnumWindows(callback(top), 0)
+    out = []
+    for box in boxes:
+        children: list[int] = []
+        user32.EnumChildWindows(box, callback(lambda hwnd, _: children.append(hwnd) or True), 0)
+        said = " ".join(text_of(h) for h in children if class_of(h) == "Static").strip()
+        button = next((h for h in children if class_of(h) == "Button"
+                       and text_of(h).replace("&", "") == "OK"), None)
+        out.append((box, said, button))
+    return out
+
+
+def is_harmless(text: str) -> bool:
+    """True for a box of ETABS that a test run may close: one about its own drawing."""
+    return any(known in str(text).lower() for known in HARMLESS_BOXES)
+
+
+class BoxWatch:
+    """Presses OK on the harmless boxes of the ETABS of a run, while it runs."""
+
+    def __init__(self, pid: int, every: float = 2.0):
+        import threading
+
+        self.pid, self.every = pid, every
+        self.closed: list[str] = []
+        self.left: list[str] = []
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._watch, daemon=True)
+
+    def _watch(self) -> None:
+        import ctypes
+
+        while not self._stop.wait(self.every):
+            try:
+                for _, said, button in message_boxes(self.pid):
+                    if is_harmless(said) and button:
+                        ctypes.windll.user32.PostMessageW(button, 0x00F5, 0, 0)    # BM_CLICK
+                        self.closed.append(said)
+                    elif said and said not in self.left:
+                        self.left.append(said)
+                        print(f"ETABS shows a message box the run does not close: {said[:300]}",
+                              flush=True)
+            except Exception:  # noqa: BLE001 - the watch must never stop a run
+                pass
+
+    def __enter__(self):
+        self._thread.start()
+        return self
+
+    def __exit__(self, *_):
+        self._stop.set()
+
+
 def run(scenario_path: str, save_reference: bool = False, keep_open: bool = False,
         pid: int | None = None, only: str | None = None, units: str | None = None,
         tolerance: float = TOLERANCE) -> int:
@@ -577,10 +668,14 @@ def run(scenario_path: str, save_reference: bool = False, keep_open: bool = Fals
         if units is not None:
             model.SetPresentUnits(units)
         times["model opened"] = time.time() - opened
-        for step in steps:
-            results.append(run_step(step, scenario, save_reference, tolerance))
-            if results[-1].status != "ok" and not step.get("continue_after_failure"):
-                break
+        with BoxWatch(pid) as boxes:
+            for step in steps:
+                results.append(run_step(step, scenario, save_reference, tolerance))
+                if results[-1].status != "ok" and not step.get("continue_after_failure"):
+                    break
+        if boxes.closed:
+            print(f"ETABS showed {len(boxes.closed)} message boxes about its own drawing "
+                  f"(\"{boxes.closed[0][:60]}...\"); the run pressed OK on them.", flush=True)
     finally:
         closing = time.time()
         if etabs is not None and pid is not None:
@@ -593,13 +688,19 @@ def run(scenario_path: str, save_reference: bool = False, keep_open: bool = Fals
         os.environ.pop("SDT_SETTINGS_DIR", None)
     times["whole run"] = time.time() - started
     text = report_text(scenario_path, results, times)
-    print(text, flush=True)
+    # the file first: it holds every symbol, whatever the console can show
     with open(os.path.join(scenario["work"], "run report.txt"), "w", encoding="utf-8") as handle:
         handle.write(text.lstrip("\n") + "\n")
+    from utilities.terminal import write
+
+    write(text)
     return 0 if results and len(results) == len(steps) and all(r.passed for r in results) else 1
 
 
 def main(argv: list[str] | None = None) -> int:
+    from utilities.terminal import safe_output
+
+    safe_output()      # the reports hold symbols a Windows console cannot encode
     parser = argparse.ArgumentParser(
         description="Run sdt commands in an ETABS of their own, from a scenario file, and "
                     "compare what they return with a reference.")

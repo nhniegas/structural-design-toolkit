@@ -109,3 +109,17 @@ def test_the_model_is_unlocked_before_the_spectrum_scale_is_changed():
 
     ma.multiply_spectrum_scale(Connector(), "RSAX", 1.25)
     assert calls == [("locked", False), ("set", [1250.0])]
+
+
+def test_the_seismic_weight_is_that_above_the_base_of_the_patterns():
+    """sdt check compares the base shear with the weight above the story the
+    patterns start from; the weight of every level is larger by the levels at
+    and below it."""
+    import pandas as pd
+
+    from etabs_api.workflows.model_analysis import weight_above
+
+    weights = pd.DataFrame({"Story": ["RD", "3F", "2F", "GF", "Base"],
+                            "Weight (kN)": [1529.9, 1806.7, 1935.1, 591.5, 54.0]})
+    assert weight_above(weights, "GF") == pytest.approx(5_271_700.0)
+    assert weight_above(weights, "RD") == 0.0 and weight_above(weights, "B2") is None

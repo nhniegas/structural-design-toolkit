@@ -334,6 +334,20 @@ def drawn() -> bool:
         return False
 
 
+def safe_output() -> None:
+    """Let no symbol stop a command: what the output cannot encode is replaced.
+
+    The reports hold Greek letters and small letters above and below the line.
+    A console or a file in a Windows code page has none of them, and a plain
+    ``print`` of such a line raised an error after the command had done its work.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass      # a stream that cannot be set, such as one a test captured
+
+
 def write(text: str) -> None:
     """Print text; a symbol the output cannot hold is replaced, never an error."""
     try:

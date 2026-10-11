@@ -62,8 +62,11 @@ def _column_calc_member(rows: pd.DataFrame) -> MemberReport:
              Tex("$f_y$ (MPa)"), number(first.get("fy_MPa"))],
             [Tex("$f_{yt}$ (MPa)"), number(first.get("fyt_MPa")),
              "Vertical bars", number(first.get("Longitudinal_Bars"), 0)],
-            ["Bars on X edge", number(first.get("Bars_X_Edge"), 0),
-             "Bars on Y edge", number(first.get("Bars_Y_Edge"), 0)],
+        ]
+        # a circular column has its bars around it, not along two edges
+        + ([] if circular else [["Bars on X edge", number(first.get("Bars_X_Edge"), 0),
+                                 "Bars on Y edge", number(first.get("Bars_Y_Edge"), 0)]])
+        + [
             [Tex(r"Steel ratio, $\rho$"), number(first.get("Reinforcement_Ratio"), 4),
              Tex(r"Limit on $\rho$"), number(first.get("Reinforcement_Ratio_Limit"), 4)],
             ["Bundles", first.get("Bundle_Layout"),
@@ -169,6 +172,7 @@ def _column_calc_member(rows: pd.DataFrame) -> MemberReport:
     if slenderness is not None:
         tables.insert(2, slenderness)
 
+    spiral = "spiral" in str(first.get("Transverse_Type", "")).lower()
     confinement = [
         [f"Required steel ratio, 18.7.5({letter})", number(first.get(f"Confinement_18_7_5_{letter}"), 4)]
         for letter in "abcdef"
@@ -180,16 +184,27 @@ def _column_calc_member(rows: pd.DataFrame) -> MemberReport:
         [
             ["Type", first.get("Transverse_Type")],
             ["Provided", first.get("Transverse_Provision_Summary")],
-            ["Tie bar diameter (mm)", number(first.get("Tie_Bar_mm"), 0)],
+        ]
+        # a spiral has a pitch and no legs along an edge
+        + ([["Spiral bar diameter (mm)", number(first.get("Tie_Bar_mm"), 0)],
+            ["Pitch (mm)", number(first.get("Transverse_Spacing_mm"), 0)]] if spiral else
+           [["Tie bar diameter (mm)", number(first.get("Tie_Bar_mm"), 0)],
             ["Spacing (mm)", number(first.get("Transverse_Spacing_mm"), 0)],
             ["Tie legs along X edge", number(first.get("Transverse_Legs_X"), 0)],
-            ["Tie legs along Y edge", number(first.get("Transverse_Legs_Y"), 0)],
+            ["Tie legs along Y edge", number(first.get("Transverse_Legs_Y"), 0)]])
+        + [
             ["Governing ACI 18.7.5 expression", first.get("Confinement_Criteria_Governing")],
             ["High axial load or high concrete strength rule", first.get("High_Axial_or_High_fc_Check")],
         ]
         + confinement
-        + [
-            [Tex("$k_f$"), number(first.get("Kf"), 3)],
+        # the volumetric ratio of a spiral is one number; ties have a ratio along each edge
+        + ([[Tex("$k_f$"), number(first.get("Kf"), 3)],
+            [Tex(r"Required spiral ratio, $\rho_s$"), number(first.get("Required_Ash_s_Ratio_X"), 4)],
+            [Tex(r"Provided spiral ratio, $\rho_s$"), number(first.get("Provided_Ash_s_Ratio_X"), 4)],
+            ["Confinement ratio check", first.get("Confinement_Check")],
+            ["Pitch check", first.get("Transverse_Spacing_Check")],
+            ["Spiral bar diameter check", first.get("Tie_Diameter_Check")]] if spiral else
+           [[Tex("$k_f$"), number(first.get("Kf"), 3)],
             [Tex("$k_n$"), number(first.get("Kn"), 3)],
             [Tex("Required $A_{sh}/(s\\,b_c)$, X"), number(first.get("Required_Ash_s_Ratio_X"), 4)],
             [Tex("Provided $A_{sh}/(s\\,b_c)$, X"), number(first.get("Provided_Ash_s_Ratio_X"), 4)],
@@ -199,7 +214,8 @@ def _column_calc_member(rows: pd.DataFrame) -> MemberReport:
             ["Tie spacing check", first.get("Transverse_Spacing_Check")],
             ["Bar support check, X edge", first.get("Alternating_Support_Check_X")],
             ["Bar support check, Y edge", first.get("Alternating_Support_Check_Y")],
-            ["Tie diameter check", first.get("Tie_Diameter_Check")],
+            ["Tie diameter check", first.get("Tie_Diameter_Check")]])
+        + [
             ["SMRF column dimension check", first.get("SMRF_Dimension_Check")],
             ["Transverse reinforcement check", first.get("Transverse_Reinforcement_Check")],
         ],

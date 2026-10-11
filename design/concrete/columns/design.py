@@ -78,6 +78,15 @@ from design.concrete.columns.options import (
 )
 
 
+
+def transverse_text(tie: float, kind: str, spacing: float, legs_x, legs_y) -> str:
+    """The transverse reinforcement of a column in words. A spiral has a pitch and
+    no legs along an edge; ties have their legs along X and along Y."""
+    if "spiral" in str(kind).lower():
+        return f"{tie:g} mm {kind} @ {spacing:.0f} mm pitch"
+    return f"{tie:g} mm {kind} @ {spacing:.0f} mm; X: {legs_x} legs, Y: {legs_y} legs"
+
+
 def design_columns(
     tables: dict,
     beam_design: pd.DataFrame,
@@ -1150,12 +1159,9 @@ def design_columns(
                 status = "FAIL: column slenderness (ACI 6.2.6) - enlarge the section"
         force_check_rows.extend(selected_checks)
         layout_summary = _column_layout_summary(selected_layout)
-        transverse_summary = (
-            f"{dties:g} mm {transverse['Transverse_Type']} @ "
-            f"{spacing_provided:.0f} mm; "
-            f"X: {transverse['Transverse_Legs_X']} legs, "
-            f"Y: {transverse['Transverse_Legs_Y']} legs"
-        )
+        transverse_summary = transverse_text(
+            dties, transverse["Transverse_Type"], spacing_provided,
+            transverse["Transverse_Legs_X"], transverse["Transverse_Legs_Y"])
         output_rows.append(
             {
                 "Story": row.get("Story"),

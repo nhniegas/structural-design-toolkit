@@ -973,3 +973,35 @@ def test_torsion_below_phi_tcr_is_not_changed_by_the_option():
                                       compatibility_torsion=True)
     for column in ("Stirrup_Legs", "Spacing_2H", "Spacing_Mid", "n_mid_L1"):
         assert plain[column].tolist() == option[column].tolist()
+
+
+# --------------------------------------------------------------------------
+# CLEAR SPAN
+# --------------------------------------------------------------------------
+def test_the_clear_span_is_not_shortened_twice_when_etabs_gives_stations_between_the_faces():
+    """A 6,000 bay between two 700 columns: ETABS gives the forces from 350 to
+    5,650. The clear span is 5,300, not 5,300 less the columns again."""
+    from design.concrete.beams.design import clear_span_of
+
+    assert clear_span_of(5300.0, 6000.0, 700.0) == 5300.0
+    # a model with no end offsets: the stations run joint to joint
+    assert clear_span_of(6000.0, 6000.0, 700.0) == 5300.0
+    # the joint length is not known: as before, the stations less the columns
+    assert clear_span_of(6000.0, None, 700.0) == 5300.0
+    assert clear_span_of(6000.0, float("nan"), 700.0) == 5300.0
+    # never longer than the stations, and a beam with no column keeps its length
+    assert clear_span_of(5000.0, 6000.0, 700.0) == 5000.0
+    assert clear_span_of(5000.0, 5000.0, 0.0) == 5000.0
+    assert clear_span_of(300.0, 400.0, 900.0) == 300.0       # columns wider than the bay
+
+
+def test_the_joint_length_of_a_beam_goes_with_its_support_widths():
+    frame = pd.DataFrame({"UniqueName": ["C1", "C2", "B1"], "Width": [700.0, 600.0, 300.0],
+                          "Depth": [600.0, 600.0, 500.0], "Diameter": [None, None, None]})
+    conn = pd.DataFrame({"UniqueName": ["C1", "C2", "B1"], "DesignType": ["Column", "Column", "Beam"],
+                         "UniquePtI": ["1", "3", "2"], "UniquePtJ": ["2", "4", "4"],
+                         "Length": [3000.0, 3000.0, 6000.0]})
+    row = beam_design._support_widths(frame, conn).iloc[0]
+    assert (row["SupportWidth_I"], row["SupportWidth_J"], row["JointLength"]) == (700.0, 600.0, 6000.0)
+    # a connectivity table with no length: the width is still found
+    assert beam_design._support_widths(frame, conn.drop(columns="Length"))["JointLength"].isna().all()

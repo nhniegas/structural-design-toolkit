@@ -97,7 +97,10 @@ class AnalysisReport:
     ground_elevation: float = 0.0              # mm
     height_from: str = ""                      # the stories hn runs between, when the patterns say
     mass_sum: dict[str, float] = field(default_factory=dict)
-    seismic_weight: float | None = None        # N, from the mass source
+    seismic_weight: float | None = None        # N, from the mass source, every level
+    # N: the weight above the base of the static seismic patterns, the W of the
+    # base shear V = Cs W (sdt check compares the patterns with it)
+    base_shear_weight: float | None = None
     reaction_weight: float | None = None       # N, base reaction of the mass-source loads
     story_weights: pd.DataFrame = field(default_factory=pd.DataFrame)
     warnings: list[str] = field(default_factory=list)
@@ -152,7 +155,12 @@ class AnalysisReport:
         out.heading("Weight")
         rows = []
         if self.seismic_weight is not None:
-            rows.append(["Seismic weight from the mass source", f"{self.seismic_weight / 1e3:,.1f}"])
+            rows.append(["Weight from the mass source, every level",
+                         f"{self.seismic_weight / 1e3:,.1f}"])
+        if self.base_shear_weight is not None:
+            rows.append([f"Seismic weight W, above {self.height_from.split(' to ')[0]} "
+                         "(the base of the seismic patterns)",
+                         f"{self.base_shear_weight / 1e3:,.1f}"])
         if self.reaction_weight is not None:
             rows.append(["Base reaction of the same loads", f"{self.reaction_weight / 1e3:,.1f}"])
         out.table(["", "kN"], rows)
@@ -207,7 +215,11 @@ class AnalysisReport:
             lines.append(f"Sum {direction}: {total * 100:.1f} %")
         lines += ["", "--- Weight ---"]
         if self.seismic_weight is not None:
-            lines.append(f"Seismic weight from the mass source: {self.seismic_weight / 1e3:,.1f} kN")
+            lines.append("Weight from the mass source, every level: "
+                         f"{self.seismic_weight / 1e3:,.1f} kN")
+        if self.base_shear_weight is not None:
+            lines.append(f"Seismic weight W, above {self.height_from.split(' to ')[0]} (the base "
+                         f"of the seismic patterns): {self.base_shear_weight / 1e3:,.1f} kN")
         if self.reaction_weight is not None:
             lines.append(f"Base reaction of the same loads:     {self.reaction_weight / 1e3:,.1f} kN")
         if not self.story_weights.empty:
@@ -412,6 +424,16 @@ def story_weights(connector) -> pd.DataFrame:
     out = mass[["Story", "UX"]].copy()
     out["Weight (kN)"] = (out.pop("UX") * G / 1e3).round(1)  # N-s2/mm * mm/s2 = N
     return out
+
+
+def weight_above(weights: pd.DataFrame, bottom: str) -> float | None:
+    """The weight, in N, of the levels above ``bottom``, the story the static
+    seismic patterns start from. ``weights``: Story and Weight (kN), from the
+    top down. None when the story is not in the table."""
+    stories = [str(name) for name in weights["Story"]]
+    if bottom not in stories:
+        return None
+    return float(weights["Weight (kN)"].iloc[:stories.index(bottom)].sum() * 1e3)
 
 
 def mass_source_loads(connector) -> list[tuple[str, float]]:
@@ -665,6 +687,8 @@ def analyze_model(connector, zone_factor: float | None = None, ct: float | None 
     weights = story_weights(connector)
     report.story_weights = weights
     report.seismic_weight = float(weights["Weight (kN)"].sum() * 1e3)
+    report.base_shear_weight = weight_above(weights, report.height_from.split(" to ")[0]) \
+        if report.height_from else None
     report.reaction_weight = reaction_weight(connector, mass_source_loads(connector))
     if report.reaction_weight:
         difference = report.seismic_weight / report.reaction_weight - 1
@@ -783,8 +807,11 @@ def analysis_summary(report: AnalysisReport, model_path: str | None = None):
                                 f"above the ground; cap {report.cap * report.method_a:.3f} s")
     for direction, total in report.mass_sum.items():
         summary.add(f"Modal mass {direction}", f"{total * 100:.1f} %")
+    if report.base_shear_weight is not None:
+        summary.add("Seismic weight W", f"{report.base_shear_weight / 1e3:,.0f} kN above "
+                    f"{report.height_from.split(' to ')[0]}")
     if report.seismic_weight is not None:
-        summary.add("Seismic weight", f"{report.seismic_weight / 1e3:,.0f} kN")
+        summary.add("Weight of every level", f"{report.seismic_weight / 1e3:,.0f} kN")
     for warning in report.warnings:
         summary.fail(warning)
     for note in report.notes:

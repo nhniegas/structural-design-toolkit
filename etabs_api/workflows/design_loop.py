@@ -888,6 +888,7 @@ class Workbench:
         self._restore_spectrum()
         report = analyze_model(self.connector, self.settings.zone_factor, self.settings.ct,
                                progress=lambda text: self.show("Analysis", text))
+        self.last_analysis = report      # the full project report shows it
         for item in report.scaling:
             self.log(f"  {item.direction}: static {item.static_shear / 1e3:,.0f} kN, "
                      f"{item.spectrum_case} x {item.factor:.3f}")
@@ -1697,6 +1698,11 @@ def run_design_cli() -> dict | None:
     folder = select_output_directory("Folder for the final results, calculations and schedules")
     if not folder:
         return None
+    from etabs_api.workflows.project_report import ask_project_report
+
+    project_report = ask_project_report(title)     # the front page, or False for no report
+    if project_report is None:
+        return None
     _remember({"smrf": smrf, "gravity_combo": gravity, **beam_bars, **column_bars,
                "beam_earth_cover_stories": earth_stories, "check_top_level": levels[0],
                "check_foundation_level": levels[1]})
@@ -1829,6 +1835,17 @@ def run_design_cli() -> dict | None:
         save_final_design(bench, summary, working, folder)
         summary["drift"] = final_drift_check(bench, drift_options, folder,
                                              os.path.splitext(os.path.basename(working))[0])
+        if project_report:
+            from etabs_api.workflows.project_report import write_project_report
+
+            bench.stage = "Full project report"
+            written = write_project_report(
+                bench.connector, working, folder, summary, settings, project_report,
+                getattr(bench, "last_analysis", None), summary["drift"]["report"], bench.tables,
+                drift_options.wind_denominator, progress=lambda text: bench.show(text))
+            summary["project_report"] = written
+            bench.log("Full project report: " + (written or "not written (see the messages "
+                                                              "above: LaTeX is needed)"))
     from design.concrete.results_tables import beam_results_report, column_results_report
 
     if summary.get("beams") is not None and len(summary["beams"]):
@@ -1836,6 +1853,8 @@ def run_design_cli() -> dict | None:
     if summary.get("columns") is not None and len(summary["columns"]):
         column_results_report(summary["columns"], "DESIGN LOOP - FINAL COLUMNS").show()
     print(f"Working copy: {working}\nLog: {log_path}\nOutputs: {folder}")
+    if summary.get("project_report"):
+        print(f"Full project report: {summary['project_report']}")
     if summary["drift"]["failed"]:
         print("DRIFT FAILS: the sections were not resized for drift. Reconfigure the model "
               f"for drift and run sdt design again. See {summary['drift']['path']}")
