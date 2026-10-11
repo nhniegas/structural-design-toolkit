@@ -130,6 +130,7 @@ Each guide in `docs/` covers one tool: how to run it, its inputs, what it writes
 - [Steel and composite modules](docs/steel_design_documentation.md)
 - [Wind load calculator](docs/wind_calculator_asce7_documentation.md)
 - [Results in the terminal](docs/terminal_output.md)
+- [The dialogs](docs/dialogs.md)
 - [Running a command from an answers file](docs/answers_file.md)
 - [ETABS test runs](docs/etabs_test_runs.md)
 
