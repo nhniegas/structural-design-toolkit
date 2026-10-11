@@ -19,7 +19,9 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 # flag it less. --console keeps the terminal the commands print to.
 # The data files of these packages (section tables, fonts, templates) are not
 # found by PyInstaller on its own. The notebook tools are only used by Quarto.
+# The icon is assets\sdt.ico (tools\make_icon.py draws it; the build only reads it).
 python -m PyInstaller main.py --name sdt --console --onedir --noconfirm --clean `
+    --icon assets\sdt.ico `
     --collect-data steelpy --collect-data ezdxf `
     --collect-data sectionproperties --collect-data concreteproperties `
     --collect-data pylatex `

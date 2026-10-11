@@ -37,6 +37,7 @@ Supporting code:
 - `utilities/_calc_report.py`: layout of the beam and column PDF calculation reports.
 - `utilities/run_summary.py`: the summary every command shows in a window when it finishes (the terminal keeps the detailed results).
 - `utilities/doctor.py`: `sdt doctor`, the check that a machine can run the toolkit.
+- `assets/sdt.ico`: the icon of `sdt.exe`; `tools/make_icon.py` draws it (run it again after a change of the design).
 - `design/parallel.py`: the processes that share the beam design of a large model between the cores (`SDT_WORKERS=1` keeps one).
 - `build_exe.ps1`: builds the packaged program `sdt.exe`.
 - `utilities/_xlsx_values.py`: rounded numbers and stated blanks of the result workbooks.
