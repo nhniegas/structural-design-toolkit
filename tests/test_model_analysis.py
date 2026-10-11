@@ -56,7 +56,7 @@ def test_report_text_lists_scaling_periods_and_warnings():
     )
     text = report.text()
     assert "RSAX 500.0 kN -> 1,000.0 kN (scale factor x 2.0000)" in text
-    assert "1.3 T_A = 1.040 s" in text
+    assert "1.3 TA = 1.040 s" in text
     assert "Sum X: 95.0 %" in text
     assert "something" in text
 

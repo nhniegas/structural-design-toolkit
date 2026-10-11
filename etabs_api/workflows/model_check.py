@@ -334,7 +334,7 @@ def nscp_coefficient(ca: float, cv: float, importance: float, r: float, period: 
 
 
 def method_a_period(ct_ft: float, height_mm: float) -> float:
-    """NSCP Eq. 208-12, T_A = Ct hn^(3/4), with Ct in ft units as ETABS has it."""
+    """NSCP Eq. 208-12, TA = Ct hn^(3/4), with Ct in ft units as ETABS has it."""
     return ct_ft * (height_mm / FT) ** SEIS.period_exponent
 
 
@@ -592,7 +592,7 @@ def check_seismic(d: ModelData, settings: dict | None = None) -> list[Finding]:
         kinds = {str(x["PeriodType"]) for _, x in strength.iterrows()}
         out.append(Finding("Seismic", INFO, "Period: " + ", ".join(sorted(kinds)) +
                            f" (Program Calculated = Method B, capped at {SEIS.period_cap_zone4:g}"
-                           f" T_A in zone 4, {SEIS.period_cap_other:g} T_A in zone 2)",
+                           f" TA in zone 4, {SEIS.period_cap_other:g} TA in zone 2)",
                            "NSCP 208.5.2.2"))
     # response spectrum function and cases (UBC 97 function = NSCP Fig. 208-3)
     function = d.table("Functions - Response Spectrum - UBC 97")
@@ -658,7 +658,7 @@ def check_seismic(d: ModelData, settings: dict | None = None) -> list[Finding]:
                             f"scales it to {irregular * 100:g} %)" if status == WARN else
                             f" (below {regular * 100:g} %: scale it, sdt analyze)"),
                            "NSCP 208.5.3.5.4",
-                           equation=f"{case}: V_spectrum / V_static = "
+                           equation=f"{case}: Vspectrum / Vstatic = "
                                     f"{abs(values[axis]) / 1e3:,.1f} / {static / 1e3:,.1f} = "
                                     f"{ratio:.3f}"))
     if not d.modal.empty:
@@ -751,12 +751,12 @@ def _check_static_results(d: ModelData, seismic: pd.DataFrame, bottom: str) -> l
             cap = (SEIS.period_cap_zone4 if z >= SEIS.zone4_factor or z != z
                    else SEIS.period_cap_other) * t_a
             out.append(Finding("Seismic", OK if period <= cap * (1 + CAP_TOLERANCE) else FAIL,
-                               f"{name}: T {period:.3f} s, T_A {t_a:.3f} s for hn "
+                               f"{name}: T {period:.3f} s, TA {t_a:.3f} s for hn "
                                f"{height / 1e3:.2f} m ({low} to {high}), cap {cap:.3f} s",
                                "NSCP 208.5.2.2",
-                               equation=f"{name}: T_A = Cₜ hₙ^(3/4) = {ct:g} × "
-                                        f"({height / FT:.2f} ft)^0.75 = {t_a:.3f} s;  T ≤ "
-                                        f"{cap / t_a:.1f} T_A = {cap:.3f} s"))
+                               equation=f"{name}: TA = Cₜ hₙ³⁄⁴ = {ct:g} × "
+                                        f"({height / FT:.2f} ft)⁰·⁷⁵ = {t_a:.3f} s;  T ≤ "
+                                        f"{cap / t_a:.1f} TA = {cap:.3f} s"))
     return out
 
 
@@ -817,12 +817,12 @@ def _check_drift(d: ModelData, seismic: pd.DataFrame) -> list[Finding]:
         limit = drift_limit(period) if period == period else SEIS.drift_limit_long
         inelastic = SEIS.drift_amplification * r_factor * ratio
         out.append(Finding("Seismic", OK if inelastic <= limit else FAIL,
-                           f"{case}: drift {ratio:.5f} at {story}, Delta_M = "
+                           f"{case}: drift {ratio:.5f} at {story}, ΔM = "
                            f"{SEIS.drift_amplification:g} R x = {inelastic:.4f} (limit "
                            f"{limit:.3f}" + (f", T {period:.2f} s" if period == period else "")
                            + (f"; {source}" if source != case else "") + ")",
                            "NSCP 208.6.4.1, 208.6.5.1",
-                           equation=f"{case}: Δ_M = {SEIS.drift_amplification:g} R Δ_S = "
+                           equation=f"{case}: ΔM = {SEIS.drift_amplification:g} R ΔS = "
                                     f"{SEIS.drift_amplification:g} × {r_factor:g} × {ratio:.5f}"
                                     f" = {inelastic:.4f} ≤ {limit:.3f} h"))
     return out

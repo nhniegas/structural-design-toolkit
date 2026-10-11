@@ -51,17 +51,41 @@ _SYMBOLS = {
 }
 # (there is no small y below the line: the Greek one, ᵧ, is the usual stand-in)
 _SUB = dict(zip("0123456789+-=()aehijklmnoprstuvxy", "₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₕᵢⱼₖₗₘₙₒₚᵣₛₜᵤᵥₓᵧ"))
-_SUP = dict(zip("0123456789+-=()ni", "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿⁱ"))
+_SUP = dict(zip("0123456789+-=()ni/.abcdefghjklmoprstuvwxyzαβ",
+                "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿⁱ⁄·ᵃᵇᶜᵈᵉᶠᵍʰʲᵏˡᵐᵒᵖʳˢᵗᵘᵛʷˣʸᶻᵅᵝ"))
 _GROUP = r"\{((?:[^{}]|\{[^{}]*\})*)\}"       # {...} with one level of braces inside
 
 
 def _script(text: str, table: dict, mark: str) -> str:
-    """``text`` as a subscript or a superscript; kept with its mark where the
-    terminal has no such letter (M_pr stays M_pr, since there is no small p or r pair)."""
+    """``text`` as a subscript or a superscript.
+
+    Unicode has no small b, c, d, f, g, q, w or z below the line, and no
+    capital. A subscript with such a letter is written beside its symbol, as
+    engineers type it: ``A_g`` gives ``Ag``, ``\\phi_c`` gives ``φc``. An
+    exponent that cannot be raised keeps its mark, ``^(...)``, since without it
+    the value would read as a product.
+    """
     text = text.strip()
     if text and all(char in table for char in text):
         return "".join(table[char] for char in text)
+    if mark == "_":
+        return text.replace(" ", "") + _END      # see math(): a space before a next letter
     return f"{mark}{text}" if len(text) == 1 else f"{mark}({text})"
+
+
+_END = "\x00"      # the end of a subscript written beside its letter
+
+
+_UNRENDERED = re.compile(r"\\[A-Za-z]|[_^]\{|[^\s_]_[A-Za-z0-9(]|\^[A-Za-z0-9]")
+
+
+def unrendered(lines: list[str]) -> list[str]:
+    """The equation lines that still hold equation source: a LaTeX command, a
+    ``_`` before a subscript or a ``^`` before a plain exponent. Empty when all
+    are as a reader should see them. ``^(...)`` is allowed: an exponent that is
+    itself an expression. It is for equations only: a section name or a path
+    also has underscores and backslashes."""
+    return [line for line in lines if _UNRENDERED.search(str(line))]
 
 
 def math(latex: str) -> str:
@@ -88,6 +112,8 @@ def math(latex: str) -> str:
     text = re.sub(r"\^([A-Za-z0-9′])", lambda m: _script(m.group(1), _SUP, "^"), text)
     text = re.sub(r"\\([A-Za-z]+)", r"\1", text)          # a command with no symbol: its name
     text = text.replace("{", "").replace("}", "")
+    # bf tf, not bftf: a subscript written beside its letter is set off from the next symbol
+    text = re.sub(_END + r"(?=[A-Za-zΑ-ωφ])", " ", text).replace(_END, "")
     text = re.sub(r"\(([\w.φλΔβρ′]+)\)/", r"\1/", text)     # (a)/(b) with one term: a/(b)
     text = re.sub(r"/\(([\w.φλΔβρ′]+)\)", r"/\1", text)
     return re.sub(r"[ \t]+", " ", text).strip()
@@ -173,6 +199,11 @@ class Report:
         if lines:
             self.blocks.append(Equations(lines, title))
         return self
+
+    def equation_lines(self) -> list[str]:
+        """Every equation line of the report, in the order shown."""
+        return [line for block in self.blocks if isinstance(block, Equations)
+                for line in block.lines]
 
     def lines(self, lines: list[str], style: str = "") -> "Report":
         lines = [line for line in lines if line is not None]

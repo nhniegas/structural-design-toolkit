@@ -642,9 +642,9 @@ def terminal_report(column: "RectangularFilledComposite"):
     out.equations([
         "Axial:        compact walls: Pₙₒ = Fy Aₛ + 0.85 f′c (Ac + Aₛᵣ Eₛ/Ec)   (DG6 2.5.2, "
         "AISC I2.2)",
-        "              Pₑ = π² EI_eff / L²,  EI_eff = Eₛ Iₛ + C₃ Ec Ic,  "
+        "              Pₑ = π² EIeff / L²,  EIeff = Eₛ Iₛ + C₃ Ec Ic,  "
         "C₃ = 0.45 + 3 (Aₛ + Aₛᵣ)/Ag ≤ 0.9",
-        "              Pₙ = Pₙₒ 0.658^(Pₙₒ/Pₑ)  when Pₙₒ/Pₑ ≤ 2.25,  else Pₙ = 0.877 Pₑ;  "
+        "              Pₙ = Pₙₒ × 0.658ˣ with x = Pₙₒ/Pₑ, when x ≤ 2.25;  else Pₙ = 0.877 Pₑ;  "
         "strength φc Pₙ",
         "Flexure:      φb Mₙ, the plastic stress distribution of the filled section about "
         "each axis   (DG6 Fig. 2-13)",
@@ -652,7 +652,7 @@ def terminal_report(column: "RectangularFilledComposite"):
         "Interaction:  Pᵤ < Pcc:  Mᵤₓ/φMₙₓ + Mᵤᵧ/φMₙᵧ ≤ 1.0",
         "              Pᵤ ≥ Pcc:  (Pᵤ − Pcc) / (φPₙ − Pcc) + Mᵤₓ/φMₙₓ + Mᵤᵧ/φMₙᵧ ≤ 1.0   "
         "(DG6 2.5.6)",
-        "              with α = 1.5:  the moment term is [(Mᵤₓ/φMₙₓ)^α + (Mᵤᵧ/φMₙᵧ)^α]^(1/α)",
+        "              with α = 1.5:  the moment term is [(Mᵤₓ/φMₙₓ)ᵅ + (Mᵤᵧ/φMₙᵧ)ᵅ]¹⁄ᵅ",
     ])
     return out
 

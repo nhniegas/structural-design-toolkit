@@ -24,22 +24,42 @@ from utilities.terminal import Report, math  # noqa: E402
 @pytest.mark.parametrize("latex, text", [
     (r"\phi M_n = 0.9 \times 250", "φ Mₙ = 0.9 × 250"),
     (r"V_e = \frac{M_{pr1} + M_{pr2}}{l_n}", "Vₑ = (Mₚᵣ₁ + Mₚᵣ₂)/lₙ"),
-    (r"\Delta_M = 0.7 R \Delta_S \le 0.020 h", "Δ_M = 0.7 R Δ_S ≤ 0.020 h"),
+    (r"\Delta_M = 0.7 R \Delta_S \le 0.020 h", "ΔM = 0.7 R ΔS ≤ 0.020 h"),
     (r"P_n &= F_uA_e \times10^{-3} &= 2625.5~\text{kN}", "Pₙ = FᵤAₑ ×10⁻³ = 2625.5 kN"),
-    (r"\sqrt{f_c}", "√(f_c)"),
+    (r"\sqrt{f_c}", "√(fc)"),
+    (r"\phi_c P_n, b_f / 2 t_f, V_{n,x}, M_{cx}", "φc Pₙ, bf / 2 tf, Vn,x, Mcx"),
+    (r"h_n^{3/4}, x^{0.75}, a^{\alpha}", "hₙ³⁄⁴, x⁰·⁷⁵, aᵅ"),
     (r"\lambda = \frac{\xi}{1 + 50\rho}", "λ = ξ/(1 + 50ρ)"),
     (r"$\textbf{OK}$ and \%", "OK and %"),
-    (r"A_g (mm$^2$)", "A_g (mm²)"),
+    (r"A_g (mm$^2$)", "Ag (mm²)"),
 ])
 def test_latex_becomes_the_symbols_of_a_terminal(latex, text):
     assert math(latex) == text
 
 
-def test_a_script_with_no_symbol_stays_readable():
-    """There is no small b or g below the line: the mark is kept, nothing is lost."""
-    assert math(r"L_b") == "L_b"
-    assert math(r"M_{ry}") == "M_(ry)" or math(r"M_{ry}") == "Mᵣᵧ"
-    assert math(r"h_n^{3/4}") == "hₙ^(3/4)"
+def test_a_subscript_with_no_symbol_is_written_beside_its_letter():
+    """There is no small b or g below the line: Lb and Ag, as engineers type them."""
+    assert math(r"L_b") == "Lb" and math(r"A_g") == "Ag"
+    assert math(r"M_{ry}") == "Mᵣᵧ"
+
+
+def test_an_exponent_that_is_an_expression_keeps_its_mark():
+    """0.658 to the power Fy/Fe cannot be raised: without ^ it would read as a product."""
+    assert math(r"0.658^{F_y/F_e} F_y") == "0.658^(Fᵧ/Fₑ) Fᵧ"
+
+
+def test_what_is_still_equation_source_is_found():
+    from utilities.terminal import unrendered
+
+    assert unrendered(["φMₙ ≥ Mᵤ", "Ag = 300 × 500", "0.658^(Fᵧ/Fₑ) Fᵧ", "hₙ³⁄⁴"]) == []
+    for source in (r"\delta_{max} / 2", "T_A = 0.5", "h^0.75", "q_z = K_z q", r"\phi M_n"):
+        assert unrendered([source]) == [source]
+
+
+def test_a_report_gives_its_equation_lines():
+    out = Report("T")
+    out.equations(["a = b", "c = d"]).table(["x"], [["T_A"]]).equations(["e = f"])
+    assert out.equation_lines() == ["a = b", "c = d", "e = f"]
 
 
 # --------------------------------------------------------------------------
@@ -173,7 +193,7 @@ def test_a_drift_finding_carries_its_equation():
     data = mc.ModelData(pattern_types={"EQXSD": mc.SEISMIC_DRIFT},
                         drifts={"DRIFT 100 x EQXSD": (0.002, "2F")}, drift_from="combinations")
     finding = mc._check_drift(data, seismic)[0]
-    assert finding.equation == ("EQXSD: Δ_M = 0.7 R Δ_S = 0.7 × 8.5 × 0.00200 = 0.0119 ≤ "
+    assert finding.equation == ("EQXSD: ΔM = 0.7 R ΔS = 0.7 × 8.5 × 0.00200 = 0.0119 ≤ "
                                 "0.020 h")
 
 
@@ -186,13 +206,15 @@ def test_the_analysis_report_has_the_period_equations():
     report.scaling = [ShearScaling("X", "EQXNE", 1_144_300.0, "RSAX", 561_200.0, 2.0392,
                                    1_144_300.0)]
     plain = report.report().plain()
-    assert "RSAX: factor = V_static / V_spectrum = 1,144.3 / 561.2 = 2.0392" in plain
-    assert "T_A = Cₜ hₙ^(3/4) = 0.03 × 87.60^0.75 = 0.859 s" in plain
-    assert "T ≤ 1.3 T_A = 1.117 s" in plain
+    assert "RSAX: factor = Vstatic / Vspectrum = 1,144.3 / 561.2 = 2.0392" in plain
+    assert "TA = Cₜ hₙ³⁄⁴ = 0.03 × 87.60⁰·⁷⁵ = 0.859 s" in plain
+    assert "T ≤ 1.3 TA = 1.117 s" in plain
     assert "14,567.5" in plain and "98.3" in plain
 
 
 def test_the_standalone_checks_have_a_terminal_report_with_equations():
+    from utilities.terminal import unrendered
+
     from design.loads import wind_directional_asce7 as wind
     from design.steel import composite_column_aiscDG06 as composite
     from design.steel import wide_flange_aisc360 as steel
@@ -204,6 +226,9 @@ def test_the_standalone_checks_have_a_terminal_report_with_equations():
         assert wanted in report.plain()
         assert report.drawn_text(140)       # it can be drawn
         assert "\\" not in report.plain()    # no LaTeX is left in what is shown
+        assert unrendered(report.equation_lines()) == []
+        assert not [line for line in report.plain().split("\n")
+                    if "_" in line and not line.startswith("Model")], "an underscore is shown"
 
 
 def test_beam_and_column_tables_list_every_member_of_a_small_model():
@@ -247,3 +272,44 @@ def test_a_large_model_lists_the_members_that_fail(monkeypatch):
     assert "2.36 %" in row and "1.60" in row and "1.50" in row and row.rstrip().endswith("FAIL")
     all_pass = table.assign(Column_Design_Status="PASS")
     assert "All 10 members pass" in rt.column_results_report(all_pass).plain()
+
+
+def test_no_command_prints_equation_source():
+    """Every equation a command shows is written with symbols: no LaTeX command,
+    no underscore before a subscript, no caret before a plain exponent."""
+    from design.concrete import results_tables as rt
+    from etabs_api.workflows import concrete_quantities as cq
+    from etabs_api.workflows import irregularity as ir
+    from etabs_api.workflows import model_check as mc
+    from etabs_api.workflows.model_3d import column_bar
+    from etabs_api.workflows.model_analysis import AnalysisReport, ShearScaling
+    from utilities.terminal import unrendered
+
+    assert unrendered(rt.BEAM_EQUATIONS + rt.COLUMN_EQUATIONS + rt.DEFLECTION_EQUATIONS) == []
+
+    analysis = AnalysisReport(model_path="t.EDB", method_a=0.859, cap=1.3, height=26_700.0,
+                              governing_period={"X": 2.322}, mass_sum={"X": 0.983},
+                              seismic_weight=14_567_500.0)
+    analysis.scaling = [ShearScaling("X", "EQXNE", 1_144_300.0, "RSAX", 561_200.0, 2.0392,
+                                     1_144_300.0)]
+    assert unrendered(analysis.report().equation_lines()) == []
+
+    assert unrendered([mc.base_shear_equation(0.44, 0.64, 1.0, 8.5, 1.176, 0.4, 1.0)]) == []
+
+    order = ["RF", "4F", "3F"]
+    stiff = [(s, "EQX", "X", k) for s, k in (("RF", 100e3), ("4F", 50e3), ("3F", 60e3))]
+    irregularity = ir.IrregularityReport("m.EDB", cases=["EQX"], items=[
+        ir.soft_story_item(stiff, order),
+        ir.mass_item([("RF", 100.0), ("4F", 200.0), ("3F", 310.0)]),
+        ir.geometry_item([("RF", 12e3, 10e3), ("4F", 18e3, 10e3)]),
+        ir.weak_story_item([("RF", 1000.0, 8), ("4F", 700.0, 8)]),
+        ir.torsion_item([("RF", "EQX", "X", 13.0, 10.0)], [("RF", "EQX", "X", 13.0, 10.0)], order),
+        ir.plan_items([("RF", ir.plan_shape([[(0, 0), (9e3, 0), (9e3, 5e3), (0, 5e3)]]))])[0],
+        ir.stability_item([("4F", "EQX", "X", 6e6, 6e5, 15.0, 3000.0)], True)])
+    lines = irregularity.report().equation_lines()
+    assert len(lines) >= 9 and unrendered(lines) == []
+
+    column = column_bar("C", "2F", (0, 0, 0), (0, 0, 3000.0), 400.0, 400.0)
+    quantities = cq.measure([column], [cq.FloorShell("S", "2F", [
+        (0, 0), (6000.0, 0), (6000.0, 4000.0), (0, 4000.0)], 150.0)], ["2F"], 100.0)
+    assert unrendered(cq.quantities_report(quantities).equation_lines()) == []
