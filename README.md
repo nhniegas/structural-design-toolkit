@@ -41,6 +41,7 @@ Supporting code:
 - `etabs_api/workflows/analysis_forces.py`: factored forces from the analysis results (combinations, spectrum and wind permutations, NSCP live load reduction, pattern live load).
 - `etabs_api/workflows/design_loop.py`, `sections.py`: the analysis and design loop with member resizing.
 - `etabs_api/workflows/tributary.py`: geometric tributary areas for the live load reduction.
+- `etabs_api/workflows/irregularity.py`: the irregularities of UBC 97 / NSCP 2015, Ax and the P-delta stability coefficient (`sdt irregularity`).
 - `etabs_api/workflows/framing_plans.py`: framing plans of the model as a DXF (`sdt plans`).
 - `etabs_api/workflows/foundation_model.py`: a second model for the foundation, from the support reactions (`sdt foundation`).
 - `etabs_api/workflows/foundation_plan.py`: the footings, tie beams and columns of the foundation model, with their marks, saved for the framing plans.
@@ -119,6 +120,7 @@ Each guide in `docs/` covers one tool: how to run it, its inputs, what it writes
 
 - [Concrete beam and column workflow](docs/concrete_beam_column_design.md)
 - [Working on a model the toolkit did not set up](docs/existing_models.md)
+- [Irregularity check](docs/etabs_irregularity.md)
 - [Framing plans as DXF](docs/etabs_framing_plans.md)
 - [Foundation model](docs/etabs_foundation_model.md)
 - [3D model as STEP](docs/etabs_3d_model.md)
@@ -140,6 +142,7 @@ sdt tag         # unique names for every beam and column (a tagged copy or the m
 sdt check       # check the open model against NSCP 2015 (read only)
 sdt analyze     # run, scale the response spectrum, check periods, modal mass and weight
 sdt drift       # story drift with the drift stiffness, then restore the model
+sdt irregularity  # vertical and plan irregularities, Ax and the P-delta stability coefficient (read only)
 sdt beams       # extract the forces and design the beams; results, calcs and schedules
 sdt deflection  # only the beam deflections (bars of the last beam design)
 sdt columns     # design the columns from the stored beam step
@@ -196,6 +199,8 @@ This defines the materials, frame sections, load patterns, UBC 97 response spect
 
 `sdt drift` checks the story drift of the `DRIFT` and `WDRIFT` combinations (or, when the model has none under those names, of its drift load cases or of the combinations you pick) using the drift stiffness: strength level (0.35 / 0.70) and service level (1.4 times, or the factor you give). It works on the open model: it sets the modifiers, analyses, reports and restores the model. The drift is read at the diaphragm centre of mass or at the four outer column joints of each story. See [Story drift](docs/etabs_drift.md).
 
+`sdt irregularity` reads the analysed model and reports each irregularity of UBC 97 Tables 16-L and 16-M (NSCP 2015 Tables 208-9 and 208-10): soft story, mass, vertical geometric, weak story (from the column design), torsional with the amplifier Ax, re-entrant corners and diaphragm openings. The types that need judgement are listed with what the model shows. It also gives the P-delta stability coefficient of each story, on first-order drifts from a copy of the model analysed with P-delta off. Nothing is changed in the model. See [Irregularity check](docs/etabs_irregularity.md).
+
 `sdt design` runs the analysis and the beam and column design again and again on a copy of the model, resizing the members until they pass (deflection included). See [Design loop](docs/etabs_design_loop.md).
 
 ## Foundation model
@@ -250,8 +255,8 @@ Not in this version, and planned for later ones:
 - **Drift in the design loop.** Drift is checked on the final sizes and reported; members are not resized for it.
 - **Steel and composite members from the ETABS model.** `sdt steel` and `sdt composite` are standalone checks with typed inputs.
 - **Flanged beams.** The design loop resizes rectangular beams and rectangular or circular columns only.
-- **A command for the irregularity checks** of UBC 97 and NSCP 2015: the torsional irregularity of each story (Table 16-M, NSCP Table 208-10) with the accidental torsion amplifier Ax (UBC 1630.7, NSCP 208.5.7), the other plan irregularities, and the vertical ones (Table 16-L, NSCP Table 208-9).
-- **P-delta stability coefficient** in that command: the ratio θ of the secondary to the primary moment of each story (UBC 1630.1.3, NSCP 208.6.3), which says whether P-delta may be neglected. Today only whether P-delta is switched on is checked.
+- **Applying Ax to the model.** `sdt irregularity` reports the accidental torsion amplifier of each level; it does not yet write it into the seismic patterns.
+- **The irregularities left to judgement**: in-plane discontinuity, out-of-plane offsets, non-parallel systems, and the change of diaphragm stiffness from story to story.
 - **Redundancy factor ρ and the system factors.** ρ is a fixed value, and R and Ω0 are not checked against Table 208-11A by system.
 - **Slabs on the framing plans.** `sdt plans` draws beams, columns, walls and grids; slab marks and span arrows are not drawn yet.
 - **Reinforcing bars in the 3D model.** `sdt 3d` writes the concrete only; the bars of the beam and column designs are not in it yet.

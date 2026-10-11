@@ -17,7 +17,8 @@
    * weight: the seismic weight from the mass source against the base reaction
      of the same loads (they must agree within 1 %), and the weight per story.
 
-Drift, irregularity and torsion checks are not done yet.
+Drift is checked by ``sdt drift``; the irregularities, the torsion amplifier Ax
+and the P-delta stability coefficient by ``sdt irregularity``.
 """
 
 from __future__ import annotations

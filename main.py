@@ -19,6 +19,9 @@ the same commands.
     sdt drift       story drift of the DRIFT / WDRIFT combinations with the drift
                     stiffness, strength and service level; the model is restored
                     (etabs_api/workflows/drift_check.py)
+    sdt irregularity  the vertical and plan irregularities of UBC 97 / NSCP 2015,
+                    the torsion amplifier Ax and the P-delta stability coefficient
+                    (etabs_api/workflows/irregularity.py)
     sdt beams       extract the forces and design the beams; save the results,
                     calculations and schedules (design/concrete/workflow.py)
     sdt deflection  check only the deflection of the beams (bars of the last
@@ -70,7 +73,7 @@ import argparse
 import sys
 from pathlib import Path
 
-VERSION = "0.4.0"  # the same as in pyproject.toml (tests/test_main.py checks it)
+VERSION = "0.5.0"  # the same as in pyproject.toml (tests/test_main.py checks it)
 # Hidden first argument: this process is the progress window of another one
 # (utilities/_gui_helpers.LoadingWindow). It is how the packaged program,
 # which has no separate Python to start, opens that window.
@@ -160,6 +163,12 @@ def _design():
     return run_design_cli()
 
 
+def _irregularity():
+    from etabs_api.workflows.irregularity import run_irregularity
+
+    return run_irregularity()
+
+
 def _foundation():
     from etabs_api.workflows.foundation_model import run_foundation
 
@@ -209,6 +218,8 @@ COMMANDS = {
     "check": (_check, "check the open model for missing or inconsistent inputs (read only)"),
     "analyze": (_analyze, "run, scale the response spectrum, check periods, mass and weight"),
     "drift": (_drift, "story drift with the drift stiffness (strength, service), then restore"),
+    "irregularity": (_irregularity, "vertical and plan irregularities, Ax and the P-delta "
+                                    "stability coefficient (read only)"),
     "beams": (_beams, "extract the forces and design the beams (ACI 318M-14)"),
     "deflection": (_deflection, "check only the beam deflections (bars of the last beam design)"),
     "columns": (_columns, "design the columns (with slenderness) from the stored beam step"),

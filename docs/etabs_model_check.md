@@ -70,7 +70,7 @@ Every story is included, those below the ground level too. A model set up before
 
 ## Not checked yet
 
-- Irregularities: the vertical ones (Table 208-9) and the plan ones (Table 208-10, including torsion).
+- Irregularities are not part of this command: `sdt irregularity` checks them, with the torsion amplifier Ax and the P-delta stability coefficient (see [Irregularity check](etabs_irregularity.md)).
 - The redundancy factor ρ (208.6.1).
 - Minimum live loads against Table 205-1, and partition loads (204.3).
 - Wind speed against the site map (Figure 207A.5).
