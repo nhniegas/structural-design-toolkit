@@ -1109,6 +1109,61 @@ def foundation_summary(outcome: Outcome, source: str):
     return summary
 
 
+SAVE_PLAN = "Save the foundation plan (for sdt plans and the 3D model)"
+
+
+def save_foundation_plan(connector, foundation_path: str, manifest: dict, title: str):
+    """With the foundation model open: read its footings, tie beams and columns and
+    keep them beside it, for the framing plans and the 3D model of the superstructure."""
+    from etabs_api.workflows import foundation_plan as fp
+    from utilities._gui_helpers import LoadingWindow, select_option
+    from utilities.run_summary import RunSummary
+    from utilities.terminal import Report
+
+    source = os.path.basename(str(manifest.get("superstructure", "")))
+    chosen = select_option(
+        title, "The model open in ETABS is a foundation model.\n\nIts footings, tie beams and "
+        "columns can be saved, so that sdt plans and the 3D model of the superstructure "
+        f"({source}) can include the foundation. To update its forces, open {source}, analyse "
+        "it and run sdt foundation there.", [SAVE_PLAN, "Cancel"])
+    if chosen != SAVE_PLAN:
+        return None
+    with LoadingWindow("Foundation plan") as window:
+        window.update("Reading the footings, tie beams and columns")
+        footings, tie_beams, columns = fp.read_foundation(connector, manifest)
+        path = fp.save_plan(foundation_path, footings, tie_beams, columns)
+    report = Report("FOUNDATION PLAN - saved", [f"Model: {foundation_path}"])
+    report.heading("Footings")
+    report.table(["Mark", "Kind", "Length (mm)", "Width (mm)", "Thickness (mm)", "Columns"],
+                 [[f.mark, f.kind, f"{f.length:,.0f}", f"{f.width:,.0f}", f"{f.thickness:,.0f}",
+                   ", ".join(f.columns) or "-"] for f in footings])
+    report.heading("Tie beams")
+    report.table(["Mark", "b x h (mm)", "Length (mm)"],
+                 [[b.mark, f"{b.width:,.0f} x {b.depth:,.0f}",
+                   f"{math.hypot(b.x2 - b.x1, b.y2 - b.y1):,.0f}"] for b in tie_beams])
+    report.show()
+    summary = RunSummary("sdt foundation", foundation_path)
+    summary.add("Foundation plan", "saved")
+    summary.add("Footings", f"{len(footings)} ({sum(1 for f in footings if f.kind == 'combined')}"
+                            " combined)")
+    summary.add("Footing marks", ", ".join(dict.fromkeys(f.mark for f in footings)) or "-")
+    summary.add("Tie beams", len(tie_beams))
+    summary.add("Columns", len(columns))
+    bare = [c.mark for c in columns
+            if not any(c.mark in f.columns for f in footings)]
+    if not footings:
+        summary.fail("The model has no horizontal shell yet: no footing was saved.")
+    elif bare:
+        from utilities.run_summary import listed
+
+        summary.fail("Columns with no footing under them: " + listed(bare))
+    summary.note("sdt plans and the 3D model read this file from the superstructure. Save the "
+                 "plan again after the foundation changes.")
+    summary.file("Foundation plan", path)
+    summary.show(popup=True, echo=False)
+    return {"footings": footings, "tie_beams": tie_beams, "columns": columns, "path": path}
+
+
 def run_foundation() -> Outcome | None:
     """Entry point: create the foundation model of the open model, or update it."""
     from etabs_api.core.connection import attach_running_etabs, model_file
@@ -1130,10 +1185,7 @@ def run_foundation() -> Outcome | None:
     own = load_manifest(source)
     if own is not None and own.get("foundation") and os.path.normcase(
             own["foundation"]) == os.path.normcase(source):
-        show_warning("The model open in ETABS is a foundation model. Open the superstructure "
-                     f"it was made from ({os.path.basename(str(own.get('superstructure')))}), "
-                     "analyse it, and run sdt foundation there.", title=title)
-        return None
+        return save_foundation_plan(connector, source, own, title)
     target = foundation_path_for(source)
     exists = os.path.isfile(target) and load_manifest(target) is not None
     action = select_option(

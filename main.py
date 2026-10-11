@@ -28,10 +28,12 @@ the same commands.
     sdt design      analysis and beam/column design loop that resizes the
                     members until they pass (etabs_api/workflows/design_loop.py)
     sdt foundation  a second model for the foundation: only the support joints,
-                    loaded with the reactions of this model; or update its forces
-                    (etabs_api/workflows/foundation_model.py)
+                    loaded with the reactions of this model; or update its forces.
+                    On the foundation model: save its footings and tie beams
+                    for the plans (etabs_api/workflows/foundation_model.py)
     sdt plans       framing plans of every floor as one DXF: beams at their
-                    width, columns at their size, marks and grids
+                    width, columns at their size, marks and grids; and the
+                    foundation plan when it was saved
                     (etabs_api/workflows/framing_plans.py)
     sdt composite   rectangular filled composite column, AISC DG6
                     (design/steel/composite_column_aiscDG06.py)

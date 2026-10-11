@@ -18,6 +18,7 @@ sdt plans
 | Grid lines | Yes; yes with the dimensions between the grids; no |
 | Column marks | On every floor, or only where each column starts (the bottom-most level) |
 | Plot scale | 1 : 100, 1 : 50 or 1 : 200. It sets the text height (2.5 mm on paper, so 250 mm at 1 : 100) and the length of the dashes. The plan itself is always drawn at 1 : 1 in mm |
+| Foundation plan | Yes or no. Asked only when a plan of the foundation model of this model was saved (see [The foundation plan](#the-foundation-plan)) |
 | Folder | Where `<model> - Framing Plans.dxf` is saved |
 
 A window then shows the summary: the floors, the counts of what was drawn and the file.
@@ -48,9 +49,41 @@ The floors are drawn side by side in one row, from the lowest, each with its tit
 
 **Grids.** Every visible grid line of every grid system, with the origin and rotation of its system. Each line runs across the plan with a bubble at its left or bottom end. Dimensions are drawn between the grids that run along X or along Y; skewed grids get no dimension.
 
+## The foundation plan
+
+The footings are in another model, the foundation model that `sdt foundation` makes, and ETABS has one model open at a time. So the foundation is saved first, then drawn:
+
+1. Open the foundation model (`<model> - FOUNDATION.EDB`), with its footings and tie beams modelled.
+2. Run `sdt foundation` and choose **Save the foundation plan**. A table lists the footings and tie beams found, and they are saved beside the model in `<model> - FOUNDATION.plan.json`.
+3. Open the superstructure and run `sdt plans`. It finds that file, says when it was saved and what it holds, and asks whether to include it.
+
+The foundation plan is drawn first, to the left of the floors, with the title `FOUNDATION PLAN` and its elevation.
+
+| Item | How | Layer |
+|---|---|---|
+| Footings | The outline of each footing, with its mark at the lower left corner | `S-FOOTING` |
+| Tie beams | Dashed multiline at the true width, stopped at the column faces, with its name | `S-TIEBEAM` |
+| Columns | Solid, at the size and rotation of the column on each support, each with its mark | `S-COLUMN` |
+| Footing sizes | One line for each mark under the title: `F1: 2,000 x 2,000 x 500 thk (9 footings)` | `S-TEXT` |
+
+**What is one footing.** Each horizontal shell of the foundation model is a footing. Shells that touch are one footing, so a mat or a footing meshed into several shells has one outline and one mark.
+
+**Footing marks.** They follow how the footings are modelled:
+
+- A footing under one column is an isolated footing. Isolated footings of the same length, width and thickness share a mark: `F1`, `F2`, ...
+- A footing under two columns or more is a combined footing and has a mark of its own: `CF1`, `CF2`, ... Its line under the title names its columns: `CF1: 7,000 x 2,000 x 600 thk, combined footing of C3, C2`.
+- Marks are given in reading order, from the top of the plan down, then left to right. Sizes that agree to 10 mm are the same size. The length and width are the sides of the footing itself, also when it is turned.
+
+**Tie beam names.** A tie beam you named in ETABS keeps its name. One that still has its ETABS number is named `FTB-1`, `FTB-2`, ... in the same reading order.
+
+**Columns.** They are the columns that stand on the support joints, from the file of the foundation model, at the joints as they now are in that model. Every column of the foundation plan has its mark, whatever was chosen for the floors.
+
+The saved plan is what the foundation model held when it was saved. After the foundation changes, save the plan again. When `sdt foundation` saves a plan, it reports the columns that have no footing under them.
+
 ## What it does not do
 
 - Slabs: no slab outline, mark or span arrow.
+- The foundation plan shows the footings as modelled: no bars, no dimensions to the grids, no footing schedule table. A wall footing is drawn by its outline, with no wall on it.
 - A beam whose section is not a concrete rectangle (a steel shape, a tee, a section designer section) is drawn as one dashed line; the summary lists those sections. A column that is not a rectangle or a circle is not drawn.
 - The insertion point (cardinal point) and joint offsets of a member are ignored: every member is drawn on its joint-to-joint line.
 - A beam that slopes is drawn by its plan projection.

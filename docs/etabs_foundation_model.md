@@ -20,6 +20,7 @@ sdt foundation
 | Question | Choices |
 |---|---|
 | What to do | **Create** the foundation model, or **update** the forces of the one this model already has |
+| With the foundation model open | **Save the foundation plan** (see [The foundation plan](#the-foundation-plan)) |
 | Seismic cases | The static seismic cases only, or also the response spectrum cases with signs (see [Response spectrum cases](#response-spectrum-cases)) |
 | Live load | The full live load, or the reducible live load reduced by NSCP 2015 205.5 or ASCE 7-10 4.7 (see [Live load reduction](#live-load-reduction)) |
 | On an update | The same choices as before, or choose again |
@@ -87,12 +88,23 @@ A table then says how the loads of each pattern moved: the vertical total before
 
 Creating again on a model that has a foundation model replaces it, with everything modelled in it. The command says so and asks before it does.
 
+## The foundation plan
+
+Once the footings and tie beams are modelled, open the foundation model and run `sdt foundation`. With a foundation model open, the command offers one thing: **Save the foundation plan**. It reads the model, changes nothing in it, and saves `<model> - FOUNDATION.plan.json`:
+
+- **Footings.** Each horizontal shell, or group of shells that touch, with its outline, thickness and the columns on it. An isolated footing shares its mark with those of its size (`F1`, `F2`, ...); a footing under two columns or more is a combined footing with a mark of its own (`CF1`, ...).
+- **Tie beams.** The beams of the model with their width and depth. One that still has its ETABS number is named `FTB-1`, `FTB-2`, ...
+- **Columns.** The column on each support joint.
+
+A table lists them, and the summary names the columns with no footing under them. `sdt plans`, run on the superstructure, then asks whether to draw the foundation plan (see [Framing plans](etabs_framing_plans.md#the-foundation-plan)). Save the plan again after the foundation changes.
+
 ## Files
 
 | File | What it holds |
 |---|---|
 | `<model> - FOUNDATION.EDB` | The foundation model |
 | `<model> - FOUNDATION.foundation.json` | The supports (joint, coordinates, restraint, the column or wall on it and its size), the choices, and the loads of every pattern. The update, the framing plans and the 3D model read it |
+| `<model> - FOUNDATION.plan.json` | The footings, tie beams and columns of the foundation model, as saved for the framing plans and the 3D model |
 | `<model> - FOUNDATION - Reactions.xlsx` | Supports, the equilibrium check, the changes of the last update, the loads applied, the reactions of every load case and of every combination at every support (kN, kN-m) |
 
 ## Limits
@@ -105,6 +117,10 @@ Creating again on a model that has a foundation model replaces it, with everythi
 
 ## Tests
 
+`tests/test_foundation_plan.py`: which shells are one footing, the marks of isolated and combined footings, the tie beam names, the saved file, and what the framing plans draw from it.
+
 `tests/test_foundation_model.py`: the sign of a load, pinned and fixed supports, wind steps, the signed spectrum case, the live load reduction, the equilibrium check, the combinations, the matching of supports and the report of changes. They need no ETABS.
 
 In ETABS, on the test model: create, then update with no change (no load moved), then update after 100 kN was added to one load pattern (its vertical total moved from 787.5 to 887.5 kN). The foundation model had the 12 support joints with no restraint, no frame or shell, 42 patterns, 428 combinations and P-delta off.
+
+For the plan: 11 footings and 5 tie beams were modelled in that foundation model, one footing under two columns and one larger than the rest. The saved plan had `F1` (9 footings), `F2` and `CF1` (combined, of C3 and C2) and `FTB-1` to `FTB-5`, and `sdt plans` drew them as the first plan.

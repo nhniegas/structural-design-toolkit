@@ -43,6 +43,7 @@ Supporting code:
 - `etabs_api/workflows/tributary.py`: geometric tributary areas for the live load reduction.
 - `etabs_api/workflows/framing_plans.py`: framing plans of the model as a DXF (`sdt plans`).
 - `etabs_api/workflows/foundation_model.py`: a second model for the foundation, from the support reactions (`sdt foundation`).
+- `etabs_api/workflows/foundation_plan.py`: the footings, tie beams and columns of the foundation model, with their marks, saved for the framing plans.
 - `design/concrete/beams/`: the beam design in files by job (design, sections, supports, results, schedule, calculations, options).
 - `design/concrete/columns/`: the column design in files by job (design, sizing, section, layouts, flexure, transverse, shear, joints, tables, report, schedule, calculations, options).
 - `design/concrete/beams/deflection.py`: beam deflection checks (ACI 318M-14 24.2).
@@ -142,7 +143,7 @@ sdt deflection  # only the beam deflections (bars of the last beam design)
 sdt columns     # design the columns from the stored beam step
 sdt design      # analysis and beam/column design loop that resizes members until they pass
 sdt foundation  # a second model for the foundation, from the support reactions; or update its forces
-sdt plans       # framing plans of every floor as one DXF: beams, columns, marks, grids
+sdt plans       # framing plans of every floor as one DXF: beams, columns, marks, grids; the foundation plan too
 sdt composite   # rectangular filled composite column, AISC DG6 (no ETABS)
 sdt steel       # wide-flange steel member, AISC 360-22 (no ETABS)
 sdt wind        # MWFRS wind pressures, ASCE 7 directional procedure (no ETABS)
@@ -196,11 +197,11 @@ This defines the materials, frame sections, load patterns, UBC 97 response spect
 
 ## Foundation model
 
-`sdt foundation` makes a second ETABS model that holds only the support joints of the superstructure, each loaded with the opposite of its reaction in every load pattern, so the foundation is modelled and designed apart from the superstructure. A wind case with several steps gets one pattern for each step, the combinations are made again, and a table checks that the loads of every pattern add up to the base reaction. Run again after the superstructure changes, it updates the forces and keeps what you modelled. See [Foundation model](docs/etabs_foundation_model.md).
+`sdt foundation` makes a second ETABS model that holds only the support joints of the superstructure, each loaded with the opposite of its reaction in every load pattern, so the foundation is modelled and designed apart from the superstructure. A wind case with several steps gets one pattern for each step, the combinations are made again, and a table checks that the loads of every pattern add up to the base reaction. Run again after the superstructure changes, it updates the forces and keeps what you modelled. Run with the foundation model open, it saves the footings, tie beams and columns for the framing plans. See [Foundation model](docs/etabs_foundation_model.md).
 
 ## Framing plans
 
-`sdt plans` writes the framing plans of the open model as one DXF, the floors side by side at 1:1 in mm. Beams and girders are dashed multilines at their true width, which keep their width when an end is dragged in AutoCAD, and stop at the column faces. Columns are solid at their true size and rotation, walls at their thickness. Every beam has its name; the column marks are on every floor or only where each column starts; the grids, with or without dimensions, are optional. See [Framing plans](docs/etabs_framing_plans.md).
+`sdt plans` writes the framing plans of the open model as one DXF, the floors side by side at 1:1 in mm. Beams and girders are dashed multilines at their true width, which keep their width when an end is dragged in AutoCAD, and stop at the column faces. Columns are solid at their true size and rotation, walls at their thickness. Every beam has its name; the column marks are on every floor or only where each column starts; the grids, with or without dimensions, are optional. When the plan of the foundation model was saved with `sdt foundation`, the foundation plan can be included: footings with their marks (`F1` for isolated footings of one size, `CF1` for a combined footing), tie beams and columns. See [Framing plans](docs/etabs_framing_plans.md).
 
 ## Beam and column design
 
