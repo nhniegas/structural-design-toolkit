@@ -46,6 +46,7 @@ Supporting code:
 - `etabs_api/workflows/foundation_model.py`: a second model for the foundation, from the support reactions (`sdt foundation`).
 - `etabs_api/workflows/foundation_plan.py`: the footings, tie beams and columns of the foundation model, with their marks, saved for the framing plans.
 - `etabs_api/workflows/model_3d.py`: the concrete of the model as 3D solids in a STEP file (`sdt 3d`).
+- `etabs_api/workflows/model_3d_bars.py`: the reinforcing bars of the saved designs for the 3D model.
 - `design/concrete/beams/`: the beam design in files by job (design, sections, supports, results, schedule, calculations, options).
 - `design/concrete/columns/`: the column design in files by job (design, sizing, section, layouts, flexure, transverse, shear, joints, tables, report, schedule, calculations, options).
 - `design/concrete/beams/deflection.py`: beam deflection checks (ACI 318M-14 24.2).
@@ -149,7 +150,7 @@ sdt columns     # design the columns from the stored beam step
 sdt design      # analysis and beam/column design loop that resizes members until they pass
 sdt foundation  # a second model for the foundation, from the support reactions; or update its forces
 sdt plans       # framing plans of every floor as one DXF: beams, columns, marks, grids; the foundation plan too
-sdt 3d          # the concrete of the model as 3D solids in a STEP file, for AutoCAD; the foundation too
+sdt 3d          # the model as 3D solids in a STEP file, for AutoCAD; the foundation and the bars too
 sdt composite   # rectangular filled composite column, AISC DG6 (no ETABS)
 sdt steel       # wide-flange steel member, AISC 360-22 (no ETABS)
 sdt wind        # MWFRS wind pressures, ASCE 7 directional procedure (no ETABS)
@@ -213,7 +214,7 @@ This defines the materials, frame sections, load patterns, UBC 97 response spect
 
 ## 3D model
 
-`sdt 3d` writes the concrete of the open model as 3D solids in one STEP file, in mm, which AutoCAD imports: columns, beams with their top at the floor and stopped at the column faces, walls and slabs, each named and grouped by story. When the plan of the foundation model was saved with `sdt foundation`, the footings and tie beams can be included. Members of the same size are one shape placed many times, so the file stays small. Concrete only: no steel members and no reinforcing bars. See [3D model](docs/etabs_3d_model.md).
+`sdt 3d` writes the concrete of the open model as 3D solids in one STEP file, in mm, which AutoCAD imports: columns, beams with their top at the floor and stopped at the column faces, walls and slabs, each named and grouped by story. When the plan of the foundation model was saved with `sdt foundation`, the footings and tie beams can be included. Members of the same size are one shape placed many times, so the file stays small. The reinforcing bars of the saved beam and column designs can be included, the main bars alone or with the stirrups and ties; they are straight, with no laps or hooks. Steel members are not drawn. See [3D model](docs/etabs_3d_model.md).
 
 ## Beam and column design
 
@@ -259,7 +260,7 @@ Not in this version, and planned for later ones:
 - **The irregularities left to judgement**: in-plane discontinuity, out-of-plane offsets, non-parallel systems, and the change of diaphragm stiffness from story to story.
 - **Redundancy factor ρ and the system factors.** ρ is a fixed value, and R and Ω0 are not checked against Table 208-11A by system.
 - **Slabs on the framing plans.** `sdt plans` draws beams, columns, walls and grids; slab marks and span arrows are not drawn yet.
-- **Reinforcing bars in the 3D model.** `sdt 3d` writes the concrete only; the bars of the beam and column designs are not in it yet.
+- **Bar details in the 3D model.** `sdt 3d` draws the designed bars straight. Laps, hooks, bends, anchorage and cut-off points are not designed yet, and slabs, walls and footings have no bars.
 - **IFC export.** The 3D model is a STEP file, which holds the solids and their names. An IFC file would also say what each solid is (a beam, a column, its story and material) for BIM programs such as Revit and for model checkers.
 - **Seismic checks for other codes.** The period, base shear and spectrum scaling checks read UBC 97 seismic patterns; other patterns are designed for but those checks are reported as not applicable.
 - **Further checks and features** not listed here are added as they are built; each release lists what it adds.

@@ -38,7 +38,8 @@ the same commands.
                     width, columns at their size, marks and grids; and the
                     foundation plan when it was saved
     sdt 3d          the concrete of the model as 3D solids in one STEP file
-                    (columns, beams, walls, slabs, and the saved foundation)
+                    (columns, beams, walls, slabs, the saved foundation, and
+                    the bars of the saved designs)
                     (etabs_api/workflows/model_3d.py)
                     (etabs_api/workflows/framing_plans.py)
     sdt composite   rectangular filled composite column, AISC DG6

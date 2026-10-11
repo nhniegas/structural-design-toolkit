@@ -7,7 +7,9 @@ programs import. The foundation is added from the plan saved by
 
 * **Concrete only.** A frame whose section is not a concrete rectangle or
   circle, and a floor that is not a slab (a deck), is left out and counted.
-  Reinforcing bars are not drawn.
+* **Reinforcing bars, if asked for.** The bars of the last beam and column
+  designs saved for the model, straight and with no laps or hooks
+  (``model_3d_bars.py``).
 * **One shape, many places.** Members of the same size are one shape in the
   file, placed once for each member with its name. A building of thousands of
   members stays a small file.
@@ -27,10 +29,12 @@ Point = tuple[float, float, float]
 
 COLUMN, BEAM, WALL, SLAB, FOOTING, TIE_BEAM = (
     "column", "beam", "wall", "slab", "footing", "tie beam")
-KINDS = (COLUMN, BEAM, WALL, SLAB, FOOTING, TIE_BEAM)
+REBAR, TIE = "bar", "tie"          # a longitudinal bar; a stirrup, tie or spiral ring
+KINDS = (COLUMN, BEAM, WALL, SLAB, FOOTING, TIE_BEAM, REBAR, TIE)
 # red, green, blue of each kind in the file (0 to 1)
 COLOURS = {COLUMN: (0.55, 0.55, 0.58), BEAM: (0.72, 0.72, 0.70), WALL: (0.62, 0.60, 0.55),
-           SLAB: (0.85, 0.85, 0.83), FOOTING: (0.60, 0.52, 0.45), TIE_BEAM: (0.66, 0.60, 0.52)}
+           SLAB: (0.85, 0.85, 0.83), FOOTING: (0.60, 0.52, 0.45), TIE_BEAM: (0.66, 0.60, 0.52),
+           REBAR: (0.75, 0.20, 0.15), TIE: (0.15, 0.35, 0.70)}
 FOUNDATION_GROUP = "FOUNDATION"
 SAME_SIZE = 1.0          # mm: members whose sizes agree to this are one shape
 MIN_LENGTH = 1.0         # mm: nothing shorter is drawn
@@ -77,14 +81,36 @@ class Plate:
 
 
 @dataclass
+class Hoop:
+    """A stirrup, a column tie or one ring of a spiral: a closed rectangle (or
+    a circle) of bar, square to the member. ``width`` (to the side) and
+    ``depth`` (along ``up``) are those of its centre line; ``inner_up`` and
+    ``inner_side`` are its inner legs along ``up`` and to the side."""
+
+    kind: str
+    name: str                # the member it belongs to
+    group: str
+    centre: Point
+    axis: Point              # along the member: the hoop is square to it
+    up: Point
+    width: float
+    depth: float
+    diameter: float
+    inner_up: int = 0
+    inner_side: int = 0
+    circular: bool = False
+
+
+@dataclass
 class Model3D:
     bars: list[Bar] = field(default_factory=list)
     plates: list[Plate] = field(default_factory=list)
+    hoops: list[Hoop] = field(default_factory=list)
     left_out: dict[str, int] = field(default_factory=dict)     # what was not drawn, counted
     sections: set[str] = field(default_factory=set)            # the frame sections left out
 
     def count(self, kind: str) -> int:
-        return sum(1 for item in self.bars + self.plates if item.kind == kind)
+        return sum(1 for item in self.bars + self.plates + self.hoops if item.kind == kind)
 
     def skip(self, what: str, number: int = 1) -> None:
         if number:
@@ -236,7 +262,7 @@ def build_assembly(model: Model3D, label: str = "MODEL"):
             shapes[key] = coloured(solid, bar.kind)
         axis = _unit(tuple(b - a for a, b in zip(bar.start, bar.end)))
         up = square_up(axis, _unit(bar.up) or (0.0, 0.0, 1.0))
-        return shapes[key].moved(bd.Location(bd.Plane(bar.start, x_dir=axis, z_dir=up)))
+        return key, shapes[key].moved(bd.Location(bd.Plane(bar.start, x_dir=axis, z_dir=up)))
 
     def plate_solid(plate: Plate):
         key = (plate.kind, *plate_shape(plate))
@@ -248,17 +274,56 @@ def build_assembly(model: Model3D, label: str = "MODEL"):
             if len(plate.outline) < 3 or not solid.is_valid or solid.volume <= 0:
                 raise ValueError(f"no solid for the outline of {plate.name}")
             shapes[key] = coloured(solid, plate.kind)
-        return shapes[key].moved(bd.Location((x0, y0, plate.top)))
+        return key, shapes[key].moved(bd.Location((x0, y0, plate.top)))
+
+    def hoop_solid(hoop: Hoop):
+        step = SAME_SIZE
+        key = (hoop.kind, hoop.circular, round(hoop.width / step), round(hoop.depth / step),
+               round(hoop.diameter / step), hoop.inner_up, hoop.inner_side)
+        if key not in shapes:
+            radius, w, d = hoop.diameter / 2.0, hoop.width, hoop.depth
+            if hoop.circular:           # in the plane square to the member (local X)
+                shape = bd.Solid.make_torus(w / 2.0, radius, bd.Plane((0, 0, 0), z_dir=(1, 0, 0)))
+            else:
+                def leg(start, direction, length):
+                    return bd.Solid.make_cylinder(radius, length, bd.Plane(start, z_dir=direction))
+
+                legs = [leg((0, -w / 2 - radius, z), (0, 1, 0), w + 2 * radius)
+                        for z in (-d / 2, d / 2)]
+                legs += [leg((0, y, -d / 2 - radius), (0, 0, 1), d + 2 * radius)
+                         for y in (-w / 2, w / 2)]
+                # The inner legs lie against the hoop, one set on each side of it, as
+                # crossties do. Bars that crossed in one plane gave a solid that did
+                # not read back as valid.
+                beside = 0.8 * hoop.diameter
+                legs += [leg((beside, -w / 2 + w * k / (hoop.inner_up + 1), -d / 2 - radius),
+                             (0, 0, 1), d + 2 * radius) for k in range(1, hoop.inner_up + 1)]
+                legs += [leg((-beside, -w / 2 - radius, -d / 2 + d * k / (hoop.inner_side + 1)),
+                             (0, 1, 0), w + 2 * radius) for k in range(1, hoop.inner_side + 1)]
+                # one solid, so that the file holds it once and places it many times
+                shape = legs[0].fuse(*legs[1:]).clean()
+                if not isinstance(shape, bd.Solid):
+                    solids = shape.solids()
+                    shape = solids[0] if len(solids) == 1 else bd.Compound(legs)
+            shapes[key] = coloured(shape, hoop.kind)
+        axis = _unit(hoop.axis)
+        up = square_up(axis, _unit(hoop.up) or (0.0, 0.0, 1.0))
+        return key, shapes[key].moved(bd.Location(bd.Plane(hoop.centre, x_dir=axis, z_dir=up)))
 
     groups: dict[str, list] = {}
-    for item in model.bars + model.plates:
+    shown: set[tuple] = set()
+    for item in model.bars + model.plates + model.hoops:
         try:
-            solid = bar_solid(item) if isinstance(item, Bar) else plate_solid(item)
+            key, solid = (bar_solid(item) if isinstance(item, Bar) else
+                          hoop_solid(item) if isinstance(item, Hoop) else plate_solid(item))
         except Exception:  # noqa: BLE001 - an outline the kernel cannot make a face of
             model.skip(NOT_MADE)
             continue
         solid.label = f"{item.kind.upper()} {item.name}"
-        solid.color = bd.Color(*COLOURS[item.kind])
+        # The colour goes on the first placement of a shape only: the file then holds
+        # it once, with the shape, and not once more for each of its placements.
+        solid.color = None if key in shown else bd.Color(*COLOURS[item.kind])
+        shown.add(key)
         groups.setdefault(item.group or "MODEL", []).append(solid)
     children = [bd.Compound(label=name, children=solids) for name, solids in groups.items()]
     return bd.Compound(label=label, children=children), len(shapes)
@@ -269,7 +334,7 @@ def write_step(model: Model3D, path: str, label: str = "MODEL") -> dict:
     import build123d as bd
 
     assembly, shapes = build_assembly(model, label)
-    if not bd.export_step(assembly, path, unit=bd.Unit.MM):
+    if not bd.export_step(assembly, path, unit=bd.Unit.MM, write_pcurves=False):
         raise OSError(f"The STEP file was not written: {path}")
     totals = {kind: model.count(kind) for kind in KINDS}
     totals.update(solids=len(assembly.leaves), shapes=shapes, size=os.path.getsize(path))
@@ -368,8 +433,10 @@ def read_model(model, slabs: bool = True) -> Model3D:
 # TERMINAL WORKFLOW
 # =============================================================================
 def model_summary(totals: dict, model: Model3D, model_path: str | None, path: str,
-                  with_slabs: bool, foundation: dict | None):
-    """The closing summary of the export, for its window."""
+                  with_slabs: bool, foundation: dict | None, bars: dict | None = None):
+    """The closing summary of the export, for its window. ``bars``: the counts of
+    ``model_3d_bars.add_reinforcement`` with ``level`` and ``note``, or None when
+    the bars were not asked for."""
     from utilities.run_summary import RunSummary, listed
 
     summary = RunSummary("sdt 3d", model_path)
@@ -382,6 +449,22 @@ def model_summary(totals: dict, model: Model3D, model_path: str | None, path: st
                                   f"(plan saved on {foundation['saved']})")
     else:
         summary.add("Foundation", "not included")
+    if bars is None:
+        summary.add("Reinforcing bars", "not included")
+    else:
+        summary.add("Reinforcing bars", f"{totals[REBAR]:,} bars"
+                    + (f", {totals[TIE]:,} stirrups and ties" if bars.get("ties") else
+                       " (stirrups and ties not included)")
+                    + f", in {bars['beams']} beams and {bars['columns']} columns")
+        without = bars["beams_without"] + bars["columns_without"]
+        if without:
+            summary.note(f"{bars['beams_without']} beams and {bars['columns_without']} columns "
+                         "have no design saved for this model: they are drawn without bars.")
+        for line in bars.get("notes", []):
+            summary.note(line)
+        summary.note("The bars are straight and stop at the ends of each member: the designs "
+                     "give no laps, hooks, bends or cut-off points. Extra bars at a support or "
+                     "at midspan are drawn over a fixed share of the clear span.")
     summary.add("Solids", f"{totals['solids']:,} ({totals['shapes']:,} different shapes)")
     summary.add("File size", f"{totals['size'] / 1e6:,.1f} MB")
     for what, number in model.left_out.items():
@@ -400,11 +483,16 @@ def model_summary(totals: dict, model: Model3D, model_path: str | None, path: st
         else:
             summary.note(f"{number} {what} are not drawn: their section is not a concrete "
                          "rectangle or circle (" + listed(sorted(model.sections), 6) + ").")
-    summary.note("In mm, at the true sizes. Concrete only: no reinforcing bars. Members overlap "
+    summary.note("In mm, at the true sizes. Members overlap "
                  "where they meet (a slab and its beams, a column and the floor): do not take "
                  "volumes from this file. The model was not changed.")
     summary.file("3D model", path)
     return summary
+
+
+BARS_NONE = "No"
+BARS_MAIN = "The main bars only"
+BARS_ALL = "The main bars with the stirrups and ties"
 
 
 def run_model_3d() -> str | None:
@@ -442,6 +530,25 @@ def run_model_3d() -> str | None:
             return None
         if include == "No":
             foundation = None
+    from design.concrete.workflow import DesignStore
+    from etabs_api.workflows import model_3d_bars as rebar
+
+    store = DesignStore.load(model_path)
+    designed = store is not None and (store.beam_results is not None
+                                      or store.column_report is not None)
+    level = rebar.NO_BARS
+    if designed:
+        has = " and ".join(text for text, there in (
+            ("the beam design", store.beam_results is not None),
+            ("the column design", store.column_report is not None)) if there)
+        choice = select_option(
+            title, f"Include the reinforcing bars?\n\nThis model has {has} saved. The bars "
+            "are drawn straight, with no laps, hooks or bends. Stirrups and ties add thousands "
+            "of solids: the file is larger and slower to open.",
+            [BARS_NONE, BARS_MAIN, BARS_ALL])
+        if choice is None:
+            return None
+        level = {BARS_MAIN: rebar.MAIN_BARS, BARS_ALL: rebar.ALL_BARS}.get(choice, rebar.NO_BARS)
     folder = select_output_directory("Folder for the 3D model (.step)")
     if not folder:
         return None
@@ -455,6 +562,19 @@ def run_model_3d() -> str | None:
                 bars, plates = foundation_parts(foundation)
                 found.bars += bars
                 found.plates += plates
+            placed = None
+            if level != rebar.NO_BARS:
+                window.update("Placing the reinforcing bars of the saved designs")
+                placed = rebar.add_reinforcement(
+                    found, store.beam_results, store.column_report,
+                    float((store.inputs.get("column_bars") or {}).get("dmain", 0.0)), level)
+                placed["ties"] = level == rebar.ALL_BARS
+                placed["notes"] = (["The designs are older than the model file: run sdt beams "
+                                    "and sdt columns again if the members changed."]
+                                   if store.is_stale() else [])
+                if store.column_report is None:
+                    placed["notes"].append("No column design is saved: run sdt columns for the "
+                                           "column bars.")
             if not found.bars and not found.plates:
                 show_warning("The model has no concrete columns, beams, walls or slabs to draw.",
                              title=title)
@@ -466,15 +586,16 @@ def run_model_3d() -> str | None:
                 show_warning("The 3D model needs the package build123d, which is not installed "
                              "here. Install it with: pip install build123d", title=title)
                 return None
-            window.update(f"Making {len(found.bars) + len(found.plates):,} solids and "
-                          "writing the file")
+            window.update(f"Making {len(found.bars) + len(found.plates) + len(found.hoops):,} "
+                          "solids and writing the file")
             totals = write_step(found, path, stem)
     except PermissionError:
         show_warning(f"{path} is open in another program. Close it and run sdt 3d again.",
                      title=title)
         return None
     print(f"3D model saved: {path}")
-    model_summary(totals, found, model_path, path, slabs == "Yes", foundation).show(popup=True)
+    model_summary(totals, found, model_path, path, slabs == "Yes", foundation,
+                  placed).show(popup=True)
     return path
 
 
