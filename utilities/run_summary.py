@@ -69,6 +69,29 @@ class RunSummary:
         lines.append("=" * WIDTH)
         return "\n".join(lines)
 
+    def report(self):
+        """The summary as a terminal report: the counts as a table, what needs
+        attention in red, the files."""
+        from utilities.terminal import Report
+
+        out = Report(f"SUMMARY - {self.command}",
+                     [f"Model: {os.path.basename(str(self.model))}"] if self.model else [])
+        out.table(["", ""], [[label, value] for label, value in self.items])
+        if self.failures:
+            out.heading(f"Needs attention ({len(self.failures)})")
+            out.lines([f"  - {text}" for text in self.failures[:MAX_LISTED]], "bold red")
+            if len(self.failures) > MAX_LISTED:
+                out.lines([f"  ... and {len(self.failures) - MAX_LISTED} more "
+                           "(see the result files)"], "red")
+        else:
+            out.lines(["", "Nothing needs attention."], "green")
+        if self.notes:
+            out.lines([""] + [f"Note: {text}" for text in self.notes])
+        if self.files:
+            out.heading("Files")
+            out.table(["", ""], [[label, path] for label, path in self.files])
+        return out
+
     def show(self, save_as: str | None = None, popup: bool = False, echo: bool = True) -> str:
         """Show the summary; with ``save_as`` also write it to that text file.
 
@@ -86,7 +109,14 @@ class RunSummary:
             except OSError:
                 save_as = None
         if echo:
-            self._print(text, save_as)
+            from utilities import terminal
+
+            if terminal.drawn():      # a terminal: tables and colour
+                self.report().show()
+                if save_as:
+                    print(f"Summary saved: {save_as}")
+            else:
+                self._print(text, save_as)
         elif save_as:
             print(f"Summary saved: {save_as}")
         if popup:

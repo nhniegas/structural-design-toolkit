@@ -62,7 +62,7 @@ import argparse
 import sys
 from pathlib import Path
 
-VERSION = "0.3.9"  # the same as in pyproject.toml (tests/test_main.py checks it)
+VERSION = "0.4.0"  # the same as in pyproject.toml (tests/test_main.py checks it)
 # Hidden first argument: this process is the progress window of another one
 # (utilities/_gui_helpers.LoadingWindow). It is how the packaged program,
 # which has no separate Python to start, opens that window.
@@ -284,13 +284,27 @@ def menu_choice(typed: str) -> str | None:
     return starts[0] if len(starts) == 1 else None
 
 
+def show_commands() -> None:
+    """The list of commands: a table in a terminal, lines of text elsewhere."""
+    from utilities import terminal
+
+    if terminal.drawn():
+        report = terminal.Report("Commands")
+        report.table(["No.", "Command", "What it does"],
+                     [[number, name, text] for number, (name, (_, text))
+                      in enumerate(COMMANDS.items(), start=1)])
+        report.show()
+        return
+    print("\nCommands:\n")
+    for number, (name, (_, text)) in enumerate(COMMANDS.items(), start=1):
+        print(f"  {number:>2}  {name:<11} {text}")
+
+
 def menu(read=input) -> int:
     """List the commands and run the ones typed until the user quits."""
     print(banner())
     while True:
-        print("\nCommands:\n")
-        for number, (name, (_, text)) in enumerate(COMMANDS.items(), start=1):
-            print(f"  {number:>2}  {name:<11} {text}")
+        show_commands()
         try:
             typed = read("\nType a number or a name (q to quit): ")
         except (EOFError, KeyboardInterrupt):

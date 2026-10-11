@@ -94,7 +94,7 @@ def test_the_deflection_table_has_one_row_per_beam(tmp_path):
 
 
 def test_a_design_stored_before_the_folders_is_still_read(tmp_path):
-    """BEHAVIOUR: design data saved by v0.3.9 or earlier names its classes by the
+    """BEHAVIOUR: design data saved by v0.3.8 or earlier names its classes by the
     modules of that time (design.concrete_workflow, design.column_slenderness: a
     column report keeps the slenderness geometry of its columns). It must open."""
     import pickle

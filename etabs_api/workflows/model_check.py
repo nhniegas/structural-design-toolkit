@@ -56,6 +56,43 @@ class Finding:
     status: str
     text: str
     ref: str = ""
+    equation: str = ""   # the calculation behind the check, with its numbers (terminal text)
+
+
+def base_shear_equation(ca: float, cv: float, importance: float, r: float, period: float,
+                        zone_factor: float, nv: float, drift: bool = False) -> str:
+    """The terms of ``nscp_coefficient`` with their numbers, as one line."""
+    main = cv * importance / (r * period)
+    top = SEIS.plateau * ca * importance / r
+    parts = [f"V/W = Cᵥ I / (R T) = {cv:g} × {importance:g} / ({r:g} × {period:.3f}) = {main:.4f}",
+             f"≤ {SEIS.plateau:g} Cₐ I / R = {top:.4f}"]
+    if not drift:
+        parts.append(f"≥ {SEIS.minimum:g} Cₐ I = {SEIS.minimum * ca * importance:.4f}")
+    if zone_factor >= SEIS.zone4_factor:
+        parts.append(f"≥ {SEIS.zone4_minimum:g} Z Nᵥ I / R = "
+                     f"{SEIS.zone4_minimum * zone_factor * nv * importance / r:.4f}")
+    return ";  ".join(parts)
+
+
+def findings_report(d: "ModelData", findings: list["Finding"]):
+    """The findings as a terminal report: one table for each group, the status in
+    colour, and under it the equations of the checks that are calculations."""
+    from utilities.terminal import Report
+
+    report = Report("MODEL CHECK", [f"Model: {d.path}", "Analysis results: "
+                                    + ("yes" if d.analysed else "no (results checks are N/A)")])
+    groups: dict[str, list[Finding]] = {}
+    for finding in findings:
+        groups.setdefault(finding.group, []).append(finding)
+    for group, items in groups.items():
+        report.heading(group)
+        report.table(["Status", "Check", "Clause"],
+                     [[f.status, f.text, f.ref] for f in items])
+        report.equations([f.equation for f in items if f.equation])
+    counts = {s: sum(f.status == s for f in findings) for s in (FAIL, WARN, INFO, OK, NA)}
+    report.heading("Summary")
+    report.table(["Status", "Count"], [[s, n] for s, n in counts.items() if n])
+    return report
 
 
 @dataclass
@@ -620,7 +657,10 @@ def check_seismic(d: ModelData, settings: dict | None = None) -> list[Finding]:
                             f"regular structure, {irregular * 100:g} % if irregular; sdt analyze "
                             f"scales it to {irregular * 100:g} %)" if status == WARN else
                             f" (below {regular * 100:g} %: scale it, sdt analyze)"),
-                           "NSCP 208.5.3.5.4"))
+                           "NSCP 208.5.3.5.4",
+                           equation=f"{case}: V_spectrum / V_static = "
+                                    f"{abs(values[axis]) / 1e3:,.1f} / {static / 1e3:,.1f} = "
+                                    f"{ratio:.3f}"))
     if not d.modal.empty:
         for axis in ("UX", "UY"):
             column = f"Sum{axis}"
@@ -700,7 +740,10 @@ def _check_static_results(d: ModelData, seismic: pd.DataFrame, bottom: str) -> l
                            ("" if good else f", NSCP gives {want:.4f}") +
                            (" (drift: the 0.11 Ca I minimum does not apply, 208-11 does)"
                             if drift else ""),
-                           "NSCP 208.6.5.2" if drift else "NSCP 208.5.2.1 Eq. 208-8 to 208-11"))
+                           "NSCP 208.6.5.2" if drift else "NSCP 208.5.2.1 Eq. 208-8 to 208-11",
+                           equation=f"{name}: " + base_shear_equation(
+                               _num(r["Ca"]), _num(r["Cv"]), _num(r["I"]), _num(r["R"]),
+                               period, z, nv, drift) + f";  governs {want:.4f}"))
         ct = _num(r.get("Ct"))
         if not drift and height > 0 and ct == ct:
             t_a = method_a_period(ct, height)
@@ -710,7 +753,10 @@ def _check_static_results(d: ModelData, seismic: pd.DataFrame, bottom: str) -> l
             out.append(Finding("Seismic", OK if period <= cap * (1 + CAP_TOLERANCE) else FAIL,
                                f"{name}: T {period:.3f} s, T_A {t_a:.3f} s for hn "
                                f"{height / 1e3:.2f} m ({low} to {high}), cap {cap:.3f} s",
-                               "NSCP 208.5.2.2"))
+                               "NSCP 208.5.2.2",
+                               equation=f"{name}: T_A = Cₜ hₙ^(3/4) = {ct:g} × "
+                                        f"({height / FT:.2f} ft)^0.75 = {t_a:.3f} s;  T ≤ "
+                                        f"{cap / t_a:.1f} T_A = {cap:.3f} s"))
     return out
 
 
@@ -775,7 +821,10 @@ def _check_drift(d: ModelData, seismic: pd.DataFrame) -> list[Finding]:
                            f"{SEIS.drift_amplification:g} R x = {inelastic:.4f} (limit "
                            f"{limit:.3f}" + (f", T {period:.2f} s" if period == period else "")
                            + (f"; {source}" if source != case else "") + ")",
-                           "NSCP 208.6.4.1, 208.6.5.1"))
+                           "NSCP 208.6.4.1, 208.6.5.1",
+                           equation=f"{case}: Δ_M = {SEIS.drift_amplification:g} R Δ_S = "
+                                    f"{SEIS.drift_amplification:g} × {r_factor:g} × {ratio:.5f}"
+                                    f" = {inelastic:.4f} ≤ {limit:.3f} h"))
     return out
 
 
@@ -788,7 +837,9 @@ def check_wind_drift(d: ModelData) -> list[Finding]:
                            f"{case}: drift {ratio:.5f} = h/{1 / ratio:,.0f} at {story} (limit "
                            f"h/{d.wind_drift_denominator:g}"
                            + (f"; {source}" if source != case else "") + ")",
-                           "NSCP 203.3 combinations; limit: project (NSCP 207 sets none)"))
+                           "NSCP 203.3 combinations; limit: project (NSCP 207 sets none)",
+                           equation=f"{case}: Δ / h = {ratio:.5f} = 1/{1 / ratio:,.0f} ≤ "
+                                    f"1/{d.wind_drift_denominator:g}"))
     return out
 
 
@@ -903,7 +954,11 @@ def _check_vertical_effect(d: ModelData, combos: pd.DataFrame, uls: list[str]) -
                     f"{LOADS.dead:g} / {LOADS.dead_minimum:g} is right only for the Omega0 "
                     "combinations 203-19, 203-20): " + ", ".join(odd[:6])
                     if odd else f"Seismic strength combinations carry Ev: {wanted[0]:.3f} D and "
-                    f"{wanted[1]:.3f} D.", "NSCP 208.6.1, 203.3.1")]
+                    f"{wanted[1]:.3f} D.", "NSCP 208.6.1, 203.3.1",
+                    equation=f"Eᵥ = {LOADS.vertical_effect:g} Cₐ I D = {LOADS.vertical_effect:g}"
+                             f" × {ca:g} × {_num(strength['I'].iloc[0], 1.0):g} D = {ev:.3f} D;  "
+                             f"({LOADS.dead:g} + Eᵥ) D = {wanted[0]:.3f} D,  "
+                             f"({LOADS.dead_minimum:g} − Eᵥ) D = {wanted[1]:.3f} D")]
 
 
 def check_analysis(d: ModelData) -> list[Finding]:
@@ -1298,7 +1353,12 @@ def run_model_check() -> list[Finding] | None:
         window.update("Running the checks")
         data.wind_drift_denominator = denominator
         findings = run_checks(data)
-    print(report_text(data, findings))
+    from utilities import terminal
+
+    if terminal.drawn():      # a terminal: tables, colour and the equations
+        findings_report(data, findings).show()
+    else:
+        print(report_text(data, findings))
     from etabs_api.core.connection import model_file
 
     check_summary(findings, model_file(connector.sap_model)).show(popup=True, echo=False)

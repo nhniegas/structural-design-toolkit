@@ -40,7 +40,7 @@ from design.criteria import dcr_targets  # noqa: E402
 from utilities.latex_help import missing_pdf_reason  # noqa: E402
 
 STORE_SUFFIX = " - design data.pkl"
-# Where the classes of a stored design were before the design folders (v0.3.9 and earlier).
+# Where the classes of a stored design were before the design folders (v0.3.8 and earlier).
 MOVED_MODULES = {
     "design.concrete_workflow": "design.concrete.workflow",
     "design.beam_deflection": "design.concrete.beams.deflection",
@@ -377,6 +377,9 @@ def run_beams() -> DesignStore | None:
         window.update("Saving 3 of 3: the calculation report (.pdf, LaTeX)")
         pdf = export_beam_pdf(results, os.path.join(folder, f"{stem} - Beam Calculations.pdf"),
                               smrf, gravity)
+    from design.concrete.results_tables import beam_results_report
+
+    beam_results_report(results).show()
     summary = beam_summary(results, "sdt beams", model_path, len(combos), earth_stories)
     add_targets_to(summary, targets, beam_types)
     if carrier_depth:
@@ -884,6 +887,9 @@ def run_deflection() -> pd.DataFrame | None:
         path = write_deflection_xlsx(table, os.path.join(folder, f"{stem} - Deflection.xlsx"))
     from utilities.run_summary import RunSummary, listed
 
+    from design.concrete.results_tables import deflection_results_report
+
+    deflection_results_report(table).show()
     status = table["Deflection check"].astype(str)
     failing = table.loc[status.str.startswith("FAIL"), "UniqueName"].astype(str).tolist() \
         if "UniqueName" in table.columns else []
@@ -987,6 +993,9 @@ def run_columns() -> DesignStore | None:
         window.update("Saving 3 of 3: the calculation report (.pdf, LaTeX)")
         pdf = export_column_pdf(report, os.path.join(folder, f"{stem} - Column Calculations.pdf"),
                                 smrf, bars["dmain"], bars["dties"], bars["cover"])
+    from design.concrete.results_tables import column_results_report
+
+    column_results_report(report).show()
     summary = column_summary(report, "sdt columns", model_path, levels[0], levels[1])
     add_targets_to(summary, targets, (dcr_targets.COLUMN,))
     from etabs_api.workflows import model_inputs as mi

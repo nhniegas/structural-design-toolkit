@@ -1829,6 +1829,12 @@ def run_design_cli() -> dict | None:
         save_final_design(bench, summary, working, folder)
         summary["drift"] = final_drift_check(bench, drift_options, folder,
                                              os.path.splitext(os.path.basename(working))[0])
+    from design.concrete.results_tables import beam_results_report, column_results_report
+
+    if summary.get("beams") is not None and len(summary["beams"]):
+        beam_results_report(summary["beams"], "DESIGN LOOP - FINAL BEAMS").show()
+    if summary.get("columns") is not None and len(summary["columns"]):
+        column_results_report(summary["columns"], "DESIGN LOOP - FINAL COLUMNS").show()
     print(f"Working copy: {working}\nLog: {log_path}\nOutputs: {folder}")
     if summary["drift"]["failed"]:
         print("DRIFT FAILS: the sections were not resized for drift. Reconfigure the model "

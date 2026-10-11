@@ -54,6 +54,7 @@ Supporting code:
 - `utilities/design_cli.py`: the terminal workflow shared by the composite, steel and wind checks (input dialog, then printout, PDF or both).
 - `utilities/_gui_helpers.py`: file pickers, list pickers, choice and text-entry dialogs, and the loading window.
 - `utilities/_calc_report.py`: layout of the beam and column PDF calculation reports.
+- `utilities/terminal.py`: tables, colour and equations in the terminal; `design/concrete/results_tables.py`: the beam and column tables.
 - `utilities/run_summary.py`: the summary every command shows in a window when it finishes (the terminal keeps the detailed results).
 - `utilities/doctor.py`: `sdt doctor`, the check that a machine can run the toolkit.
 - `utilities/answers.py`: the answers file, which runs a command with no dialog (`--answers`, `--record`).
@@ -118,6 +119,7 @@ Each guide in `docs/` covers one tool: how to run it, its inputs, what it writes
 - [Framing plans as DXF](docs/etabs_framing_plans.md)
 - [Steel and composite modules](docs/steel_design_documentation.md)
 - [Wind load calculator](docs/wind_calculator_asce7_documentation.md)
+- [Results in the terminal](docs/terminal_output.md)
 - [Running a command from an answers file](docs/answers_file.md)
 - [ETABS test runs](docs/etabs_test_runs.md)
 
@@ -150,7 +152,7 @@ sdt beams --record beams.json    # any command: save what you answer in its dial
 sdt beams --answers beams.json   # any command: run it with no dialog, from that file
 ```
 
-Each command asks for its inputs in dialogs. The standalone checks (`composite`, `steel`, `wind`) then ask whether to print the results in the terminal, export a PDF calculation report, or both. The terminal shows the detailed results of a command. When it finishes, a separate window shows its summary: what was run, the counts, what needs attention and the files written.
+Each command asks for its inputs in dialogs. The standalone checks (`composite`, `steel`, `wind`) then ask whether to print the results in the terminal, export a PDF calculation report, or both. The terminal shows the detailed results of a command as tables, with the equations of the checks and each status in colour (see [Results in the terminal](docs/terminal_output.md)). When it finishes, a separate window shows its summary: what was run, the counts, what needs attention and the files written.
 
 The commands also run on a model that was not made with `sdt setup`: one with its own combination names, section names and untagged members. A command reads what the model holds and asks for what is missing (which combinations to design for, the deflection and drift combinations, what to do with untagged members), saves the answers beside the model, and says in its summary what was read, answered or assumed. See [Working on a model the toolkit did not set up](docs/existing_models.md).
 

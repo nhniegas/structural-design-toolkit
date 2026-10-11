@@ -300,6 +300,43 @@ class DriftReport:
     modifiers: list[mc.Finding] = field(default_factory=list)  # your modifiers, judged
     modelled: str = ""  # the effective I of your modifiers, as text
 
+    def report(self):
+        """The report for the terminal: the checks and the drift of every story as
+        tables, and the drift equations with their numbers."""
+        from utilities.terminal import Report
+
+        where = ("diaphragm centre of mass" if self.reference == CENTER
+                 else "outer four column joints of each story")
+        out = Report("STORY DRIFT (NSCP 208.6.4, 208.6.5)",
+                     [f"Model: {self.model_path}",
+                      f"Drift read at the {where}; wind limit h/{self.wind_denominator:g}"])
+        if self.modifiers:
+            out.heading("Your modifiers (frame x section, as ETABS uses them)")
+            out.table(["Status", "Check", "Clause"],
+                      [[f.status, f.text, f.ref] for f in self.modifiers])
+        for level, findings, periods in self.levels:
+            stiffness = (self.modelled if level.as_modelled else
+                         f"beams I {level.beam:.2f}, columns I {level.column:.2f}")
+            out.heading(f"{level.name}: {stiffness} ({level.reference})")
+            if periods:
+                out.lines(["Drift pattern periods: " + ", ".join(
+                    f"{case} {t:.3f} s" for case, t in sorted(periods.items()))])
+            out.table(["Status", "Check", "Clause"], [[f.status, f.text, f.ref] for f in findings])
+            out.equations([f.equation for f in findings if getattr(f, "equation", "")])
+            rows = self.stories.get(level.name, [])
+            out.table(["Story", "Seismic Δ_S / h", "Δ_M / h", "Combination", "Wind", "Combination"],
+                      [[story, "-" if s is None else f"{s:.5f}",
+                        "-" if m is None else f"{m:.4f}", str(sc or "-"),
+                        "-" if not w else f"h/{1.0 / w:,.0f}", str(wc or "-")]
+                       for story, s, m, sc, w, wc in rows],
+                      "Drift of every story (the largest of the combinations checked)")
+        if self.notes:
+            out.heading("Notes")
+            out.lines(self.notes)
+        out.lines(["", "Model restored to its strength modifiers and spectrum scale factors"
+                   + (" and analysed again." if self.restored else ".")])
+        return out
+
     def text(self) -> str:
         where = ("diaphragm centre of mass" if self.reference == CENTER
                  else "outer four column joints of each story")
@@ -768,7 +805,12 @@ def run_drift_check() -> DriftReport | None:
     except RuntimeError as error:
         show_warning(str(error), title=title)
         return None
-    print(report.text())
+    from utilities import terminal
+
+    if terminal.drawn():
+        report.report().show()
+    else:
+        print(report.text())
     saved = save_report(report, os.path.splitext(path)[0] + " - Drift.txt")
     print(f"Saved: {saved}")
     drift_summary(report, path, saved).show(popup=True, echo=False)

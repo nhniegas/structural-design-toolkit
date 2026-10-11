@@ -13,6 +13,9 @@ shapely
 steelpy
 matplotlib
 
+# Tables, colour and equations in the terminal (utilities/terminal.py)
+rich
+
 # PDF report generation and optional rich display helpers
 PyLaTeX
 IPython

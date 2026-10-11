@@ -180,13 +180,22 @@ def run_doctor(version: str = "") -> list[Check]:
         checks.append(check_running_etabs())
     checks.append(check_latex())
     checks.append(check_design_processes())
+    failed = sum(1 for status, _, _ in checks if status == FAIL)
+    warned = sum(1 for status, _, _ in checks if status == WARN)
+    verdict = ("Everything the toolkit needs is in place." if not failed and not warned else
+               f"{failed} problem(s), {warned} warning(s). A warning limits one feature; "
+               "a problem stops the commands that need it.")
+    from utilities import terminal
+
+    if terminal.drawn():
+        report = terminal.Report("sdt doctor" + (f" {version}" if version else ""))
+        report.table(["Status", "Check", "Found"], [list(check) for check in checks])
+        report.lines([verdict], "green" if not failed and not warned else "yellow")
+        report.show()
+        return checks
     print()
     for status, what, found in checks:
         print(f"[{status:>4}] {what}: {found}")
-    failed = sum(1 for status, _, _ in checks if status == FAIL)
-    warned = sum(1 for status, _, _ in checks if status == WARN)
     print()
-    print("Everything the toolkit needs is in place." if not failed and not warned else
-          f"{failed} problem(s), {warned} warning(s). A warning limits one feature; "
-          "a problem stops the commands that need it.")
+    print(verdict)
     return checks
