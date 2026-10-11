@@ -42,6 +42,7 @@ Supporting code:
 - `etabs_api/workflows/design_loop.py`, `sections.py`: the analysis and design loop with member resizing.
 - `etabs_api/workflows/tributary.py`: geometric tributary areas for the live load reduction.
 - `etabs_api/workflows/framing_plans.py`: framing plans of the model as a DXF (`sdt plans`).
+- `etabs_api/workflows/foundation_model.py`: a second model for the foundation, from the support reactions (`sdt foundation`).
 - `design/concrete/beams/`: the beam design in files by job (design, sections, supports, results, schedule, calculations, options).
 - `design/concrete/columns/`: the column design in files by job (design, sizing, section, layouts, flexure, transverse, shear, joints, tables, report, schedule, calculations, options).
 - `design/concrete/beams/deflection.py`: beam deflection checks (ACI 318M-14 24.2).
@@ -117,6 +118,7 @@ Each guide in `docs/` covers one tool: how to run it, its inputs, what it writes
 - [Concrete beam and column workflow](docs/concrete_beam_column_design.md)
 - [Working on a model the toolkit did not set up](docs/existing_models.md)
 - [Framing plans as DXF](docs/etabs_framing_plans.md)
+- [Foundation model](docs/etabs_foundation_model.md)
 - [Steel and composite modules](docs/steel_design_documentation.md)
 - [Wind load calculator](docs/wind_calculator_asce7_documentation.md)
 - [Results in the terminal](docs/terminal_output.md)
@@ -139,6 +141,7 @@ sdt beams       # extract the forces and design the beams; results, calcs and sc
 sdt deflection  # only the beam deflections (bars of the last beam design)
 sdt columns     # design the columns from the stored beam step
 sdt design      # analysis and beam/column design loop that resizes members until they pass
+sdt foundation  # a second model for the foundation, from the support reactions; or update its forces
 sdt plans       # framing plans of every floor as one DXF: beams, columns, marks, grids
 sdt composite   # rectangular filled composite column, AISC DG6 (no ETABS)
 sdt steel       # wide-flange steel member, AISC 360-22 (no ETABS)
@@ -190,6 +193,10 @@ This defines the materials, frame sections, load patterns, UBC 97 response spect
 `sdt drift` checks the story drift of the `DRIFT` and `WDRIFT` combinations (or, when the model has none under those names, of its drift load cases or of the combinations you pick) using the drift stiffness: strength level (0.35 / 0.70) and service level (1.4 times, or the factor you give). It works on the open model: it sets the modifiers, analyses, reports and restores the model. The drift is read at the diaphragm centre of mass or at the four outer column joints of each story. See [Story drift](docs/etabs_drift.md).
 
 `sdt design` runs the analysis and the beam and column design again and again on a copy of the model, resizing the members until they pass (deflection included). See [Design loop](docs/etabs_design_loop.md).
+
+## Foundation model
+
+`sdt foundation` makes a second ETABS model that holds only the support joints of the superstructure, each loaded with the opposite of its reaction in every load pattern, so the foundation is modelled and designed apart from the superstructure. A wind case with several steps gets one pattern for each step, the combinations are made again, and a table checks that the loads of every pattern add up to the base reaction. Run again after the superstructure changes, it updates the forces and keeps what you modelled. See [Foundation model](docs/etabs_foundation_model.md).
 
 ## Framing plans
 

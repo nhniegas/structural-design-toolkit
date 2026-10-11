@@ -377,6 +377,8 @@ def run_step(step: dict, scenario: dict, save_reference: bool, tolerance: float)
     with open(answers_file, "w", encoding="utf-8") as handle:
         json.dump({key: step[key] for key in ("folder", "unanswered", "answers") if key in step},
                   handle, indent=2, ensure_ascii=False)
+    if step.get("open"):      # a step that needs another model than the one left open
+        reopen(step["open"], scenario)
     returned = None
     tee = _Tee(sys.stdout)
     start = time.time()
@@ -435,6 +437,19 @@ def run_step(step: dict, scenario: dict, save_reference: bool, tolerance: float)
     else:
         result.comparison = "no reference to compare with"
     return result
+
+
+def reopen(which: str, scenario: dict) -> None:
+    """Open a model of the work folder before a step: "model" is the copy of the
+    scenario's model, anything else a file name in the work folder."""
+    from etabs_api.core.connection import etabs_helper, ETABS_OBJECT
+
+    name = os.path.basename(scenario["model"]) if which == "model" else which
+    path = os.path.join(scenario["work"], name)
+    etabs = etabs_helper().GetObjectProcess(ETABS_OBJECT, int(os.environ["SDT_ETABS_PID"]))
+    outcome = etabs.SapModel.File.OpenFile(path)
+    if (outcome[-1] if isinstance(outcome, (list, tuple)) else outcome) != 0:
+        raise RuntimeError(f"ETABS could not open {path}.")
 
 
 # =============================================================================

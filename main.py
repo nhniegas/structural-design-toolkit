@@ -27,6 +27,9 @@ the same commands.
                     slenderness; save the results, calculations and schedule
     sdt design      analysis and beam/column design loop that resizes the
                     members until they pass (etabs_api/workflows/design_loop.py)
+    sdt foundation  a second model for the foundation: only the support joints,
+                    loaded with the reactions of this model; or update its forces
+                    (etabs_api/workflows/foundation_model.py)
     sdt plans       framing plans of every floor as one DXF: beams at their
                     width, columns at their size, marks and grids
                     (etabs_api/workflows/framing_plans.py)
@@ -152,6 +155,12 @@ def _design():
     return run_design_cli()
 
 
+def _foundation():
+    from etabs_api.workflows.foundation_model import run_foundation
+
+    return run_foundation()
+
+
 def _plans():
     from etabs_api.workflows.framing_plans import run_framing_plans
 
@@ -193,6 +202,7 @@ COMMANDS = {
     "deflection": (_deflection, "check only the beam deflections (bars of the last beam design)"),
     "columns": (_columns, "design the columns (with slenderness) from the stored beam step"),
     "design": (_design, "analysis and design loop that resizes beams and columns"),
+    "foundation": (_foundation, "foundation model from the support reactions, or update its forces"),
     "plans": (_plans, "framing plans of every floor as one DXF (beams, columns, marks, grids)"),
     "composite": (_composite, "check a rectangular filled composite column (AISC DG6)"),
     "steel": (_steel, "check a wide-flange steel member (AISC 360-22)"),
