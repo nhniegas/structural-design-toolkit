@@ -24,7 +24,7 @@ The report is printed and saved beside the model as `<model> - Irregularity.txt`
 
 ## What is checked
 
-The checks use the static seismic load cases of the model: its seismic patterns, each with its accidental eccentricity, or the drift patterns when the model has no other. For each story and direction, the case that governs is shown.
+The checks use the static seismic load cases of the model: its seismic patterns, each with its accidental eccentricity, or the drift patterns when the model has no other. Each case is checked in its own direction only: ETABS also lists an X case in Y, where it hardly moves the structure and a ratio of drifts means nothing. For each story and direction, the case that governs is shown.
 
 ### Vertical irregularities (Table 16-L)
 

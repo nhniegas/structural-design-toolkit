@@ -273,8 +273,8 @@ def quantities_report(q: Quantities):
     parts.append(["Total", _m3(q.volume), _m3(q.floor_area)])
     report.table(["Part", "Concrete (m3)", "Floor area (m2)"], parts)
     if q.floor_area > 0:
-        report.equations([rf"V / A = {q.volume:,.2f} m^3 / {q.floor_area:,.2f} m^2 = "
-                          rf"{q.ratio:.3f} m^3/m^2"], title="Concrete ratio")
+        report.equations([f"V / A = {q.volume:,.2f} m³ / {q.floor_area:,.2f} m² = "
+                          f"{q.ratio:.3f} m³/m²"], title="Concrete ratio")
     report.lines([
         "Beams are measured below the slab and between the faces of their supports; slabs "
         "less their openings and the columns through them; columns floor to floor.",

@@ -86,6 +86,24 @@ def _directions(rows, case_at: int = 1, direction_at: int = 2) -> list[str]:
 # =============================================================================
 # CHECKS (plain data)
 # =============================================================================
+def own_direction(rows: list[tuple], weight: int = -1) -> list[tuple]:
+    """The rows of each load case in its own direction only.
+
+    ETABS lists a seismic case in both directions. Across its own direction a
+    case moves the structure very little, and a ratio of two such movements
+    means nothing: an X case would be reported as torsionally irregular in Y.
+    The direction of a case is the one where ``weight`` (a column of the rows,
+    such as the average drift or the story shear) adds up to the most.
+    ``rows``: (story, case, direction, ...).
+    """
+    totals: dict[str, dict[str, float]] = {}
+    for row in rows:
+        own = totals.setdefault(str(row[1]), {})
+        own[str(row[2])] = own.get(str(row[2]), 0.0) + abs(float(row[weight]))
+    main = {case: max(found, key=found.get) for case, found in totals.items()}
+    return [row for row in rows if main[str(row[1])] == str(row[2])]
+
+
 def torsion_item(drifts: list[tuple], displacements: list[tuple], order: list[str]) -> Item:
     """``drifts`` and ``displacements``: (story, case, direction, maximum, average)
     of each static seismic case. ``order``: the stories from the top down.
@@ -124,8 +142,8 @@ def torsion_item(drifts: list[tuple], displacements: list[tuple], order: list[st
     item.verdict = (f"{IRREGULAR}: max / avg drift {top:.3f} > {TORSION_LIMIT:g}; largest Ax "
                     f"{ax_top:.2f}" if top > TORSION_LIMIT else
                     f"{REGULAR}: max / avg drift {top:.3f} <= {TORSION_LIMIT:g}")
-    item.equations = [r"\delta_{max} / \delta_{avg} > 1.2 \Rightarrow irregular",
-                      r"A_x = (\delta_{max} / (1.2 \delta_{avg}))^2, 1.0 \le A_x \le 3.0"]
+    item.equations = [r"\delta_{max} / \delta_{ave} > 1.2 \Rightarrow irregular",
+                      r"A_x = (\delta_{max} / (1.2 \delta_{ave}))^2, 1.0 \le A_x \le 3.0"]
     if item.irregular:
         item.notes.append(
             "The accidental torsion of each level is to be multiplied by its Ax (UBC 1630.7). "
@@ -201,7 +219,7 @@ def mass_item(masses: list[tuple[str, float]]) -> Item:
     item.status = WARN if heavy else OK
     item.verdict = (f"{IRREGULAR}: " + ", ".join(heavy) + " over 150 % of an adjacent story"
                     if heavy else f"{REGULAR}: no story over 150 % of an adjacent story")
-    item.equations = [r"m_i > 1.50 m_{adjacent} \Rightarrow irregular"]
+    item.equations = [r"m_i > 1.50 m_{next} \Rightarrow irregular"]
     item.notes.append("A roof lighter than the floor below is not counted. A level at or below "
                       "the ground, such as one of tie beams only, is in the list: judge whether "
                       "it is a story of the structure.")
@@ -231,7 +249,7 @@ def geometry_item(extents: list[tuple[str, float, float]]) -> Item:
     item.status = WARN if found else OK
     item.verdict = (f"{IRREGULAR}: " + ", ".join(found) + " over 130 % of an adjacent story"
                     if found else f"{REGULAR}: no story over 130 % of an adjacent story")
-    item.equations = [r"L_i > 1.30 L_{adjacent} \Rightarrow irregular"]
+    item.equations = [r"L_i > 1.30 L_{next} \Rightarrow irregular"]
     item.notes.append("L is the distance between the outermost columns and walls of a story. "
                       "A one-story penthouse need not be considered.")
     return item
@@ -264,9 +282,8 @@ def weak_story_item(strengths: list[tuple[str, float, int]] | None) -> Item:
     item.status = WARN if weak else OK
     item.verdict = (f"{IRREGULAR}: weak story at " + ", ".join(weak) if weak else
                     f"{REGULAR}: no story under 80 % of the strength of the story above")
-    item.equations = [r"V_{n,i} < 0.80 V_{n,i+1} \Rightarrow weak story",
-                      r"V_{n,story} = \sum_{columns} min(\phi V_n, (\phi M_{n,top} + "
-                      r"\phi M_{n,bottom}) / l_u)"]
+    item.equations = [r"V_i < 0.80 V_{i+1} \Rightarrow weak story",
+                      r"V_{story} = \sum min(\phi V_n, (\phi M_{n1} + \phi M_{n2}) / l_u)"]
     item.notes.append(
         "The story strength is the sum over its columns of the shear at which the column "
         "yields in flexure at both ends, limited by its shear strength, both from the last "
@@ -511,7 +528,7 @@ class IrregularityReport:
     notes: list[str] = field(default_factory=list)
 
     def report(self):
-        from utilities.terminal import Report
+        from utilities.terminal import Report, math
 
         report = Report("IRREGULARITY CHECK", [
             f"Model: {self.model_path}",
@@ -527,7 +544,7 @@ class IrregularityReport:
                 if item.rows:
                     report.table(item.headers, item.rows, title=item.name)
                 if item.equations and item.rows:
-                    report.equations(item.equations)
+                    report.equations([math(equation) for equation in item.equations])
                 if item.notes:
                     report.lines(item.notes)
         report.heading("What follows")
@@ -625,6 +642,7 @@ def _stability_rows(connector, seismic: list[str], gravity: list[str],
                 if abs(shear) > NO_VALUE:
                     rows.append((story, case, direction, axial.get(story, 0.0), shear,
                                  _number(row.get(f"Drift{direction}")), height.get(story, 0.0)))
+    rows = own_direction(rows, weight=4)        # by the story shear
     order = {story: index for index, (story, _, _) in enumerate(levels)}
     rows.sort(key=lambda r: order.get(r[0], 0))
     return rows
@@ -709,8 +727,9 @@ def read_irregularity(connector, model_path: str, first_order: bool = True,
     mass = _results(connector, "Mass Summary by Story", [])
 
     def pairs(table, most, average):
-        return [(str(r["Story"]), str(r["OutputCase"]), str(r["Direction"]), _number(r[most]),
-                 _number(r[average])) for _, r in table.iterrows()] if len(table) else []
+        return own_direction([
+            (str(r["Story"]), str(r["OutputCase"]), str(r["Direction"]), _number(r[most]),
+             _number(r[average])) for _, r in table.iterrows()]) if len(table) else []
 
     stiffness = []
     if len(stiff):
@@ -718,7 +737,9 @@ def read_irregularity(connector, model_path: str, first_order: bool = True,
             for direction in ("X", "Y"):
                 if abs(_number(row.get(f"Shear{direction}"))) > NO_VALUE:
                     stiffness.append((str(row["Story"]), str(row["OutputCase"]), direction,
-                                      _number(row.get(f"Stiff{direction}"))))
+                                      _number(row.get(f"Stiff{direction}")),
+                                      _number(row.get(f"Shear{direction}"))))
+    stiffness = [row[:4] for row in own_direction(stiffness)]      # by the story shear
     mass_of = {str(s): _number(m) for s, m in zip(mass["Story"], mass["UX"])} if len(mass) else {}
 
     say("Reading the columns, walls and floors")

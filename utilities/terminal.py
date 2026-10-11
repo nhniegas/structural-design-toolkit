@@ -36,6 +36,7 @@ WIDTH = 78
 # EQUATIONS: LATEX TO THE SYMBOLS OF A TERMINAL
 # =============================================================================
 _SYMBOLS = {
+    r"\Rightarrow": "⇒", r"\Leftrightarrow": "⇔",
     r"\alpha": "α", r"\beta": "β", r"\gamma": "γ", r"\delta": "δ", r"\Delta": "Δ",
     r"\epsilon": "ε", r"\varepsilon": "ε", r"\theta": "θ", r"\lambda": "λ", r"\mu": "μ",
     r"\pi": "π", r"\rho": "ρ", r"\sigma": "σ", r"\tau": "τ", r"\phi": "φ", r"\varphi": "φ",
