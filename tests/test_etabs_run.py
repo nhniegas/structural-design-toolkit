@@ -145,7 +145,7 @@ def test_results_become_plain_data_without_paths():
 
 
 def test_a_design_store_is_compared_table_by_table():
-    from design.concrete_workflow import DesignStore
+    from design.concrete.workflow import DesignStore
 
     def store(depth):
         s = DesignStore(r"C:\a\m.EDB", 1.0, {"FRAME DATA": table(Depth=[depth])}, {"smrf": True})

@@ -1,6 +1,6 @@
 """Compatibility tests for the consolidated composite-column designer."""
 
-from design.composite_column_designer_aiscDG06 import RectangularFilledComposite
+from design.steel.composite_column_aiscDG06 import RectangularFilledComposite
 
 
 def test_standalone_constructor_names_are_supported():

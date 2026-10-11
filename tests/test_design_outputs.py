@@ -15,9 +15,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from design import beam_designer_aci318 as beam  # noqa: E402
-from design import column_designer_aci318 as col  # noqa: E402
-from design import concrete_workflow as cw  # noqa: E402
+from design.concrete.beams import designer as beam  # noqa: E402
+from design.concrete.columns import designer as col  # noqa: E402
+from design.concrete import workflow as cw  # noqa: E402
 from etabs_api.workflows import analysis_forces as af  # noqa: E402
 from etabs_api.workflows import design_loop as dl  # noqa: E402
 from utilities._xlsx_values import cell_value, is_blank  # noqa: E402

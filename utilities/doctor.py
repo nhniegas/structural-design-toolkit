@@ -72,11 +72,11 @@ COMMAND_MODULES = (
     "etabs_api.workflows.frame_tagger", "etabs_api.workflows.model_check",
     "etabs_api.workflows.model_analysis", "etabs_api.workflows.drift_check",
     "etabs_api.workflows.design_loop", "etabs_api.workflows.framing_plans",
-    "design.concrete_workflow",
-    "design.beam_designer_aci318", "design.column_designer_aci318",
-    "design.composite_column_designer_aiscDG06",
-    "design.general_steel_section_designer_aisc360",
-    "design.wind_calculator_directional_asce7", "utilities._calc_report",
+    "design.concrete.workflow",
+    "design.concrete.beams.designer", "design.concrete.columns.designer",
+    "design.steel.composite_column_aiscDG06",
+    "design.steel.wide_flange_aisc360",
+    "design.loads.wind_directional_asce7", "utilities._calc_report",
 )
 
 

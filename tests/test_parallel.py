@@ -59,7 +59,7 @@ def _beams(count: int) -> tuple[pd.DataFrame, pd.DataFrame]:
 
 
 def test_several_processes_give_the_rows_of_one_process(monkeypatch):
-    from design import beam_designer_aci318 as beam
+    from design.concrete.beams import designer as beam
 
     props, forces = _beams(7)
     props = props.iloc[::-1].reset_index(drop=True)        # not in the order of the results
@@ -78,7 +78,7 @@ def test_several_processes_give_the_rows_of_one_process(monkeypatch):
 
 
 def test_one_process_takes_over_when_the_processes_fail(monkeypatch):
-    from design import beam_designer_aci318 as beam
+    from design.concrete.beams import designer as beam
 
     props, forces = _beams(3)
     one = beam.execute_beam_design(props, forces, False, "GRAV")

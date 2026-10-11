@@ -32,7 +32,7 @@ if __package__ in (None, ""):
     # Run as a script: make the project folder (two levels up) importable.
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from design.code_config import NSCP  # noqa: E402
+from design.criteria.code_config import NSCP  # noqa: E402
 from etabs_api.core.helpers import as_list, return_code  # noqa: E402
 
 G = NSCP.seismic.gravity  # mm/s2

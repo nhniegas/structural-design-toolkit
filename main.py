@@ -20,7 +20,7 @@ the same commands.
                     stiffness, strength and service level; the model is restored
                     (etabs_api/workflows/drift_check.py)
     sdt beams       extract the forces and design the beams; save the results,
-                    calculations and schedules (design/concrete_workflow.py)
+                    calculations and schedules (design/concrete/workflow.py)
     sdt deflection  check only the deflection of the beams (bars of the last
                     beam design, service moments read again from ETABS)
     sdt columns     design the columns from the stored beam step, with
@@ -31,11 +31,11 @@ the same commands.
                     width, columns at their size, marks and grids
                     (etabs_api/workflows/framing_plans.py)
     sdt composite   rectangular filled composite column, AISC DG6
-                    (design/composite_column_designer_aiscDG06.py)
+                    (design/steel/composite_column_aiscDG06.py)
     sdt steel       wide-flange member, AISC 360-22
-                    (design/general_steel_section_designer_aisc360.py)
+                    (design/steel/wide_flange_aisc360.py)
     sdt wind        MWFRS wind pressures, ASCE 7 directional procedure
-                    (design/wind_calculator_directional_asce7.py)
+                    (design/loads/wind_directional_asce7.py)
     sdt doctor      check that this machine can run the toolkit: ETABS and its
                     API, the dialogs, LaTeX     (utilities/doctor.py)
     sdt --help      list the commands
@@ -129,19 +129,19 @@ def _drift():
 
 
 def _beams():
-    from design.concrete_workflow import run_beams
+    from design.concrete.workflow import run_beams
 
     return run_beams()
 
 
 def _deflection():
-    from design.concrete_workflow import run_deflection
+    from design.concrete.workflow import run_deflection
 
     return run_deflection()
 
 
 def _columns():
-    from design.concrete_workflow import run_columns
+    from design.concrete.workflow import run_columns
 
     return run_columns()
 
@@ -159,19 +159,19 @@ def _plans():
 
 
 def _composite():
-    from design.composite_column_designer_aiscDG06 import run
+    from design.steel.composite_column_aiscDG06 import run
 
     return run()
 
 
 def _steel():
-    from design.general_steel_section_designer_aisc360 import run
+    from design.steel.wide_flange_aisc360 import run
 
     return run()
 
 
 def _wind():
-    from design.wind_calculator_directional_asce7 import run
+    from design.loads.wind_directional_asce7 import run
 
     return run()
 

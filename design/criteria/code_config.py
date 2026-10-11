@@ -320,7 +320,7 @@ class ColumnSlendernessConfig:
     k_min_coeff: float = 0.05
     k_max: float = 1.0
     # A footing takes the support of the analysis model: fixed when the rotation
-    # is restrained there, pinned otherwise (design/column_slenderness.py).
+    # is restrained there, pinned otherwise (design/concrete/columns/slenderness.py).
     psi_fixed_base: float = 1.0  # a footing built to resist moment              ACI R6.2.5
     psi_pinned_base: float = 10.0  #                                             ACI R6.2.5
     column_inertia_factor: float = 0.70  # cracked I for psi                     ACI Table 6.6.3.1.1(a)
@@ -604,7 +604,7 @@ def override(code: Any, **changes: Any) -> Any:
 
 
 if __name__ == "__main__":
-    # Quick self-check: python design/code_config.py
+    # Quick self-check: python design/criteria/code_config.py
     print(CODE.name, "beta1(28)=", CODE.beta1(28.0), "beta1(60)=", CODE.beta1(60.0))
     print("phi at eps_t=0.0035, fy=415:", round(CODE.phi_flexure(0.0035, 415.0), 3))
     print("crack spacing, fy=415, clear cover 50:", round(CODE.crack_control_spacing(415.0, 50.0), 1))

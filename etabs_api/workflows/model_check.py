@@ -29,14 +29,14 @@ import pandas as pd
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from design.code_config import CODE, NSCP  # noqa: E402
+from design.criteria.code_config import CODE, NSCP  # noqa: E402
 from etabs_api.core.helpers import as_list  # noqa: E402
 
 OK, INFO, WARN, FAIL, NA = "OK", "INFO", "WARN", "FAIL", "N/A"
 DEAD, SUPER_DEAD, LIVE, REDUCIBLE, SEISMIC, WIND, OTHER, ROOF = 1, 2, 3, 4, 5, 6, 8, 11
 SEISMIC_DRIFT = 61
 
-# Code values: design/code_config.py
+# Code values: design/criteria/code_config.py
 SEIS = NSCP.seismic
 LOADS = NSCP.load_factors
 LLR = NSCP.live_load_reduction
@@ -1271,7 +1271,7 @@ def story_drifts(connector, cases: list[str], combos: list[str]) -> dict[str, tu
 
 def run_model_check() -> list[Finding] | None:
     """Entry point: check the model open in ETABS and print the results."""
-    from design.concrete_workflow import attach_etabs
+    from design.concrete.workflow import attach_etabs
     from utilities._gui_helpers import LoadingWindow
 
     from utilities._gui_helpers import enter_values, show_warning

@@ -15,7 +15,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
-from design.code_config import CODE
+from design.criteria.code_config import CODE
 
 GIRDER, BEAM, COLUMN = "girder", "beam", "column"
 FLEXURE, SHEAR, DEFLECTION = "flexure", "shear", "deflection"
@@ -124,7 +124,7 @@ def use(targets: Targets | None):
 
 def beam_type(support_status: object) -> str:
     """Girder or beam, from the support status of the beam design table."""
-    from design.beam_designer_aci318 import is_gravity_beam
+    from design.concrete.beams.designer import is_gravity_beam
 
     return BEAM if is_gravity_beam(support_status) else GIRDER
 

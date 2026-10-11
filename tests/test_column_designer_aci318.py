@@ -1,4 +1,4 @@
-"""Unit tests for design/column_designer_aci318.py  (ACI 318M-14).
+"""Unit tests for design/concrete/columns/designer.py  (ACI 318M-14).
 
 HOW TO RUN (from the project root, the folder that contains main.py):
     python -m pytest tests/test_column_designer_aci318.py -v
@@ -56,8 +56,8 @@ _install_stand_ins_if_needed()
 
 import ezdxf  # noqa: E402
 
-from design import column_designer_aci318 as col  # noqa: E402
-from design.code_config import CODE, override  # noqa: E402
+from design.concrete.columns import designer as col  # noqa: E402
+from design.criteria.code_config import CODE, override  # noqa: E402
 
 # --------------------------------------------------------------------------
 # UNIT CONVERSIONS
@@ -1691,7 +1691,7 @@ def test_the_clear_height_never_exceeds_the_station_span_and_falls_back_to_it():
 def test_a_confinement_ratio_equal_to_the_required_one_passes_whatever_the_last_digit():
     """The tie spacing is the one at which provided = required: values of a real column
     came out one digit apart, and failed or passed by chance."""
-    from design.column_designer_aci318 import _meets
+    from design.concrete.columns.designer import _meets
 
     assert _meets(0.01220294102960668, 0.012202941029606682)     # one ulp under: the same number
     assert _meets(0.012182885935757375, 0.012182885935757377)
@@ -1700,7 +1700,7 @@ def test_a_confinement_ratio_equal_to_the_required_one_passes_whatever_the_last_
 
 
 def test_names_are_cleaned_once_for_each_different_name():
-    from design.column_designer_aci318 import _normalize_names, _normalize_object_name
+    from design.concrete.columns.designer import _normalize_names, _normalize_object_name
 
     names = pd.Series([502.0, "C1 ", None, 502, "007.0", float("nan"), "C1 ", 12.5, "3.0"],
                       index=list("abcdefghi"), name="UniqueName")

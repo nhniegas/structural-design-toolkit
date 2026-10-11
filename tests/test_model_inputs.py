@@ -5,7 +5,7 @@ import json
 import pandas as pd
 import pytest
 
-from design.beam_deflection import COMBO_DEAD, COMBO_FULL, COMBO_ROOF, COMBO_SUSTAINED
+from design.concrete.beams.deflection import COMBO_DEAD, COMBO_FULL, COMBO_ROOF, COMBO_SUSTAINED
 from etabs_api.workflows import model_inputs as mi
 from etabs_api.workflows.analysis_forces import ComboTerms
 
@@ -388,7 +388,7 @@ class Dialogs:
 
 
 def prepared(monkeypatch, tmp_path, names_of_members, combos, dialogs_kwargs=None):
-    from design import concrete_workflow as cw
+    from design.concrete import workflow as cw
 
     monkeypatch.setattr(mi, "read_combinations", lambda connector: combos)
     monkeypatch.setattr(mi, "wall_count", lambda connector: 0)
@@ -520,7 +520,7 @@ def test_the_beam_seismic_shear_defaults_to_the_combination_closest_to_12d_f1l()
 def test_untagged_members_are_designed_as_they_are_by_default(monkeypatch, tmp_path):
     """Tagging renames the members of the open model and drops its results, so it
     is not what pressing Enter does."""
-    from design import concrete_workflow as cw
+    from design.concrete import workflow as cw
 
     first = next(iter(cw.UNNAMED_OPTIONS))
     assert cw.UNNAMED_OPTIONS[first] == "numbers"

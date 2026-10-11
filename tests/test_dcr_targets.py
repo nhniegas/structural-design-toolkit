@@ -10,8 +10,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import test_beam_designer_aci318 as beam_tests  # noqa: E402
 
-from design import beam_carriers as bc  # noqa: E402
-from design import dcr_targets as dt  # noqa: E402
+from design.concrete.beams import carriers as bc  # noqa: E402
+from design.criteria import dcr_targets as dt  # noqa: E402
 
 beam = beam_tests.beam
 
@@ -175,7 +175,7 @@ def test_the_loop_makes_a_shallow_carrier_deeper_and_does_not_shrink_one_below_i
 # ----------------------------------------------------------------- asking
 def test_the_targets_dialogs_keep_the_code_limits_unless_the_engineer_sets_some(monkeypatch,
                                                                                 tmp_path):
-    from design import concrete_workflow as cw
+    from design.concrete import workflow as cw
     from etabs_api.workflows import model_inputs as mi
     from utilities import _gui_helpers as gui
 
@@ -210,7 +210,7 @@ def test_the_targets_dialogs_keep_the_code_limits_unless_the_engineer_sets_some(
 
 
 def test_the_carrier_depth_question_defaults_to_no(monkeypatch):
-    from design import concrete_workflow as cw
+    from design.concrete import workflow as cw
     from utilities import _gui_helpers as gui
 
     monkeypatch.setattr(gui, "select_option",
@@ -267,7 +267,7 @@ def test_without_coordinates_the_supports_are_classified_as_before():
 def test_without_the_office_rule_a_wide_beam_gets_fewer_bars_for_spacing():
     """A 1000 mm wide beam: 150 mm clear needs 6 bars of 25 on a face; crack
     control (about 250 mm centre to centre) needs 5."""
-    from design.code_config import CODE, override
+    from design.criteria.code_config import CODE, override
 
     office = beam.BeamFlexureDesign(1000, 800, 28, 414, 414, 25, 10, 40)
     code_only = beam.BeamFlexureDesign(
@@ -283,7 +283,7 @@ def test_the_office_rule_stays_the_default_of_the_design():
     props["Width"] = 900.0
     tables = {"FRAME DATA": None}
     default = beam.execute_beam_design(props, forces, False, "GRAV")
-    from design.code_config import CODE, override
+    from design.criteria.code_config import CODE, override
 
     code_only = beam.execute_beam_design(
         props, forces, False, "GRAV",

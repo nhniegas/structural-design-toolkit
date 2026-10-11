@@ -31,7 +31,8 @@ from pylatex import (
 
 if __package__ in (None, ""):
     # Run as a script: make the project folder importable.
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__)))))
 
 from utilities.design_cli import Field, run_design  # noqa: E402
 

@@ -15,7 +15,7 @@ def test_levels_are_as_modelled_strength_and_service():
 
 
 def test_service_level_is_capped_at_the_gross_section(monkeypatch):
-    from design.code_config import NSCP, override
+    from design.criteria.code_config import NSCP, override
 
     monkeypatch.setattr(dc, "NSCP", override(NSCP, analysis__column_inertia=0.8))
     assert dc.stiffness_levels()[2].column == 1.0

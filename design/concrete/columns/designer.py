@@ -1,6 +1,6 @@
 """ACI 318M-14 reinforced-concrete column design, SMRF checks and schedules.
 
-The terminal workflow (``sdt columns``) is in ``design/concrete_workflow.py``;
+The terminal workflow (``sdt columns``) is in ``design/concrete/workflow.py``;
 this module designs from tables (``design_columns``) and writes the results
 file, the DXF schedule and the calculation report. Its tables use mm, MPa,
 kN and kN-m; section-library forces are converted at the calculation boundary.
@@ -13,10 +13,10 @@ import numpy as np
 import pandas as pd
 import ezdxf
 from dataclasses import dataclass
-from design.code_config import CODE, AciCode
-from design import dcr_targets
-from design.column_interaction import clip_moments, section_rings
-from design.column_slenderness import (
+from design.criteria.code_config import CODE, AciCode
+from design.criteria import dcr_targets
+from design.concrete.columns.interaction import clip_moments, section_rings
+from design.concrete.columns.slenderness import (
     SLENDERNESS_REPORT_FIELDS,
     ColumnSection,
     FrameBeam,
@@ -89,7 +89,7 @@ class ColumnFlexureDesign:
             axial_load: Optional applied axial force in N; compression is positive.
             shape: Either ``"rectangular"`` or ``"circular"``.
             is_smrf: Whether ACI Chapter 18 SMRF column detailing applies.
-            code: ACI constants (see code_config.py).
+            code: ACI constants (see criteria/code_config.py).
         """
         self.code = code
         self.width = width
@@ -1154,7 +1154,7 @@ class LazyColumnSection:
     """The reinforced geometry of a column, built (and meshed) on first use only.
 
     The bar layout search and the interaction surface need only the outline and
-    the bars (``column_interaction.layout_section_data``); the concreteproperties
+    the bars (``interaction.layout_section_data``); the concreteproperties
     geometry, which takes about 0.1 s per layout, is built only when the exact
     per-point solver or a drawing asks for it.
     """
@@ -1509,7 +1509,7 @@ def _evaluate_column_candidate(
     if strength_limits["status"] != "Pass":
         return False, [], strength_limits
 
-    from design.column_interaction import surface_for
+    from design.concrete.columns.interaction import surface_for
 
     surface = surface_for(engine, section, bar_layout) if USE_INTERACTION_SURFACE else None
     if surface is not None:
@@ -1646,11 +1646,11 @@ def _evaluate_on_surface(member, force_rows, surface, engine, n_bars, dmain,
     to fail, so a layout that cannot work is rejected before the others are
     looked up. The others are then confirmed, because the phi-scaled surface is
     not strictly convex where phi changes from 0.65 to 0.90."""
-    from design.column_interaction import hull_vertices
+    from design.concrete.columns.interaction import hull_vertices
 
     demands = column_demands(member, force_rows)
     data = np.array([[p, m2, m3] for _, _, p, m2, m3 in demands], dtype=float).reshape(-1, 3)
-    # Section moments: Mx = M3, My = -M2 (column_interaction.demand_moments), in N and N-mm.
+    # Section moments: Mx = M3, My = -M2 (interaction.demand_moments), in N and N-mm.
     points = np.column_stack([data[:, 0] * 1e3, data[:, 2] * 1e6, -data[:, 1] * 1e6])
     no_moment = np.hypot(data[:, 1], data[:, 2]) < NO_MOMENT_KNM
     points[no_moment, 1:] = 0.0
@@ -1718,7 +1718,7 @@ def _strong_column_hull_combos(combos: list[str], columns: list[str], joint: str
     and the joint shear do not depend on the combination. Every combination is
     kept when an axial load cannot be read (the loop then reports what is missing).
     """
-    from design.column_interaction import hull_vertices
+    from design.concrete.columns.interaction import hull_vertices
 
     if len(combos) <= 3 or not columns:
         return list(combos)
@@ -2205,7 +2205,7 @@ def _beam_end_reinforcement(
     intentionally excluded. ``fy_multiplier`` is 1.0 for nominal strength and
     1.25 for probable joint-force calculations.
     """
-    from design.beam_designer_aci318 import BeamFlexureDesign
+    from design.concrete.beams.designer import BeamFlexureDesign
 
     member = str(beam_row["UniqueName"])
     width = _numeric(beam_row["Width"], "Width", member)
@@ -2381,7 +2381,7 @@ def _column_shear_checks(
             bundle_layout=bundle_layout,
         )
         if USE_INTERACTION_SURFACE:
-            from design.column_interaction import demand_moments, surface_for
+            from design.concrete.columns.interaction import demand_moments, surface_for
 
             probable_surface = surface_for(probable_engine, probable_section, bundle_layout)
 
@@ -2558,7 +2558,7 @@ def _evaluate_smrf_joints(
     if not is_smrf:
         return pd.DataFrame()
 
-    from design.beam_designer_aci318 import restore_beam_result_labels
+    from design.concrete.beams.designer import restore_beam_result_labels
 
     connectivity = connectivity.copy()
     frame_data = frame_data.copy()
@@ -2754,7 +2754,7 @@ def _evaluate_smrf_joints(
             )
         engine, section = column_sections[section_key]
         if USE_INTERACTION_SURFACE:
-            from design.column_interaction import demand_moments, surface_for
+            from design.concrete.columns.interaction import demand_moments, surface_for
 
             surface = surface_for(engine, section, column_layouts.get(member))
             if surface is not None:
@@ -4292,7 +4292,7 @@ def design_columns(
     """Design every column and run the SMRF checks.
 
     ``slenderness`` adds the member slenderness of ACI 6.6.4.5 (see
-    ``design/column_slenderness.py``): the moments at the column ends are
+    ``design/concrete/columns/slenderness.py``): the moments at the column ends are
     magnified before the bars are chosen. The sway effects must be in the
     forces already (the ETABS P-delta analysis).
 
@@ -4449,7 +4449,7 @@ def design_columns(
     slender_results: dict[str, MemberSlenderness] = {}
     slender_geometry: dict[str, dict] = {}
     if slenderness:
-        from design.column_slenderness import supports_from_table
+        from design.concrete.columns.slenderness import supports_from_table
 
         supports = tables.get("SUPPORTS")
         frame_model = _slenderness_frame_model(
@@ -4787,7 +4787,7 @@ def design_columns(
             engine, section = candidate_section_cache[section_key]
             surface = None
             if USE_INTERACTION_SURFACE:
-                from design.column_interaction import demand_moments, surface_for
+                from design.concrete.columns.interaction import demand_moments, surface_for
 
                 surface = surface_for(engine, section, layout)
             if surface is not None:
@@ -7333,7 +7333,7 @@ def column_interaction_figure(rows: pd.DataFrame, path: str, dmain: float, dties
     The demands are every combination at both ends; the hull vertices and the
     governing demand are marked. None when the layout has no surface.
     """
-    from design.column_interaction import (
+    from design.concrete.columns.interaction import (
         demand_moments,
         hull_vertices,
         plot_surface,

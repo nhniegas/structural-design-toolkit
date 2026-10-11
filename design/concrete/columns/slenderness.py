@@ -36,7 +36,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from design.code_config import CODE, AciCode
+from design.criteria.code_config import CODE, AciCode
 
 AXES = ("2", "3")  # bending about local 2 (over the width) and local 3 (over the depth)
 NOT_SLENDER = "Not slender"

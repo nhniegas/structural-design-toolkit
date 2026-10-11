@@ -3,7 +3,7 @@
 Ca and Cv come from the seismic zone factor, the soil profile type and, in
 zone 4, the near-source factors Na and Nv, which depend on the seismic source
 type and the closest distance to the source. The tables are in
-``design/code_config.py`` (``NSCP.seismic``).
+``design/criteria/code_config.py`` (``NSCP.seismic``).
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ import sys
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from design.code_config import NSCP  # noqa: E402
+from design.criteria.code_config import NSCP  # noqa: E402
 
 _SEISMIC = NSCP.seismic
 ZONE_FACTORS = _SEISMIC.ubc_zone_factors

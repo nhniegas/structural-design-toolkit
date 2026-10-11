@@ -1,7 +1,7 @@
 """
 tests/test_concrete_workflow.py
 ===============================
-Checks for design/concrete_workflow.py (the store between the beam and
+Checks for design/concrete/workflow.py (the store between the beam and
 column steps) and the column results file. No ETABS is needed.
 """
 
@@ -14,8 +14,8 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from design import column_designer_aci318 as col  # noqa: E402
-from design.concrete_workflow import (  # noqa: E402
+from design.concrete.columns import designer as col  # noqa: E402
+from design.concrete.workflow import (  # noqa: E402
     DesignStore,
     _gravity_options,
     deflection_table,

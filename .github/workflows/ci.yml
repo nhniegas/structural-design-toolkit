@@ -53,14 +53,14 @@ jobs:
         run: ruff check --select F,B --exit-zero .
 
       - name: Check every module compiles
-        run: python -m compileall -q main.py design etabs_api utilities tests
+        run: python -m compileall -q main.py design etabs_api utilities tools tests
 
       # The workbook buttons import these modules directly, so they must import cleanly.
       - name: Check the Excel entry-point modules import
         run: >
-          python -c "import design.beam_designer_aci318, design.column_designer_aci318,
-          design.composite_column_designer_aiscDG06, design.wind_calculator_directional_asce7,
-          design.general_steel_section_designer_aisc360; print('design modules import OK')"
+          python -c "import design.concrete.beams.designer, design.concrete.columns.designer,
+          design.steel.composite_column_aiscDG06, design.loads.wind_directional_asce7,
+          design.steel.wide_flange_aisc360; print('design modules import OK')"
 
       - name: Run tests
         run: >

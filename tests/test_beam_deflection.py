@@ -1,7 +1,7 @@
 """
 tests/test_beam_deflection.py
 =============================
-Checks for design/beam_deflection.py against closed-form results.
+Checks for design/concrete/beams/deflection.py against closed-form results.
 """
 
 import math
@@ -14,7 +14,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from design import beam_deflection as bd  # noqa: E402
+from design.concrete.beams import deflection as bd  # noqa: E402
 
 L = 6000.0
 X = np.linspace(0, L, 41)

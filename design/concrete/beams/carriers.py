@@ -254,7 +254,7 @@ def end_pushes(forces: pd.DataFrame | None, combo: str | None,
         return {}
     import numpy as np
 
-    from design.beam_deflection import statics_shear
+    from design.concrete.beams.deflection import statics_shear
 
     kind = connectivity["DesignType"].astype(str).str.strip().str.casefold()
     ends = {_name(r["UniqueName"]): (_name(r["UniquePtI"]), _name(r["UniquePtJ"]))

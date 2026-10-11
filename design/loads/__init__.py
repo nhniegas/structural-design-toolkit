@@ -1,0 +1,1 @@
+"""Loads: the wind calculator."""

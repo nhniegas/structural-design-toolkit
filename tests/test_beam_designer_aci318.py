@@ -1,4 +1,4 @@
-"""Unit tests for design/beam_designer_aci318.py  (ACI 318M-14).
+"""Unit tests for design/concrete/beams/designer.py  (ACI 318M-14).
 
 HOW TO RUN (from the project root, the folder that contains main.py):
     python -m pytest tests/test_beam_designer_aci318.py -v
@@ -55,8 +55,8 @@ def _install_stand_ins_if_needed() -> None:
 
 _install_stand_ins_if_needed()
 
-from design import beam_designer_aci318 as beam  # noqa: E402
-from design.code_config import CODE, override  # noqa: E402
+from design.concrete.beams import designer as beam  # noqa: E402
+from design.criteria.code_config import CODE, override  # noqa: E402
 
 # --------------------------------------------------------------------------
 # UNIT CONVERSIONS (published examples are in US units, the code works in SI)

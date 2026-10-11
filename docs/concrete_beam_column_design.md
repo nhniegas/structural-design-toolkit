@@ -60,11 +60,11 @@ Answers are remembered and offered again next time. Every named member (not a nu
 
 ## How the pieces fit
 
-- `design/concrete_workflow.py`: the commands, the dialogs and the store.
-- `design/beam_designer_aci318.py`: beam design (`design_beams`), results file, beam schedule DXF and calculation report.
-- `design/beam_deflection.py`: deflection checks.
-- `design/column_designer_aci318.py`: column design and SMRF checks (`design_columns`), results file, column schedule DXF and calculation report.
-- `design/code_config.py`: every code value, each with its clause: ACI 318M-14 (`CODE`, used by both designers) and NSCP 2015 chapter 2 (`NSCP`: loads, live load reduction, earthquake).
+- `design/concrete/workflow.py`: the commands, the dialogs and the store.
+- `design/concrete/beams/designer.py`: beam design (`design_beams`), results file, beam schedule DXF and calculation report.
+- `design/concrete/beams/deflection.py`: deflection checks.
+- `design/concrete/columns/designer.py`: column design and SMRF checks (`design_columns`), results file, column schedule DXF and calculation report.
+- `design/criteria/code_config.py`: every code value, each with its clause: ACI 318M-14 (`CODE`, used by both designers) and NSCP 2015 chapter 2 (`NSCP`: loads, live load reduction, earthquake).
 - `etabs_api/workflows/exporter.py`, `analysis_forces.py`, `tributary.py`: the extraction and the factored forces from the analysis results.
 - `utilities/_gui_helpers.py`: dialogs and the loading window; `utilities/_calc_report.py`: the PDF layout.
 
@@ -141,7 +141,7 @@ A dialog asks for the rule. NSCP 2015 governs; ASCE 7 is the alternate it allows
 
 **Both rules.** A member supporting reducible live load above 4.8 kPa (more than 0.5 m2 of such floor) gets no reduction. The exception is a column receiving load from more than one level, which gets 20 %; under ASCE, never more than its 4.7.2 reduction.
 
-Only the patterns of type Reducible Live are reduced. The `LIVE LOAD REDUCTION` results list the rule used for each member. Every value is in `design/code_config.py` (`NSCP.live_load_reduction`).
+Only the patterns of type Reducible Live are reduced. The `LIVE LOAD REDUCTION` results list the rule used for each member. Every value is in `design/criteria/code_config.py` (`NSCP.live_load_reduction`).
 
 **Tributary area.** When reduction is chosen, a third question asks how to find A:
 
@@ -358,7 +358,7 @@ Second-order effects have two parts, and both are covered:
 | Effect | Where it comes from |
 |---|---|
 | Sway of the storeys (P-Δ) | The ETABS analysis. `sdt setup` defines iterative P-delta on the gravity loads and the frames carry cracked stiffness, which is an elastic second-order analysis (ACI 6.7). The forces read from ETABS already hold it, so no sway magnifier is added. `sdt check` reports when P-delta is off |
-| Bow of the column between its ends (P-δ) | Added by `sdt columns`, by the moment magnification of ACI 6.6.4.5 (`design/column_slenderness.py`). ETABS does not capture it unless every column is subdivided |
+| Bow of the column between its ends (P-δ) | Added by `sdt columns`, by the moment magnification of ACI 6.6.4.5 (`design/concrete/columns/slenderness.py`). ETABS does not capture it unless every column is subdivided |
 
 For each column, each bending axis and each combination:
 
@@ -459,7 +459,7 @@ The design calculation places each bundle as one equivalent bar at the layout po
 
 ## Column strength: the biaxial interaction surface
 
-Axial load and biaxial bending are checked on the ACI 318M-14 design interaction surface (phi Pn, phi Mnx, phi Mny) of each layout, in `design/column_interaction.py`:
+Axial load and biaxial bending are checked on the ACI 318M-14 design interaction surface (phi Pn, phi Mnx, phi Mny) of each layout, in `design/concrete/columns/interaction.py`:
 
 - **The surface.** It is computed once per layout (shape, size, bars, cover, materials) and reused by every column, combination and iteration with that layout. The grid is 72 neutral-axis angles × 120 depths, using strain compatibility, the Whitney block and elastic-plastic bars (the same model as the exact solver it replaced). phi at each point comes from that point's steel strain, and the axial cap is phi 0.80 Po (tied) or phi 0.85 Po (spiral). The values match the exact solver; where they differ (at most about 0.1 %), the surface is on the safe side.
 - **A demand (Pu, Mu2, Mu3).** The surface is cut where phi Pn = Pu, and the capacity is read along the demand's moment direction. Utilization is |Mu| / phi Mn. Before October 2026, phi was applied to Mn at Pn = Pu, which overstated the capacity above the balance point.

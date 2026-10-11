@@ -61,7 +61,7 @@ def test_a_gravity_beam_never_counts_as_designed_with_the_smrf_rules():
 
 
 def test_the_question_defaults_to_keeping_the_rules_and_remembers_the_last_answer(monkeypatch):
-    from design import concrete_workflow as cw
+    from design.concrete import workflow as cw
     from utilities import _gui_helpers as gui
 
     monkeypatch.setattr(gui, "select_option",
@@ -73,7 +73,7 @@ def test_the_question_defaults_to_keeping_the_rules_and_remembers_the_last_answe
 
 
 def test_the_summary_lists_the_girders_left_out_and_says_what_is_not_covered():
-    from design import concrete_workflow as cw
+    from design.concrete import workflow as cw
     from utilities.run_summary import RunSummary
 
     results = pd.DataFrame({"UniqueName": ["G1", "G1", "G2", "G2"],

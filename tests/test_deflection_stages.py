@@ -122,7 +122,7 @@ def test_the_results_show_the_long_term_part_and_the_total_and_the_stages_only_w
 
 
 def test_the_question_keeps_the_safe_side_unless_the_engineer_gives_the_time(monkeypatch, tmp_path):
-    from design import beam_designer_aci318 as beam
+    from design.concrete.beams import designer as beam
     from utilities import _gui_helpers as gui
 
     monkeypatch.setattr(beam, "_deflection_settings_path", lambda: str(tmp_path / "d.json"))

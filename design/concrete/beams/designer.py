@@ -1,6 +1,6 @@
 """Beam design for ACI 318M-14: flexure, shear, torsion, SMRF, detailing and schedules.
 
-The terminal workflow (``sdt beams``) is in ``design/concrete_workflow.py``;
+The terminal workflow (``sdt beams``) is in ``design/concrete/workflow.py``;
 this module designs from tables (``design_beams``) and writes the results
 file, the DXF schedules and the calculation report.
 """
@@ -15,9 +15,9 @@ import ezdxf
 import numpy as np
 import pandas as pd
 
-from design import dcr_targets
-from design.code_config import CODE, AciCode, override
-from design.beam_deflection import (
+from design.criteria import dcr_targets
+from design.criteria.code_config import CODE, AciCode, override
+from design.concrete.beams.deflection import (
     DEFLECTION_COLUMNS,
     LIMIT_DAMAGED,
     LIMIT_NOT_DAMAGED,
@@ -101,7 +101,7 @@ def identify_cantilever_beams(
     supported too: a beam across it at the joint, or a girder whose centre
     line passes through the joint and that ETABS has not split there. A beam
     that only continues in line does not hold an end by itself: the end is as
-    held as the far end of that beam (``beam_carriers.end_conditions``).
+    held as the far end of that beam (``carriers.end_conditions``).
 
     * on a column or wall at one end at least, and held at the other:
       ``Supported Both Ends`` (a frame member, with the seismic rules)
@@ -146,7 +146,7 @@ def identify_cantilever_beams(
         if pd.notna(point)
     }
 
-    from design.beam_carriers import BEAM_END, _name, end_conditions
+    from design.concrete.beams.carriers import BEAM_END, _name, end_conditions
 
     beams = conn.loc[conn["DesignType"].eq("Beam")].copy()
     has_support_i = beams["UniquePtI"].isin(support_joints)
@@ -220,7 +220,7 @@ class BeamFlexureDesign:
         """Initialize the rectangular beam section and reinforcement design inputs (mm, MPa, kN-m).
 
         ``d_agg`` is the maximum aggregate size; ``None`` uses the configured default.
-        ``code`` holds every ACI constant (see code_config.py).
+        ``code`` holds every ACI constant (see criteria/code_config.py).
         """
         self.code = code
         detailing = code.beam_detailing
@@ -2392,15 +2392,15 @@ def ask_deflection_stages(title: str = "Beam Design - Deflection") -> Deflection
 def load_path_pushes(tables: dict, gravity_combo: str | None = None) -> dict:
     """What the analysis says holds each beam end, for the support status and
     the carrier rule: the shear and moment diagrams and, with the service
-    loads, the deflected shape (``beam_carriers.LoadPath``).
+    loads, the deflected shape (``carriers.LoadPath``).
 
     Read under the full service load (DEF 101) when the model has the
     deflection combinations, otherwise under the factored gravity
     combination of the seismic shear. Empty when neither is there: the
     geometry of the framing then decides.
     """
-    from design.beam_carriers import read_load_path
-    from design.beam_deflection import COMBO_FULL
+    from design.concrete.beams.carriers import read_load_path
+    from design.concrete.beams.deflection import COMBO_FULL
 
     connectivity = tables.get("CONNECTIVITY")
     service = tables.get("SERVICE LOADS")
@@ -2437,7 +2437,7 @@ def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict
     are active (``dcr_targets.use``). Returns the results, two rows (TOP,
     BOTTOM) per beam.
     """
-    from design.beam_carriers import forget_networks
+    from design.concrete.beams.carriers import forget_networks
 
     forget_networks()   # the tables of this design are new: nothing kept from another one
     pushes = load_path_pushes(tables, gravity_combo) if load_path is None else load_path
@@ -2461,7 +2461,7 @@ def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict
                                          stages=deflection_stages, points=tables.get("POINTS"),
                                          pushes=pushes)
     if carrier_depth and not results.empty:
-        from design.beam_carriers import add_carrier_depth_check
+        from design.concrete.beams.carriers import add_carrier_depth_check
 
         results = add_carrier_depth_check(results, tables["CONNECTIVITY"], tables.get("POINTS"),
                                           pushes)
@@ -3190,6 +3190,6 @@ def export_beam_pdf(results: pd.DataFrame, path: str, seismic: bool,
 
 
 if __name__ == "__main__":
-    from design.concrete_workflow import run_beams
+    from design.concrete.workflow import run_beams
 
     run_beams()

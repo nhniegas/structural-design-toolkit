@@ -59,7 +59,7 @@ For the spectrum combinations, ETABS gives Max and Min envelopes. The centre-of-
 - **Seismic** (`DRIFT` combinations: 203-5 and 203-7, E from `EQXSD`, `EQYSD`, `RSAXD` and `RSAYD`, ρ = 1.0): ΔM = 0.7 R ΔS, at most 0.025h when T < 0.7 s, otherwise 0.020h (NSCP 208.6.5.1). T is the drift pattern period from the same run. The worst combination of each case is reported.
 - **Wind** (`WDRIFT` combinations: 203-3, 203-4 and 203-6 on `WX` and `WY`): at most h / the typed limit. NSCP 207 sets no wind drift limit.
 
-The drift combinations come from `sdt setup`; a model without them stops with a message to run `sdt setup` first. Every value (stiffness, factor 1.4, limits) is in `design/code_config.py`.
+The drift combinations come from `sdt setup`; a model without them stops with a message to run `sdt setup` first. Every value (stiffness, factor 1.4, limits) is in `design/criteria/code_config.py`.
 
 ## Tests
 

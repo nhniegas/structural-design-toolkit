@@ -26,7 +26,7 @@ ETABS has no NSCP seismic code, so the model uses the UBC 97 auto-seismic patter
 
 `sdt check` reads the UBC 97 inputs and holds them to the NSCP tables. It checks every pattern, including Ca, Cv, the period or coefficient typed in by hand. With results, it recomputes the NSCP base shear coefficient from the period and weight ETABS used, so an edited static pattern is checked too.
 
-Every limit and table value comes from `design/code_config.py`: `NSCP` for chapter 2, and `CODE` (ACI 318M-14 = NSCP chapter 4) for the member limits. To change a value, change it there.
+Every limit and table value comes from `design/criteria/code_config.py`: `NSCP` for chapter 2, and `CODE` (ACI 318M-14 = NSCP chapter 4) for the member limits. To change a value, change it there.
 
 **Drift.** NSCP 208.6.4.1 computes drift with the 203.3 combinations, so the check reads the story drifts of the `DRIFT` and `WDRIFT` combinations that `sdt setup` creates. For each drift case it reports the worst combination:
 

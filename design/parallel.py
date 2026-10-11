@@ -84,7 +84,7 @@ def chunks(names: list, workers: int) -> list[list]:
 
 def _answer(pair: tuple) -> float:
     """What a process of ``self_test`` does: it loads the beam designer, as a design would."""
-    from design import beam_designer_aci318  # noqa: F401
+    from design.concrete.beams import designer  # noqa: F401
 
     return sum(pair)
 

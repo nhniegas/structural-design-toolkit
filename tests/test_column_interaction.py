@@ -1,4 +1,4 @@
-"""Tests for the biaxial interaction surface and the demand hull (design/column_interaction.py)."""
+"""Tests for the biaxial interaction surface and the demand hull (design/concrete/columns/interaction.py)."""
 
 import math
 
@@ -6,8 +6,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from design import column_designer_aci318 as cd
-from design import column_interaction as ci
+from design.concrete.columns import designer as cd
+from design.concrete.columns import interaction as ci
 
 
 def section(width=600, depth=800, diameter=np.nan, bars=16):

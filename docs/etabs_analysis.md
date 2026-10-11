@@ -53,7 +53,7 @@ The model is unlocked before each scale factor is changed. ETABS accepts a new f
 - The 90 % / 100 % scaling rule of NSCP for regular and irregular structures: the spectrum is always scaled to 100 % (`sdt check` reports 90 to 100 % as a warning).
 - Irregularities (torsion and Ax, soft story, mass, weak story). Story drift is checked by `sdt check`.
 
-The values (scaling target, period caps, modal mass) are in `design/code_config.py` (`NSCP.seismic`).
+The values (scaling target, period caps, modal mass) are in `design/criteria/code_config.py` (`NSCP.seismic`).
 - A PDF or Excel report.
 
 ## Tests

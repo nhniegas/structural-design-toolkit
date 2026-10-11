@@ -21,7 +21,7 @@ The drift is read at the diaphragm centre of mass, or at the four outermost
 column joints of each story (the extreme joints along the two diagonals).
 Seismic drift is checked as Delta_M = 0.7 R Delta_S against 0.025 or 0.020 of
 the story height (NSCP 208.6.5.1); wind drift against h / the typed limit.
-The values are in design/code_config.py.
+The values are in design/criteria/code_config.py.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ import pandas as pd
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from design.code_config import NSCP  # noqa: E402
+from design.criteria.code_config import NSCP  # noqa: E402
 from etabs_api.core.helpers import as_list, return_code  # noqa: E402
 from etabs_api.workflows import model_check as mc  # noqa: E402
 
@@ -731,7 +731,7 @@ def save_report(report: DriftReport, path: str) -> str:
 def run_drift_check() -> DriftReport | None:
     """Entry point: ask the options, run the drift levels on the open model, print the
     report and save it beside the model (``<model> - Drift.txt``)."""
-    from design.concrete_workflow import attach_etabs
+    from design.concrete.workflow import attach_etabs
     from utilities._gui_helpers import LoadingWindow, select_option, show_warning
 
     title = "Story Drift"
