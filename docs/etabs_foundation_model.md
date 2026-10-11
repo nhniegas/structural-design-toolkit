@@ -96,7 +96,7 @@ Once the footings and tie beams are modelled, open the foundation model and run 
 - **Tie beams.** The beams of the model with their width and depth. One that still has its ETABS number is named `FTB-1`, `FTB-2`, ...
 - **Columns.** The column on each support joint.
 
-A table lists them, and the summary names the columns with no footing under them. `sdt plans`, run on the superstructure, then asks whether to draw the foundation plan (see [Framing plans](etabs_framing_plans.md#the-foundation-plan)). Save the plan again after the foundation changes.
+A table lists them, and the summary names the columns with no footing under them. `sdt plans`, run on the superstructure, then asks whether to draw the foundation plan (see [Framing plans](etabs_framing_plans.md#the-foundation-plan)), and `sdt 3d` whether to include the footings and tie beams as solids (see [3D model](etabs_3d_model.md#the-foundation)). Save the plan again after the foundation changes.
 
 ## Files
 

@@ -73,6 +73,7 @@ COMMAND_MODULES = (
     "etabs_api.workflows.model_analysis", "etabs_api.workflows.drift_check",
     "etabs_api.workflows.design_loop", "etabs_api.workflows.framing_plans",
     "etabs_api.workflows.foundation_model", "etabs_api.workflows.foundation_plan",
+    "etabs_api.workflows.model_3d",
     "design.concrete.workflow",
     "design.concrete.beams.design", "design.concrete.beams.schedule",
     "design.concrete.beams.calculations", "design.concrete.columns.design",
@@ -155,6 +156,17 @@ def check_latex() -> Check:
         "calculation reports are not. " + INSTALL_HINT)
 
 
+def check_3d_kernel() -> Check:
+    """Whether build123d, which makes the solids of ``sdt 3d``, can be loaded."""
+    try:
+        import build123d
+    except Exception as error:  # noqa: BLE001 - not installed, or one of its parts is missing
+        return WARN, "3D model (build123d)", (
+            f"build123d could not be loaded ({error}): sdt 3d cannot write its STEP file. "
+            "Every other command works. Install it with: pip install build123d")
+    return OK, "3D model (build123d)", f"build123d {build123d.__version__}"
+
+
 def check_design_processes() -> Check:
     """Whether the member designs of a large model can be shared between the cores."""
     from design import parallel
@@ -180,6 +192,7 @@ def run_doctor(version: str = "") -> list[Check]:
     if api[0] == OK:
         checks.append(check_running_etabs())
     checks.append(check_latex())
+    checks.append(check_3d_kernel())
     checks.append(check_design_processes())
     failed = sum(1 for status, _, _ in checks if status == FAIL)
     warned = sum(1 for status, _, _ in checks if status == WARN)

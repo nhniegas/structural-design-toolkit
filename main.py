@@ -34,6 +34,9 @@ the same commands.
     sdt plans       framing plans of every floor as one DXF: beams at their
                     width, columns at their size, marks and grids; and the
                     foundation plan when it was saved
+    sdt 3d          the concrete of the model as 3D solids in one STEP file
+                    (columns, beams, walls, slabs, and the saved foundation)
+                    (etabs_api/workflows/model_3d.py)
                     (etabs_api/workflows/framing_plans.py)
     sdt composite   rectangular filled composite column, AISC DG6
                     (design/steel/composite_column_aiscDG06.py)
@@ -169,6 +172,12 @@ def _plans():
     return run_framing_plans()
 
 
+def _model_3d():
+    from etabs_api.workflows.model_3d import run_model_3d
+
+    return run_model_3d()
+
+
 def _composite():
     from design.steel.composite_column_aiscDG06 import run
 
@@ -206,6 +215,7 @@ COMMANDS = {
     "design": (_design, "analysis and design loop that resizes beams and columns"),
     "foundation": (_foundation, "foundation model from the support reactions, or update its forces"),
     "plans": (_plans, "framing plans of every floor as one DXF (beams, columns, marks, grids)"),
+    "3d": (_model_3d, "the concrete of the model as 3D solids in a STEP file, for AutoCAD"),
     "composite": (_composite, "check a rectangular filled composite column (AISC DG6)"),
     "steel": (_steel, "check a wide-flange steel member (AISC 360-22)"),
     "wind": (_wind, "MWFRS wind pressures by the ASCE 7 directional procedure"),

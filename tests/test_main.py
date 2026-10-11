@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import main  # noqa: E402
 
 
-@pytest.mark.parametrize("command", ["setup", "grids", "tag", "check", "analyze", "drift", "beams", "deflection", "columns", "design", "foundation", "plans", "composite", "steel", "wind", "doctor"])
+@pytest.mark.parametrize("command", ["setup", "grids", "tag", "check", "analyze", "drift", "beams", "deflection", "columns", "design", "foundation", "plans", "3d", "composite", "steel", "wind", "doctor"])
 def test_each_command_runs_its_workflow(command, monkeypatch):
     ran = []
     for name in main.COMMANDS:
@@ -147,6 +147,7 @@ def test_doctor_reports_every_check_and_counts_the_problems(monkeypatch, capsys)
     monkeypatch.setattr(doctor, "check_running_etabs",
                         lambda: pytest.fail("not checked when the API did not load"))
     monkeypatch.setattr(doctor, "check_latex", lambda: (doctor.OK, "LaTeX", "found"))
+    monkeypatch.setattr(doctor, "check_3d_kernel", lambda: (doctor.OK, "3D model", "found"))
     checks = doctor.run_doctor("0.1.0")
     out = capsys.readouterr().out
     assert [status for status, _, _ in checks].count(doctor.FAIL) == 1

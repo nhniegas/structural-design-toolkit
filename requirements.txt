@@ -16,6 +16,9 @@ matplotlib
 # Tables, colour and equations in the terminal (utilities/terminal.py)
 rich
 
+# Solids and the STEP file of the 3D model (sdt 3d); loaded only by that command
+build123d
+
 # PDF report generation and optional rich display helpers
 PyLaTeX
 IPython

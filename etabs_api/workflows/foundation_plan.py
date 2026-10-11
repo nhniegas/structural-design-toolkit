@@ -253,10 +253,42 @@ def columns_of_manifest(manifest: dict) -> list[PlanColumn]:
     return out
 
 
+def read_shells(model, xyz: dict[str, tuple[float, float, float]]) -> list[Shell]:
+    """The horizontal shells of the model open in ETABS, with the thickness of
+    their slab property (0 for a deck or another property). Walls, ramps and
+    openings are left out. ``xyz``: the coordinates of the joints by name."""
+    from etabs_api.core.helpers import as_list, return_code
+
+    thickness: dict[str, float] = {}
+    shells = []
+    for name in [str(n) for n in as_list(model.AreaObj.GetNameList(0, [])[1])]:
+        got = model.AreaObj.GetPoints(name, 0, [])
+        if return_code(got) != 0:
+            continue
+        corners = [xyz[str(p)] for p in as_list(got[1]) if str(p) in xyz]
+        if len(corners) < 3 or max(c[2] for c in corners) - min(c[2] for c in corners) > 1.0:
+            continue                      # not a horizontal shell: a wall, a ramp
+        try:
+            if model.AreaObj.GetOpening(name, False)[0]:
+                continue
+        except Exception:  # noqa: BLE001 - no opening flag: a plain shell
+            pass
+        prop = model.AreaObj.GetProperty(name)
+        section = str(prop[0]) if return_code(prop) == 0 else ""
+        if section and section not in thickness:
+            try:
+                slab = model.PropArea.GetSlab(section)
+                thickness[section] = float(slab[3]) if return_code(slab) == 0 else 0.0
+            except Exception:  # noqa: BLE001 - a deck or a wall property
+                thickness[section] = 0.0
+        shells.append(Shell(name, [(c[0], c[1]) for c in corners], corners[0][2],
+                            thickness.get(section, 0.0), section))
+    return shells
+
+
 def read_foundation(connector, manifest: dict) -> tuple[list[Footing], list[TieBeam],
                                                          list[PlanColumn]]:
     """The footings, tie beams and columns of the foundation model open in ETABS."""
-    from etabs_api.core.helpers import as_list, return_code
     from etabs_api.workflows.foundation_model import _number, _table
 
     model = connector.sap_model
@@ -268,26 +300,7 @@ def read_foundation(connector, manifest: dict) -> tuple[list[Footing], list[TieB
     for column in columns:
         if column.joint in xyz:
             column.x, column.y, column.z = xyz[column.joint]
-
-    thickness: dict[str, float] = {}
-    shells = []
-    for name in [str(n) for n in as_list(model.AreaObj.GetNameList(0, [])[1])]:
-        got = model.AreaObj.GetPoints(name, 0, [])
-        if return_code(got) != 0:
-            continue
-        corners = [xyz[str(p)] for p in as_list(got[1]) if str(p) in xyz]
-        if len(corners) < 3 or max(c[2] for c in corners) - min(c[2] for c in corners) > 1.0:
-            continue                      # not a horizontal shell: a wall, a ramp
-        prop = model.AreaObj.GetProperty(name)
-        section = str(prop[0]) if return_code(prop) == 0 else ""
-        if section and section not in thickness:
-            try:
-                slab = model.PropArea.GetSlab(section)
-                thickness[section] = float(slab[3]) if return_code(slab) == 0 else 0.0
-            except Exception:  # noqa: BLE001 - a deck or a wall property
-                thickness[section] = 0.0
-        shells.append(Shell(name, [(c[0], c[1]) for c in corners], corners[0][2],
-                            thickness.get(section, 0.0), section))
+    shells = read_shells(model, xyz)
 
     beams = _table(connector, "Beam Object Connectivity")
     assigned = _table(connector, "Frame Assignments - Section Properties")

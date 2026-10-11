@@ -44,6 +44,7 @@ Supporting code:
 - `etabs_api/workflows/framing_plans.py`: framing plans of the model as a DXF (`sdt plans`).
 - `etabs_api/workflows/foundation_model.py`: a second model for the foundation, from the support reactions (`sdt foundation`).
 - `etabs_api/workflows/foundation_plan.py`: the footings, tie beams and columns of the foundation model, with their marks, saved for the framing plans.
+- `etabs_api/workflows/model_3d.py`: the concrete of the model as 3D solids in a STEP file (`sdt 3d`).
 - `design/concrete/beams/`: the beam design in files by job (design, sections, supports, results, schedule, calculations, options).
 - `design/concrete/columns/`: the column design in files by job (design, sizing, section, layouts, flexure, transverse, shear, joints, tables, report, schedule, calculations, options).
 - `design/concrete/beams/deflection.py`: beam deflection checks (ACI 318M-14 24.2).
@@ -73,7 +74,7 @@ Supporting code:
 1. Open the [Releases](https://github.com/nhniegas/structural-design-toolkit/releases) page and download `sdt-<version>-windows.zip` of the latest release.
 2. Unzip it anywhere and open the `sdt` folder. Keep the files of the folder together.
 3. Double-click `sdt.exe`. A terminal opens with the menu of commands: type a number or a name, and the menu comes back when the command ends.
-4. Run `doctor` first. It checks that ETABS, the dialogs and LaTeX are in place on your machine, and that the design processes start.
+4. Run `doctor` first. It checks that ETABS, the dialogs, LaTeX and the 3D kernel are in place on your machine, and that the design processes start.
 
 Windows may warn that the program is from an unknown publisher (it is not signed): choose **More info**, then **Run anyway**. ETABS must be installed for the ETABS commands.
 
@@ -120,6 +121,7 @@ Each guide in `docs/` covers one tool: how to run it, its inputs, what it writes
 - [Working on a model the toolkit did not set up](docs/existing_models.md)
 - [Framing plans as DXF](docs/etabs_framing_plans.md)
 - [Foundation model](docs/etabs_foundation_model.md)
+- [3D model as STEP](docs/etabs_3d_model.md)
 - [Steel and composite modules](docs/steel_design_documentation.md)
 - [Wind load calculator](docs/wind_calculator_asce7_documentation.md)
 - [Results in the terminal](docs/terminal_output.md)
@@ -144,6 +146,7 @@ sdt columns     # design the columns from the stored beam step
 sdt design      # analysis and beam/column design loop that resizes members until they pass
 sdt foundation  # a second model for the foundation, from the support reactions; or update its forces
 sdt plans       # framing plans of every floor as one DXF: beams, columns, marks, grids; the foundation plan too
+sdt 3d          # the concrete of the model as 3D solids in a STEP file, for AutoCAD; the foundation too
 sdt composite   # rectangular filled composite column, AISC DG6 (no ETABS)
 sdt steel       # wide-flange steel member, AISC 360-22 (no ETABS)
 sdt wind        # MWFRS wind pressures, ASCE 7 directional procedure (no ETABS)
@@ -203,6 +206,10 @@ This defines the materials, frame sections, load patterns, UBC 97 response spect
 
 `sdt plans` writes the framing plans of the open model as one DXF, the floors side by side at 1:1 in mm. Beams and girders are dashed multilines at their true width, which keep their width when an end is dragged in AutoCAD, and stop at the column faces. Columns are solid at their true size and rotation, walls at their thickness. Every beam has its name; the column marks are on every floor or only where each column starts; the grids, with or without dimensions, are optional. When the plan of the foundation model was saved with `sdt foundation`, the foundation plan can be included: footings with their marks (`F1` for isolated footings of one size, `CF1` for a combined footing), tie beams and columns. See [Framing plans](docs/etabs_framing_plans.md).
 
+## 3D model
+
+`sdt 3d` writes the concrete of the open model as 3D solids in one STEP file, in mm, which AutoCAD imports: columns, beams with their top at the floor and stopped at the column faces, walls and slabs, each named and grouped by story. When the plan of the foundation model was saved with `sdt foundation`, the footings and tie beams can be included. Members of the same size are one shape placed many times, so the file stays small. Concrete only: no steel members and no reinforcing bars. See [3D model](docs/etabs_3d_model.md).
+
 ## Beam and column design
 
 `sdt beams`, then `sdt columns` (and `sdt deflection` for the deflections alone). The design forces come from the analysis results, not from ETABS concrete design. You can set a target ratio below the code limit of 1.00 for each check of girders, beams and columns, and require a girder to be at least as deep as the beams it carries. Girders with a clear span under 4d, which do not qualify as beams of a special moment frame, can be designed without the SMRF rules. The deflection results show the live load deflection, the deflection after attachment of the partitions, its long-term part and the total, and can leave out the long-term deflection that happens before the partitions are built. The columns include slenderness: the sway effect from the ETABS P-delta analysis and the member effect by moment magnification. Each command saves its results (`.xlsx`), calculation report (`.pdf`) and schedules (`.dxf`) in the folder you choose. See [Concrete beam and column design](docs/concrete_beam_column_design.md).
@@ -243,10 +250,12 @@ Not in this version, and planned for later ones:
 - **Drift in the design loop.** Drift is checked on the final sizes and reported; members are not resized for it.
 - **Steel and composite members from the ETABS model.** `sdt steel` and `sdt composite` are standalone checks with typed inputs.
 - **Flanged beams.** The design loop resizes rectangular beams and rectangular or circular columns only.
-- **Irregularities and torsion.** The vertical irregularities (NSCP Table 208-9) and the plan ones (Table 208-10), with the accidental torsion amplifier Ax.
-- **P-delta stability ratio** (NSCP 208.6.3). Today only whether P-delta is switched on is checked.
+- **A command for the irregularity checks** of UBC 97 and NSCP 2015: the torsional irregularity of each story (Table 16-M, NSCP Table 208-10) with the accidental torsion amplifier Ax (UBC 1630.7, NSCP 208.5.7), the other plan irregularities, and the vertical ones (Table 16-L, NSCP Table 208-9).
+- **P-delta stability coefficient** in that command: the ratio θ of the secondary to the primary moment of each story (UBC 1630.1.3, NSCP 208.6.3), which says whether P-delta may be neglected. Today only whether P-delta is switched on is checked.
 - **Redundancy factor ρ and the system factors.** ρ is a fixed value, and R and Ω0 are not checked against Table 208-11A by system.
 - **Slabs on the framing plans.** `sdt plans` draws beams, columns, walls and grids; slab marks and span arrows are not drawn yet.
+- **Reinforcing bars in the 3D model.** `sdt 3d` writes the concrete only; the bars of the beam and column designs are not in it yet.
+- **IFC export.** The 3D model is a STEP file, which holds the solids and their names. An IFC file would also say what each solid is (a beam, a column, its story and material) for BIM programs such as Revit and for model checkers.
 - **Seismic checks for other codes.** The period, base shear and spectrum scaling checks read UBC 97 seismic patterns; other patterns are designed for but those checks are reported as not applicable.
 - **Further checks and features** not listed here are added as they are built; each release lists what it adds.
 
