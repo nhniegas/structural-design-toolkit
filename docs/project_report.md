@@ -69,4 +69,4 @@ Part C makes the report long: about a page for each beam and two for each column
 
 `tests/test_project_report.py`: what is read from the text file of a model (stories, patterns, seismic and wind values, cases, combinations, floor loads), which combinations are listed and how they are grouped, the lines of the beam and column tables, a round column, and the LaTeX of the report with parts left out. They need no ETABS and no LaTeX.
 
-The report was compiled with the module from the stored results and designs of the test model, and read page by page.
+In ETABS: `sdt design` was run on the test model with the report asked for (the `t34 design` scenario). The loop ended as usual and wrote the report, 246 pages, with no part left out.
