@@ -286,7 +286,7 @@ def _section_data(section) -> dict | None:
         SteelElasticPlastic,
     )
 
-    from design.concrete.columns.designer import _concrete_section_for
+    from design.concrete.columns.section import _concrete_section_for
 
     section = _concrete_section_for(section)
     if (len(section.meshed_geometries) != 1 or section.reinf_geometries_meshed

@@ -61,10 +61,22 @@ Answers are remembered and offered again next time. Every named member (not a nu
 ## How the pieces fit
 
 - `design/concrete/workflow.py`: the commands, the dialogs and the store.
-- `design/concrete/beams/designer.py`: beam design (`design_beams`), results file, beam schedule DXF and calculation report.
-- `design/concrete/beams/deflection.py`: deflection checks.
-- `design/concrete/columns/designer.py`: column design and SMRF checks (`design_columns`), results file, column schedule DXF and calculation report.
-- `design/criteria/code_config.py`: every code value, each with its clause: ACI 318M-14 (`CODE`, used by both designers) and NSCP 2015 chapter 2 (`NSCP`: loads, live load reduction, earthquake).
+- `design/concrete/beams/`: the beam design, one file for each job:
+  - `design.py`: the design of every beam from the tables (`design_beams`);
+  - `sections.py`: flexure, shear, torsion and the SMRF checks of one beam;
+  - `supports.py`: what holds a beam (support status, gravity beams, girders under 4d);
+  - `deflection.py`: deflection checks; `carriers.py`: the load path and the carrier depth rule;
+  - `results.py`: the results workbook; `schedule.py`: the schedule drawings; `calculations.py`: the calculation report;
+  - `options.py`: the questions of the beam design.
+- `design/concrete/columns/`: the column design, one file for each job:
+  - `design.py`: the design of every column from the tables (`design_columns`); `sizing.py`: the size trial of the design loop;
+  - `section.py`: the column section and its exact P-M solver; `layouts.py`: the bar layouts that fit it;
+  - `flexure.py`: axial load and biaxial bending of a layout; `interaction.py`: the interaction surface; `slenderness.py`: slenderness;
+  - `transverse.py`: ties and confinement; `shear.py`: column shear and Ve; `joints.py`: strong column - weak beam and joint shear;
+  - `tables.py`: the tables, names, local axes and permutations;
+  - `report.py`: the column report and the results workbook; `schedule.py`: the schedule drawing; `calculations.py`: the calculation report;
+  - `options.py`: the questions of the column design.
+- `design/criteria/`: the design criteria. `code_config.py` has every code value, each with its clause: ACI 318M-14 (`CODE`, used by both designers) and NSCP 2015 chapter 2 (`NSCP`: loads, live load reduction, earthquake).
 - `etabs_api/workflows/exporter.py`, `analysis_forces.py`, `tributary.py`: the extraction and the factored forces from the analysis results.
 - `utilities/_gui_helpers.py`: dialogs and the loading window; `utilities/_calc_report.py`: the PDF layout.
 

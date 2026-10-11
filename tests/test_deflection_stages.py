@@ -122,18 +122,18 @@ def test_the_results_show_the_long_term_part_and_the_total_and_the_stages_only_w
 
 
 def test_the_question_keeps_the_safe_side_unless_the_engineer_gives_the_time(monkeypatch, tmp_path):
-    from design.concrete.beams import designer as beam
+    from design.concrete.beams import options as beam_options
     from utilities import _gui_helpers as gui
 
-    monkeypatch.setattr(beam, "_deflection_settings_path", lambda: str(tmp_path / "d.json"))
+    monkeypatch.setattr(beam_options, "_deflection_settings_path", lambda: str(tmp_path / "d.json"))
     monkeypatch.setattr(gui, "select_option",
                         lambda title, prompt, options, default_index=0: options[default_index])
-    assert not beam.ask_deflection_stages().active            # the default: not known
+    assert not beam_options.ask_deflection_stages().active            # the default: not known
 
-    monkeypatch.setattr(gui, "select_option", lambda *a, **k: beam.STAGES_ENTER)
+    monkeypatch.setattr(gui, "select_option", lambda *a, **k: beam_options.STAGES_ENTER)
     monkeypatch.setattr(gui, "enter_values", lambda title, prompt, labels, defaults: {
-        beam.STAGE_MONTHS: "6", beam.STAGE_SHARE: "75"})
-    assert beam.ask_deflection_stages() == bd.DeflectionStages(6.0, 0.75)
+        beam_options.STAGE_MONTHS: "6", beam_options.STAGE_SHARE: "75"})
+    assert beam_options.ask_deflection_stages() == bd.DeflectionStages(6.0, 0.75)
 
     # remembered: the next run offers "enter" first, with the same numbers
     seen = {}
@@ -148,20 +148,20 @@ def test_the_question_keeps_the_safe_side_unless_the_engineer_gives_the_time(mon
 
     monkeypatch.setattr(gui, "select_option", first)
     monkeypatch.setattr(gui, "enter_values", keep)
-    assert beam.ask_deflection_stages() == bd.DeflectionStages(6.0, 0.75)
-    assert seen["default"] == beam.STAGES_ENTER
-    assert seen["defaults"] == {beam.STAGE_MONTHS: "6", beam.STAGE_SHARE: "75"}
+    assert beam_options.ask_deflection_stages() == bd.DeflectionStages(6.0, 0.75)
+    assert seen["default"] == beam_options.STAGES_ENTER
+    assert seen["defaults"] == {beam_options.STAGE_MONTHS: "6", beam_options.STAGE_SHARE: "75"}
 
     # the limit question does not erase the stages it shares its file with
-    beam._save_deflection_settings({"long_limit_divisor": 240})
-    assert bd.DeflectionStages.from_saved(beam._deflection_settings()["stages"]).active
+    beam_options._save_deflection_settings({"long_limit_divisor": 240})
+    assert bd.DeflectionStages.from_saved(beam_options._deflection_settings()["stages"]).active
 
-    monkeypatch.setattr(gui, "enter_values", lambda *a, **k: {beam.STAGE_MONTHS: "-1",
-                                                              beam.STAGE_SHARE: "80"})
+    monkeypatch.setattr(gui, "enter_values", lambda *a, **k: {beam_options.STAGE_MONTHS: "-1",
+                                                              beam_options.STAGE_SHARE: "80"})
     monkeypatch.setattr(gui, "show_warning", lambda *a, **k: None)
-    assert beam.ask_deflection_stages() is None                # a wrong entry is refused
+    assert beam_options.ask_deflection_stages() is None                # a wrong entry is refused
     monkeypatch.setattr(gui, "select_option", lambda *a, **k: None)
-    assert beam.ask_deflection_stages() is None                # closed
+    assert beam_options.ask_deflection_stages() is None                # closed
 
 
 def test_the_window_names_the_number_of_combinations_not_the_first_one():
@@ -171,7 +171,7 @@ def test_the_window_names_the_number_of_combinations_not_the_first_one():
     second = forces.copy()
     second["Combo"] = "WIND"
     lines = []
-    beam_tests.beam.execute_beam_design(props, pd.concat([forces, second], ignore_index=True),
+    beam_tests.beam_design.execute_beam_design(props, pd.concat([forces, second], ignore_index=True),
                                         False, "GRAV", progress=lines.append)
     demands = [line for line in lines if "Demands" in line]
     assert len(demands) == 1 and "all 2 combinations" in demands[0]

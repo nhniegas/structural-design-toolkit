@@ -316,7 +316,7 @@ def beam_comfortable(rows: pd.DataFrame, ratio: float, seismic: bool) -> bool:
     """A passing beam whose steel, shear and deflection all stay below ``ratio`` of the
     limits. With target ratios, below ``ratio`` of the targets."""
     from design.criteria import dcr_targets
-    from design.concrete.beams.designer import smrf_applies
+    from design.concrete.beams.supports import smrf_applies
 
     top = rows.iloc[0]
     kind = dcr_targets.beam_type(top.get("SupportStatus", ""))
@@ -822,7 +822,7 @@ class Workbench:
         of the loop and kept: read again after every resizing, a stiffer member
         attracts more load and the classification and the sizes chase each other."""
         if getattr(self, "_load_path", None) is None:
-            from design.concrete.beams.designer import load_path_pushes
+            from design.concrete.beams.design import load_path_pushes
 
             self._load_path = load_path_pushes(self.tables, self.settings.gravity_combo)
         return self._load_path
@@ -912,7 +912,7 @@ class Workbench:
             self.log("  " + note)
 
     def design_beams(self) -> pd.DataFrame:
-        from design.concrete.beams.designer import design_beams
+        from design.concrete.beams.design import design_beams
 
         def beam_progress(detail: str) -> None:
             self.show("Beam design", str(detail))
@@ -930,7 +930,7 @@ class Workbench:
                             load_path=self.load_path())
 
     def design_columns(self, beams: pd.DataFrame) -> pd.DataFrame:
-        from design.concrete.columns.designer import design_columns
+        from design.concrete.columns.design import design_columns
 
         def column_progress(detail: str) -> None:
             self.show("Column design", str(detail))
@@ -955,7 +955,7 @@ class Workbench:
     def column_sizer(self):
         """``sizer`` for column_actions: the member checks of each trial size on the
         forces of the last analysis (column_size_passes), without ETABS."""
-        from design.concrete.columns.designer import column_size_passes
+        from design.concrete.columns.sizing import column_size_passes
 
         frame = self.tables.get("FRAME DATA")
         loads = self.tables.get("FACTORED LOADS")
@@ -1557,12 +1557,12 @@ def final_drift_check(bench: Workbench, options, folder: str, stem: str) -> dict
 
 def run_design_cli() -> dict | None:
     """Entry point: ask everything once, then run the loop on a working copy."""
-    from design.concrete.beams.designer import ask_deflection_limit, ask_earth_cover_stories
-    from design.concrete.columns.designer import (
+    from design.concrete.beams.options import ask_deflection_limit, ask_earth_cover_stories
+    from design.concrete.columns.options import (
         ask_capacity_check_levels,
         ask_column_design_options,
-        ask_inner_tie_style,
     )
+    from design.concrete.columns.schedule import ask_inner_tie_style
     from etabs_api.core.connection import attach_running_etabs
     from etabs_api.workflows.analysis_forces import ask_force_options
     from etabs_api.workflows.model_setup import load_settings, merge_settings, save_settings
@@ -1651,7 +1651,7 @@ def run_design_cli() -> dict | None:
     long_limit = ask_deflection_limit()
     if long_limit is None:
         return None
-    from design.concrete.beams.designer import ask_deflection_stages
+    from design.concrete.beams.options import ask_deflection_stages
 
     deflection_stages = ask_deflection_stages(title)
     if deflection_stages is None:
@@ -1925,16 +1925,12 @@ def loop_summary(summary: dict, settings: LoopSettings, original: str, working: 
 def save_final_design(bench: Workbench, summary: dict, working: str, folder: str) -> None:
     """Store the final design for sdt columns and write the result files."""
     say = bench.progress
-    from design.concrete.beams.designer import (
-        export_beam_dxf,
-        export_beam_pdf,
-        write_beam_results_xlsx,
-    )
-    from design.concrete.columns.designer import (
-        export_column_cad_drawings,
-        export_column_pdf,
-        write_column_results_xlsx,
-    )
+    from design.concrete.beams.calculations import export_beam_pdf
+    from design.concrete.beams.results import write_beam_results_xlsx
+    from design.concrete.beams.schedule import export_beam_dxf
+    from design.concrete.columns.calculations import export_column_pdf
+    from design.concrete.columns.report import write_column_results_xlsx
+    from design.concrete.columns.schedule import export_column_cad_drawings
     from design.concrete.workflow import DesignStore
     from utilities.latex_help import missing_pdf_reason
 

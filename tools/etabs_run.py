@@ -110,7 +110,9 @@ def plain(value, depth: int = 0):
     if depth > 12:
         return str(type(value).__name__)
     if isinstance(value, pd.DataFrame):
-        return value.reset_index(drop=True)
+        table = value.reset_index(drop=True)
+        table.attrs = {}      # working data of the command (objects), not a result
+        return table
     if isinstance(value, pd.Series):
         return value.reset_index(drop=True).to_frame()
     if value is None or isinstance(value, (bool, str)):
@@ -415,8 +417,10 @@ def run_step(step: dict, scenario: dict, save_reference: bool, tolerance: float)
         result.comparison = "reference saved"
     elif os.path.isfile(reference_file):
         result.compared = True
+        from design.concrete.workflow import StoreReader
+
         with open(reference_file, "rb") as handle:
-            reference = pickle.load(handle)
+            reference = StoreReader(handle).load()   # also a reference of before the folders
         accepted = Accepted()
         result.differences = compare(snapshot, reference, step["name"], tolerance, accepted)
         if result.differences:

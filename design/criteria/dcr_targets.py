@@ -124,7 +124,7 @@ def use(targets: Targets | None):
 
 def beam_type(support_status: object) -> str:
     """Girder or beam, from the support status of the beam design table."""
-    from design.concrete.beams.designer import is_gravity_beam
+    from design.concrete.beams.supports import is_gravity_beam
 
     return BEAM if is_gravity_beam(support_status) else GIRDER
 

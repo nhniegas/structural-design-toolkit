@@ -41,13 +41,20 @@ from utilities.latex_help import missing_pdf_reason  # noqa: E402
 
 STORE_SUFFIX = " - design data.pkl"
 # Where the classes of a stored design were before the design folders (v0.3.9 and earlier).
-MOVED_MODULES = {"design.concrete_workflow": "design.concrete.workflow",
-                 "design.beam_deflection": "design.concrete.beams.deflection",
-                 "design.dcr_targets": "design.criteria.dcr_targets"}
+MOVED_MODULES = {
+    "design.concrete_workflow": "design.concrete.workflow",
+    "design.beam_deflection": "design.concrete.beams.deflection",
+    "design.beam_carriers": "design.concrete.beams.carriers",
+    "design.column_slenderness": "design.concrete.columns.slenderness",
+    "design.column_interaction": "design.concrete.columns.interaction",
+    "design.dcr_targets": "design.criteria.dcr_targets",
+    "design.code_config": "design.criteria.code_config",
+}
 
 
-class _StoreReader(pickle.Unpickler):
-    """Reads a stored design, also one saved before the modules were moved."""
+class StoreReader(pickle.Unpickler):
+    """Reads a stored design, also one saved before the modules were moved (a column
+    report keeps the slenderness geometry of its columns, which is such a class)."""
 
     def find_class(self, module, name):
         return super().find_class(MOVED_MODULES.get(module, module), name)
@@ -106,7 +113,7 @@ class DesignStore:
     def load(cls, model_path: str) -> "DesignStore | None":
         try:
             with open(cls.path_for(model_path), "rb") as handle:
-                return _StoreReader(handle).load()
+                return StoreReader(handle).load()
         except (OSError, pickle.UnpicklingError, EOFError, AttributeError, ImportError):
             return None
 
@@ -252,14 +259,11 @@ def _gravity_options(combos: list[str]) -> list[str]:
 # =============================================================================
 def run_beams() -> DesignStore | None:
     """Extract, design the beams and save the results, the calculations and the schedules."""
-    from design.concrete.beams.designer import (
-        ask_deflection_limit,
-        ask_earth_cover_stories,
-        design_beams,
-        export_beam_dxf,
-        export_beam_pdf,
-        write_beam_results_xlsx,
-    )
+    from design.concrete.beams.calculations import export_beam_pdf
+    from design.concrete.beams.design import design_beams
+    from design.concrete.beams.options import ask_deflection_limit, ask_earth_cover_stories
+    from design.concrete.beams.results import write_beam_results_xlsx
+    from design.concrete.beams.schedule import export_beam_dxf
     from etabs_api.workflows.analysis_forces import ask_force_options
     from utilities._gui_helpers import (
         LoadingWindow,
@@ -309,7 +313,7 @@ def run_beams() -> DesignStore | None:
     divisor = ask_deflection_limit()
     if divisor is None:
         return None
-    from design.concrete.beams.designer import ask_deflection_stages
+    from design.concrete.beams.options import ask_deflection_stages
 
     stages = ask_deflection_stages()
     if stages is None:
@@ -707,7 +711,7 @@ def ask_short_span_girders(title: str, last: dict | None = None) -> bool | None:
 
 def short_span_members(results) -> list[str]:
     """The girders the SMRF rules were not applied to for their short span."""
-    from design.concrete.beams.designer import SMRF_SHORT_SPAN
+    from design.concrete.beams.supports import SMRF_SHORT_SPAN
 
     if results is None or getattr(results, "empty", True) or "Seismic_Rules" not in results:
         return []
@@ -820,7 +824,7 @@ def write_deflection_xlsx(table: pd.DataFrame, path: str) -> str:
 def run_deflection() -> pd.DataFrame | None:
     """Deflection checks only, with the bars of the last beam design of the model."""
     from design.concrete.beams.deflection import DEFLECTION_COLUMNS, add_deflection_columns
-    from design.concrete.beams.designer import ask_deflection_limit
+    from design.concrete.beams.options import ask_deflection_limit
     from etabs_api.workflows.exporter import ETABSDataExporter
     from utilities._gui_helpers import LoadingWindow, select_output_directory, show_warning
 
@@ -848,7 +852,7 @@ def run_deflection() -> pd.DataFrame | None:
     divisor = ask_deflection_limit()
     if divisor is None:
         return None
-    from design.concrete.beams.designer import ask_deflection_stages
+    from design.concrete.beams.options import ask_deflection_stages
 
     stages = ask_deflection_stages("Deflection check")
     if stages is None:
@@ -904,15 +908,14 @@ def run_deflection() -> pd.DataFrame | None:
 # =============================================================================
 def run_columns() -> DesignStore | None:
     """Design the columns from the stored beam step and save the outputs."""
-    from design.concrete.columns.designer import (
+    from design.concrete.columns.calculations import export_column_pdf
+    from design.concrete.columns.design import design_columns
+    from design.concrete.columns.options import (
         ask_capacity_check_levels,
         ask_column_design_options,
-        ask_inner_tie_style,
-        design_columns,
-        export_column_cad_drawings,
-        export_column_pdf,
-        write_column_results_xlsx,
     )
+    from design.concrete.columns.report import write_column_results_xlsx
+    from design.concrete.columns.schedule import ask_inner_tie_style, export_column_cad_drawings
     from utilities._gui_helpers import (
         LoadingWindow,
         select_option,

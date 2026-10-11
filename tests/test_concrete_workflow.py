@@ -14,7 +14,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from design.concrete.columns import designer as col  # noqa: E402
+from design.concrete.columns import report as col_report  # noqa: E402
 from design.concrete.workflow import (  # noqa: E402
     DesignStore,
     _gravity_options,
@@ -69,10 +69,10 @@ def test_column_results_are_saved_with_group_headers(tmp_path):
     groups = [("COLUMN LABEL / LEVEL", ["Column_Label", "UniqueName", "Story", "End", "Combo"]),
               ("FLEXURE / AXIAL", ["Flexure_Check"]),
               ("DESIGN STATUS", ["Column_Design_Status"])]
-    path = col.write_column_results_xlsx(report, groups, str(tmp_path / "columns.xlsx"))
+    path = col_report.write_column_results_xlsx(report, groups, str(tmp_path / "columns.xlsx"))
     sheet = load_workbook(path).active
     assert sheet["A2"].value == "COLUMN LABEL / LEVEL"
-    assert sheet["B3"].value == col.COLUMN_REPORT_LABELS.get("UniqueName", "UniqueName")
+    assert sheet["B3"].value == col_report.COLUMN_REPORT_LABELS.get("UniqueName", "UniqueName")
     assert sheet["D4"].value == "Bottom (I)" and sheet["D5"].value == "Top (J)"
     assert sheet["F5"].font.bold  # FAIL in bold red
 
@@ -91,3 +91,36 @@ def test_the_deflection_table_has_one_row_per_beam(tmp_path):
     path = write_deflection_xlsx(table, str(tmp_path / "d.xlsx"))
     sheet = load_workbook(path).active
     assert sheet.cell(row=2, column=table.columns.get_loc("Deflection check") + 1).font.bold
+
+
+def test_a_design_stored_before_the_folders_is_still_read(tmp_path):
+    """BEHAVIOUR: design data saved by v0.3.9 or earlier names its classes by the
+    modules of that time (design.concrete_workflow, design.column_slenderness: a
+    column report keeps the slenderness geometry of its columns). It must open."""
+    import pickle
+
+    from design.concrete import workflow
+    from design.concrete.columns.slenderness import AxisGeometry
+
+    model = str(tmp_path / "model.EDB")
+    store = workflow.DesignStore(model, 1.0, {}, {"smrf": True})
+    report = pd.DataFrame({"UniqueName": ["GF-C1"]})
+    report.attrs["slenderness_geometry"] = {"GF-C1": {"2": AxisGeometry(3000.0)}}
+    store.column_report = report
+    # protocol 2 writes a class by its module and name as text, each ending a line:
+    # the module names of that time can be put back
+    old = pickle.dumps(store, protocol=2)
+    for now, then in (("design.concrete.workflow", "design.concrete_workflow"),
+                      ("design.concrete.columns.slenderness", "design.column_slenderness")):
+        now, then = (now + chr(10)).encode(), (then + chr(10)).encode()
+        assert now in old
+        old = old.replace(now, then)
+    assert b"design.concrete_workflow" in old and b"design.column_slenderness" in old
+    with open(workflow.DesignStore.path_for(model), "wb") as handle:
+        handle.write(old)
+
+    loaded = workflow.DesignStore.load(model)
+
+    assert loaded is not None and loaded.inputs == {"smrf": True}
+    geometry = loaded.column_report.attrs["slenderness_geometry"]["GF-C1"]["2"]
+    assert isinstance(geometry, AxisGeometry) and geometry.lu == 3000.0

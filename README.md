@@ -6,11 +6,28 @@ Structural design calculations and ETABS automation, run from the terminal with 
 
 | Run from | Design module (`design/`) | What it does |
 |---|---|---|
-| `sdt beams` | `concrete/beams/designer.py` | ACI 318M-14 beam flexure, shear, torsion, deflection and SMRF checks from ETABS forces; girder and beam schedule DXF; PDF calculation report |
-| `sdt columns` | `concrete/columns/designer.py` | ACI 318M-14 column P-M with slenderness, shear, confinement, strong-column and joint-shear checks; column schedule DXF; PDF calculation report |
+| `sdt beams` | `concrete/beams/` | ACI 318M-14 beam flexure, shear, torsion, deflection and SMRF checks from ETABS forces; girder and beam schedule DXF; PDF calculation report |
+| `sdt columns` | `concrete/columns/` | ACI 318M-14 column P-M with slenderness, shear, confinement, strong-column and joint-shear checks; column schedule DXF; PDF calculation report |
 | `sdt composite` | `steel/composite_column_aiscDG06.py` | AISC Design Guide 6 rectangular filled composite column; printout and/or PDF report |
 | `sdt steel` | `steel/wide_flange_aisc360.py` | AISC 360-22 wide-flange capacity checks; printout and/or PDF report |
 | `sdt wind` | `loads/wind_directional_asce7.py` | ASCE 7 directional procedure (MWFRS) wind pressures; printout and/or PDF report |
+
+Where the code is:
+
+```
+design/
+  criteria/     the code values (code_config.py) and the target ratios (dcr_targets.py)
+  concrete/     workflow.py: the sdt beams, sdt deflection and sdt columns commands
+    beams/      design, sections, supports, deflection, carriers, results, schedule, calculations, options
+    columns/    design, sizing, section, layouts, flexure, interaction, slenderness, transverse,
+                shear, joints, tables, report, schedule, calculations, options
+  steel/        wide-flange members (AISC 360-22) and filled composite columns (AISC DG6)
+  loads/        the wind calculator (ASCE 7)
+  parallel.py   the processes that share the beam design of a large model
+etabs_api/      core: the ETABS connection; workflows: the ETABS commands
+utilities/      dialogs, answers file, summaries, report layout, doctor
+tools/          the ETABS test runner and the icon
+```
 
 Supporting code:
 
@@ -25,6 +42,8 @@ Supporting code:
 - `etabs_api/workflows/design_loop.py`, `sections.py`: the analysis and design loop with member resizing.
 - `etabs_api/workflows/tributary.py`: geometric tributary areas for the live load reduction.
 - `etabs_api/workflows/framing_plans.py`: framing plans of the model as a DXF (`sdt plans`).
+- `design/concrete/beams/`: the beam design in files by job (design, sections, supports, results, schedule, calculations, options).
+- `design/concrete/columns/`: the column design in files by job (design, sizing, section, layouts, flexure, transverse, shear, joints, tables, report, schedule, calculations, options).
 - `design/concrete/beams/deflection.py`: beam deflection checks (ACI 318M-14 24.2).
 - `design/criteria/dcr_targets.py`: target demand / capacity ratios by member type and check.
 - `design/concrete/beams/carriers.py`: which beam carries which, and the rule that a carrier is at least as deep.

@@ -6,14 +6,16 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from design.concrete.columns import designer as cd
+from design.concrete.columns import layouts as col_layouts
+from design.concrete.columns import section as col_section
+from design.concrete.columns import tables as col_tables
 from design.concrete.columns import interaction as ci
 
 
 def section(width=600, depth=800, diameter=np.nan, bars=16):
     row = pd.Series({"UniqueName": "C1", "Width": width, "Depth": depth, "Diameter": diameter,
                      "f'c": 27.6, "fy": 414, "fys": 414})
-    return cd._build_column_section(row, bars, 25, 12, 40, True)
+    return col_layouts._build_column_section(row, bars, 25, 12, 40, True)
 
 
 @pytest.fixture(scope="module")
@@ -24,12 +26,12 @@ def rectangle():
 
 def test_surface_matches_the_exact_solver(rectangle):
     engine, sec, surface = rectangle
-    concrete = cd._concrete_section_for(sec)
+    concrete = col_section._concrete_section_for(sec)
     angles = np.linspace(-math.pi, math.pi, ci.N_ANGLES, endpoint=False)
     for k in (0, 18, 30, 54):
         for j in (15, 45, 70):
             pn = surface.p[k, j] / surface.phi[k, j]
-            exact, _ = cd._fast_rectangular_block_capacity(concrete, angles[k], pn)
+            exact, _ = col_section._fast_rectangular_block_capacity(concrete, angles[k], pn)
             mx = surface.mx[k, j] / surface.phi[k, j]
             my = surface.my[k, j] / surface.phi[k, j]
             assert exact.m_x == pytest.approx(mx, rel=1e-4, abs=1e3)
@@ -38,7 +40,7 @@ def test_surface_matches_the_exact_solver(rectangle):
 
 def test_axial_limits(rectangle):
     engine, sec, surface = rectangle
-    steel = sum(b.calculate_area() for b in cd._concrete_section_for(sec).reinf_geometries_lumped)
+    steel = sum(b.calculate_area() for b in col_section._concrete_section_for(sec).reinf_geometries_lumped)
     po = 0.85 * 27.6 * (600 * 800 - steel) + 414 * steel
     assert surface.p_cap == pytest.approx(0.65 * 0.80 * po, rel=1e-3)
     _, _, _, old_cap, _ = engine.solve_moment_capacity(sec, axial_load=0.0, bending_angle=0.0)
@@ -96,7 +98,7 @@ def test_circular_section_and_cache():
                                            (5e6, 1.0, 0.0)])
 def test_nominal_capacity_matches_the_exact_solver(rectangle, axial, m2, m3):
     engine, sec, surface = rectangle
-    theta = cd._section_bending_angle(m2, m3)
+    theta = col_tables._section_bending_angle(m2, m3)
     old, _, _, _, _ = engine.solve_moment_capacity(sec, axial_load=axial, bending_angle=theta)
     new = surface.nominal_capacity(axial, *ci.demand_moments(m2, m3))
     # the grid's chords lie inside the convex surface: never above, at most 0.3 % below
@@ -118,10 +120,10 @@ def test_surface_from_the_layout_equals_the_meshed_section(shape):
         engine, _ = section(width=0, depth=0, diameter=700, bars=12)
     else:
         engine, _ = section()
-    layout = cd._enumerate_column_bar_layouts(engine, 60)[3 if shape == "bundled" else 0]
+    layout = col_layouts._enumerate_column_bar_layouts(engine, 60)[3 if shape == "bundled" else 0]
     if shape == "bundled":
         layout = [(x, y, 2) for x, y, _ in layout]
-    lazy = cd.LazyColumnSection(engine, sum(c for *_, c in layout), layout)
+    lazy = col_section.LazyColumnSection(engine, sum(c for *_, c in layout), layout)
     analytic = ci.build_surface(None, engine, data=ci.layout_section_data(engine, layout))
     meshed = ci.build_surface(lazy.geometry(), engine)
     for name in ("p", "mx", "my", "phi"):

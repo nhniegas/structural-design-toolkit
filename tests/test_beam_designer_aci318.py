@@ -55,7 +55,12 @@ def _install_stand_ins_if_needed() -> None:
 
 _install_stand_ins_if_needed()
 
-from design.concrete.beams import designer as beam  # noqa: E402
+from design.concrete.beams import calculations as beam_calculations  # noqa: E402
+from design.concrete.beams import design as beam_design  # noqa: E402
+from design.concrete.beams import results as beam_results  # noqa: E402
+from design.concrete.beams import schedule as beam_schedule  # noqa: E402
+from design.concrete.beams import sections as beam_sections  # noqa: E402
+from design.concrete.beams import supports as beam_supports  # noqa: E402
 from design.criteria.code_config import CODE, override  # noqa: E402
 
 # --------------------------------------------------------------------------
@@ -132,7 +137,7 @@ class TestFlexure:
         4 - #8 bars, no bottom steel.  a = As*fy/(0.85*fc*b),  Mn = As*fy*(d - a/2)
         """
         b = torsion_beam
-        engine = beam.BeamFlexureDesign(
+        engine = beam_sections.BeamFlexureDesign(
             b["width"], b["height"], b["fc"], b["fy"], b["fy"],
             b["main_bar"], b["stirrup"], b["cover"],
         )
@@ -156,7 +161,7 @@ class TestFlexure:
         b = torsion_beam
 
         def capacity(n_bottom: int) -> float:
-            engine = beam.BeamFlexureDesign(
+            engine = beam_sections.BeamFlexureDesign(
                 b["width"], b["height"], b["fc"], b["fy"], b["fy"],
                 b["main_bar"], b["stirrup"], b["cover"],
             )
@@ -175,7 +180,7 @@ class TestFlexure:
         """
         bar_area = 9.42 * IN2 / 10
         bar_diameter = math.sqrt(4 * bar_area / math.pi)
-        engine = beam.BeamFlexureDesign(
+        engine = beam_sections.BeamFlexureDesign(
             14 * IN, 29 * IN, 5 * KSI, 60 * KSI, 60 * KSI,
             bar_diameter, 0.5 * IN, 2.0 * IN,
         )
@@ -192,7 +197,7 @@ class TestFlexure:
     def test_minimum_steel_formula(self, torsion_beam):
         """PUBLISHED: As,min = 1.003 in2 (ACI 9.6.1.2(b) governs, 200*b*d/fy)."""
         b = torsion_beam
-        engine = beam.BeamFlexureDesign(
+        engine = beam_sections.BeamFlexureDesign(
             b["width"], b["height"], b["fc"], b["fy"], b["fy"],
             b["main_bar"], b["stirrup"], b["cover"],
         )
@@ -204,7 +209,7 @@ class TestFlexure:
     def test_design_beam_selects_four_bars_for_published_moment(self, torsion_beam):
         """PUBLISHED: Mu = 228.25 kip-ft needs As = 2.55 in2 -> 4 - #8 bars."""
         b = torsion_beam
-        engine = beam.BeamFlexureDesign(
+        engine = beam_sections.BeamFlexureDesign(
             b["width"], b["height"], b["fc"], b["fy"], b["fy"],
             b["main_bar"], b["stirrup"], b["cover"],
             Mu_neg=228.25 * KIP_FT, Mu_pos=0.0,
@@ -219,7 +224,7 @@ class TestFlexure:
         fy = 415 MPa -> fs = 2/3 fy = 276.7 MPa.
         s = 380*(280/fs) - 2.5*cc  with cc = 40 (cover) + 10 (stirrup) = 50 mm.
         """
-        engine = beam.BeamFlexureDesign(300, 500, 28, 415, 415, 20, 10, 40)
+        engine = beam_sections.BeamFlexureDesign(300, 500, 28, 415, 415, 20, 10, 40)
         fs = 2 / 3 * 415
         expected = min(380 * (280 / fs) - 2.5 * 50, 300 * (280 / fs))
         assert engine.check_crack_control_spacing()["s_max_crack"] == pytest.approx(expected)
@@ -228,7 +233,7 @@ class TestFlexure:
         """BEHAVIOUR: bar count is non-decreasing with the design moment."""
         counts = []
         for moment in (50, 150, 250, 350):
-            engine = beam.BeamFlexureDesign(350, 600, 28, 415, 415, 25, 10, 40, Mu_neg=moment)
+            engine = beam_sections.BeamFlexureDesign(350, 600, 28, 415, 415, 25, 10, 40, Mu_neg=moment)
             counts.append(engine.design_beam()["n_top"])
         assert counts == sorted(counts)
 
@@ -244,7 +249,7 @@ class TestShear:
         formula uses 2*sqrt(fc') = 0.166 (about 2 % apart).
         """
         b = torsion_beam
-        shear = beam.BeamShearDesign(
+        shear = beam_sections.BeamShearDesign(
             b["width"], b["height"], b["d"], b["fc"], b["fy"], b["stirrup"], n_legs=2
         )
         result = shear.solve_shear_capacity(57.14 * KIP)
@@ -253,18 +258,18 @@ class TestShear:
 
     def test_concrete_shear_strength_hand_calc(self):
         """HAND CALC (ACI 22.5.5.1): Vc = 0.17*sqrt(fc')*bw*d."""
-        shear = beam.BeamShearDesign(300, 600, 540, 28, 415, 10, 2)
+        shear = beam_sections.BeamShearDesign(300, 600, 540, 28, 415, 10, 2)
         result = shear.solve_shear_capacity(50.0)
         assert result["Vc"] == pytest.approx(0.17 * math.sqrt(28) * 300 * 540 / 1000)
 
     def test_small_shear_needs_no_stirrup_steel_from_strength(self):
         """BEHAVIOUR: if Vu is below phi*Vc the strength-based demand is zero."""
-        shear = beam.BeamShearDesign(300, 600, 540, 28, 415, 10, 2)
+        shear = beam_sections.BeamShearDesign(300, 600, 540, 28, 415, 10, 2)
         assert shear.solve_shear_capacity(20.0)["Av_s_demand"] == 0.0
 
     def test_stirrup_spacing_limit_tightens_for_large_shear(self):
         """ACI 9.7.6.2.2: d/2 (max 600) normally, d/4 (max 300) for large Vs."""
-        shear = beam.BeamShearDesign(300, 600, 540, 28, 415, 10, 2)
+        shear = beam_sections.BeamShearDesign(300, 600, 540, 28, 415, 10, 2)
         low = shear.solve_shear_capacity(100.0)["s_max_code"]
         high = shear.solve_shear_capacity(450.0)["s_max_code"]
         assert low == pytest.approx(270.0)  # d/2
@@ -272,13 +277,13 @@ class TestShear:
 
     def test_section_too_small_is_reported(self):
         """ACI 22.5.1.2: Vs cannot exceed 0.66*sqrt(fc')*bw*d."""
-        shear = beam.BeamShearDesign(200, 400, 340, 28, 415, 10, 2)
+        shear = beam_sections.BeamShearDesign(200, 400, 340, 28, 415, 10, 2)
         assert shear.solve_shear_capacity(2000.0)["shear_failed"] is True
 
     def test_seismic_zero_vc_option(self):
         """ACI 18.6.5.2: Vc can be switched off, stirrups must carry everything."""
-        with_vc = beam.BeamShearDesign(300, 600, 540, 28, 415, 10, 2)
-        no_vc = beam.BeamShearDesign(300, 600, 540, 28, 415, 10, 2, suppress_Vc=True)
+        with_vc = beam_sections.BeamShearDesign(300, 600, 540, 28, 415, 10, 2)
+        no_vc = beam_sections.BeamShearDesign(300, 600, 540, 28, 415, 10, 2, suppress_Vc=True)
         assert no_vc.solve_shear_capacity(200)["Vc"] == 0.0
         assert (
             no_vc.solve_shear_capacity(200)["Av_s_demand"]
@@ -291,7 +296,7 @@ class TestShear:
 # ==========================================================================
 class TestTorsion:
     def _engine(self, b, fyt=None):
-        return beam.BeamTorsionDesign(
+        return beam_sections.BeamTorsionDesign(
             b["width"], b["height"], b["d"], b["fc"], b["fy"],
             fyt or b["fy"], b["stirrup"], b["cover"],
         )
@@ -381,7 +386,7 @@ class TestTorsion:
     def test_combined_shear_torsion_stirrup_ratio(self, torsion_beam):
         """PUBLISHED: (Av + 2At)/s = 0.0704 in2/in."""
         b = torsion_beam
-        shear = beam.BeamShearDesign(
+        shear = beam_sections.BeamShearDesign(
             b["width"], b["height"], b["d"], b["fc"], b["fy"], b["stirrup"], 2
         )
         s = shear.solve_shear_capacity(57.14 * KIP)
@@ -397,7 +402,7 @@ def _seismic_beam(n_top=4, n_bot=3, width=350, height=600):
     """Three identical location engines with chosen bar counts."""
     engines = {}
     for name in ("Left Support Face", "Midspan Zone", "Right Support Face"):
-        engine = beam.BeamFlexureDesign(width, height, 28, 415, 415, 25, 10, 40)
+        engine = beam_sections.BeamFlexureDesign(width, height, 28, 415, 415, 25, 10, 40)
         engine.n_top, engine.n_bot = n_top, n_bot
         engines[name] = engine
     return engines
@@ -410,7 +415,7 @@ class TestSeismic:
         4 - 25 mm bars at the top.  a = As*1.25fy/(0.85 fc b),  Mpr = As*1.25fy*(d - a/2)
         """
         engines = _seismic_beam()
-        checker = beam.BeamSeismicDesign(engines, clear_span=6000)
+        checker = beam_sections.BeamSeismicDesign(engines, clear_span=6000)
         engine = engines["Left Support Face"]
         d, _ = engine.compute_effective_depths(is_negative_moment=True)
 
@@ -423,17 +428,17 @@ class TestSeismic:
 
     def test_reinforcement_ratio_limit(self):
         """ACI 18.6.3.1: rho <= 0.025.  Light steel passes, a very heavy layer fails."""
-        light = beam.BeamSeismicDesign(_seismic_beam(4, 3), 6000).check_reinforcement_ratio_limits()
-        heavy = beam.BeamSeismicDesign(_seismic_beam(14, 3), 6000).check_reinforcement_ratio_limits()
+        light = beam_sections.BeamSeismicDesign(_seismic_beam(4, 3), 6000).check_reinforcement_ratio_limits()
+        heavy = beam_sections.BeamSeismicDesign(_seismic_beam(14, 3), 6000).check_reinforcement_ratio_limits()
         assert light["all_passed"] is True
         assert heavy["all_passed"] is False
 
     def test_positive_moment_at_face_must_reach_half_of_negative(self):
         """ACI 18.6.3.2: bottom capacity at the support >= 1/2 of top capacity."""
-        weak_bottom = beam.BeamSeismicDesign(
+        weak_bottom = beam_sections.BeamSeismicDesign(
             _seismic_beam(n_top=8, n_bot=3), 6000
         ).check_flexural_capacity_ratios()
-        strong_bottom = beam.BeamSeismicDesign(
+        strong_bottom = beam_sections.BeamSeismicDesign(
             _seismic_beam(n_top=4, n_bot=4), 6000
         ).check_flexural_capacity_ratios()
         assert weak_bottom["all_passed"] is False
@@ -446,7 +451,7 @@ class TestSeismic:
         gravity shear the earthquake part is >= 50 % so Vc must be set to zero.
         """
         engines = _seismic_beam()
-        checker = beam.BeamSeismicDesign(engines, clear_span=6000, Pu_axial=0.0)
+        checker = beam_sections.BeamSeismicDesign(engines, clear_span=6000, Pu_axial=0.0)
         zero_torsion = {"Al_top_req": 0.0}
         sides = {"Left Support (d_eff)": zero_torsion, "Right Support (d_eff)": zero_torsion}
 
@@ -464,7 +469,7 @@ class TestSeismic:
     def test_vc_kept_when_gravity_shear_dominates(self):
         """Large gravity shear -> earthquake share < 50 % -> Vc stays."""
         engines = _seismic_beam()
-        checker = beam.BeamSeismicDesign(engines, clear_span=6000)
+        checker = beam_sections.BeamSeismicDesign(engines, clear_span=6000)
         zero = {"Al_top_req": 0.0}
         sides = {"Left Support (d_eff)": zero, "Right Support (d_eff)": zero}
         result = checker.evaluate_seismic_shear_demands(2000.0, 2000.0, sides)
@@ -472,7 +477,7 @@ class TestSeismic:
 
     def test_seismic_off_returns_gravity_only(self):
         """With seismic design switched off, no sway shear is added."""
-        checker = beam.BeamSeismicDesign(_seismic_beam(), 6000, enable_seismic=False)
+        checker = beam_sections.BeamSeismicDesign(_seismic_beam(), 6000, enable_seismic=False)
         result = checker.evaluate_seismic_shear_demands(80.0, 90.0, {})
         assert result["V_sway_max"] == 0.0
         assert result["Vu_seismic_left"] == 80.0
@@ -484,14 +489,14 @@ class TestSeismic:
 class TestDetailing:
     def test_no_skin_or_torsion_steel_for_ordinary_beam(self):
         """No torsion and h <= 900 mm -> no side bars."""
-        result = beam.distribute_longitudinal_torsion_and_skin(
+        result = beam_sections.distribute_longitudinal_torsion_and_skin(
             0.0, 25, 12, 600, 300, 540, 415, 40, 10
         )
         assert result["n_side_bars_total"] == 0
 
     def test_torsion_steel_is_split_into_four_faces(self):
         """Al is shared equally: Al/4 on top, Al/4 on bottom, Al/2 on the sides."""
-        result = beam.distribute_longitudinal_torsion_and_skin(
+        result = beam_sections.distribute_longitudinal_torsion_and_skin(
             1200.0, 25, 16, 600, 300, 540, 415, 40, 10
         )
         assert result["Al_top_req"] == pytest.approx(300.0)
@@ -501,14 +506,14 @@ class TestDetailing:
 
     def test_deep_beam_gets_skin_bars(self):
         """ACI 9.7.2.3: h > 900 mm requires skin reinforcement."""
-        result = beam.distribute_longitudinal_torsion_and_skin(
+        result = beam_sections.distribute_longitudinal_torsion_and_skin(
             0.0, 25, 16, 1000, 300, 940, 415, 40, 10
         )
         assert result["n_side_per_face"] >= 1
 
     def test_last_layer_never_holds_a_single_bar(self):
         """Project rule: a layer with 1 bar is bumped to 2."""
-        engine = beam.BeamFlexureDesign(300, 500, 28, 415, 415, 20, 10, 40)
+        engine = beam_sections.BeamFlexureDesign(300, 500, 28, 415, 415, 20, 10, 40)
         per_layer = engine.max_bar_per_layer
         engine.n_top = per_layer + 1  # would leave exactly one bar on layer 2
         engine.n_bot = 2
@@ -517,12 +522,12 @@ class TestDetailing:
 
     def test_stirrup_legs_grow_with_bars_per_layer(self):
         """Alternate bars need lateral support: legs = bars/2 + 1 (rounded down)."""
-        assert beam.check_alternating_tie_legs(6, 6, 2, 6) == 4
-        assert beam.check_alternating_tie_legs(2, 2, 2, 6) == 2
+        assert beam_sections.check_alternating_tie_legs(6, 6, 2, 6) == 4
+        assert beam_sections.check_alternating_tie_legs(2, 2, 2, 6) == 2
 
     def test_anchorage_adds_bars_when_legs_exceed_first_layer(self):
         """Every stirrup leg needs a corner/anchor bar in the first layer."""
-        result = beam.check_stirrup_leg_anchorage(
+        result = beam_sections.check_stirrup_leg_anchorage(
             n_top=2, n_bot=2, n_legs=3, max_bar_per_layer=5,
             dmain=20, dstirrup=10, width=300, cc=40,
         )
@@ -547,7 +552,7 @@ class TestSupportStatus:
         # B1 runs 1 -> 12, B2 runs 2 -> 11. Point 12 and 11 have columns; 1 and 2 do not.
         # Give point 2 a column too so B2 is supported at both ends.
         connectivity.loc[connectivity["UniqueName"] == "C1", "UniquePtI"] = "2"
-        result = beam.identify_cantilever_beams(pd.DataFrame(), connectivity).set_index("UniqueName")
+        result = beam_supports.identify_cantilever_beams(pd.DataFrame(), connectivity).set_index("UniqueName")
 
         assert result.loc["B1", "SupportStatus"] == "Cantilever (Free at PtI)"
         assert result.loc["B2", "SupportStatus"] == "Supported Both Ends"
@@ -594,7 +599,7 @@ def _mock_force_table(name="B1", span=6000.0, wu=60.0):
 class TestPipelineWithMockEtabs:
     def test_simply_supported_beam_matches_hand_moment(self):
         """HAND CALC: wu = 60 kN/m, L = 6 m -> Mmid = wu L^2 / 8 = 270 kN-m."""
-        results = beam.execute_beam_design(
+        results = beam_design.execute_beam_design(
             _mock_beam_properties(), _mock_force_table(), False, "GRAV"
         )
         bottom = results[results["Face"] == "BOTTOM"].iloc[0]
@@ -603,13 +608,13 @@ class TestPipelineWithMockEtabs:
 
     def test_designed_bars_are_strong_enough(self):
         """Take the bars the pipeline chose and re-check phi*Mn >= Mu independently."""
-        results = beam.execute_beam_design(
+        results = beam_design.execute_beam_design(
             _mock_beam_properties(), _mock_force_table(), False, "GRAV"
         )
         bottom = results[results["Face"] == "BOTTOM"].iloc[0]
         n_bars = int(bottom["n_mid_L1"] + bottom["n_mid_L2"] + bottom["n_mid_L3"])
 
-        check = beam.BeamFlexureDesign(300, 600, 28, 414, 414, 25, 10, 40)
+        check = beam_sections.BeamFlexureDesign(300, 600, 28, 414, 414, 25, 10, 40)
         check.n_bot = n_bars
         check.n_top = int(
             results[results["Face"] == "TOP"].iloc[0][["n_mid_L1", "n_mid_L2", "n_mid_L3"]].sum()
@@ -620,7 +625,7 @@ class TestPipelineWithMockEtabs:
     def test_heavier_load_gives_at_least_as_many_bars(self):
         """BEHAVIOUR: doubling the load cannot reduce the bottom bar count."""
         def bottom_bars(load):
-            out = beam.execute_beam_design(
+            out = beam_design.execute_beam_design(
                 _mock_beam_properties(), _mock_force_table(wu=load), False, "GRAV"
             )
             row = out[out["Face"] == "BOTTOM"].iloc[0]
@@ -629,13 +634,13 @@ class TestPipelineWithMockEtabs:
         assert bottom_bars(120) >= bottom_bars(40)
 
     def test_output_has_top_and_bottom_row_per_beam(self):
-        results = beam.execute_beam_design(
+        results = beam_design.execute_beam_design(
             _mock_beam_properties(), _mock_force_table(), False, "GRAV"
         )
         assert list(results["Face"]) == ["TOP", "BOTTOM"]
 
     def test_stirrup_spacing_is_multiple_of_25mm(self):
-        results = beam.execute_beam_design(
+        results = beam_design.execute_beam_design(
             _mock_beam_properties(), _mock_force_table(), False, "GRAV"
         )
         row = results.iloc[0]
@@ -644,7 +649,7 @@ class TestPipelineWithMockEtabs:
 
     def test_seismic_zone_stirrups_are_at_least_as_tight(self):
         """ACI 18.6.4.4: with seismic design on, end-zone hoops obey d/4, 6db, 150 mm."""
-        results = beam.execute_beam_design(
+        results = beam_design.execute_beam_design(
             _mock_beam_properties(), _mock_force_table(), True, "GRAV"
         )
         d = 600 - 40 - 10 - 12.5
@@ -658,29 +663,29 @@ class TestPipelineWithMockEtabs:
         although the connectivity helper writes 'Free at PtI'.
         """
         props = _mock_beam_properties(support="Cantilever (Free at PtI)")
-        results = beam.execute_beam_design(props, _mock_force_table(), True, "GRAV")
+        results = beam_design.execute_beam_design(props, _mock_force_table(), True, "GRAV")
         top = results[results["Face"] == "TOP"].iloc[0]
 
-        engine = beam.BeamFlexureDesign(300, 600, 28, 414, 414, 25, 10, 40)
+        engine = beam_sections.BeamFlexureDesign(300, 600, 28, 414, 414, 25, 10, 40)
         engine.n_top = int(top["n_right_L1"] + top["n_right_L2"] + top["n_right_L3"])
         engine.n_bot = 2
-        checker = beam.BeamSeismicDesign({}, 6000)
+        checker = beam_sections.BeamSeismicDesign({}, 6000)
         expected = checker.compute_probable_moment(engine, True) / 6.0
         assert top["V_sway_max_kN"] == pytest.approx(expected, rel=0.01)
 
     def test_display_labels_round_trip(self):
         """Excel headers use subscripts; restoring them must give the original keys."""
-        results = beam.execute_beam_design(
+        results = beam_design.execute_beam_design(
             _mock_beam_properties(), _mock_force_table(), False, "GRAV"
         )
-        shown = beam.display_beam_result_labels(results)
+        shown = beam_results.display_beam_result_labels(results)
         assert "n₍left, 1₎" in shown.columns
-        restored = beam.restore_beam_result_labels(shown)
+        restored = beam_results.restore_beam_result_labels(shown)
         assert list(restored.columns) == list(results.columns)
 
     def test_beam_names_sort_by_floor_type_then_number(self):
         names = ["L2BY-3", "L2BX-44", "L2BX-7", "L1GX-1"]
-        ordered = sorted(names, key=beam.beam_sort_key)
+        ordered = sorted(names, key=beam_results.beam_sort_key)
         assert ordered == ["L1GX-1", "L2BX-7", "L2BX-44", "L2BY-3"]
 
 
@@ -689,11 +694,11 @@ class TestPipelineWithMockEtabs:
 # ==========================================================================
 class TestBeamScheduleDxf:
     def test_schedule_file_is_created(self, tmp_path):
-        results = beam.execute_beam_design(
+        results = beam_design.execute_beam_design(
             _mock_beam_properties(), _mock_force_table(), False, "GRAV"
         )
         target = tmp_path / "L2_Beam_Schedule.dxf"
-        beam.generate_dxf_beam_schedule("L2", results, str(target))
+        beam_schedule.generate_dxf_beam_schedule("L2", results, str(target))
         assert target.exists() and target.stat().st_size > 1000
 
 
@@ -715,7 +720,7 @@ class _FakeRange:
 def _three_zone_engines(top=6, bottom=2):
     engines = {}
     for name in ("Left Support Face", "Midspan Zone", "Right Support Face"):
-        engine = beam.BeamFlexureDesign(400.0, 600.0, 28.0, 415.0, 415.0, 25.0, 10.0, 40.0)
+        engine = beam_sections.BeamFlexureDesign(400.0, 600.0, 28.0, 415.0, 415.0, 25.0, 10.0, 40.0)
         engine.n_top, engine.n_bot = (top, bottom) if "Support" in name else (2, 2)
         engines[name] = engine
     return engines
@@ -724,7 +729,7 @@ def _three_zone_engines(top=6, bottom=2):
 def test_bottom_bars_are_added_until_positive_strength_is_half_the_negative():
     """ACI 18.6.3.2: at the joint face Mn+ >= 0.5 Mn-, and every section >= 0.25 max."""
     engines = _three_zone_engines(top=6, bottom=2)
-    checker = beam.BeamSeismicDesign(engines, 6000.0)
+    checker = beam_sections.BeamSeismicDesign(engines, 6000.0)
     assert not checker.check_flexural_capacity_ratios()["all_passed"]
 
     assert checker.enforce_flexural_capacity_ratios() is True
@@ -738,7 +743,7 @@ def test_bottom_bars_are_added_until_positive_strength_is_half_the_negative():
 
 
 def test_design_reports_the_design_shear_and_the_smrf_checks():
-    results = beam.execute_beam_design(
+    results = beam_design.execute_beam_design(
         df_beam_props=_mock_beam_properties(), df_frame_forces=_mock_force_table(),
         enable_seismic_design=True, gravity_combo_name="GRAV",
     )
@@ -749,7 +754,7 @@ def test_design_reports_the_design_shear_and_the_smrf_checks():
 
 
 def test_non_seismic_design_marks_the_smrf_checks_not_applicable():
-    results = beam.execute_beam_design(
+    results = beam_design.execute_beam_design(
         df_beam_props=_mock_beam_properties(), df_frame_forces=_mock_force_table(),
         enable_seismic_design=False, gravity_combo_name="GRAV",
     )
@@ -761,12 +766,12 @@ def test_non_seismic_design_marks_the_smrf_checks_not_applicable():
 # CALCULATION REPORT (PDF) CONTENT
 # --------------------------------------------------------------------------
 def _beam_report_member(seismic=False):
-    results = beam.execute_beam_design(
+    results = beam_design.execute_beam_design(
         _mock_beam_properties(), _mock_force_table(), seismic, "GRAV"
     )
     top = results[results["Face"] == "TOP"].iloc[0]
     bottom = results[results["Face"] == "BOTTOM"].iloc[0]
-    return beam._beam_calc_member(top, bottom, seismic), bottom
+    return beam_calculations._beam_calc_member(top, bottom, seismic), bottom
 
 
 def test_beam_report_recomputes_strength_from_the_designed_bars():
@@ -797,15 +802,15 @@ def test_beam_report_adds_the_seismic_tables_only_for_smrf():
 # GRAVITY BEAMS ARE LEFT OUT OF THE SEISMIC PROVISIONS
 # --------------------------------------------------------------------------
 def _design(support, seismic):
-    return beam.execute_beam_design(
+    return beam_design.execute_beam_design(
         _mock_beam_properties(support=support), _mock_force_table(), seismic, "GRAV"
     )
 
 
 def test_gravity_beam_gets_the_same_design_with_seismic_on_or_off():
     """BEHAVIOUR: a beam on no column is designed for gravity only."""
-    on = _design(beam.GRAVITY_BEAM_STATUS, True)
-    off = _design(beam.GRAVITY_BEAM_STATUS, False)
+    on = _design(beam_supports.GRAVITY_BEAM_STATUS, True)
+    off = _design(beam_supports.GRAVITY_BEAM_STATUS, False)
     pd.testing.assert_frame_equal(on, off)
     assert set(on["SMRF_Flexure_Ratio_Check"]) == {"N/A"}
     assert (on["V_sway_max_kN"] == 0).all()
@@ -819,16 +824,16 @@ def test_frame_beam_still_gets_the_seismic_provisions():
 
 def test_schedules_are_written_per_story_for_girders_and_for_gravity_beams(tmp_path, monkeypatch):
     girder = _design("Supported Both Ends", False)
-    gravity = _design(beam.GRAVITY_BEAM_STATUS, False).assign(UniqueName="B2")
+    gravity = _design(beam_supports.GRAVITY_BEAM_STATUS, False).assign(UniqueName="B2")
     results = pd.concat([girder, gravity], ignore_index=True)
     written = []
     monkeypatch.setattr(
-        beam, "generate_dxf_beam_schedule",
+        beam_schedule, "generate_dxf_beam_schedule",
         lambda story_name, df_story, output_filepath: written.append(
             (Path(output_filepath).name, sorted(df_story["UniqueName"].unique()))
         ),
     )
-    paths = beam.export_beam_dxf(results, str(tmp_path))
+    paths = beam_schedule.export_beam_dxf(results, str(tmp_path))
     assert len(paths) == 2
     assert written == [("L2_Girder_Schedule.dxf", ["B1"]), ("L2_Beam_Schedule.dxf", ["B2"])]
 
@@ -844,7 +849,7 @@ def test_the_beam_table_gets_support_status_and_bar_inputs():
         "UniquePtI": ["a", "b", "z"], "UniquePtJ": ["b", "c", "a"],
     })
     bars = {"dm": 20, "ds": 10, "dw": 12, "fyw": 275, "cc": 40}
-    table = beam.prepare_beam_table(frame, conn, bars)
+    table = beam_design.prepare_beam_table(frame, conn, bars)
     assert table["UniqueName"].tolist() == ["2GX-1", "2GX-2"]  # beams only, sorted
     assert table.loc[table.UniqueName == "2GX-2", "SupportStatus"].item().startswith(
         "Cantilever")
@@ -857,7 +862,7 @@ def test_beam_results_are_saved_as_a_formatted_workbook(tmp_path):
     from openpyxl import load_workbook
 
     results = _design("Supported Both Ends", False)
-    path = beam.write_beam_results_xlsx(results, str(tmp_path / "beams.xlsx"))
+    path = beam_results.write_beam_results_xlsx(results, str(tmp_path / "beams.xlsx"))
     sheet = load_workbook(path).active
     assert sheet.title == "BEAM DESIGN"
     assert sheet.cell(row=1, column=1).font.bold
@@ -870,7 +875,7 @@ def test_beam_results_are_saved_as_a_formatted_workbook(tmp_path):
 def test_shear_beyond_the_section_limit_fails_the_beam():
     """phi(Vc + Vs,max) = 0.75 (0.17 + 0.66) sqrt(28) x 300 x d < 1500 kN: the section,
     not the stirrups, is too small (ACI 22.5.1.2); the status must say so."""
-    results = beam.execute_beam_design(
+    results = beam_design.execute_beam_design(
         _mock_beam_properties(), _mock_force_table(wu=500.0), False, "GRAV")
     assert results["Design_Status"].str.contains("SHEAR STRENGTH").all()
 
@@ -879,7 +884,7 @@ def test_the_clear_span_runs_face_to_face_of_the_columns():
     """Ve = sum Mpr / ln (ACI 18.6.5.1): 6000 mm between joints, 500 mm columns
     at both ends -> ln = 6000 - 250 - 250 = 5500 mm."""
     props = _mock_beam_properties().assign(SupportWidth_I=500.0, SupportWidth_J=500.0)
-    results = beam.execute_beam_design(props, _mock_force_table(), True, "GRAV")
+    results = beam_design.execute_beam_design(props, _mock_force_table(), True, "GRAV")
     assert results["ClearSpan_Ln"].iloc[0] == pytest.approx(5500.0)
 
 
@@ -892,24 +897,24 @@ def test_support_widths_come_from_the_columns_at_each_end():
         "UniqueName": ["2GX-1", "2-C1", "2-C2"], "DesignType": ["Beam", "Column", "Column"],
         "UniquePtI": ["a", "x", "y"], "UniquePtJ": ["b", "a", "b"],
     })
-    widths = beam._support_widths(frame, conn).set_index("UniqueName")
+    widths = beam_design._support_widths(frame, conn).set_index("UniqueName")
     assert widths.loc["2GX-1", "SupportWidth_I"] == 500
     assert widths.loc["2GX-1", "SupportWidth_J"] == 600
 
 
 def test_torsion_steel_uses_fyt_at_most_420_mpa():
     """ACI 20.2.2.4: a 550 MPa stirrup is designed as 420 MPa for torsion."""
-    plain = beam.BeamTorsionDesign(300, 600, 540, 28, 415, 420, 10, 40)
-    strong = beam.BeamTorsionDesign(300, 600, 540, 28, 415, 550, 10, 40)
+    plain = beam_sections.BeamTorsionDesign(300, 600, 540, 28, 415, 420, 10, 40)
+    strong = beam_sections.BeamTorsionDesign(300, 600, 540, 28, 415, 550, 10, 40)
     assert strong.solve_torsion_capacity(40.0, 50.0)["At_s_demand"] == pytest.approx(
         plain.solve_torsion_capacity(40.0, 50.0)["At_s_demand"])
 
 
 def test_smrf_midspan_stirrups_carry_the_probable_moment_shear():
     """Beyond 2h the design shear is the sway shear plus the gravity shear there."""
-    seismic = beam.execute_beam_design(_mock_beam_properties(), _mock_force_table(wu=20.0),
+    seismic = beam_design.execute_beam_design(_mock_beam_properties(), _mock_force_table(wu=20.0),
                                        True, "GRAV")
-    gravity = beam.execute_beam_design(_mock_beam_properties(), _mock_force_table(wu=20.0),
+    gravity = beam_design.execute_beam_design(_mock_beam_properties(), _mock_force_table(wu=20.0),
                                        False, "GRAV")
     assert seismic["Spacing_Mid"].iloc[0] <= gravity["Spacing_Mid"].iloc[0]
     assert seismic["V_sway_max_kN"].iloc[0] > 0
@@ -923,7 +928,7 @@ def test_a_beam_too_narrow_for_its_stirrup_legs_fails_and_the_others_are_designe
     props = pd.concat([narrow, _mock_beam_properties("B1")], ignore_index=True)
     forces = pd.concat([_mock_force_table("NARROW", wu=40.0), _mock_force_table("B1")],
                        ignore_index=True)
-    results = beam.execute_beam_design(props, forces, True, "GRAV")
+    results = beam_design.execute_beam_design(props, forces, True, "GRAV")
     status = results.groupby("UniqueName")["Design_Status"].first()
     assert "STIRRUP LEGS" in status["NARROW"] and status["NARROW"].startswith("FAILED")
     assert status["B1"] == "OK"
@@ -943,28 +948,28 @@ def test_compatibility_torsion_is_designed_for_at_most_phi_tcr():
     = 23.6 kN-m. With 90 kN-m from the analysis the section fails as equilibrium
     torsion and passes as compatibility torsion; the analysis value is reported."""
     props = _mock_beam_properties()
-    analysis = beam.execute_beam_design(props, _torsion_forces(90.0), False, "GRAV")
+    analysis = beam_design.execute_beam_design(props, _torsion_forces(90.0), False, "GRAV")
     assert analysis["Design_Status"].str.contains("torsion").all()
     assert "Torsion_Basis" not in analysis.columns
-    reduced = beam.execute_beam_design(props, _torsion_forces(90.0), False, "GRAV",
+    reduced = beam_design.execute_beam_design(props, _torsion_forces(90.0), False, "GRAV",
                                        compatibility_torsion=True)
     assert (reduced["Design_Status"] == "OK").all()
     assert reduced["Tu_left"].max() == pytest.approx(90.0)
-    assert (reduced["Torsion_Basis"] == beam.COMPATIBILITY_TORSION).all()
+    assert (reduced["Torsion_Basis"] == beam_design.COMPATIBILITY_TORSION).all()
 
 
 def test_a_cantilever_keeps_its_analysis_torsion():
     props = _mock_beam_properties(support="Cantilever (Free at PtJ)")
-    reduced = beam.execute_beam_design(props, _torsion_forces(90.0), False, "GRAV",
+    reduced = beam_design.execute_beam_design(props, _torsion_forces(90.0), False, "GRAV",
                                        compatibility_torsion=True)
-    assert (reduced["Torsion_Basis"] == beam.ANALYSIS_TORSION).all()
+    assert (reduced["Torsion_Basis"] == beam_design.ANALYSIS_TORSION).all()
     assert reduced["Design_Status"].str.contains("torsion").all()
 
 
 def test_torsion_below_phi_tcr_is_not_changed_by_the_option():
     props = _mock_beam_properties()
-    plain = beam.execute_beam_design(props, _torsion_forces(15.0), False, "GRAV")
-    option = beam.execute_beam_design(props, _torsion_forces(15.0), False, "GRAV",
+    plain = beam_design.execute_beam_design(props, _torsion_forces(15.0), False, "GRAV")
+    option = beam_design.execute_beam_design(props, _torsion_forces(15.0), False, "GRAV",
                                       compatibility_torsion=True)
     for column in ("Stirrup_Legs", "Spacing_2H", "Spacing_Mid", "n_mid_L1"):
         assert plain[column].tolist() == option[column].tolist()
