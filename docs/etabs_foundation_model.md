@@ -56,7 +56,7 @@ The foundation model is saved beside the superstructure as `<model> - FOUNDATION
 The reactions of a response spectrum case are peak values with no sign. They are not one set of forces in equilibrium: their vertical sum is not zero, and every support has its largest value at once.
 
 - **Static cases only (the first choice).** The spectrum cases and their combinations are left out. The static seismic cases carry the earthquake.
-- **With signs.** Each component of a spectrum reaction takes the sign of the static seismic case of the same direction at that joint: the one with the largest base shear in that direction, and a drift pattern for a drift spectrum case. The pattern then has the size of the spectrum and the sense of the static case. The check lists these patterns as information, since they do not add up to a base reaction.
+- **With signs.** Each component of a spectrum reaction takes the sign of the static seismic case of the same direction at that joint: the one with the largest base shear in that direction, and a drift pattern for a drift spectrum case. A pattern and its two eccentricities have the same base shear; the first of them in the model is then taken, at every run. The pattern then has the size of the spectrum and the sense of the static case. The check lists these patterns as information, since they do not add up to a base reaction.
 
 ## Live load reduction
 
@@ -95,6 +95,8 @@ Once the footings and tie beams are modelled, open the foundation model and run 
 - **Footings.** Each horizontal shell, or group of shells that touch, with its outline, thickness and the columns on it. An isolated footing shares its mark with those of its size (`F1`, `F2`, ...); a footing under two columns or more is a combined footing with a mark of its own (`CF1`, ...).
 - **Tie beams.** The beams of the model with their width and depth. One that still has its ETABS number is named `FTB-1`, `FTB-2`, ...
 - **Columns.** The column on each support joint.
+
+A foundation model is known by its file `<model> - FOUNDATION.foundation.json` beside it, so the two must stay together; the folder itself can be moved or copied.
 
 A table lists them, and the summary names the columns with no footing under them. `sdt plans`, run on the superstructure, then asks whether to draw the foundation plan (see [Framing plans](etabs_framing_plans.md#the-foundation-plan)), and `sdt 3d` whether to include the footings and tie beams as solids (see [3D model](etabs_3d_model.md#the-foundation)). Save the plan again after the foundation changes.
 

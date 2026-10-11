@@ -502,10 +502,18 @@ def read_reactions(connector, cases: dict[str, str], supports: list[Support]
     return table.reset_index(drop=True), base_table.reset_index(drop=True)
 
 
+SAME_SHEAR = 1e-6        # base shears that agree to this share of their size are the same
+
+
 def spectrum_partners(base: pd.DataFrame, pattern_types: dict[str, int]) -> dict[str, str]:
     """The static seismic case each spectrum case takes its signs from: the one
     with the largest base shear in the direction of the spectrum case. A drift
-    spectrum case (a name ending in D) takes a drift pattern when there is one."""
+    spectrum case (a name ending in D) takes a drift pattern when there is one.
+
+    Cases with the same base shear (the pattern and its two eccentricities)
+    differ by the noise of the analysis, about 1e-12 of their size, which
+    changes from run to run. Among those within ``SAME_SHEAR`` of the largest,
+    the first of the model's patterns is taken, so the choice is always the same."""
     shear = {str(c): (abs(float(x)), abs(float(y))) for c, x, y in zip(
         base["Case"], base["FX"], base["FY"])}
     spectra = set(base.loc[base["Kind"] == SPECTRUM, "Case"].astype(str))
@@ -517,7 +525,8 @@ def spectrum_partners(base: pd.DataFrame, pattern_types: dict[str, int]) -> dict
         pool = drift if case.upper().endswith("D") and drift else strength
         pool = [c for c in pool if shear[c][axis] >= shear[c][1 - axis]]
         if pool:
-            out[case] = max(pool, key=lambda c: shear[c][axis])
+            largest = max(shear[c][axis] for c in pool)
+            out[case] = next(c for c in pool if shear[c][axis] >= largest * (1.0 - SAME_SHEAR))
     return out
 
 
@@ -1182,9 +1191,10 @@ def run_foundation() -> Outcome | None:
     if not source or not os.path.isfile(source):
         show_warning("Save the ETABS model first: it has no file yet.", title=title)
         return None
+    # The file of a foundation model lies beside it under its own name, so a model
+    # that has one is a foundation model, also after its folder was moved or copied.
     own = load_manifest(source)
-    if own is not None and own.get("foundation") and os.path.normcase(
-            own["foundation"]) == os.path.normcase(source):
+    if own is not None and "supports" in own:
         return save_foundation_plan(connector, source, own, title)
     target = foundation_path_for(source)
     exists = os.path.isfile(target) and load_manifest(target) is not None

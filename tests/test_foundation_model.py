@@ -266,3 +266,28 @@ def test_the_report_shows_the_check_and_what_changed():
     summary = fm.foundation_summary(outcome, "T.EDB").text()
     assert "the loads of every pattern add up to its base reaction" in summary
     assert "Patterns whose loads changed  1 of 2" in summary
+
+
+def test_the_static_case_of_a_spectrum_case_does_not_depend_on_the_noise_of_the_analysis():
+    """A pattern and its two eccentricities have the same base shear, apart from
+    1e-12 that changes at every analysis: the first pattern of the model is taken."""
+    import pandas as pd
+
+    def partner(noise_plus: float, noise_minus: float) -> str:
+        base = pd.DataFrame({
+            "Case": ["EQX", "EQXPE", "EQXNE", "EQY", "RSAX"],
+            "Kind": ["static", "static", "static", "static", fm.SPECTRUM],
+            "FX": [-500.0, -500.0 * (1 + noise_plus), -500.0 * (1 + noise_minus), 0.0, 480.0],
+            "FY": [0.0, 0.0, 0.0, -450.0, 12.0]})
+        types = {"EQX": 5, "EQXPE": 5, "EQXNE": 5, "EQY": 5}
+        return fm.spectrum_partners(base, types)["RSAX"]
+
+    assert partner(0.0, 0.0) == partner(2e-12, 0.0) == partner(0.0, 3e-12) == "EQX"
+
+
+def test_a_static_case_with_a_larger_base_shear_is_still_the_one_taken():
+    import pandas as pd
+
+    base = pd.DataFrame({"Case": ["EQX", "EQX2", "RSAX"], "Kind": ["static", "static", fm.SPECTRUM],
+                         "FX": [-500.0, -510.0, 480.0], "FY": [0.0, 0.0, 0.0]})
+    assert fm.spectrum_partners(base, {"EQX": 5, "EQX2": 5}) == {"RSAX": "EQX2"}

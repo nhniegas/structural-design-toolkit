@@ -121,14 +121,18 @@ def use_working_units(model) -> None:
     model in kN-m would get a spectrum a thousand times too large. The units
     the model had are put back by ``restore_units`` when the command ends.
     Call it again after opening a file: ETABS then shows that file's units.
+
+    The units are set even when ETABS says they are N-mm already. An ETABS
+    started through the API reports the units of the file it opened, but keeps
+    working in lb-in until the units are set once: every coordinate, size and
+    force then passes through the API in lb and inches (found on ETABS 22).
     """
     try:
         original = int(model.GetPresentUnits())
     except Exception:
         return
-    if original == EXTRACTION_UNITS:
-        return
-    if not any(borrowed is model for borrowed, _ in _BORROWED_UNITS):
+    if original != EXTRACTION_UNITS and not any(
+            borrowed is model for borrowed, _ in _BORROWED_UNITS):
         _BORROWED_UNITS.append((model, original))
     ensure_success(model.SetPresentUnits(EXTRACTION_UNITS),
                    f"SetPresentUnits({UNIT_NAMES[EXTRACTION_UNITS]})")
