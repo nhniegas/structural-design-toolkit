@@ -344,6 +344,11 @@ def column_interaction_figure(rows: pd.DataFrame, path: str, dmain: float, dties
     return plot_surface(surface, points, path, title, hull, governing)
 
 
+# The table the interaction surface is set beside: it is narrow, and long enough to
+# stand next to the figure.
+BESIDE_FIGURE = "Transverse reinforcement"
+
+
 def build_column_calc_report(report: pd.DataFrame, filepath: str, information: list,
                              figure_options: dict | None = None) -> str | None:
     """Write the column calculation PDF from the report (internal field names).
@@ -371,6 +376,7 @@ def build_column_calc_report(report: pd.DataFrame, filepath: str, information: l
         member = _column_calc_member(rows)
         if name in figures:
             member.figures.append(figures[name])
+            member.beside_figure = BESIDE_FIGURE
         members.append(member)
     if not members:
         raise ValueError("COLUMN DESIGN contains no designed columns to report.")
@@ -384,6 +390,7 @@ def build_column_calc_report(report: pd.DataFrame, filepath: str, information: l
             filepath,
             "p{1.4cm}p{2.9cm}p{1.3cm}p{2.3cm}p{1.1cm}p{1.9cm}p{1.9cm}p{2.6cm}",
             command="sdt columns",
+            member_pages=True,
         )
     finally:
         shutil.rmtree(os.path.join(folder, figure_dir), ignore_errors=True)

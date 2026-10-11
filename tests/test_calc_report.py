@@ -122,3 +122,18 @@ def test_the_title_block_sets_its_pairs_two_to_a_line():
     assert r"{\LARGE\bfseries Beam Design}" in text and "Special moment frame" in text
     assert r"Model & t34 & Date & 11 October 2026 \\ \hline" in text
     assert "Empty" not in text and r"Design code & ACI 318M-14 &  &  \\ \hline" in text
+
+
+def test_a_figure_is_set_beside_a_narrow_table_and_the_table_keeps_its_size():
+    """A tall figure under the tables jumps to the next page and leaves a half empty one."""
+    from utilities._calc_report import _beside_latex
+
+    table = ReportTable("Transverse reinforcement", ["Parameter", "Value"], [
+        ["Provided", "16 mm Rectilinear hoops and crossties @ 125 mm; X: 3 legs, Y: 3 legs"],
+        ["Tie spacing check", "PASS"]], "ll")
+    text = _beside_latex(table, "figures_tmp" + chr(92) + "C1.jpg", "Interaction surface")
+    assert text.count(chr(92) + "begin{minipage}[t]") == 2 and "0.5" + chr(92) + "textwidth" in text
+    assert chr(92) + "includegraphics[width=" + chr(92) + "linewidth]{figures_tmp/C1.jpg}" in text
+    # the two columns wrap their own text: no box around the sentence, no fixed "ll"
+    assert "p{0.54" + chr(92) + "linewidth}" in text and chr(92) + "parbox" not in text
+    assert chr(92) + "sdtpass{PASS}" in text and "Interaction surface" in text

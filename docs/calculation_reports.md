@@ -28,7 +28,7 @@ Code: `utilities/report_style.py` (the look), `utilities/_calc_report.py` (the b
 - A result is a tag: `PASS` or `OK` in green, `FAIL` in red. A ratio is its number; the tag beside it says whether it passes.
 - The text and the equations are in one sans typeface, in the graphite of the program.
 
-**Beam and column reports** hold the intermediate and final values of each member in tables, with no equation written out for each member; on a model of a hundred members that would be a report of several hundred pages. The column report keeps the interaction surface of each column, with every combination plotted against it.
+**Beam and column reports** hold the intermediate and final values of each member in tables, with no equation written out for each member; on a model of a hundred members that would be a report of several hundred pages. The column report keeps the interaction surface of each column, with every combination plotted against it. Each column starts on a new page and takes two: its forces and checks on the first, and on the second its transverse reinforcement with the interaction surface at its right, then its design status. Set under the tables, the surface was pushed to the next page and left a half empty one.
 
 **Steel, composite and wind reports** are for one member or one building, and write their equations with the numbers. The steel report is set to fit one page; when it cannot, it runs to a second, numbered like the first.
 
