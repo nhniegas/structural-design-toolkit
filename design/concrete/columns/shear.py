@@ -121,6 +121,24 @@ def _beam_end_reinforcement(
     }
 
 
+SPIRAL_LEGS = 2                 # a spiral crosses a shear plane twice (ACI 22.5.10.5.3)
+CIRCULAR_DEPTH_FACTOR = 0.8     # d of a circular section, as a share of D (ACI 22.5.2.2)
+SPIRAL_SHEAR_FAIL = ("FAIL: the spiral cannot carry the shear at its closest pitch "
+                     "- larger spiral bar or section")
+
+
+def spiral_pitch(pitch: float, least: float) -> float:
+    """The pitch a spiral is built at, mm: ``pitch`` taken down to 5 mm, or to
+    1 mm where 5 would bring it under ``least`` (the bar and the least clear
+    spacing, ACI 25.7.3.1). Never taken up: a pitch rounded up gives less
+    spiral than was counted."""
+    for step in (5.0, 1.0):
+        rounded = math.floor(pitch / step + 1e-9) * step
+        if rounded >= least - 1e-9:
+            return rounded
+    return pitch
+
+
 def _column_shear_checks(
     row: pd.Series,
     forces: pd.DataFrame,
@@ -149,6 +167,12 @@ def _column_shear_checks(
     maps (shear direction "V2"/"V3", end "I"/"J") to the end moment the beams can
     deliver to this column, kN-m: ACI 18.7.6.1.1 lets Ve stop at the shear that
     the joint strengths (beam Mpr) can develop.
+
+    A circular column has a spiral, not ties: it has two legs across any
+    shear plane and no more can be added (ACI 22.5.10.5.3), and its d is 0.8 of
+    the diameter (ACI 22.5.2.2). The shear it cannot carry at the given pitch
+    is answered with a closer pitch: ``Shear_Spacing_Limit_mm`` then holds the
+    pitch the shear needs.
 
     The function compares analysis shear with the capacity-based probable-moment
     shear, then selects, for each direction, a leg count sufficient for all force
@@ -184,6 +208,9 @@ def _column_shear_checks(
     # parallel to the depth, which are the ones counted along the X edge.
     # V3 acts along the width and uses the legs counted along the Y edge.
     starting_legs = {"V2": legs_along_x, "V3": legs_along_y}
+    spiral = engine.shape == "circular"
+    if spiral:
+        starting_legs = {"V2": SPIRAL_LEGS, "V3": SPIRAL_LEGS}
     provided_legs = dict(starting_legs)
 
     shear_target = dcr_targets.limit(dcr_targets.COLUMN, dcr_targets.SHEAR)
@@ -277,7 +304,7 @@ def _column_shear_checks(
                 # Capacity-based Ve is the probable end-moment sum divided by lu.
                 capacity_shear_kN = sum(probable_moments) * 1000.0 / clear_length
 
-            effective_depth = max(
+            effective_depth = CIRCULAR_DEPTH_FACTOR * overall_depth if spiral else max(
                 1.0,
                 overall_depth - engine.cc - engine.dties - engine.dmain / 2.0,
             )
@@ -328,6 +355,14 @@ def _column_shear_checks(
                     ),
                 )
                 required_legs = max(required_legs, starting_legs[shear_name])
+                if spiral:
+                    # no leg can be added to a spiral: the pitch answers the shear
+                    required_legs = SPIRAL_LEGS
+                    needed = min(required_vs, vs_max)
+                    if needed > 0:
+                        shear_spacing_limit = min(
+                            shear_spacing_limit,
+                            SPIRAL_LEGS * tie_area * fyt * effective_depth / needed)
                 provided_legs[shear_name] = max(provided_legs[shear_name], required_legs)
                 output.append(
                     {
@@ -370,8 +405,10 @@ def _column_shear_checks(
             if shear_capacity > 0
             else math.inf
         )
+        at_vs_max = steel_shear >= item["_vs_max_N"] - 1e-6
         item["Shear_Check"] = (
             "PASS" if item["Design_Shear_kN"] <= shear_capacity * shear_target + 1e-9
+            else SPIRAL_SHEAR_FAIL if spiral and not at_vs_max
             else "FAIL: Vs above 0.66 sqrt(fc') b d (ACI 22.5.1.2) - enlarge the section"
             if item["Design_Shear_kN"] > shear_capacity + 1e-9
             else f"FAIL: above the target ratio {shear_target:g} at the largest Vs "

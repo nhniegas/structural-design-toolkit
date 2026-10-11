@@ -883,6 +883,8 @@ def column_blank_reason(name: str, row: dict) -> str:
         return "N/A - seismic design is off"
     if name in ("Width_mm", "Depth_mm", "Bars_X_Edge", "Bars_Y_Edge"):
         return "N/A - circular column" if circular else "N/A"
+    if name in ("Transverse_Legs_X", "Transverse_Legs_Y"):
+        return "N/A - spiral" if circular else "N/A"
     if name == "Diameter_mm":
         return "N/A - rectangular column"
     if name in ("Confinement_18_7_5_a", "Confinement_18_7_5_b", "Kn"):

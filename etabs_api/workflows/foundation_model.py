@@ -678,10 +678,28 @@ def _clear_structure(model, keep: set[str], outcome: Outcome) -> None:
         outcome.problems.append(f"{left} joints are left, for {len(keep)} supports")
 
 
+def same_name(name: str) -> str:
+    """A name as ETABS compares it: without the spaces around it and whatever
+    its case. A pattern can be listed as "TEST LOAD " while its case and the
+    tables call it "TEST LOAD"; ETABS takes them for one name, and refuses to
+    add the second."""
+    return str(name).strip().casefold()
+
+
+def missing_patterns(wanted: list[str], existing: list[str]) -> list[str]:
+    """The names of ``wanted`` that the model does not have, as ETABS compares
+    names."""
+    have = {same_name(name) for name in existing}
+    return [name for name in wanted if same_name(name) not in have]
+
+
 def _make_patterns(model, sup: Superstructure, outcome: Outcome) -> None:
     """The load patterns and cases of the foundation model."""
     wanted = {p.name for p in sup.patterns}
-    existing = {str(n) for n in as_list(model.LoadPatterns.GetNameList(0, [])[1])}
+    # the patterns the model has, spelled as the superstructure names them
+    spelled = {same_name(name): name for name in wanted}
+    existing = {spelled.get(same_name(n), str(n))
+                for n in as_list(model.LoadPatterns.GetNameList(0, [])[1])}
     cases = {str(n) for n in as_list(model.LoadCases.GetNameList(0, [])[1])}
     # a response spectrum case becomes a static case of the same name, or goes
     for case, kind in sup.cases.items():
@@ -958,9 +976,10 @@ def update_foundation(connector, foundation_path: str, options: Options | None =
 def _make_update_patterns(model, sup: Superstructure, old: list[dict], clear: list[str],
                           outcome: Outcome) -> None:
     """Add the patterns that are new; empty those that are no longer exported."""
-    existing = {str(n) for n in as_list(model.LoadPatterns.GetNameList(0, [])[1])}
+    existing = [str(n) for n in as_list(model.LoadPatterns.GetNameList(0, [])[1])]
+    new = set(missing_patterns([p.name for p in sup.patterns], existing))
     for pattern in sup.patterns:
-        if pattern.name not in existing:
+        if pattern.name in new:
             if _ok(model.LoadPatterns.Add(pattern.name, OTHER_PATTERN, 0.0, True)):
                 outcome.notes.append(f"New load pattern: {pattern.name}")
             else:

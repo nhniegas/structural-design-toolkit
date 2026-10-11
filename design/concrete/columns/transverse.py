@@ -232,7 +232,13 @@ def _smrf_transverse_design(
             if required_ratio > 0
             else math.inf
         )
-        spacing = min(spacing_limit, pitch_for_confinement)
+        from design.concrete.columns.shear import spiral_pitch
+
+        # the pitch it is built at: taken down, never up, so the spiral provided
+        # is never less than the spiral counted
+        spacing = spiral_pitch(
+            min(spacing_limit, pitch_for_confinement),
+            engine.code.column_transverse.spiral_clear_spacing_min + engine.dties)
         provided_ratio = 4.0 * tie_area / (core_diameter * spacing)
         clear_spacing = spacing - engine.dties
         check = (
@@ -269,9 +275,10 @@ def _smrf_transverse_design(
                 "APPLIED" if high_axial_or_high_strength else "NOT APPLIED"
             ),
             "Spiral_Clear_Spacing_mm": clear_spacing,
-            "Transverse_Legs_Per_Direction": 1,
-            "Required_Legs_X": 1,
-            "Required_Legs_Y": 1,
+            # a spiral crosses any plane through the column twice
+            "Transverse_Legs_Per_Direction": 2,
+            "Required_Legs_X": 2,
+            "Required_Legs_Y": 2,
             "Alternating_Support_Check": "N/A for continuous spiral",
         }
 

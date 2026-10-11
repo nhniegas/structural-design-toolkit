@@ -293,3 +293,34 @@ def test_the_equations_are_printed_with_symbols_not_as_latex():
     for expected in ("δₘₐₓ / δₐᵥₑ > 1.2 ⇒ irregular", "Aₓ = (δₘₐₓ / (1.2 δₐᵥₑ))²",
                      "θ = Pₓ Δ / (Vₓ h) ≤ 0.10", "Kᵢ < 0.70 Kᵢ₊₁", "Vᵢ < 0.80 Vᵢ₊₁ ⇒ weak story"):
         assert expected in text
+
+
+# --------------------------------------------------------------------------
+# WHICH LEVELS ARE STORIES
+# --------------------------------------------------------------------------
+def test_a_minor_level_and_the_levels_at_the_base_are_not_compared_as_stories():
+    """The masses of a real model: a footing tie level of 62 t among floors of
+    15,000 t gave a mass ratio of 270."""
+    masses = [("PD2", 7333.6), ("PD1", 19228.9), ("3F", 15157.3), ("2F", 15260.7),
+              ("UG", 16684.0), ("UG - FT", 61.9), ("LG", 2742.7), ("LG - FT", 378.0)]
+    stories, below, minor = ir.compared_stories(masses, "LG")
+    assert stories == ["PD2", "PD1", "3F", "2F", "UG"]
+    assert below == ["LG", "LG - FT"] and minor == ["UG - FT"]
+    note = ir.levels_note(below, minor)
+    assert "LG, LG - FT (at or below the base" in note and "UG - FT (under 10 %" in note
+    item = ir.mass_item([(s, m) for s, m in masses if s in stories])
+    assert item.status == ir.OK      # PD1 is 2.6 times the roof above it, which is not counted
+
+
+def test_with_no_base_named_every_level_with_enough_mass_is_a_story():
+    stories, below, minor = ir.compared_stories([("RD", 156.0), ("3F", 184.0), ("GF", 12.0)], None)
+    assert (stories, below, minor) == (["RD", "3F"], [], ["GF"])
+    assert ir.levels_note([], []) == ""
+
+
+def test_ax_is_not_given_where_etabs_has_no_displacement_of_the_level():
+    drifts = [("2F", "EQX", "X", 13.0, 10.0), ("LG", "EQX", "X", 17.3, 10.0)]
+    item = ir.torsion_item(drifts, [("2F", "EQX", "X", 26.0, 20.0)], ["2F", "LG"])
+    rows = {r[0]: r for r in item.rows}
+    assert rows["2F"][6] == "1.17" and rows["LG"][6] == "-" and rows["LG"][-1] == ir.IRREGULAR
+    assert any("no diaphragm" in note for note in item.notes)

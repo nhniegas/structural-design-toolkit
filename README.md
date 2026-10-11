@@ -45,6 +45,8 @@ Supporting code:
 - `etabs_api/workflows/framing_plans.py`: framing plans of the model as a DXF (`sdt plans`).
 - `etabs_api/workflows/foundation_model.py`: a second model for the foundation, from the support reactions (`sdt foundation`).
 - `etabs_api/workflows/foundation_plan.py`: the footings, tie beams and columns of the foundation model, with their marks, saved for the framing plans.
+- `etabs_api/workflows/project_report.py`: the full project report of a design loop.
+- `utilities/report_style.py`: the look of the PDF reports.
 - `etabs_api/workflows/model_3d.py`: the concrete of the model as 3D solids in a STEP file (`sdt 3d`).
 - `etabs_api/workflows/model_3d_bars.py`: the reinforcing bars of the saved designs for the 3D model.
 - `etabs_api/workflows/concrete_quantities.py`: the concrete volume, the floor area and the ratio in m3/m2 (`sdt quantities`).
@@ -132,6 +134,7 @@ Each guide in `docs/` covers one tool: how to run it, its inputs, what it writes
 - [Results in the terminal](docs/terminal_output.md)
 - [The dialogs](docs/dialogs.md)
 - [The calculation reports](docs/calculation_reports.md)
+- [The full project report](docs/project_report.md)
 - [Running a command from an answers file](docs/answers_file.md)
 - [ETABS test runs](docs/etabs_test_runs.md)
 
@@ -207,7 +210,7 @@ This defines the materials, frame sections, load patterns, UBC 97 response spect
 
 `sdt irregularity` reads the analysed model and reports each irregularity of UBC 97 Tables 16-L and 16-M (NSCP 2015 Tables 208-9 and 208-10): soft story, mass, vertical geometric, weak story (from the column design), torsional with the amplifier Ax, re-entrant corners and diaphragm openings. The types that need judgement are listed with what the model shows. It also gives the P-delta stability coefficient of each story, on first-order drifts from a copy of the model analysed with P-delta off. Nothing is changed in the model. See [Irregularity check](docs/etabs_irregularity.md).
 
-`sdt design` runs the analysis and the beam and column design again and again on a copy of the model, resizing the members until they pass (deflection included). See [Design loop](docs/etabs_design_loop.md).
+`sdt design` runs the analysis and the beam and column design again and again on a copy of the model, resizing the members until they pass (deflection included). It can end with the [full project report](docs/project_report.md): one PDF with the analysis (3D view, framing plans, loads, combinations, seismic and wind criteria, drifts, irregularities), the design of every member, and the calculation tables. See [Design loop](docs/etabs_design_loop.md).
 
 ## Foundation model
 
@@ -269,7 +272,8 @@ Not in this version, and planned for later ones:
 - **The irregularities left to judgement**: in-plane discontinuity, out-of-plane offsets, non-parallel systems, and the change of diaphragm stiffness from story to story.
 - **Redundancy factor ρ and the system factors.** ρ is a fixed value, and R and Ω0 are not checked against Table 208-11A by system.
 - **Slabs on the framing plans.** `sdt plans` draws beams, columns, walls and grids; slab marks and span arrows are not drawn yet.
-- **Full calculation reports.** The beam and column reports hold tables of values for each member. A report with the equations of every member written out with their numbers is planned as a choice.
+- **Equations in the batch reports.** The beam and column reports, and Part C of the full project report, hold tables of values for each member. Writing out the equations of every member with their numbers is planned as a choice.
+- **The full project report for a model designed earlier.** Today it is written at the end of `sdt design` only.
 - **Bar details in the 3D model.** `sdt 3d` draws the designed bars straight. Laps, hooks, bends, anchorage and cut-off points are not designed yet, and slabs, walls and footings have no bars.
 - **IFC export.** The 3D model is a STEP file, which holds the solids and their names. An IFC file would also say what each solid is (a beam, a column, its story and material) for BIM programs such as Revit and for model checkers.
 - **Seismic checks for other codes.** The period, base shear and spectrum scaling checks read UBC 97 seismic patterns; other patterns are designed for but those checks are reported as not applicable.

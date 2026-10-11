@@ -166,12 +166,12 @@ def check_model(d: ModelData) -> list[Finding]:
         no_section = info[info["SectProp"].astype(str).isin(["None", "", "nan"])] \
             if "SectProp" in info else info.iloc[0:0]
         out.append(Finding("Model", WARN if len(no_diaphragm) else OK,
-                           f"{len(no_diaphragm)} floors without a diaphragm" if len(no_diaphragm)
-                           else f"All {len(floor_names)} floors have a diaphragm.",
+                           f"{len(no_diaphragm)} floor panels without a diaphragm" if len(no_diaphragm)
+                           else f"All {len(floor_names)} floor panels have a diaphragm.",
                            "NSCP 208.5.1.3"))
         out.append(Finding("Model", WARN if len(no_section) else OK,
-                           f"{len(no_section)} floors without a slab section" if len(no_section)
-                           else "All floors have a slab section."))
+                           f"{len(no_section)} floor panels without a slab section" if len(no_section)
+                           else "All floor panels have a slab section."))
     else:
         out.append(Finding("Model", WARN, "The model has no floor objects: no slabs, no floor "
                            "loads and no rigid diaphragms from slabs."))
@@ -1067,6 +1067,37 @@ def modifier_findings(effective: dict[str, tuple], columns: set[str],
     return out
 
 
+def clear_spans(beams: pd.DataFrame, columns: pd.DataFrame, section_of: dict[str, str]
+                ) -> dict[str, float]:
+    """The clear span of each beam, mm: its joint-to-joint length less half of the
+    column at each end (the larger side of the column, as the beam design takes
+    it). ACI 18.6.2.1(a) sets the 4d rule on the clear span, so sdt check and
+    sdt beams measure a girder the same way."""
+    from etabs_api.workflows.sections import parse_section
+
+    needed = {"UniqueName", "UniquePtI", "UniquePtJ"}
+    if beams.empty or not needed <= set(beams.columns) or "Length" not in beams.columns:
+        return {}
+    side_at: dict[str, float] = {}
+    if not columns.empty and needed <= set(columns.columns):
+        for name, i, j in zip(columns["UniqueName"].astype(str), columns["UniquePtI"].astype(str),
+                              columns["UniquePtJ"].astype(str)):
+            found = parse_section(section_of.get(name, ""))
+            if found is None:
+                continue
+            side = max(found.width, found.depth)
+            for joint in (i, j):
+                side_at[joint] = max(side_at.get(joint, 0.0), side)
+    out = {}
+    for name, i, j, length in zip(beams["UniqueName"].astype(str), beams["UniquePtI"].astype(str),
+                                  beams["UniquePtJ"].astype(str),
+                                  pd.to_numeric(beams["Length"], errors="coerce")):
+        if length == length:
+            clear = float(length) - 0.5 * (side_at.get(i, 0.0) + side_at.get(j, 0.0))
+            out[name] = clear if clear > 0 else float(length)
+    return out
+
+
 def check_smrf_members(d: ModelData) -> list[Finding]:
     from etabs_api.workflows.sections import parse_section
 
@@ -1080,6 +1111,10 @@ def check_smrf_members(d: ModelData) -> list[Finding]:
                        pd.to_numeric(d.table("Beam Object Connectivity").get("Length",
                                                                              pd.Series(dtype=float)),
                                      errors="coerce")))
+    clear = clear_spans(d.table("Beam Object Connectivity"),
+                        d.table("Column Object Connectivity"),
+                        dict(zip(sections["UniqueName"].astype(str),
+                                 sections["SectProp"].astype(str))))
     narrow, short, small_col, slender_col = [], [], [], []
     for member, prop in zip(sections["UniqueName"].astype(str), sections["SectProp"].astype(str)):
         s = parse_section(prop)
@@ -1094,7 +1129,8 @@ def check_smrf_members(d: ModelData) -> list[Finding]:
         elif s.family in ("G",):
             if s.width < min(SMRF_BEAM.min_width_to_depth * s.depth, SMRF_BEAM.min_width) - 0.5:
                 narrow.append(member)
-            length = lengths.get(member, math.nan)
+            # the clear span between the column faces, as sdt beams measures it
+            length = clear.get(member, lengths.get(member, math.nan))
             if length == length and \
                     length < SMRF_BEAM.min_clear_span_to_depth * (s.depth - COVER_TO_BAR):
                 short.append(member)
@@ -1107,12 +1143,12 @@ def check_smrf_members(d: ModelData) -> list[Finding]:
                 f"{', '.join(narrow[:8])}" if narrow else f"Girder widths at least the smaller of "
                 f"{SMRF_BEAM.min_width_to_depth:g}h and {SMRF_BEAM.min_width:g} mm.",
                 ref + "418.6.2.1(b)"),
-        Finding(group, WARN if short else OK, f"Girders with a span under "
+        Finding(group, WARN if short else OK, f"Girders with a clear span under "
                 f"{span_ratio:g}d (deep beams): {', '.join(short[:8])}"
                 + (f", ... ({len(short)} in all)" if len(short) > 8 else "")
                 + " - they do not qualify as beams of a special moment frame; sdt beams and "
                 "sdt design can design them without the SMRF rules" if short else
-                f"Girder spans at least {span_ratio:g}d.", ref + "418.6.2.1(a)"),
+                f"Girder clear spans at least {span_ratio:g}d.", ref + "418.6.2.1(a)"),
         Finding(group, WARN if small_col else OK, f"Columns with a side under {least_side:g} mm: "
                 f"{', '.join(small_col[:8])}" if small_col else
                 f"Column sides at least {least_side:g} mm.", ref + "418.7.2.1(a)"),

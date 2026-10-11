@@ -51,6 +51,7 @@ WEAK_SEVERE = 0.65           # under this, UBC 1629.9.1 limits the height
 REENTRANT_LIMIT = 0.15
 OPENING_LIMIT = 0.50
 THETA_LIMIT = 0.10
+MINOR_LEVEL = 0.10           # a level under this share of the largest story mass is not a story
 NO_VALUE = 1e-9
 
 VERTICAL, PLAN, STABILITY = "Vertical irregularities", "Plan irregularities", "P-delta"
@@ -86,6 +87,42 @@ def _directions(rows, case_at: int = 1, direction_at: int = 2) -> list[str]:
 # =============================================================================
 # CHECKS (plain data)
 # =============================================================================
+def compared_stories(masses: list[tuple[str, float]], base: str | None
+                     ) -> tuple[list[str], list[str], list[str]]:
+    """Which levels are stories to compare with each other, from the top down:
+    (stories, levels at or below the base, minor levels).
+
+    ETABS has a story for every level of the model. Two kinds are not stories
+    of the structure for the vertical irregularities:
+
+    * the level the static seismic patterns start from (``base``) and those
+      below it: they are at the base, where no story shear is carried over;
+    * a minor level, with under ``MINOR_LEVEL`` of the mass of the largest
+      story: a footing tie level, a landing, a small mezzanine.
+
+    Compared with a full story, either gives a mass ratio in the hundreds and a
+    false irregularity.
+    """
+    names = [story for story, _ in masses]
+    below = names[names.index(base):] if base in names else []
+    above = [(story, mass) for story, mass in masses if story not in below]
+    largest = max((mass for _, mass in above), default=0.0)
+    minor = [story for story, mass in above if mass < MINOR_LEVEL * largest]
+    stories = [story for story, _ in above if story not in minor]
+    return stories, below, minor
+
+
+def levels_note(below: list[str], minor: list[str]) -> str:
+    """What is said of the levels left out of the vertical comparisons."""
+    parts = []
+    if below:
+        parts.append(", ".join(below) + " (at or below the base of the seismic patterns)")
+    if minor:
+        parts.append(", ".join(minor) + f" (under {MINOR_LEVEL * 100:g} % of the mass of the "
+                     "largest story: a minor level, not a story)")
+    return "Levels not compared as stories: " + "; ".join(parts) + "." if parts else ""
+
+
 def own_direction(rows: list[tuple], weight: int = -1) -> list[tuple]:
     """The rows of each load case in its own direction only.
 
@@ -132,10 +169,10 @@ def torsion_item(drifts: list[tuple], displacements: list[tuple], order: list[st
             if (story, direction) not in worst:
                 continue
             ratio, case, most, average = worst[(story, direction)]
-            ax = max((v for (s, _, d), v in ax_of.items() if s == story and d == direction),
-                     default=1.0)
+            known = [v for (s, _, d), v in ax_of.items() if s == story and d == direction]
             item.rows.append([story, direction, case, _fmt(most), _fmt(average), _fmt(ratio),
-                              _fmt(ax, 2), IRREGULAR if ratio > TORSION_LIMIT else REGULAR])
+                              _fmt(max(known), 2) if known else "-",
+                              IRREGULAR if ratio > TORSION_LIMIT else REGULAR])
     top = max((v[0] for v in worst.values()), default=0.0)
     ax_top = max(ax_of.values(), default=1.0)
     item.status = WARN if top > TORSION_LIMIT else OK
@@ -148,6 +185,9 @@ def torsion_item(drifts: list[tuple], displacements: list[tuple], order: list[st
         item.notes.append(
             "The accidental torsion of each level is to be multiplied by its Ax (UBC 1630.7). "
             "Ax is reported here; it is not applied to the seismic patterns of the model.")
+    if any(row[6] == "-" for row in item.rows):
+        item.notes.append("Ax is from the displacements of a level; \"-\" where ETABS gives "
+                          "none for it (a level with no diaphragm).")
     return item
 
 
@@ -220,9 +260,7 @@ def mass_item(masses: list[tuple[str, float]]) -> Item:
     item.verdict = (f"{IRREGULAR}: " + ", ".join(heavy) + " over 150 % of an adjacent story"
                     if heavy else f"{REGULAR}: no story over 150 % of an adjacent story")
     item.equations = [r"m_i > 1.50 m_{next} \Rightarrow irregular"]
-    item.notes.append("A roof lighter than the floor below is not counted. A level at or below "
-                      "the ground, such as one of tie beams only, is in the list: judge whether "
-                      "it is a story of the structure.")
+    item.notes.append("A roof lighter than the floor below is not counted.")
     return item
 
 
@@ -785,10 +823,19 @@ def read_irregularity(connector, model_path: str, first_order: bool = True,
 
     corners, opening = plan_items([s for s in shapes if s[1] is not None])
     offset, plane, parallel = judged_items(planted, len(order))
+    stories, below, minor = compared_stories(
+        [(story, mass_of.get(story, 0.0)) for story in order if mass_of.get(story, 0.0) > NO_VALUE],
+        _seismic_base(model))
+    note = levels_note(below, minor)
+    if note:
+        report.notes.append(note)
+    if strengths is not None:
+        strengths = [row for row in strengths if row[0] in stories]
     report.items = [
-        soft_story_item(stiffness, order),
-        mass_item([(story, mass_of.get(story, 0.0)) for story in order]),
-        geometry_item(extents), offset, weak_story_item(strengths),
+        soft_story_item([row for row in stiffness if row[0] in stories], stories),
+        mass_item([(story, mass_of.get(story, 0.0)) for story in stories]),
+        geometry_item([row for row in extents if row[0] in stories]), offset,
+        weak_story_item(strengths),
         torsion_item(pairs(drifts, "Max Drift", "Avg Drift"),
                      pairs(moved, "Maximum", "Average"), order),
         corners, opening, plane, parallel]
@@ -818,6 +865,18 @@ def _restrained(model, joint: str) -> bool:
         return any(bool(v) for v in model.PointObj.GetRestraint(joint, [])[0])
     except Exception:  # noqa: BLE001
         return False
+
+
+def _seismic_base(model) -> str | None:
+    """The story the static seismic patterns start from, or None when the model
+    does not say (patterns that are not UBC 97, or none)."""
+    from etabs_api.workflows.grid_column_model import _table
+
+    for row in _table(model, "Load Pattern Definitions - Auto Seismic - UBC 97"):
+        for key in ("BotStory", "BottomStory", "Bottom Story"):
+            if str(row.get(key) or "").strip() not in ("", "None"):
+                return str(row[key]).strip()
+    return None
 
 
 def _r_factor(model) -> float | None:

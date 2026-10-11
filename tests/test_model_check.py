@@ -363,3 +363,17 @@ def test_drift_cases_are_scaled_to_the_zone_4_minimum_only_when_it_governs():
     table["Z"] = 0.4                                                       # defined by its site
     assert ma.minimum_scalings(table, ["EQXSD", "EQYSD"]) == []
     assert ma.minimum_scalings(pd.DataFrame(), ["EQXSD"]) == []
+
+
+def test_the_4d_rule_is_on_the_clear_span_as_the_beam_design_measures_it():
+    """A girder of 2,400 between two 700 columns has a clear span of 1,700."""
+    beams = pd.DataFrame({"UniqueName": ["2GX-1", "2BY-1"], "UniquePtI": ["1", "5"],
+                          "UniquePtJ": ["2", "6"], "Length": [2400.0, 5000.0]})
+    columns = pd.DataFrame({"UniqueName": ["2-C1", "2-C2"], "UniquePtI": ["11", "12"],
+                            "UniquePtJ": ["1", "2"]})
+    sections = {"2-C1": "CR_700X600_C04_G60", "2-C2": "C_700_C04_G60", "2GX-1": "G_300X500_C04_G60"}
+    clear = mc.clear_spans(beams, columns, sections)
+    assert clear == {"2GX-1": 1700.0, "2BY-1": 5000.0}     # a beam on no column keeps its length
+    # a connectivity table with no length, or no beams: nothing to measure
+    assert mc.clear_spans(beams.drop(columns="Length"), columns, sections) == {}
+    assert mc.clear_spans(beams.iloc[0:0], columns, sections) == {}
