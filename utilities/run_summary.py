@@ -90,8 +90,10 @@ class RunSummary:
         elif save_as:
             print(f"Summary saved: {save_as}")
         if popup:
-            from utilities import _gui_helpers
+            from utilities import _gui_helpers, answers
 
+            if answers.replaying() and echo:
+                return text     # printed above: the window would only print it again
             shown = text + (f"\nSummary saved: {save_as}" if save_as else "")
             try:
                 _gui_helpers.show_summary(shown, f"Summary - {self.command}")

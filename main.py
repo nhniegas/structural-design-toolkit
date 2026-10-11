@@ -41,6 +41,10 @@ the same commands.
     sdt --help      list the commands
     sdt --version   the version
 
+    sdt <command> --record FILE    run with the dialogs and save what you answer
+    sdt <command> --answers FILE   run with no dialog: the answers come from the
+                                   file (utilities/answers.py)
+
 ``sdt`` alone, and the packaged ``sdt.exe`` when it is double-clicked, shows
 a menu of the commands: type a number or a name, and the menu comes back when
 the command ends.
@@ -58,7 +62,7 @@ import argparse
 import sys
 from pathlib import Path
 
-VERSION = "0.3.8"  # the same as in pyproject.toml (tests/test_main.py checks it)
+VERSION = "0.3.9"  # the same as in pyproject.toml (tests/test_main.py checks it)
 # Hidden first argument: this process is the progress window of another one
 # (utilities/_gui_helpers.LoadingWindow). It is how the packaged program,
 # which has no separate Python to start, opens that window.
@@ -209,16 +213,39 @@ def build_parser() -> argparse.ArgumentParser:
                         version=f"Structural Design Toolkit {VERSION}")
     commands = parser.add_subparsers(dest="command", metavar="command")
     for name, (_, text) in COMMANDS.items():
-        commands.add_parser(name, help=text, description=text)
+        command = commands.add_parser(name, help=text, description=text)
+        files = command.add_mutually_exclusive_group()
+        files.add_argument("--answers", metavar="FILE",
+                           help="answer the dialogs from this file: nothing is asked")
+        files.add_argument("--record", metavar="FILE",
+                           help="show the dialogs and save what you answer to this file")
     return parser
 
 
-def run_and_restore(name: str):
+def run_and_restore(name: str, answers_file: str | None = None,
+                    record_file: str | None = None):
     """Run a command, then put back the units of the ETABS model it worked on
-    (the commands work in N-mm, whatever units the model is in)."""
+    (the commands work in N-mm, whatever units the model is in).
+
+    ``answers_file`` answers its dialogs from a file; ``record_file`` shows
+    them and saves what is answered (utilities/answers.py).
+    """
+    from utilities import answers
+
+    if answers_file:
+        answers.load(answers_file)
+    elif record_file:
+        answers.record(record_file)
     try:
         return COMMANDS[name][0]()
     finally:
+        if answers_file or record_file:
+            left = answers.stop()
+            if left:
+                print(f"[answers] {len(left)} answers of {answers_file} were not used: "
+                      + "; ".join(left))
+            if record_file:
+                print(f"Answers saved: {record_file}")
         try:
             from etabs_api.core.connection import restore_units
 
@@ -295,7 +322,14 @@ def main(argv: list[str] | None = None) -> int:
             return menu()  # typed alone in a terminal, or the program double-clicked
         parser.print_help()
         return 1
-    run_and_restore(arguments.command)
+    from utilities.answers import AnswersError
+
+    try:
+        run_and_restore(arguments.command, getattr(arguments, "answers", None),
+                        getattr(arguments, "record", None))
+    except AnswersError as error:   # a fault of the answers file, not of the program
+        print(f"\n{arguments.command} stopped: {error}")
+        return 2
     return 0
 
 

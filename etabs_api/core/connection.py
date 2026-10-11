@@ -79,8 +79,18 @@ def running_etabs(helper=None):
     ``Helper.GetObject`` returns None, without raising, when it finds no
     session, so its result is checked. A session it misses is looked for
     again by its process.
+
+    ``SDT_ETABS_PID`` in the environment names the one ETABS process to use.
+    The test runs set it to the ETABS they started, so that a command never
+    attaches to another ETABS that is open on the machine.
     """
     helper = helper or etabs_helper()
+    pinned = os.environ.get("SDT_ETABS_PID", "").strip()
+    if pinned.isdigit():
+        try:
+            return helper.GetObjectProcess(ETABS_OBJECT, int(pinned))
+        except Exception:
+            return None
     try:
         etabs = helper.GetObject(ETABS_OBJECT)
     except Exception:

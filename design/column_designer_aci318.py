@@ -1053,6 +1053,9 @@ def _collapse_combo_permutations(
 
     Flexure/axial keeps one row per column, combination and end: the governing
     permutation, i.e. a failing one if any, otherwise the highest utilization.
+    Permutations with the same utilization (to ``RATIO_TOLERANCE``; at a pinned
+    end every one is zero) are told apart by the larger axial compression, so
+    that the row shown does not depend on the last digits of the analysis.
     Shear and joint rows are only relabelled; the report builder already takes
     the worst value of every row that shares a column, combination and end.
     """
@@ -1067,14 +1070,18 @@ def _collapse_combo_permutations(
             load_checks.get("Flexure_Utilization"), errors="coerce"
         )
         load_checks["_not_pass"] = load_checks["Strength_Check"].astype(str).ne("PASS")
-        load_checks["_utilization"] = utilization.fillna(math.inf)
+        load_checks["_utilization"] = utilization.fillna(math.inf).round(
+            GOVERNING_DECIMALS)
+        load_checks["_axial"] = pd.to_numeric(
+            load_checks.get("Pu_kN"), errors="coerce").fillna(-math.inf).round(
+            GOVERNING_DECIMALS)
         load_checks = (
             load_checks.sort_values(
-                ["_not_pass", "_utilization"], ascending=False, kind="stable"
+                ["_not_pass", "_utilization", "_axial"], ascending=False, kind="stable"
             )
             .drop_duplicates(subset=["UniqueName", "Combo", "End"], keep="first")
             .sort_index()
-            .drop(columns=["_not_pass", "_utilization"])
+            .drop(columns=["_not_pass", "_utilization", "_axial"])
             .reset_index(drop=True)
         )
     if not shear_checks.empty:
@@ -1600,6 +1607,12 @@ def _evaluate_column_candidate(
 
 
 USE_INTERACTION_SURFACE = True  # False: the per-demand solver (Mn at Pn = Pu, then phi)
+# A moment below this is no moment: what the analysis leaves at a pinned end, about
+# 1e-13 kN-m, in a direction that changes from one analysis to the next. Such a
+# demand is checked as axial load alone, with its strength read about the section's
+# first axis, so that the result is the same at every run.
+NO_MOMENT_KNM = 1e-6
+GOVERNING_DECIMALS = 9   # utilizations and axial loads equal to this many decimals are a tie
 
 
 def column_demands(member: str, force_rows: pd.DataFrame) -> list[tuple[str, str, float, float, float]]:
@@ -1639,6 +1652,8 @@ def _evaluate_on_surface(member, force_rows, surface, engine, n_bars, dmain,
     data = np.array([[p, m2, m3] for _, _, p, m2, m3 in demands], dtype=float).reshape(-1, 3)
     # Section moments: Mx = M3, My = -M2 (column_interaction.demand_moments), in N and N-mm.
     points = np.column_stack([data[:, 0] * 1e3, data[:, 2] * 1e6, -data[:, 1] * 1e6])
+    no_moment = np.hypot(data[:, 1], data[:, 2]) < NO_MOMENT_KNM
+    points[no_moment, 1:] = 0.0
     tension_capacity = (engine.code.strength.tension_controlled * n_bars * math.pi * dmain**2
                         / 4.0 * engine.fy / 1000.0)
     if progress is not None and demands:
@@ -1655,7 +1670,8 @@ def _evaluate_on_surface(member, force_rows, surface, engine, n_bars, dmain,
             continue
         pu, mx, my = points[indices].T
         capacity, phi = surface.capacities(pu, mx, my)
-        demand = np.hypot(data[indices, 1], data[indices, 2])
+        demand = np.where(no_moment[indices], 0.0,
+                          np.hypot(data[indices, 1], data[indices, 2]))
         capacity_kNm = capacity / 1e6
         with np.errstate(divide="ignore", invalid="ignore"):
             utilization = np.where(

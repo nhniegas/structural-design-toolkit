@@ -17,7 +17,15 @@ def settings_path(filename: str) -> str:
     """Full path of a settings file in the user's settings folder.
 
     The folder itself is not created here; writers create it when they save.
+
+    ``SDT_SETTINGS_DIR`` in the environment names another folder. A test run
+    sets it to an empty one, so the dialogs offer the program's own defaults
+    and not what was last answered on this machine, and the answers of the
+    test do not replace yours.
     """
+    other = os.environ.get("SDT_SETTINGS_DIR", "").strip()
+    if other:
+        return os.path.join(other, filename)
     home = os.path.expanduser("~")
     folder = os.path.join(home, FOLDER)
     old = os.path.join(home, OLD_FOLDER)

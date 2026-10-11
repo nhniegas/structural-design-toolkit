@@ -37,6 +37,8 @@ Supporting code:
 - `utilities/_calc_report.py`: layout of the beam and column PDF calculation reports.
 - `utilities/run_summary.py`: the summary every command shows in a window when it finishes (the terminal keeps the detailed results).
 - `utilities/doctor.py`: `sdt doctor`, the check that a machine can run the toolkit.
+- `utilities/answers.py`: the answers file, which runs a command with no dialog (`--answers`, `--record`).
+- `tools/etabs_run.py`: test runs of the commands in an ETABS of their own, compared with a reference.
 - `assets/sdt.ico`: the icon of `sdt.exe`; `tools/make_icon.py` draws it (run it again after a change of the design).
 - `design/parallel.py`: the processes that share the beam design of a large model between the cores (`SDT_WORKERS=1` keeps one).
 - `build_exe.ps1`: builds the packaged program `sdt.exe`.
@@ -97,6 +99,8 @@ Each guide in `docs/` covers one tool: how to run it, its inputs, what it writes
 - [Framing plans as DXF](docs/etabs_framing_plans.md)
 - [Steel and composite modules](docs/steel_design_documentation.md)
 - [Wind load calculator](docs/wind_calculator_asce7_documentation.md)
+- [Running a command from an answers file](docs/answers_file.md)
+- [ETABS test runs](docs/etabs_test_runs.md)
 
 ## Running from the terminal
 
@@ -122,11 +126,16 @@ sdt doctor      # check that this machine can run the toolkit: ETABS, dialogs, L
 sdt             # the menu of commands (also what the packaged sdt.exe opens with)
 sdt --help      # list the commands
 sdt --version   # the version
+
+sdt beams --record beams.json    # any command: save what you answer in its dialogs
+sdt beams --answers beams.json   # any command: run it with no dialog, from that file
 ```
 
 Each command asks for its inputs in dialogs. The standalone checks (`composite`, `steel`, `wind`) then ask whether to print the results in the terminal, export a PDF calculation report, or both. The terminal shows the detailed results of a command. When it finishes, a separate window shows its summary: what was run, the counts, what needs attention and the files written.
 
 The commands also run on a model that was not made with `sdt setup`: one with its own combination names, section names and untagged members. A command reads what the model holds and asks for what is missing (which combinations to design for, the deflection and drift combinations, what to do with untagged members), saves the answers beside the model, and says in its summary what was read, answered or assumed. See [Working on a model the toolkit did not set up](docs/existing_models.md).
+
+A command can also run with no dialog. `--record` saves what you answer; `--answers` runs the command again from that file, printing each question with the answer it got. A dialog with no answer stops the command unless the file says to take what the dialog offers. See [Running a command from an answers file](docs/answers_file.md).
 
 `sdt` is installed by `python -m pip install -e .` in [Setup](#setup) (editable, so code changes apply without reinstalling). Without that step, `python main.py <command>` from the project folder runs the same commands:
 
@@ -141,7 +150,7 @@ To use `sdt` without activating the environment, add this to your PowerShell pro
 function sdt { & "C:\path\to\structural-design-toolkit\.venv\Scripts\sdt.exe" @args }
 ```
 
-`xs`, the command's earlier name, still works as an alias. Answers the commands remember are kept in `~/.structural_design_toolkit` (those in the old `~/.xlwings_structural` are copied over on first use).
+`xs`, the command's earlier name, still works as an alias. Answers the commands remember are kept in `~/.structural_design_toolkit` (`SDT_SETTINGS_DIR` in the environment names another folder) (those in the old `~/.xlwings_structural` are copied over on first use).
 
 ## Setting up an ETABS model
 
@@ -177,6 +186,8 @@ python -m pytest tests
 ```
 
 The tests need no ETABS. GitHub Actions runs them on every push to `main` (`.github/workflows/ci.yml`).
+
+For the checks that do need ETABS, `python tools/etabs_run.py scenario.json` starts an ETABS of its own, runs the commands of the scenario on a copy of a model from their answers, and compares every result with a reference: text and counts exactly, numbers within 1e-9. See [ETABS test runs](docs/etabs_test_runs.md).
 
 ## Building and releasing the program
 

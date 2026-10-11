@@ -403,6 +403,22 @@ class TestCandidateCheck:
         assert ok is False
         assert checks[0]["Flexure_Check"] == "FAIL"
 
+    def test_a_moment_of_analysis_noise_is_no_moment(self):
+        """BEHAVIOUR: at a pinned end the analysis leaves about 1e-13 kN-m, in a
+        direction that changes from one analysis to the next. The strength and
+        the utilization must not follow that direction."""
+        layout = self._layout(4)
+        one = col._evaluate_column_candidate(
+            frame_row(), force_table(combos={"L": (800.0, 0.0, 0.0, -1.8e-13, -3.0e-14)}),
+            layout, 25.0, 10.0, 40.0, False)[1]
+        other = col._evaluate_column_candidate(
+            frame_row(), force_table(combos={"L": (800.0, 0.0, 0.0, 3.1e-14, 1.2e-13)}),
+            layout, 25.0, 10.0, 40.0, False)[1]
+        for a, b in zip(one, other):
+            assert a["Flexure_Utilization"] == b["Flexure_Utilization"] == 0.0
+            assert a["phi_Mn_kNm"] == b["phi_Mn_kNm"] > 0
+            assert a["Strength_Check"] == "PASS"
+
     def test_resultant_of_two_moments_is_used(self):
         """HAND CALC: demand is sqrt(M2^2 + M3^2)."""
         layout = self._layout(4)
@@ -955,6 +971,27 @@ def test_report_keeps_the_governing_permutation_under_the_plain_combo_name():
     ]
     assert shear["Combo"].tolist() == ["ULS 1"]
     assert joints["Load_Combo"].tolist() == ["ULS 1"]
+
+
+def test_permutations_with_the_same_utilization_show_the_larger_axial_load():
+    """BEHAVIOUR: at a pinned end every permutation has utilization 0 (or the same
+    but for the last digits of the analysis). The row shown is the one with the
+    larger compression, whatever those digits are and whatever order they come in."""
+    display = {"ULS 1-1": "ULS 1", "ULS 1-2": "ULS 1", "ULS 1-3": "ULS 1"}
+
+    def governing(utilizations):
+        checks = pd.DataFrame({
+            "UniqueName": ["C1"] * 3, "Combo": ["ULS 1-1", "ULS 1-2", "ULS 1-3"],
+            "End": ["I"] * 3, "Pu_kN": [402.36, 417.31, 395.0],
+            "Flexure_Utilization": utilizations, "Strength_Check": ["PASS"] * 3})
+        load, _, _ = col._collapse_combo_permutations(checks, pd.DataFrame(), pd.DataFrame(),
+                                                      display)
+        return load["Pu_kN"].tolist()
+
+    assert governing([0.0, 0.0, 0.0]) == [417.31]
+    assert governing([2.4e-16, 1.7e-16, 3.3e-16]) == [417.31]
+    assert governing([0.5, 0.5 + 1e-13, 0.5 - 1e-13]) == [417.31]
+    assert governing([0.6, 0.5, 0.5]) == [402.36]      # a real difference still governs
 
 
 # --------------------------------------------------------------------------
