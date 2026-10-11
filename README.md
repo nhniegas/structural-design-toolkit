@@ -131,6 +131,7 @@ Each guide in `docs/` covers one tool: how to run it, its inputs, what it writes
 - [Wind load calculator](docs/wind_calculator_asce7_documentation.md)
 - [Results in the terminal](docs/terminal_output.md)
 - [The dialogs](docs/dialogs.md)
+- [The calculation reports](docs/calculation_reports.md)
 - [Running a command from an answers file](docs/answers_file.md)
 - [ETABS test runs](docs/etabs_test_runs.md)
 
@@ -268,6 +269,7 @@ Not in this version, and planned for later ones:
 - **The irregularities left to judgement**: in-plane discontinuity, out-of-plane offsets, non-parallel systems, and the change of diaphragm stiffness from story to story.
 - **Redundancy factor ρ and the system factors.** ρ is a fixed value, and R and Ω0 are not checked against Table 208-11A by system.
 - **Slabs on the framing plans.** `sdt plans` draws beams, columns, walls and grids; slab marks and span arrows are not drawn yet.
+- **Full calculation reports.** The beam and column reports hold tables of values for each member. A report with the equations of every member written out with their numbers is planned as a choice.
 - **Bar details in the 3D model.** `sdt 3d` draws the designed bars straight. Laps, hooks, bends, anchorage and cut-off points are not designed yet, and slabs, walls and footings have no bars.
 - **IFC export.** The 3D model is a STEP file, which holds the solids and their names. An IFC file would also say what each solid is (a beam, a column, its story and material) for BIM programs such as Revit and for model checkers.
 - **Seismic checks for other codes.** The period, base shear and spectrum scaling checks read UBC 97 seismic patterns; other patterns are designed for but those checks are reported as not applicable.

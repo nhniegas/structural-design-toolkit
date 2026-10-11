@@ -1088,27 +1088,21 @@ class WindLoadCalculatorDirectionalASCE7:
             tabular.append(NoEscape(r"\bottomrule"))
             return tabular
 
-        doc = Document(
-            save_path,
-            lmodern=False,  # avoids a hard dependency on the lmodern font package
-            geometry_options={"a4paper": True, "margin": "0.5in"},
-        )
-        doc.packages.append(Package("booktabs"))
-        doc.packages.append(Package("amsmath"))
-        doc.packages.append(Package("multicol"))
-        doc.preamble.append(NoEscape(r"\pagestyle{empty}"))
+        from utilities import report_style as style
 
-        doc.append(NoEscape(r"\begin{center}"))
-        doc.append(
-            NoEscape(
-                r"{\LARGE \textbf{ASCE 7 Wind Load Calculations (Directional Procedure)}}\\[0.35cm]"
-            )
-        )
-        doc.append(
-            NoEscape(r"{\normalsize " + datetime.today().strftime("%B %d, %Y") + r"}")
-        )
-        doc.append(NoEscape(r"\end{center}"))
-        doc.append(NoEscape(r"\vspace{0.4cm}"))
+        building = f"{self.l_input:g} x {self.b_input:g} m, mean roof height {self.mean_roof_height:g} m"
+        doc = style.new_document(
+            "Wind Load Calculation", "ASCE 7, directional procedure (MWFRS)",
+            f"Building: {self.l_input:g} x {self.b_input:g} m", "sdt wind",
+            os.path.basename(save_path) + ".pdf", packages=("multicol",),
+            default_filepath=save_path)
+        doc.append(NoEscape(style.title_block(
+            "Wind Load Calculation", "Main wind force resisting system, directional procedure", [
+                ("Building", building),
+                ("Date", datetime.today().strftime("%d %B %Y").lstrip("0")),
+                ("Design code", "ASCE 7"),
+                ("Prepared with", f"sdt wind {style.program_version()}".strip())])))
+        doc.append(NoEscape(r"\vspace{2mm}"))
 
         doc.append(NoEscape(r"\begin{multicols}{2}"))
 
@@ -1207,8 +1201,6 @@ class WindLoadCalculatorDirectionalASCE7:
             )
 
         doc.append(NoEscape(r"\end{multicols}"))
-        doc.append(NoEscape(r"\vspace{0.3cm}"))
-        doc.append(NoEscape(r"\hrule"))
         doc.append(NoEscape(r"\vspace{0.4cm}"))
 
         # --- 4.0 MWFRS Pressure Summary Section (kept full-width, single column) ---
@@ -1266,6 +1258,8 @@ class WindLoadCalculatorDirectionalASCE7:
 
         # --- Compile -----------------------------------------------------
         try:
+            # twice: the header says "Page x of y", which LaTeX knows after one pass
+            doc.generate_pdf(save_path, clean=False, clean_tex=False, compiler="pdflatex")
             doc.generate_pdf(save_path, clean_tex=True, compiler="pdflatex")
             print(f"PDF exported successfully: {save_path}.pdf")
             return f"{save_path}.pdf"

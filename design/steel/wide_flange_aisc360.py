@@ -2188,8 +2188,10 @@ def _has_sty(name: str) -> bool:
 
 
 class LatexRenderer:
-    def __init__(self, base_pt: int = 10, gap_cm: float = 0.30, margin: str = "0.5in"):
+    def __init__(self, base_pt: int = 10, gap_cm: float = 0.30, margin: str = "0.5in",
+                 file_name: str = ""):
         self.pt, self.gap, self.margin = base_pt, gap_cm, margin
+        self.file_name = file_name
 
     # ---- one item -> LaTeX --------------------------------------------------
     def _emit(self, box, it: Item, nxt: Optional[Item] = None) -> None:
@@ -2235,16 +2237,12 @@ class LatexRenderer:
 
     # ---- Content -> Document --------------------------------------------------
     def document(self, c: Content) -> Document:
-        doc = Document(
-            documentclass="extarticle",
-            document_options=[f"{self.pt}pt"],
-            geometry_options={"a4paper": True, "margin": self.margin},
-            lmodern=_has_sty("lmodern.sty"),
-        )
-        doc.packages.append(Package("booktabs"))
-        doc.packages.append(Package("amsmath"))
-        doc.packages.append(Package("multicol"))
-        doc.preamble.append(NoEscape(r"\pagestyle{empty}"))  # no page numbers
+        from utilities import report_style as style
+
+        doc = style.new_document(
+            "Steel Member Capacity", "AISC 360-22",
+            "Section: " + c.title.split(" ")[0], "sdt steel", self.file_name,
+            documentclass="extarticle", font_size=self.pt, packages=("multicol",))
         # FIX: Added \raggedcolumns to stop the multicol package from stretching spaces
         doc.preamble.append(
             NoEscape(
@@ -2253,19 +2251,15 @@ class LatexRenderer:
             )
         )
         # header
-        doc.append(NoEscape(r"\begin{center}"))
-        doc.append(NoEscape(r"{\LARGE \textbf{" + c.title + r"}}\\[0.35cm]"))
-        doc.append(NoEscape(r"{\normalsize " + c.date + r"}"))
-        doc.append(NoEscape(r"\end{center}"))
+        doc.append(NoEscape(r"{\LARGE\bfseries " + c.title + r"}\par\vspace{1mm}"))
+        doc.append(NoEscape(r"{\large\sdtsoft{" + c.date + r"\ \ $\cdot$\ \ sdt steel "
+                            + style.program_version() + r"}}\par"))
         doc.append(NoEscape(rf"\vspace{{{self.gap * 4 / 3:.2f}cm}}"))
         # 2-column body
         doc.append(NoEscape(r"\begin{multicols}{2}"))
         for sec in c.columns:
             self._section(doc, sec)
         doc.append(NoEscape(r"\end{multicols}"))
-        doc.append(NoEscape(rf"\vspace{{{self.gap}cm}}"))
-        doc.append(NoEscape(r"\hrule"))
-        doc.append(NoEscape(rf"\vspace{{{self.gap * 4 / 3:.2f}cm}}"))
         self._section(doc, c.summary)
         return doc
 
@@ -2302,7 +2296,8 @@ class WideFlangeReport:
         content = self.builder.build(demands or Demands(), title, date)
         pages = None
         for pt, gap in self.FIT_STEPS:
-            doc = LatexRenderer(pt, gap).document(content)
+            doc = LatexRenderer(pt, gap, file_name=os.path.basename(base) + ".pdf").document(
+                content)
             doc.generate_pdf(
                 base,
                 clean=False,
@@ -2318,8 +2313,7 @@ class WideFlangeReport:
         ):
             if os.path.exists(base + ext):
                 os.remove(base + ext)
-        if pages != 1:
-            print(f"WARNING: report is {pages} pages even at the smallest fit step")
+        # More than one page is fine: each page has the header with "Page x of y".
         return base + ".pdf"
 
 
