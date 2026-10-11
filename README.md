@@ -47,6 +47,7 @@ Supporting code:
 - `etabs_api/workflows/foundation_plan.py`: the footings, tie beams and columns of the foundation model, with their marks, saved for the framing plans.
 - `etabs_api/workflows/model_3d.py`: the concrete of the model as 3D solids in a STEP file (`sdt 3d`).
 - `etabs_api/workflows/model_3d_bars.py`: the reinforcing bars of the saved designs for the 3D model.
+- `etabs_api/workflows/concrete_quantities.py`: the concrete volume, the floor area and the ratio in m3/m2 (`sdt quantities`).
 - `design/concrete/beams/`: the beam design in files by job (design, sections, supports, results, schedule, calculations, options).
 - `design/concrete/columns/`: the column design in files by job (design, sizing, section, layouts, flexure, transverse, shear, joints, tables, report, schedule, calculations, options).
 - `design/concrete/beams/deflection.py`: beam deflection checks (ACI 318M-14 24.2).
@@ -125,6 +126,7 @@ Each guide in `docs/` covers one tool: how to run it, its inputs, what it writes
 - [Framing plans as DXF](docs/etabs_framing_plans.md)
 - [Foundation model](docs/etabs_foundation_model.md)
 - [3D model as STEP](docs/etabs_3d_model.md)
+- [Concrete quantities](docs/etabs_concrete_quantities.md)
 - [Steel and composite modules](docs/steel_design_documentation.md)
 - [Wind load calculator](docs/wind_calculator_asce7_documentation.md)
 - [Results in the terminal](docs/terminal_output.md)
@@ -151,6 +153,7 @@ sdt design      # analysis and beam/column design loop that resizes members unti
 sdt foundation  # a second model for the foundation, from the support reactions; or update its forces
 sdt plans       # framing plans of every floor as one DXF: beams, columns, marks, grids; the foundation plan too
 sdt 3d          # the model as 3D solids in a STEP file, for AutoCAD; the foundation and the bars too
+sdt quantities  # concrete volume by story, floor area and the concrete ratio in m3/m2 (read only)
 sdt composite   # rectangular filled composite column, AISC DG6 (no ETABS)
 sdt steel       # wide-flange steel member, AISC 360-22 (no ETABS)
 sdt wind        # MWFRS wind pressures, ASCE 7 directional procedure (no ETABS)
@@ -215,6 +218,10 @@ This defines the materials, frame sections, load patterns, UBC 97 response spect
 ## 3D model
 
 `sdt 3d` writes the concrete of the open model as 3D solids in one STEP file, in mm, which AutoCAD imports: columns, beams with their top at the floor and stopped at the column faces, walls and slabs, each named and grouped by story. When the plan of the foundation model was saved with `sdt foundation`, the footings and tie beams can be included. Members of the same size are one shape placed many times, so the file stays small. The reinforcing bars of the saved beam and column designs can be included, the main bars alone or with the stirrups and ties; they are straight, with no laps or hooks. Steel members are not drawn. See [3D model](docs/etabs_3d_model.md).
+
+## Concrete quantities
+
+`sdt quantities` gives the volume of concrete of each story and of the building, the floor area, and the concrete ratio in m3/m2. Beams are measured below the slab and between the faces of their supports, slabs less their openings and the columns through them, so nothing is counted twice. The slab on grade, which is not modelled as a rule, is the footprint of the building by the thickness you type, and the footings and tie beams of the saved foundation plan can be added. See [Concrete quantities](docs/etabs_concrete_quantities.md).
 
 ## Beam and column design
 

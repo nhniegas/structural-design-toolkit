@@ -42,6 +42,9 @@ the same commands.
                     the bars of the saved designs)
                     (etabs_api/workflows/model_3d.py)
                     (etabs_api/workflows/framing_plans.py)
+    sdt quantities  the concrete volume of each story and of the building, the
+                    floor area, and the concrete ratio in m3/m2
+                    (etabs_api/workflows/concrete_quantities.py)
     sdt composite   rectangular filled composite column, AISC DG6
                     (design/steel/composite_column_aiscDG06.py)
     sdt steel       wide-flange member, AISC 360-22
@@ -188,6 +191,12 @@ def _model_3d():
     return run_model_3d()
 
 
+def _quantities():
+    from etabs_api.workflows.concrete_quantities import run_quantities
+
+    return run_quantities()
+
+
 def _composite():
     from design.steel.composite_column_aiscDG06 import run
 
@@ -228,6 +237,7 @@ COMMANDS = {
     "foundation": (_foundation, "foundation model from the support reactions, or update its forces"),
     "plans": (_plans, "framing plans of every floor as one DXF (beams, columns, marks, grids)"),
     "3d": (_model_3d, "the concrete of the model as 3D solids in a STEP file, for AutoCAD"),
+    "quantities": (_quantities, "concrete volume, floor area and their ratio in m3/m2 (read only)"),
     "composite": (_composite, "check a rectangular filled composite column (AISC DG6)"),
     "steel": (_steel, "check a wide-flange steel member (AISC 360-22)"),
     "wind": (_wind, "MWFRS wind pressures by the ASCE 7 directional procedure"),

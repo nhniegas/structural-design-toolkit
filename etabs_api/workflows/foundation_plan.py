@@ -41,6 +41,7 @@ class Shell:
     z: float
     thickness: float = 0.0
     section: str = ""
+    opening: bool = False        # an opening in the floor, not concrete
 
 
 @dataclass
@@ -253,10 +254,12 @@ def columns_of_manifest(manifest: dict) -> list[PlanColumn]:
     return out
 
 
-def read_shells(model, xyz: dict[str, tuple[float, float, float]]) -> list[Shell]:
+def read_shells(model, xyz: dict[str, tuple[float, float, float]],
+                openings: bool = False) -> list[Shell]:
     """The horizontal shells of the model open in ETABS, with the thickness of
-    their slab property (0 for a deck or another property). Walls, ramps and
-    openings are left out. ``xyz``: the coordinates of the joints by name."""
+    their slab property (0 for a deck or another property). Walls and ramps are
+    left out, and so are openings unless ``openings`` asks for them (they then
+    come with ``opening`` set). ``xyz``: the coordinates of the joints by name."""
     from etabs_api.core.helpers import as_list, return_code
 
     thickness: dict[str, float] = {}
@@ -270,6 +273,9 @@ def read_shells(model, xyz: dict[str, tuple[float, float, float]]) -> list[Shell
             continue                      # not a horizontal shell: a wall, a ramp
         try:
             if model.AreaObj.GetOpening(name, False)[0]:
+                if openings:
+                    shells.append(Shell(name, [(c[0], c[1]) for c in corners], corners[0][2],
+                                        opening=True))
                 continue
         except Exception:  # noqa: BLE001 - no opening flag: a plain shell
             pass
