@@ -31,11 +31,13 @@ if __package__ in (None, ""):
 
 LAYER_GIRDER, LAYER_BEAM, LAYER_COLUMN = "S-GIRDER", "S-BEAM", "S-COLUMN"
 LAYER_WALL, LAYER_GRID, LAYER_TEXT, LAYER_DIM = "S-WALL", "S-GRID", "S-TEXT", "S-DIM"
+LAYER_FOOTING, LAYER_TIE_BEAM = "S-FOOTING", "S-TIEBEAM"
 # name, AutoCAD colour index, linetype
 LAYERS = (
     (LAYER_GIRDER, 3, "Continuous"), (LAYER_BEAM, 4, "Continuous"),
     (LAYER_COLUMN, 7, "Continuous"), (LAYER_WALL, 8, "Continuous"),
     (LAYER_GRID, 8, "CENTER"), (LAYER_TEXT, 2, "Continuous"), (LAYER_DIM, 1, "Continuous"),
+    (LAYER_FOOTING, 6, "Continuous"), (LAYER_TIE_BEAM, 5, "Continuous"),
 )
 BEAM_STYLE = "SDT_BEAM"       # the multiline style: two dashed lines, one unit apart
 DIM_STYLE = "SDT_PLAN"
@@ -111,6 +113,11 @@ class FloorPlan:
     walls: list[PlanWall] = field(default_factory=list)
     # columns that start on this floor (no column below): beams stop at them too
     columns_above: list[PlanColumn] = field(default_factory=list)
+    # the foundation plan only: its footings (foundation_plan.Footing), the title of
+    # the plan and the lines written under it (the footing sizes)
+    footings: list = field(default_factory=list)
+    title: str = ""
+    notes: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -329,6 +336,9 @@ def extent(floors: list[FloorPlan]) -> tuple[float, float, float, float]:
         for wall in floor.walls:
             xs += [wall.x1, wall.x2]
             ys += [wall.y1, wall.y2]
+        for footing in floor.footings:
+            xs += [x for x, _ in footing.outline]
+            ys += [y for _, y in footing.outline]
     if not xs:
         return 0.0, 0.0, 0.0, 0.0
     return min(xs), min(ys), max(xs), max(ys)
@@ -432,6 +442,13 @@ def draw_floor(msp, floor: FloorPlan, offset: tuple[float, float], options: Plan
     ox, oy = offset
     height = options.text_height
     counts = {"beams": 0, "single_line": 0, "columns": 0, "walls": 0}
+    for footing in floor.footings:      # under everything else: its outline and its mark
+        outline = [(x + ox, y + oy) for x, y in footing.outline]
+        msp.add_lwpolyline(outline, close=True, dxfattribs={"layer": LAYER_FOOTING})
+        low_x = min(x for x, _ in outline)
+        low_y = min(y for _, y in outline)
+        _text(msp, footing.mark, (low_x + 0.5 * height, low_y + 0.5 * height), height,
+              align="BOTTOM_LEFT", layer=LAYER_FOOTING)
     cuts = beam_end_cuts(floor)
     for beam in floor.beams:
         at_i, at_j = cuts[beam.name]
@@ -439,7 +456,8 @@ def draw_floor(msp, floor: FloorPlan, offset: tuple[float, float], options: Plan
         if ends is None:
             continue
         (x1, y1), (x2, y2) = ends
-        layer = LAYER_GIRDER if beam.girder else LAYER_BEAM
+        layer = LAYER_TIE_BEAM if floor.footings or floor.title else (
+            LAYER_GIRDER if beam.girder else LAYER_BEAM)
         if beam.width > 0:
             line = msp.add_mline([(x1 + ox, y1 + oy), (x2 + ox, y2 + oy)], dxfattribs={
                 "layer": layer, "style_name": BEAM_STYLE, "scale_factor": beam.width,
@@ -554,6 +572,9 @@ def write_framing_plans(floors: list[FloorPlan], grids: list[PlanGrid], path: st
     room = 12.0 * height + 4.0 * height if options.grids and grids else 4.0 * height
     pitch = (box[2] - box[0]) + 2.0 * room + 10.0 * height
     marked = marked_columns(floors, options.column_marks)
+    for floor in floors:        # the foundation plan marks every column on it
+        if floor.title:
+            marked |= {(floor.story, column.name) for column in floor.columns}
     totals = {"floors": 0, "beams": 0, "single_line": 0, "columns": 0, "walls": 0}
     for index, floor in enumerate(floors):
         offset = (index * pitch, 0.0)
@@ -565,9 +586,12 @@ def write_framing_plans(floors: list[FloorPlan], grids: list[PlanGrid], path: st
         totals["floors"] += 1
         middle = (box[0] + box[2]) / 2.0 + offset[0]
         base = box[1] - room - 4.0 * height
-        _text(msp, f"{floor.story} FRAMING PLAN", (middle, base), 1.6 * height)
+        _text(msp, floor.title or f"{floor.story} FRAMING PLAN", (middle, base), 1.6 * height)
         _text(msp, f"ELEV. {floor.elevation / 1000.0:+.2f} m", (middle, base - 2.6 * height),
               height)
+        for row, note in enumerate(floor.notes):      # the footing sizes
+            _text(msp, note, (box[0] + offset[0], base - (5.2 + 1.8 * row) * height), height,
+                  align="MIDDLE_LEFT")
     doc.saveas(path)
     return totals
 
@@ -711,6 +735,35 @@ def read_grids(model, box: tuple[float, float, float, float]) -> list[PlanGrid]:
     return grids
 
 
+FOUNDATION_STORY = "FOUNDATION"
+
+
+def foundation_floor(plan: dict) -> FloorPlan:
+    """The saved plan of the foundation model (``foundation_plan.load_plan``) as a
+    floor to draw: its footings with their marks, the tie beams at their width with
+    their names, and the columns with their marks. The sizes of the footings are
+    written under its title."""
+    from etabs_api.workflows.foundation_plan import schedule_lines
+
+    columns = [PlanColumn(c.name, c.x, c.y, c.width, c.depth, c.angle, c.circular,
+                          c.joint, c.joint) for c in plan["columns"]]
+    joints = {c.joint for c in plan["columns"]}
+    beams = [PlanBeam(b.mark, b.x1, b.y1, b.x2, b.y2, b.width, b.joint_i, b.joint_j,
+                      girder=b.joint_i in joints or b.joint_j in joints)
+             for b in plan["tie_beams"]]
+    levels = [f.z for f in plan["footings"]] or [c.z for c in plan["columns"]] or [0.0]
+    return FloorPlan(FOUNDATION_STORY, min(levels), beams, columns, footings=plan["footings"],
+                     title="FOUNDATION PLAN", notes=schedule_lines(plan["footings"]))
+
+
+def saved_foundation_plan(model_path: str) -> dict | None:
+    """The foundation plan saved for the foundation model of ``model_path``, or None."""
+    from etabs_api.workflows.foundation_model import foundation_path_for
+    from etabs_api.workflows.foundation_plan import load_plan
+
+    return load_plan(foundation_path_for(model_path))
+
+
 # =============================================================================
 # TERMINAL WORKFLOW
 # =============================================================================
@@ -727,6 +780,9 @@ def plans_summary(totals: dict[str, int], options: PlanOptions, model_path: str 
     summary.add("Beams and girders", totals["beams"])
     summary.add("Columns", totals["columns"])
     summary.add("Walls", totals["walls"])
+    if "footings" in totals:
+        summary.add("Foundation plan", f"included: {totals['footings']} footings (the first "
+                                       "plan; its tie beams and columns are in the counts)")
     summary.add("Grids", ("with dimensions" if options.dimensions else "with bubbles")
                 if options.grids else "not drawn")
     summary.add("Column marks", "where each column starts"
@@ -776,6 +832,18 @@ def run_framing_plans() -> str | None:
     if scale is None:
         return None
     options.scale = SCALES[scale]
+    foundation = saved_foundation_plan(model_path)
+    if foundation is not None:
+        include = select_option(
+            title, "Include the foundation plan?\n\nA plan of the foundation model of this "
+            f"model was saved on {foundation['saved']}: {len(foundation['footings'])} footings, "
+            f"{len(foundation['tie_beams'])} tie beams. It is drawn first, before the floors. "
+            "If the foundation changed since, open its model and save the plan again with "
+            "sdt foundation.", ["Yes", "No"])
+        if include is None:
+            return None
+        if include == "No":
+            foundation = None
     folder = select_output_directory("Folder for the framing plans (.dxf)")
     if not folder:
         return None
@@ -788,8 +856,12 @@ def run_framing_plans() -> str | None:
             if not floors:
                 show_warning("The model has no beams, columns or walls to draw.", title=title)
                 return None
+            if foundation is not None:
+                floors = [foundation_floor(foundation)] + floors
             window.update(f"Drawing {len(floors)} floors")
             totals = write_framing_plans(floors, grid_lines, path, options)
+            if foundation is not None:
+                totals["footings"] = len(foundation["footings"])
     except PermissionError:
         show_warning(f"{path} is open in another program. Close it and run sdt plans again.",
                      title=title)

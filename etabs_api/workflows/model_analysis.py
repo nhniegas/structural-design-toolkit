@@ -17,7 +17,8 @@
    * weight: the seismic weight from the mass source against the base reaction
      of the same loads (they must agree within 1 %), and the weight per story.
 
-Drift, irregularity and torsion checks are not done yet.
+Drift is checked by ``sdt drift``; the irregularities, the torsion amplifier Ax
+and the P-delta stability coefficient by ``sdt irregularity``.
 """
 
 from __future__ import annotations
@@ -32,7 +33,7 @@ if __package__ in (None, ""):
     # Run as a script: make the project folder (two levels up) importable.
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from design.code_config import NSCP  # noqa: E402
+from design.criteria.code_config import NSCP  # noqa: E402
 from etabs_api.core.helpers import as_list, return_code  # noqa: E402
 
 G = NSCP.seismic.gravity  # mm/s2
@@ -101,6 +102,69 @@ class AnalysisReport:
     story_weights: pd.DataFrame = field(default_factory=pd.DataFrame)
     warnings: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)  # checks that do not apply to this model
+
+    def report(self):
+        """The report for the terminal: tables, and the equations with their numbers."""
+        from utilities.terminal import Report
+
+        out = Report("ETABS ANALYSIS", [f"Model: {self.model_path}"] if self.model_path else [])
+        out.heading(f"Response spectrum scaled to {SCALE_TARGET * 100:g} % of the static "
+                    "base shear (drift cases: of the drift patterns)")
+        out.table(["Direction", "Static case", "V static (kN)", "Spectrum case",
+                   "V before (kN)", "V after (kN)", "Scale factor x"],
+                  [[s.direction, s.static_case, f"{s.static_shear / 1e3:,.1f}", s.spectrum_case,
+                    f"{s.spectrum_before / 1e3:,.1f}", f"{s.spectrum_after / 1e3:,.1f}",
+                    f"{s.factor:.4f}"] for s in self.scaling])
+        out.equations([f"{s.spectrum_case}: factor = V_static / V_spectrum = "
+                       f"{s.static_shear / 1e3:,.1f} / {s.spectrum_before / 1e3:,.1f} = "
+                       f"{s.factor:.4f}" for s in self.scaling if s.factor != 1.0])
+        if not self.scaling:
+            out.lines(["No static and spectrum cases were found to compare."])
+        raised = [m for m in self.minimum_scaling if m.factor > 1.0]
+        if raised:
+            out.heading("Drift load cases raised to the zone 4 minimum (Eq. 208-11)")
+            out.table(["Case", "V/W of ETABS", "0.8 Z Nᵥ I / R", "Soil", "Nᵥ", "Scale factor x"],
+                      [[m.case, f"{m.coefficient:.4f}", f"{m.minimum:.4f}", m.soil,
+                        f"{m.nv:g}", f"{m.factor:.3f}"] for m in raised])
+            out.equations([f"{m.case}: factor = (0.8 Z Nᵥ I / R) / (V/W) = {m.minimum:.4f} / "
+                           f"{m.coefficient:.4f} = {m.factor:.3f}" for m in raised])
+            out.lines(["Ca and Cv are typed in, and ETABS then takes Nv = 1 in the minimum."])
+        out.heading("Periods")
+        out.table(["Direction", "Governing modal period (s)"],
+                  [[d, f"{t:.3f}"] for d, t in self.governing_period.items()])
+        if self.method_a is not None and self.height is not None:
+            where = (f"{self.height_from}, the stories of the static seismic patterns"
+                     if self.height_from else
+                     f"above the ground at elevation {self.ground_elevation / 1e3:g} m")
+            out.equations([
+                f"hₙ = {self.height / 1e3:.2f} m = {self.height / FT:.2f} ft  ({where})",
+                f"T_A = Cₜ hₙ^(3/4) = {self.method_a / (self.height / FT) ** 0.75:g} × "
+                f"{self.height / FT:.2f}^0.75 = {self.method_a:.3f} s   (NSCP Eq. 208-12)",
+                f"T ≤ {self.cap:.1f} T_A = {self.cap * self.method_a:.3f} s   (Method B cap, "
+                "NSCP 208.5.2.2)"])
+        if not self.periods.empty:
+            head = self.periods.head(12)
+            out.table([str(c) for c in head.columns], head.values.tolist(), "Modes")
+        out.heading("Modal participating mass")
+        out.table(["Direction", "Sum (%)", "Needed (%)"],
+                  [[d, f"{total * 100:.1f}", f"{NSCP.seismic.modal_mass * 100:g}"]
+                   for d, total in self.mass_sum.items()])
+        out.heading("Weight")
+        rows = []
+        if self.seismic_weight is not None:
+            rows.append(["Seismic weight from the mass source", f"{self.seismic_weight / 1e3:,.1f}"])
+        if self.reaction_weight is not None:
+            rows.append(["Base reaction of the same loads", f"{self.reaction_weight / 1e3:,.1f}"])
+        out.table(["", "kN"], rows)
+        if not self.story_weights.empty:
+            out.table([str(c) for c in self.story_weights.columns],
+                      self.story_weights.values.tolist(), "Weight of each story")
+        out.heading("Warnings")
+        out.lines(self.warnings or ["None."], "yellow" if self.warnings else "green")
+        if self.notes:
+            out.heading("Not applicable to this model")
+            out.lines(self.notes)
+        return out
 
     def text(self) -> str:
         """The report as terminal text."""
@@ -689,7 +753,12 @@ def run_model_analysis() -> AnalysisReport | None:
         return None
     # Save() keeps the results; Save(path) drops them even for the same file
     model.File.Save()
-    print(report.text())
+    from utilities import terminal
+
+    if terminal.drawn():
+        report.report().show()
+    else:
+        print(report.text())
     print(f"Saved: {path}")
     analysis_summary(report, path).show(popup=True, echo=False)
     return report

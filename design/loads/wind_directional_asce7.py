@@ -26,7 +26,8 @@ from pylatex.utils import NoEscape
 
 if __package__ in (None, ""):
     # Run as a script: make the project folder importable.
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__)))))
 
 from utilities.design_cli import Field, run_design  # noqa: E402
 
@@ -1335,6 +1336,47 @@ def calculate(values: dict) -> WindLoadCalculatorDirectionalASCE7:
 def summary_text(calculator: WindLoadCalculatorDirectionalASCE7) -> str:
     """Every intermediate and final table as terminal text."""
     return calculator.summary_text()
+
+
+def terminal_report(calculator: WindLoadCalculatorDirectionalASCE7):
+    """The wind pressures for the terminal: every table, and the equations of the
+    directional procedure with the numbers of this building."""
+    from utilities.terminal import Report
+
+    c = calculator
+    out = Report("ASCE 7 WIND LOADS - DIRECTIONAL PROCEDURE (MWFRS)")
+    out.heading("Inputs")
+    out.table(["", ""], [
+        ["Building classification", c.building_class],
+        ["Basic wind speed V (m/s)", f"{c.basic_wind_speed:.3f}"],
+        ["Enclosure classification", c.enclosure_class],
+        ["Exposure category", c.exposure_category],
+        ["Kd / Kzt / Ke / G", f"{c.wind_dir_factor} / {c.topographic_factor} / "
+                              f"{c.ground_elevation_factor} / {c.gust_effect_factor}"],
+        ["GCpi (+ / -)", f"{c.gcpi_pos} / {c.gcpi_neg}"],
+        ["L x B (m)", f"{c.l_input} x {c.b_input} (ridge direction: {c.ridge_direction_input})"],
+        ["Eave / mean / apex height (m)", f"{c.eave_height} / {c.mean_roof_height} / "
+                                           f"{c.apex_height}"],
+    ])
+    out.equations([
+        f"q = 0.613 Kzt Kd Kₑ V² = 0.613 × {c.topographic_factor} × {c.wind_dir_factor} × "
+        f"{c.ground_elevation_factor} × {c.basic_wind_speed:.3f}² = {c.vel_pres:.3f} Pa",
+        "q_z = K_z q  at each height;  q_h = K_h q  at the mean roof height",
+        f"p = q G Cp − q_h (GCpi),  G = {c.gust_effect_factor},  GCpi = {c.gcpi_pos} and "
+        f"{c.gcpi_neg}   (windward walls: q = q_z; other surfaces: q = q_h)",
+    ], "Equations")
+    for title, table in (
+            ("Velocity pressure profile (q_z)", c.velocity_pressure_table),
+            ("Wall pressure coefficients (Cp)", c.wall_cp_table),
+            ("Roof pressure coefficients (Cp), wind normal to the ridge",
+             c.roof_cp_display_normal),
+            ("Roof pressure coefficients (Cp), wind parallel to the ridge",
+             c.roof_cp_display_parallel),
+            ("MWFRS pressures, wind normal to the ridge", c.mwfrs_normal_summary),
+            ("MWFRS pressures, wind parallel to the ridge", c.mwfrs_parallel_summary)):
+        out.heading(title)
+        out.table([str(col) for col in table.columns], table.values.tolist())
+    return out
 
 
 def export_pdf(calculator: WindLoadCalculatorDirectionalASCE7, path: str) -> str | None:

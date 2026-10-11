@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
-from design.beam_deflection import (
+from design.concrete.beams.deflection import (
     COMBO_DEAD,
     COMBO_FULL,
     COMBO_ROOF,

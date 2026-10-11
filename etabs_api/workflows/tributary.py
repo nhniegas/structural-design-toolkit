@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from design.code_config import NSCP
+from design.criteria.code_config import NSCP
 
 HEAVY_KPA = NSCP.live_load_reduction.heavy_kpa
 HEAVY_TOLERANCE_M2 = NSCP.live_load_reduction.heavy_tolerance_m2

@@ -10,10 +10,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import test_beam_designer_aci318 as beam_tests  # noqa: E402
 
-from design import beam_carriers as bc  # noqa: E402
-from design import dcr_targets as dt  # noqa: E402
+from design.concrete.beams import carriers as bc  # noqa: E402
+from design.criteria import dcr_targets as dt  # noqa: E402
 
-beam = beam_tests.beam
+from design.concrete.beams import design as beam_design  # noqa: E402
+from design.concrete.beams import sections as beam_sections  # noqa: E402
+from design.concrete.beams import supports as beam_supports  # noqa: E402
 
 
 # ----------------------------------------------------------------- the targets
@@ -58,7 +60,7 @@ def test_a_target_at_the_code_limit_is_not_kept_and_targets_are_saved_and_read()
 
 def test_a_girder_and_a_gravity_beam_are_told_apart_by_their_supports():
     assert dt.beam_type("Supported Both Ends") == dt.GIRDER
-    assert dt.beam_type(beam.GRAVITY_BEAM_STATUS) == dt.BEAM
+    assert dt.beam_type(beam_supports.GRAVITY_BEAM_STATUS) == dt.BEAM
 
 
 # ----------------------------------------------------------------- beams designed to a target
@@ -69,11 +71,11 @@ def bottom_bars(results) -> int:
 
 def test_a_flexure_target_gives_more_bars_and_the_real_moment_is_reported():
     props, forces = beam_tests._mock_beam_properties(), beam_tests._mock_force_table()
-    code = beam.execute_beam_design(props, forces, False, "GRAV")
+    code = beam_design.execute_beam_design(props, forces, False, "GRAV")
     targets = dt.Targets()
     targets.set(dt.GIRDER, dt.FLEXURE, 0.6)
     with dt.use(targets):
-        tight = beam.execute_beam_design(props, forces, False, "GRAV")
+        tight = beam_design.execute_beam_design(props, forces, False, "GRAV")
     assert bottom_bars(tight) > bottom_bars(code)
     assert tight["Mu_mid"].max() == pytest.approx(code["Mu_mid"].max())     # not the amplified one
     assert tight["Target_DCR_Flexure"].iloc[0] == 0.6
@@ -82,21 +84,21 @@ def test_a_flexure_target_gives_more_bars_and_the_real_moment_is_reported():
 
 def test_a_target_of_another_member_type_changes_nothing():
     props, forces = beam_tests._mock_beam_properties(), beam_tests._mock_force_table()
-    code = beam.execute_beam_design(props, forces, False, "GRAV")
+    code = beam_design.execute_beam_design(props, forces, False, "GRAV")
     targets = dt.Targets()
     targets.set(dt.BEAM, dt.FLEXURE, 0.6)            # the mock is a girder
     with dt.use(targets):
-        other = beam.execute_beam_design(props, forces, False, "GRAV")
+        other = beam_design.execute_beam_design(props, forces, False, "GRAV")
     assert bottom_bars(other) == bottom_bars(code)
 
 
 def test_a_shear_target_gives_more_stirrup_steel():
     props, forces = beam_tests._mock_beam_properties(), beam_tests._mock_force_table(wu=110.0)
-    code = beam.execute_beam_design(props, forces, False, "GRAV")
+    code = beam_design.execute_beam_design(props, forces, False, "GRAV")
     targets = dt.Targets()
     targets.set(dt.GIRDER, dt.SHEAR, 0.6)
     with dt.use(targets):
-        tight = beam.execute_beam_design(props, forces, False, "GRAV")
+        tight = beam_design.execute_beam_design(props, forces, False, "GRAV")
     def steel(results):   # stirrup legs per mm of beam: more legs, or closer stirrups
         return results["Stirrup_Legs"].iloc[0] / results["Spacing_2H"].iloc[0]
 
@@ -175,7 +177,7 @@ def test_the_loop_makes_a_shallow_carrier_deeper_and_does_not_shrink_one_below_i
 # ----------------------------------------------------------------- asking
 def test_the_targets_dialogs_keep_the_code_limits_unless_the_engineer_sets_some(monkeypatch,
                                                                                 tmp_path):
-    from design import concrete_workflow as cw
+    from design.concrete import workflow as cw
     from etabs_api.workflows import model_inputs as mi
     from utilities import _gui_helpers as gui
 
@@ -210,7 +212,7 @@ def test_the_targets_dialogs_keep_the_code_limits_unless_the_engineer_sets_some(
 
 
 def test_the_carrier_depth_question_defaults_to_no(monkeypatch):
-    from design import concrete_workflow as cw
+    from design.concrete import workflow as cw
     from utilities import _gui_helpers as gui
 
     monkeypatch.setattr(gui, "select_option",
@@ -244,7 +246,7 @@ def test_a_cantilever_in_two_pieces_is_still_a_cantilever():
     connectivity, points = chain(tip_held=False)
     held = bc.end_conditions(connectivity, points)
     assert held[("T", "c")] == bc.FREE_END and held[("R", "b")] == bc.FREE_END
-    status = beam.identify_cantilever_beams(None, connectivity, points).set_index("UniqueName")
+    status = beam_supports.identify_cantilever_beams(None, connectivity, points).set_index("UniqueName")
     assert status.loc["R", "SupportStatus"] == "Cantilever (Free at PtJ)"
 
 
@@ -252,14 +254,14 @@ def test_a_beam_from_a_column_to_a_girder_is_not_a_cantilever():
     connectivity, points = chain(tip_held=True)
     held = bc.end_conditions(connectivity, points)
     assert held[("T", "c")] == bc.BEAM_END and held[("R", "b")] == bc.BEAM_END
-    status = beam.identify_cantilever_beams(None, connectivity, points).set_index("UniqueName")
+    status = beam_supports.identify_cantilever_beams(None, connectivity, points).set_index("UniqueName")
     assert status.loc["R", "SupportStatus"] == "Supported Both Ends"
-    assert status.loc["T", "SupportStatus"] == beam.GRAVITY_BEAM_STATUS
+    assert status.loc["T", "SupportStatus"] == beam_supports.GRAVITY_BEAM_STATUS
 
 
 def test_without_coordinates_the_supports_are_classified_as_before():
     connectivity, _ = chain(tip_held=True)
-    status = beam.identify_cantilever_beams(None, connectivity).set_index("UniqueName")
+    status = beam_supports.identify_cantilever_beams(None, connectivity).set_index("UniqueName")
     assert status.loc["R", "SupportStatus"] == "Cantilever (Free at PtJ)"
 
 
@@ -267,10 +269,10 @@ def test_without_coordinates_the_supports_are_classified_as_before():
 def test_without_the_office_rule_a_wide_beam_gets_fewer_bars_for_spacing():
     """A 1000 mm wide beam: 150 mm clear needs 6 bars of 25 on a face; crack
     control (about 250 mm centre to centre) needs 5."""
-    from design.code_config import CODE, override
+    from design.criteria.code_config import CODE, override
 
-    office = beam.BeamFlexureDesign(1000, 800, 28, 414, 414, 25, 10, 40)
-    code_only = beam.BeamFlexureDesign(
+    office = beam_sections.BeamFlexureDesign(1000, 800, 28, 414, 414, 25, 10, 40)
+    code_only = beam_sections.BeamFlexureDesign(
         1000, 800, 28, 414, 414, 25, 10, 40,
         code=override(CODE, beam_detailing__limit_clear_spacing=False))
     assert office.get_min_bars_for_150mm_spacing() == 6
@@ -282,10 +284,10 @@ def test_the_office_rule_stays_the_default_of_the_design():
     props, forces = beam_tests._mock_beam_properties(), beam_tests._mock_force_table(wu=5.0)
     props["Width"] = 900.0
     tables = {"FRAME DATA": None}
-    default = beam.execute_beam_design(props, forces, False, "GRAV")
-    from design.code_config import CODE, override
+    default = beam_design.execute_beam_design(props, forces, False, "GRAV")
+    from design.criteria.code_config import CODE, override
 
-    code_only = beam.execute_beam_design(
+    code_only = beam_design.execute_beam_design(
         props, forces, False, "GRAV",
         code=override(CODE, beam_detailing__limit_clear_spacing=False))
     count = lambda r: int(r[r["Face"] == "TOP"].iloc[0]["n_mid_L1"])
@@ -337,6 +339,6 @@ def test_an_edge_beam_on_the_tips_of_cantilever_girders_is_not_their_carrier():
 
     held = bc.end_conditions(connectivity, points)
     assert held[("2GY-1", "t1")] == bc.FREE_END                         # still a cantilever
-    status = beam.identify_cantilever_beams(None, connectivity, points).set_index("UniqueName")
+    status = beam_supports.identify_cantilever_beams(None, connectivity, points).set_index("UniqueName")
     assert status.loc["2GY-1", "SupportStatus"] == "Cantilever (Free at PtJ)"
-    assert status.loc["2BX-7A", "SupportStatus"] == beam.GRAVITY_BEAM_STATUS
+    assert status.loc["2BX-7A", "SupportStatus"] == beam_supports.GRAVITY_BEAM_STATUS

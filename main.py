@@ -19,27 +19,46 @@ the same commands.
     sdt drift       story drift of the DRIFT / WDRIFT combinations with the drift
                     stiffness, strength and service level; the model is restored
                     (etabs_api/workflows/drift_check.py)
+    sdt irregularity  the vertical and plan irregularities of UBC 97 / NSCP 2015,
+                    the torsion amplifier Ax and the P-delta stability coefficient
+                    (etabs_api/workflows/irregularity.py)
     sdt beams       extract the forces and design the beams; save the results,
-                    calculations and schedules (design/concrete_workflow.py)
+                    calculations and schedules (design/concrete/workflow.py)
     sdt deflection  check only the deflection of the beams (bars of the last
                     beam design, service moments read again from ETABS)
     sdt columns     design the columns from the stored beam step, with
                     slenderness; save the results, calculations and schedule
     sdt design      analysis and beam/column design loop that resizes the
                     members until they pass (etabs_api/workflows/design_loop.py)
+    sdt foundation  a second model for the foundation: only the support joints,
+                    loaded with the reactions of this model; or update its forces.
+                    On the foundation model: save its footings and tie beams
+                    for the plans (etabs_api/workflows/foundation_model.py)
     sdt plans       framing plans of every floor as one DXF: beams at their
-                    width, columns at their size, marks and grids
+                    width, columns at their size, marks and grids; and the
+                    foundation plan when it was saved
+    sdt 3d          the concrete of the model as 3D solids in one STEP file
+                    (columns, beams, walls, slabs, the saved foundation, and
+                    the bars of the saved designs)
+                    (etabs_api/workflows/model_3d.py)
                     (etabs_api/workflows/framing_plans.py)
+    sdt quantities  the concrete volume of each story and of the building, the
+                    floor area, and the concrete ratio in m3/m2
+                    (etabs_api/workflows/concrete_quantities.py)
     sdt composite   rectangular filled composite column, AISC DG6
-                    (design/composite_column_designer_aiscDG06.py)
+                    (design/steel/composite_column_aiscDG06.py)
     sdt steel       wide-flange member, AISC 360-22
-                    (design/general_steel_section_designer_aisc360.py)
+                    (design/steel/wide_flange_aisc360.py)
     sdt wind        MWFRS wind pressures, ASCE 7 directional procedure
-                    (design/wind_calculator_directional_asce7.py)
+                    (design/loads/wind_directional_asce7.py)
     sdt doctor      check that this machine can run the toolkit: ETABS and its
                     API, the dialogs, LaTeX     (utilities/doctor.py)
     sdt --help      list the commands
     sdt --version   the version
+
+    sdt <command> --record FILE    run with the dialogs and save what you answer
+    sdt <command> --answers FILE   run with no dialog: the answers come from the
+                                   file (utilities/answers.py)
 
 ``sdt`` alone, and the packaged ``sdt.exe`` when it is double-clicked, shows
 a menu of the commands: type a number or a name, and the menu comes back when
@@ -58,7 +77,7 @@ import argparse
 import sys
 from pathlib import Path
 
-VERSION = "0.3.8"  # the same as in pyproject.toml (tests/test_main.py checks it)
+VERSION = "0.5.0"  # the same as in pyproject.toml (tests/test_main.py checks it)
 # Hidden first argument: this process is the progress window of another one
 # (utilities/_gui_helpers.LoadingWindow). It is how the packaged program,
 # which has no separate Python to start, opens that window.
@@ -125,19 +144,19 @@ def _drift():
 
 
 def _beams():
-    from design.concrete_workflow import run_beams
+    from design.concrete.workflow import run_beams
 
     return run_beams()
 
 
 def _deflection():
-    from design.concrete_workflow import run_deflection
+    from design.concrete.workflow import run_deflection
 
     return run_deflection()
 
 
 def _columns():
-    from design.concrete_workflow import run_columns
+    from design.concrete.workflow import run_columns
 
     return run_columns()
 
@@ -148,26 +167,50 @@ def _design():
     return run_design_cli()
 
 
+def _irregularity():
+    from etabs_api.workflows.irregularity import run_irregularity
+
+    return run_irregularity()
+
+
+def _foundation():
+    from etabs_api.workflows.foundation_model import run_foundation
+
+    return run_foundation()
+
+
 def _plans():
     from etabs_api.workflows.framing_plans import run_framing_plans
 
     return run_framing_plans()
 
 
+def _model_3d():
+    from etabs_api.workflows.model_3d import run_model_3d
+
+    return run_model_3d()
+
+
+def _quantities():
+    from etabs_api.workflows.concrete_quantities import run_quantities
+
+    return run_quantities()
+
+
 def _composite():
-    from design.composite_column_designer_aiscDG06 import run
+    from design.steel.composite_column_aiscDG06 import run
 
     return run()
 
 
 def _steel():
-    from design.general_steel_section_designer_aisc360 import run
+    from design.steel.wide_flange_aisc360 import run
 
     return run()
 
 
 def _wind():
-    from design.wind_calculator_directional_asce7 import run
+    from design.loads.wind_directional_asce7 import run
 
     return run()
 
@@ -185,11 +228,16 @@ COMMANDS = {
     "check": (_check, "check the open model for missing or inconsistent inputs (read only)"),
     "analyze": (_analyze, "run, scale the response spectrum, check periods, mass and weight"),
     "drift": (_drift, "story drift with the drift stiffness (strength, service), then restore"),
+    "irregularity": (_irregularity, "vertical and plan irregularities, Ax and the P-delta "
+                                    "stability coefficient (read only)"),
     "beams": (_beams, "extract the forces and design the beams (ACI 318M-14)"),
     "deflection": (_deflection, "check only the beam deflections (bars of the last beam design)"),
     "columns": (_columns, "design the columns (with slenderness) from the stored beam step"),
     "design": (_design, "analysis and design loop that resizes beams and columns"),
+    "foundation": (_foundation, "foundation model from the support reactions, or update its forces"),
     "plans": (_plans, "framing plans of every floor as one DXF (beams, columns, marks, grids)"),
+    "3d": (_model_3d, "the concrete of the model as 3D solids in a STEP file, for AutoCAD"),
+    "quantities": (_quantities, "concrete volume, floor area and their ratio in m3/m2 (read only)"),
     "composite": (_composite, "check a rectangular filled composite column (AISC DG6)"),
     "steel": (_steel, "check a wide-flange steel member (AISC 360-22)"),
     "wind": (_wind, "MWFRS wind pressures by the ASCE 7 directional procedure"),
@@ -209,16 +257,39 @@ def build_parser() -> argparse.ArgumentParser:
                         version=f"Structural Design Toolkit {VERSION}")
     commands = parser.add_subparsers(dest="command", metavar="command")
     for name, (_, text) in COMMANDS.items():
-        commands.add_parser(name, help=text, description=text)
+        command = commands.add_parser(name, help=text, description=text)
+        files = command.add_mutually_exclusive_group()
+        files.add_argument("--answers", metavar="FILE",
+                           help="answer the dialogs from this file: nothing is asked")
+        files.add_argument("--record", metavar="FILE",
+                           help="show the dialogs and save what you answer to this file")
     return parser
 
 
-def run_and_restore(name: str):
+def run_and_restore(name: str, answers_file: str | None = None,
+                    record_file: str | None = None):
     """Run a command, then put back the units of the ETABS model it worked on
-    (the commands work in N-mm, whatever units the model is in)."""
+    (the commands work in N-mm, whatever units the model is in).
+
+    ``answers_file`` answers its dialogs from a file; ``record_file`` shows
+    them and saves what is answered (utilities/answers.py).
+    """
+    from utilities import answers
+
+    if answers_file:
+        answers.load(answers_file)
+    elif record_file:
+        answers.record(record_file)
     try:
         return COMMANDS[name][0]()
     finally:
+        if answers_file or record_file:
+            left = answers.stop()
+            if left:
+                print(f"[answers] {len(left)} answers of {answers_file} were not used: "
+                      + "; ".join(left))
+            if record_file:
+                print(f"Answers saved: {record_file}")
         try:
             from etabs_api.core.connection import restore_units
 
@@ -257,13 +328,27 @@ def menu_choice(typed: str) -> str | None:
     return starts[0] if len(starts) == 1 else None
 
 
+def show_commands() -> None:
+    """The list of commands: a table in a terminal, lines of text elsewhere."""
+    from utilities import terminal
+
+    if terminal.drawn():
+        report = terminal.Report("Commands")
+        report.table(["No.", "Command", "What it does"],
+                     [[number, name, text] for number, (name, (_, text))
+                      in enumerate(COMMANDS.items(), start=1)])
+        report.show()
+        return
+    print("\nCommands:\n")
+    for number, (name, (_, text)) in enumerate(COMMANDS.items(), start=1):
+        print(f"  {number:>2}  {name:<11} {text}")
+
+
 def menu(read=input) -> int:
     """List the commands and run the ones typed until the user quits."""
     print(banner())
     while True:
-        print("\nCommands:\n")
-        for number, (name, (_, text)) in enumerate(COMMANDS.items(), start=1):
-            print(f"  {number:>2}  {name:<11} {text}")
+        show_commands()
         try:
             typed = read("\nType a number or a name (q to quit): ")
         except (EOFError, KeyboardInterrupt):
@@ -295,7 +380,14 @@ def main(argv: list[str] | None = None) -> int:
             return menu()  # typed alone in a terminal, or the program double-clicked
         parser.print_help()
         return 1
-    run_and_restore(arguments.command)
+    from utilities.answers import AnswersError
+
+    try:
+        run_and_restore(arguments.command, getattr(arguments, "answers", None),
+                        getattr(arguments, "record", None))
+    except AnswersError as error:   # a fault of the answers file, not of the program
+        print(f"\n{arguments.command} stopped: {error}")
+        return 2
     return 0
 
 

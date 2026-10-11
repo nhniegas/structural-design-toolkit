@@ -369,7 +369,7 @@ def test_column_size_passes_on_real_forces():
     """A 300 mm column cannot carry 4000 kN; an 600 mm column can."""
     import numpy as np
 
-    from design.column_designer_aci318 import column_size_passes
+    from design.concrete.columns.sizing import column_size_passes
 
     def row(side):
         return pd.Series({"UniqueName": "2-C1", "Story": "2F", "DesignType": "Column",
@@ -393,7 +393,7 @@ def test_a_size_trial_uses_the_capacity_shear_of_the_design():
     and stops Ve at what the beams deliver (ACI 18.7.6.1.1); so must the trial."""
     import numpy as np
 
-    from design.column_designer_aci318 import column_size_passes
+    from design.concrete.columns.sizing import column_size_passes
 
     def row(side):
         return pd.Series({"UniqueName": "2-C1", "Story": "2F", "DesignType": "Column",

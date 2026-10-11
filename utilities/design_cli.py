@@ -140,7 +140,13 @@ def run_design(module, title: str, name: str, report_name: str):
         return result
     show, export = OUTPUT_OPTIONS[choice]
     if show:
-        print(module.summary_text(result))
+        from utilities import terminal
+
+        # a terminal gets the tables and equations; a file or a pipe the plain text
+        if terminal.drawn() and hasattr(module, "terminal_report"):
+            module.terminal_report(result).show()
+        else:
+            terminal.write(module.summary_text(result))
     summary.add("Results", "printed in the terminal" if show else "not printed (PDF only)")
     if export:
         path = select_save_file(default_name=report_name)

@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from design.code_config import NSCP  # noqa: E402
+from design.criteria.code_config import NSCP  # noqa: E402
 
 DEAD_TYPES = ("Dead", "Super Dead")
 LIVE_TYPES = ("Live", "Reducible Live")
@@ -84,7 +84,7 @@ def build_combinations(
     ``patterns`` maps each load pattern to its ETABS type. Dead and super dead
     patterns form DL, live and reducible live form LL, roof live forms Lr, and
     the wind patterns are ``WX`` and ``WY``. ``live_factor`` is f on LL. The
-    factors are those of ``NSCP.load_factors`` (design/code_config.py).
+    factors are those of ``NSCP.load_factors`` (design/criteria/code_config.py).
     """
     k = _FACTORS
     dead = [name for name, kind in patterns.items() if kind in DEAD_TYPES]

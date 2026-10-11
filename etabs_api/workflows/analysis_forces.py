@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from design.code_config import NSCP
+from design.criteria.code_config import NSCP
 from etabs_api.core.helpers import as_list, return_code
 from etabs_api.workflows.tributary import HEAVY_TOLERANCE_M2, Tributary
 
@@ -292,7 +292,7 @@ def nscp_reduction(area_m2: float, reducible_kpa: float, dead_over_live: float,
     live loads above 4.8 kPa are not reduced, except by 20 % for members
     supporting more than one floor. ``heavy`` says whether the member supports
     such a load (by default: when ``reducible_kpa`` is above 4.8). The values
-    are those of ``NSCP.live_load_reduction`` (design/code_config.py).
+    are those of ``NSCP.live_load_reduction`` (design/criteria/code_config.py).
     """
     k = _LLR
     r = k.nscp_rate if r is None else r

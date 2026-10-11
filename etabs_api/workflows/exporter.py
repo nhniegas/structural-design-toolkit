@@ -103,7 +103,7 @@ class ETABSDataExporter:
         beam from an end that a girder holds down, which the shear and moment
         diagrams cannot.
         """
-        from design.beam_deflection import DEFLECTION_COMBOS
+        from design.concrete.beams.deflection import DEFLECTION_COMBOS
 
         from etabs_api.workflows.load_combinations import ensure_deflection_combinations
 
@@ -369,7 +369,7 @@ class ETABSDataExporter:
         """
         if connectivity.empty or "UniqueName" not in connectivity.columns:
             return connectivity
-        from design.beam_deflection import _MARK
+        from design.concrete.beams.deflection import _MARK
         from etabs_api.workflows.model_inputs import geometric_lines
 
         try:

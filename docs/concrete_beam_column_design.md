@@ -60,11 +60,23 @@ Answers are remembered and offered again next time. Every named member (not a nu
 
 ## How the pieces fit
 
-- `design/concrete_workflow.py`: the commands, the dialogs and the store.
-- `design/beam_designer_aci318.py`: beam design (`design_beams`), results file, beam schedule DXF and calculation report.
-- `design/beam_deflection.py`: deflection checks.
-- `design/column_designer_aci318.py`: column design and SMRF checks (`design_columns`), results file, column schedule DXF and calculation report.
-- `design/code_config.py`: every code value, each with its clause: ACI 318M-14 (`CODE`, used by both designers) and NSCP 2015 chapter 2 (`NSCP`: loads, live load reduction, earthquake).
+- `design/concrete/workflow.py`: the commands, the dialogs and the store.
+- `design/concrete/beams/`: the beam design, one file for each job:
+  - `design.py`: the design of every beam from the tables (`design_beams`);
+  - `sections.py`: flexure, shear, torsion and the SMRF checks of one beam;
+  - `supports.py`: what holds a beam (support status, gravity beams, girders under 4d);
+  - `deflection.py`: deflection checks; `carriers.py`: the load path and the carrier depth rule;
+  - `results.py`: the results workbook; `schedule.py`: the schedule drawings; `calculations.py`: the calculation report;
+  - `options.py`: the questions of the beam design.
+- `design/concrete/columns/`: the column design, one file for each job:
+  - `design.py`: the design of every column from the tables (`design_columns`); `sizing.py`: the size trial of the design loop;
+  - `section.py`: the column section and its exact P-M solver; `layouts.py`: the bar layouts that fit it;
+  - `flexure.py`: axial load and biaxial bending of a layout; `interaction.py`: the interaction surface; `slenderness.py`: slenderness;
+  - `transverse.py`: ties and confinement; `shear.py`: column shear and Ve; `joints.py`: strong column - weak beam and joint shear;
+  - `tables.py`: the tables, names, local axes and permutations;
+  - `report.py`: the column report and the results workbook; `schedule.py`: the schedule drawing; `calculations.py`: the calculation report;
+  - `options.py`: the questions of the column design.
+- `design/criteria/`: the design criteria. `code_config.py` has every code value, each with its clause: ACI 318M-14 (`CODE`, used by both designers) and NSCP 2015 chapter 2 (`NSCP`: loads, live load reduction, earthquake).
 - `etabs_api/workflows/exporter.py`, `analysis_forces.py`, `tributary.py`: the extraction and the factored forces from the analysis results.
 - `utilities/_gui_helpers.py`: dialogs and the loading window; `utilities/_calc_report.py`: the PDF layout.
 
@@ -126,7 +138,7 @@ One combination can stand for several sets of forces. `FACTORED LOADS` stores th
 | Otherwise | 1 | 1 |
 
 - **Beams** take the envelope of all rows of a combination, so the maximum and minimum rows carry everything.
-- **Columns** are checked against every permutation separately. The report and the loading window show only the plain combination name. For flexure and axial load each report row shows the governing permutation (a failing one if there is one, otherwise the highest utilization). Shear and joint values are the worst across the permutations.
+- **Columns** are checked against every permutation separately. The report and the loading window show only the plain combination name. For flexure and axial load each report row shows the governing permutation (a failing one if there is one, otherwise the highest utilization). Where permutations have the same utilization, as at a pinned end where every one is 0, the row shown is the one with the largest axial compression. Shear and joint values are the worst across the permutations.
 
 ### Live load reduction
 
@@ -141,7 +153,7 @@ A dialog asks for the rule. NSCP 2015 governs; ASCE 7 is the alternate it allows
 
 **Both rules.** A member supporting reducible live load above 4.8 kPa (more than 0.5 m2 of such floor) gets no reduction. The exception is a column receiving load from more than one level, which gets 20 %; under ASCE, never more than its 4.7.2 reduction.
 
-Only the patterns of type Reducible Live are reduced. The `LIVE LOAD REDUCTION` results list the rule used for each member. Every value is in `design/code_config.py` (`NSCP.live_load_reduction`).
+Only the patterns of type Reducible Live are reduced. The `LIVE LOAD REDUCTION` results list the rule used for each member. Every value is in `design/criteria/code_config.py` (`NSCP.live_load_reduction`).
 
 **Tributary area.** When reduction is chosen, a third question asks how to find A:
 
@@ -358,7 +370,7 @@ Second-order effects have two parts, and both are covered:
 | Effect | Where it comes from |
 |---|---|
 | Sway of the storeys (P-Δ) | The ETABS analysis. `sdt setup` defines iterative P-delta on the gravity loads and the frames carry cracked stiffness, which is an elastic second-order analysis (ACI 6.7). The forces read from ETABS already hold it, so no sway magnifier is added. `sdt check` reports when P-delta is off |
-| Bow of the column between its ends (P-δ) | Added by `sdt columns`, by the moment magnification of ACI 6.6.4.5 (`design/column_slenderness.py`). ETABS does not capture it unless every column is subdivided |
+| Bow of the column between its ends (P-δ) | Added by `sdt columns`, by the moment magnification of ACI 6.6.4.5 (`design/concrete/columns/slenderness.py`). ETABS does not capture it unless every column is subdivided |
 
 For each column, each bending axis and each combination:
 
@@ -459,10 +471,11 @@ The design calculation places each bundle as one equivalent bar at the layout po
 
 ## Column strength: the biaxial interaction surface
 
-Axial load and biaxial bending are checked on the ACI 318M-14 design interaction surface (phi Pn, phi Mnx, phi Mny) of each layout, in `design/column_interaction.py`:
+Axial load and biaxial bending are checked on the ACI 318M-14 design interaction surface (phi Pn, phi Mnx, phi Mny) of each layout, in `design/concrete/columns/interaction.py`:
 
 - **The surface.** It is computed once per layout (shape, size, bars, cover, materials) and reused by every column, combination and iteration with that layout. The grid is 72 neutral-axis angles × 120 depths, using strain compatibility, the Whitney block and elastic-plastic bars (the same model as the exact solver it replaced). phi at each point comes from that point's steel strain, and the axial cap is phi 0.80 Po (tied) or phi 0.85 Po (spiral). The values match the exact solver; where they differ (at most about 0.1 %), the surface is on the safe side.
 - **A demand (Pu, Mu2, Mu3).** The surface is cut where phi Pn = Pu, and the capacity is read along the demand's moment direction. Utilization is |Mu| / phi Mn. Before October 2026, phi was applied to Mn at Pn = Pu, which overstated the capacity above the balance point.
+- **An end with no moment.** At a pinned end the analysis leaves a moment of about 1e-13 kN-m, in a direction that changes from one analysis to the next. A moment under 1e-6 kN-m (1 N-mm) is taken as no moment: the utilization is 0 and phi Mn is read about the section's first axis. Before version 0.4.0 phi Mn followed the direction of that leftover, so the value shown at a pinned base changed from run to run. No check was affected: the utilization was 1e-16.
 - **Bar search and the convex hull.** The demands of a column are checked first at the vertices of their convex hull, so a layout that cannot work is rejected after a few checks. The other demands are then confirmed, because the phi-scaled surface is not strictly convex where phi changes from 0.65 to 0.90. The final layout is reported for every combination at both ends.
 - **Strong column - weak beam.** It uses the nominal surface (phi = 1) at the factored axial load. Each column's Mn(P) along a fixed direction is concave, so the lowest sum of column strengths at a joint occurs at a vertex of the convex hull of the columns' axial loads over the combinations. Only those combinations are evaluated; the result is the same. The beam strengths and the joint shear do not depend on the combination.
 - **Capacity-design shear.** Mpr (1.25 fy) is read from the probable-strength surface along the principal axis, through a (P, Mn) table built once per direction.

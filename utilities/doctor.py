@@ -72,11 +72,16 @@ COMMAND_MODULES = (
     "etabs_api.workflows.frame_tagger", "etabs_api.workflows.model_check",
     "etabs_api.workflows.model_analysis", "etabs_api.workflows.drift_check",
     "etabs_api.workflows.design_loop", "etabs_api.workflows.framing_plans",
-    "design.concrete_workflow",
-    "design.beam_designer_aci318", "design.column_designer_aci318",
-    "design.composite_column_designer_aiscDG06",
-    "design.general_steel_section_designer_aisc360",
-    "design.wind_calculator_directional_asce7", "utilities._calc_report",
+    "etabs_api.workflows.foundation_model", "etabs_api.workflows.foundation_plan",
+    "etabs_api.workflows.model_3d", "etabs_api.workflows.irregularity",
+    "etabs_api.workflows.concrete_quantities",
+    "design.concrete.workflow",
+    "design.concrete.beams.design", "design.concrete.beams.schedule",
+    "design.concrete.beams.calculations", "design.concrete.columns.design",
+    "design.concrete.columns.schedule", "design.concrete.columns.calculations",
+    "design.steel.composite_column_aiscDG06",
+    "design.steel.wide_flange_aisc360",
+    "design.loads.wind_directional_asce7", "utilities._calc_report",
 )
 
 
@@ -152,6 +157,17 @@ def check_latex() -> Check:
         "calculation reports are not. " + INSTALL_HINT)
 
 
+def check_3d_kernel() -> Check:
+    """Whether build123d, which makes the solids of ``sdt 3d``, can be loaded."""
+    try:
+        import build123d
+    except Exception as error:  # noqa: BLE001 - not installed, or one of its parts is missing
+        return WARN, "3D model (build123d)", (
+            f"build123d could not be loaded ({error}): sdt 3d cannot write its STEP file. "
+            "Every other command works. Install it with: pip install build123d")
+    return OK, "3D model (build123d)", f"build123d {build123d.__version__}"
+
+
 def check_design_processes() -> Check:
     """Whether the member designs of a large model can be shared between the cores."""
     from design import parallel
@@ -177,14 +193,24 @@ def run_doctor(version: str = "") -> list[Check]:
     if api[0] == OK:
         checks.append(check_running_etabs())
     checks.append(check_latex())
+    checks.append(check_3d_kernel())
     checks.append(check_design_processes())
+    failed = sum(1 for status, _, _ in checks if status == FAIL)
+    warned = sum(1 for status, _, _ in checks if status == WARN)
+    verdict = ("Everything the toolkit needs is in place." if not failed and not warned else
+               f"{failed} problem(s), {warned} warning(s). A warning limits one feature; "
+               "a problem stops the commands that need it.")
+    from utilities import terminal
+
+    if terminal.drawn():
+        report = terminal.Report("sdt doctor" + (f" {version}" if version else ""))
+        report.table(["Status", "Check", "Found"], [list(check) for check in checks])
+        report.lines([verdict], "green" if not failed and not warned else "yellow")
+        report.show()
+        return checks
     print()
     for status, what, found in checks:
         print(f"[{status:>4}] {what}: {found}")
-    failed = sum(1 for status, _, _ in checks if status == FAIL)
-    warned = sum(1 for status, _, _ in checks if status == WARN)
     print()
-    print("Everything the toolkit needs is in place." if not failed and not warned else
-          f"{failed} problem(s), {warned} warning(s). A warning limits one feature; "
-          "a problem stops the commands that need it.")
+    print(verdict)
     return checks

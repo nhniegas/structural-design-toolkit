@@ -59,11 +59,11 @@ def _beams(count: int) -> tuple[pd.DataFrame, pd.DataFrame]:
 
 
 def test_several_processes_give_the_rows_of_one_process(monkeypatch):
-    from design import beam_designer_aci318 as beam
+    from design.concrete.beams import design as beam_design
 
     props, forces = _beams(7)
     props = props.iloc[::-1].reset_index(drop=True)        # not in the order of the results
-    one = beam.execute_beam_design(props, forces, False, "GRAV")
+    one = beam_design.execute_beam_design(props, forces, False, "GRAV")
     monkeypatch.setattr(parallel, "MIN_MEMBERS", 1)
     monkeypatch.setenv("SDT_WORKERS", "2")
     parallel.enable()
@@ -71,17 +71,17 @@ def test_several_processes_give_the_rows_of_one_process(monkeypatch):
     monkeypatch.setattr(parallel, "pool", lambda workers, real=parallel.pool:
                         started.append(workers) or real(workers))
     seen = []
-    several = beam.execute_beam_design(props, forces, False, "GRAV", progress=seen.append)
+    several = beam_design.execute_beam_design(props, forces, False, "GRAV", progress=seen.append)
     assert started == [2]                                   # the processes were used
     pd.testing.assert_frame_equal(one, several)
     assert seen and "7 of 7 beams designed" in seen[-1]
 
 
 def test_one_process_takes_over_when_the_processes_fail(monkeypatch):
-    from design import beam_designer_aci318 as beam
+    from design.concrete.beams import design as beam_design
 
     props, forces = _beams(3)
-    one = beam.execute_beam_design(props, forces, False, "GRAV")
+    one = beam_design.execute_beam_design(props, forces, False, "GRAV")
     monkeypatch.setattr(parallel, "MIN_MEMBERS", 1)
     monkeypatch.setenv("SDT_WORKERS", "2")
     parallel.enable()
@@ -90,4 +90,4 @@ def test_one_process_takes_over_when_the_processes_fail(monkeypatch):
         raise OSError("no processes on this machine")
 
     monkeypatch.setattr(parallel, "pool", broken)
-    pd.testing.assert_frame_equal(one, beam.execute_beam_design(props, forces, False, "GRAV"))
+    pd.testing.assert_frame_equal(one, beam_design.execute_beam_design(props, forces, False, "GRAV"))

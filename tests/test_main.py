@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import main  # noqa: E402
 
 
-@pytest.mark.parametrize("command", ["setup", "grids", "tag", "check", "analyze", "drift", "beams", "deflection", "columns", "design", "plans", "composite", "steel", "wind", "doctor"])
+@pytest.mark.parametrize("command", ["setup", "grids", "tag", "check", "analyze", "drift", "irregularity", "beams", "deflection", "columns", "design", "foundation", "plans", "3d", "quantities", "composite", "steel", "wind", "doctor"])
 def test_each_command_runs_its_workflow(command, monkeypatch):
     ran = []
     for name in main.COMMANDS:
@@ -147,6 +147,7 @@ def test_doctor_reports_every_check_and_counts_the_problems(monkeypatch, capsys)
     monkeypatch.setattr(doctor, "check_running_etabs",
                         lambda: pytest.fail("not checked when the API did not load"))
     monkeypatch.setattr(doctor, "check_latex", lambda: (doctor.OK, "LaTeX", "found"))
+    monkeypatch.setattr(doctor, "check_3d_kernel", lambda: (doctor.OK, "3D model", "found"))
     checks = doctor.run_doctor("0.1.0")
     out = capsys.readouterr().out
     assert [status for status, _, _ in checks].count(doctor.FAIL) == 1
@@ -219,13 +220,16 @@ def test_a_command_works_in_n_mm_and_puts_the_units_of_the_model_back():
     assert model.calls == [n_mm, n_mm, kn_m]
 
 
-def test_a_model_already_in_n_mm_is_left_alone():
+def test_a_model_that_says_n_mm_still_has_its_units_set_and_nothing_is_put_back():
+    """An ETABS started through the API says N-mm and works in lb-in until the
+    units are set once, so they are always set."""
     from etabs_api.core import connection
 
-    model = FakeUnitsModel(connection.EXTRACTION_UNITS)
+    n_mm = connection.EXTRACTION_UNITS
+    model = FakeUnitsModel(n_mm)
     connection.use_working_units(model)
     connection.restore_units()
-    assert model.calls == []
+    assert model.calls == [n_mm]
 
 
 def test_the_units_are_put_back_even_when_the_command_fails(monkeypatch):

@@ -31,7 +31,8 @@ from pylatex import (
 
 if __package__ in (None, ""):
     # Run as a script: make the project folder importable.
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__)))))
 
 from utilities.design_cli import Field, run_design  # noqa: E402
 
@@ -617,6 +618,43 @@ def result_rows(column: "RectangularFilledComposite") -> list[tuple[str, object]
         if isinstance(ratio, (int, float)):
             rows.append((f"STATUS ({label})", status(ratio)))
     return rows
+
+
+def terminal_report(column: "RectangularFilledComposite"):
+    """The check for the terminal: the results as tables and the equations of the
+    strengths and of the interaction (AISC Design Guide 6)."""
+    from utilities.terminal import Report
+
+    out = Report("RECTANGULAR FILLED COMPOSITE COLUMN (AISC DG6)")
+    group: list[list] = []
+    groups = [group]
+    for label, value in result_rows(column):
+        if not label:
+            group = []
+            groups.append(group)
+        else:
+            group.append([label.replace("phi ", "φ"), value])
+    for title, rows in zip(("Section checks", "Design strengths", "Shear", "Interaction"),
+                           [g for g in groups if g]):
+        out.heading(title)
+        out.table(["", ""], rows)
+    out.heading("Equations of the checks")
+    out.equations([
+        "Axial:        compact walls: Pₙₒ = Fy Aₛ + 0.85 f′c (Ac + Aₛᵣ Eₛ/Ec)   (DG6 2.5.2, "
+        "AISC I2.2)",
+        "              Pₑ = π² EI_eff / L²,  EI_eff = Eₛ Iₛ + C₃ Ec Ic,  "
+        "C₃ = 0.45 + 3 (Aₛ + Aₛᵣ)/Ag ≤ 0.9",
+        "              Pₙ = Pₙₒ 0.658^(Pₙₒ/Pₑ)  when Pₙₒ/Pₑ ≤ 2.25,  else Pₙ = 0.877 Pₑ;  "
+        "strength φc Pₙ",
+        "Flexure:      φb Mₙ, the plastic stress distribution of the filled section about "
+        "each axis   (DG6 Fig. 2-13)",
+        "Shear:        φv Vₙ,  Vₙ = 0.6 Fy Aᵥ + 0.06 Kc Ac √f′c,  Aᵥ = 2 d t   (AISC Eq. I4-1)",
+        "Interaction:  Pᵤ < Pcc:  Mᵤₓ/φMₙₓ + Mᵤᵧ/φMₙᵧ ≤ 1.0",
+        "              Pᵤ ≥ Pcc:  (Pᵤ − Pcc) / (φPₙ − Pcc) + Mᵤₓ/φMₙₓ + Mᵤᵧ/φMₙᵧ ≤ 1.0   "
+        "(DG6 2.5.6)",
+        "              with α = 1.5:  the moment term is [(Mᵤₓ/φMₙₓ)^α + (Mᵤᵧ/φMₙᵧ)^α]^(1/α)",
+    ])
+    return out
 
 
 def summary_text(column: "RectangularFilledComposite") -> str:

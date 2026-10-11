@@ -1,4 +1,4 @@
-"""Unit tests for design/column_designer_aci318.py  (ACI 318M-14).
+"""Unit tests for design/concrete/columns/designer.py  (ACI 318M-14).
 
 HOW TO RUN (from the project root, the folder that contains main.py):
     python -m pytest tests/test_column_designer_aci318.py -v
@@ -56,8 +56,19 @@ _install_stand_ins_if_needed()
 
 import ezdxf  # noqa: E402
 
-from design import column_designer_aci318 as col  # noqa: E402
-from design.code_config import CODE, override  # noqa: E402
+from design.concrete.columns import calculations as col_calculations  # noqa: E402
+from design.concrete.columns import design as col_design  # noqa: E402
+from design.concrete.columns import flexure as col_flexure  # noqa: E402
+from design.concrete.columns import joints as col_joints  # noqa: E402
+from design.concrete.columns import layouts as col_layouts  # noqa: E402
+from design.concrete.columns import options as col_options  # noqa: E402
+from design.concrete.columns import report as col_report  # noqa: E402
+from design.concrete.columns import schedule as col_schedule  # noqa: E402
+from design.concrete.columns import section as col_section  # noqa: E402
+from design.concrete.columns import shear as col_shear  # noqa: E402
+from design.concrete.columns import tables as col_tables  # noqa: E402
+from design.concrete.columns import transverse as col_transverse  # noqa: E402
+from design.criteria.code_config import CODE, override  # noqa: E402
 
 # --------------------------------------------------------------------------
 # UNIT CONVERSIONS
@@ -88,7 +99,7 @@ def build_published_column():
     centre_offset = 2.5 * IN  # face to bar centre
     cover = centre_offset - tie_diameter - bar_diameter / 2  # cover to the tie
 
-    engine = col.ColumnFlexureDesign(
+    engine = col_section.ColumnFlexureDesign(
         width, height, 0.0, 5 * KSI, 60 * KSI, 60 * KSI,
         bar_diameter, tie_diameter, cover,
     )
@@ -104,7 +115,7 @@ def build_published_column():
 def build_rect_column(width=500.0, height=500.0, fc=28.0, fy=415.0, dmain=25.0, dties=10.0,
                       cover=40.0, is_smrf=False):
     """A plain rectangular column engine (no bars yet)."""
-    return col.ColumnFlexureDesign(
+    return col_section.ColumnFlexureDesign(
         width, height, 0.0, fc, fy, fy, dmain, dties, cover,
         shape="rectangular", is_smrf=is_smrf,
     )
@@ -193,19 +204,19 @@ class TestPublishedInteractionDiagram:
 class TestAxialSignConvention:
     def test_etabs_compression_is_flipped_to_positive(self):
         etabs = force_table(combos={"DL": (-1500.0, 0, 0, 0, 100.0), "WIND": (250.0, 0, 0, 0, 80.0)})
-        converted = col._to_compression_positive(etabs)
+        converted = col_tables._to_compression_positive(etabs)
         assert converted["P"].tolist()[:2] == [1500.0, 1500.0]  # compression -> positive
         assert converted["P"].tolist()[2:] == [-250.0, -250.0]  # tension -> negative
 
     def test_input_table_is_not_modified(self):
         etabs = force_table(combos={"DL": (-1500.0, 0, 0, 0, 100.0)})
-        col._to_compression_positive(etabs)
+        col_tables._to_compression_positive(etabs)
         assert etabs["P"].iloc[0] == -1500.0
 
     def test_flip_can_be_switched_off_in_config(self):
         positive_compression = override(CODE, conventions__etabs_compression_is_negative=False)
         table = force_table(combos={"DL": (1500.0, 0, 0, 0, 100.0)})
-        assert col._to_compression_positive(table, positive_compression)["P"].iloc[0] == 1500.0
+        assert col_tables._to_compression_positive(table, positive_compression)["P"].iloc[0] == 1500.0
 
     def test_unflipped_etabs_forces_would_be_judged_as_tension(self):
         """Why the flip matters: -1500 kN read as compression-positive is a 1500 kN PULL.
@@ -214,14 +225,14 @@ class TestAxialSignConvention:
         load as compression raises it (about 632 kN-m).  A 400 kN-m moment
         therefore fails if the sign is wrong and passes if it is right.
         """
-        layout = next(o for o in col._enumerate_column_bar_layouts(build_rect_column(), 60)
+        layout = next(o for o in col_layouts._enumerate_column_bar_layouts(build_rect_column(), 60)
                       if sum(c for *_, c in o) == 16 and all(c == 1 for *_, c in o))
         etabs = force_table(combos={"DL": (-1500.0, 10.0, 0.0, 0.0, 400.0)})
 
-        raw_ok, raw_checks, _ = col._evaluate_column_candidate(
+        raw_ok, raw_checks, _ = col_flexure._evaluate_column_candidate(
             frame_row(), etabs, layout, 25.0, 10.0, 40.0, False)
-        fixed_ok, fixed_checks, _ = col._evaluate_column_candidate(
-            frame_row(), col._to_compression_positive(etabs), layout, 25.0, 10.0, 40.0, False)
+        fixed_ok, fixed_checks, _ = col_flexure._evaluate_column_candidate(
+            frame_row(), col_tables._to_compression_positive(etabs), layout, 25.0, 10.0, 40.0, False)
 
         assert raw_ok is False  # read as a 1500 kN pull, the moment capacity is too low
         assert fixed_ok is True  # the same forces, correctly read as compression, pass
@@ -233,7 +244,7 @@ class TestAxialSignConvention:
 # ==========================================================================
 class TestCircularColumn:
     def _circular(self):
-        engine = col.ColumnFlexureDesign(
+        engine = col_section.ColumnFlexureDesign(
             0.0, 0.0, 500.0, 35.0, 420.0, 420.0, 25.0, 10.0, 40.0, shape="circular"
         )
         concrete, steel = engine.define_materials()
@@ -260,7 +271,7 @@ class TestCircularColumn:
 
     def test_minimum_bars_in_circular_smrf(self):
         """ACI 10.7.3.1: at least 6 bars for a spiral / special column."""
-        engine = col.ColumnFlexureDesign(0, 0, 400.0, 28, 415, 415, 16, 10, 40,
+        engine = col_section.ColumnFlexureDesign(0, 0, 400.0, 28, 415, 415, 16, 10, 40,
                                          shape="circular", is_smrf=True)
         assert engine._calculate_required_bars(2) >= 6
 
@@ -300,15 +311,15 @@ class TestLimitsAndSpacing:
 
     def test_spiral_pitch_limit(self):
         """ACI 25.7.3.1: clear spiral spacing 25..75 mm -> pitch limit = 75 + dtie."""
-        engine = col.ColumnFlexureDesign(0, 0, 500.0, 28, 415, 415, 25, 10, 40, shape="circular")
+        engine = col_section.ColumnFlexureDesign(0, 0, 500.0, 28, 415, 415, 25, 10, 40, shape="circular")
         assert engine.solve_max_spacing()["max_tie_spacing_mm"] == 85.0
 
     def test_minimum_tie_diameter_depends_on_bar_size(self):
         """NSCP 425.7.2.2: 10 mm ties up to 32 mm bars, 12 mm ties above and for bundles."""
-        assert col._minimum_tie_diameter(build_rect_column(dmain=25.0)) == 10.0
-        assert col._minimum_tie_diameter(build_rect_column(dmain=36.0)) == 12.0
+        assert col_transverse._minimum_tie_diameter(build_rect_column(dmain=25.0)) == 10.0
+        assert col_transverse._minimum_tie_diameter(build_rect_column(dmain=36.0)) == 12.0
         bundled = [(62.5, 62.5, 2), (437.5, 62.5, 2), (62.5, 437.5, 2), (437.5, 437.5, 2)]
-        assert col._minimum_tie_diameter(build_rect_column(dmain=25.0), bundled) == 12.0
+        assert col_transverse._minimum_tie_diameter(build_rect_column(dmain=25.0), bundled) == 12.0
 
     def test_confinement_uses_the_core_to_the_outside_of_the_hoops(self):
         """HAND CALC (ACI 18.7.5.4): 500 x 500, cover 40, fc' 28, fyt 415, Pu low.
@@ -316,7 +327,7 @@ class TestLimitsAndSpacing:
         (a) 0.3 (250000/176400 - 1) 28/415 = 0.0844;  (b) 0.09 x 28/415 = 0.00607.
         """
         engine = build_rect_column(width=500, height=500, fc=28.0, fy=415.0, is_smrf=True)
-        result = col._smrf_transverse_design(engine, 12, 1.0e5, 100.0)
+        result = col_transverse._smrf_transverse_design(engine, 12, 1.0e5, 100.0)
         assert result["Core_Dimension_mm"] == "420.0 x 420.0"
         assert result["Confinement_18_7_5_a"] == pytest.approx(
             0.3 * (250000 / 420**2 - 1) * 28 / 415, rel=1e-6)
@@ -338,14 +349,14 @@ class TestBarLayouts:
     def test_perimeter_positions_have_no_duplicate_corners(self):
         """Regression: earlier code drew every corner bar twice."""
         engine = build_rect_column()
-        positions = col._perimeter_bar_positions(engine, 3, 3)
+        positions = col_layouts._perimeter_bar_positions(engine, 3, 3)
         assert len(positions) == 12
         assert len({(round(x, 3), round(y, 3)) for x, y in positions}) == 12
 
     def test_layouts_are_symmetric(self):
         """Every bar must have a mirror partner about both axes of the column."""
         engine = build_rect_column()
-        for layout in col._enumerate_column_bar_layouts(engine, max_bars=40)[:8]:
+        for layout in col_layouts._enumerate_column_bar_layouts(engine, max_bars=40)[:8]:
             points = {(round(x, 3), round(y, 3)) for x, y, _ in layout}
             for x, y in points:
                 assert (round(500 - x, 3), y) in points
@@ -354,24 +365,24 @@ class TestBarLayouts:
     def test_layouts_are_sorted_from_fewest_bars(self):
         engine = build_rect_column()
         totals = [sum(c for *_, c in layout) for layout in
-                  col._enumerate_column_bar_layouts(engine, max_bars=60)]
+                  col_layouts._enumerate_column_bar_layouts(engine, max_bars=60)]
         assert totals == sorted(totals)
 
     def test_bundle_size_never_exceeds_four(self):
         """ACI 25.6.1.1: bundles of at most 4 bars."""
         engine = build_rect_column()
-        for layout in col._enumerate_column_bar_layouts(engine, max_bars=120):
+        for layout in col_layouts._enumerate_column_bar_layouts(engine, max_bars=120):
             assert max(c for *_, c in layout) <= 4
 
     def test_no_layout_exceeds_bar_budget(self):
         engine = build_rect_column()
-        for layout in col._enumerate_column_bar_layouts(engine, max_bars=30):
+        for layout in col_layouts._enumerate_column_bar_layouts(engine, max_bars=30):
             assert sum(c for *_, c in layout) <= 30
 
     def test_layout_summary_text(self):
-        summary = col._column_layout_summary([(0, 0, 1), (1, 1, 1), (2, 2, 2)])
+        summary = col_transverse._column_layout_summary([(0, 0, 1), (1, 1, 1), (2, 2, 2)])
         assert summary == "2 single bars; 1 bundles of 2 bars"
-        assert col._bundle_histogram(summary) == {1: 2, 2: 1}
+        assert col_schedule._bundle_histogram(summary) == {1: 2, 2: 1}
 
 
 # ==========================================================================
@@ -380,13 +391,13 @@ class TestBarLayouts:
 class TestCandidateCheck:
     def _layout(self, n_bars_per_side=3, width=500.0, cover=40.0, dties=10.0, dmain=25.0):
         engine = build_rect_column(dmain=dmain, dties=dties, cover=cover)
-        options = col._enumerate_column_bar_layouts(engine, max_bars=60)
+        options = col_layouts._enumerate_column_bar_layouts(engine, max_bars=60)
         return next(o for o in options if sum(c for *_, c in o) == 4 * (n_bars_per_side - 1)
                     and all(c == 1 for *_, c in o))
 
     def test_light_load_passes(self):
         layout = self._layout(4)
-        ok, checks, limits = col._evaluate_column_candidate(
+        ok, checks, limits = col_flexure._evaluate_column_candidate(
             frame_row(), force_table(combos={"L": (800.0, 10.0, 0.0, 0.0, 60.0)}),
             layout, 25.0, 10.0, 40.0, False,
         )
@@ -396,17 +407,33 @@ class TestCandidateCheck:
 
     def test_huge_moment_fails(self):
         layout = self._layout(4)
-        ok, checks, _ = col._evaluate_column_candidate(
+        ok, checks, _ = col_flexure._evaluate_column_candidate(
             frame_row(), force_table(combos={"L": (800.0, 10.0, 0.0, 0.0, 900.0)}),
             layout, 25.0, 10.0, 40.0, False,
         )
         assert ok is False
         assert checks[0]["Flexure_Check"] == "FAIL"
 
+    def test_a_moment_of_analysis_noise_is_no_moment(self):
+        """BEHAVIOUR: at a pinned end the analysis leaves about 1e-13 kN-m, in a
+        direction that changes from one analysis to the next. The strength and
+        the utilization must not follow that direction."""
+        layout = self._layout(4)
+        one = col_flexure._evaluate_column_candidate(
+            frame_row(), force_table(combos={"L": (800.0, 0.0, 0.0, -1.8e-13, -3.0e-14)}),
+            layout, 25.0, 10.0, 40.0, False)[1]
+        other = col_flexure._evaluate_column_candidate(
+            frame_row(), force_table(combos={"L": (800.0, 0.0, 0.0, 3.1e-14, 1.2e-13)}),
+            layout, 25.0, 10.0, 40.0, False)[1]
+        for a, b in zip(one, other):
+            assert a["Flexure_Utilization"] == b["Flexure_Utilization"] == 0.0
+            assert a["phi_Mn_kNm"] == b["phi_Mn_kNm"] > 0
+            assert a["Strength_Check"] == "PASS"
+
     def test_resultant_of_two_moments_is_used(self):
         """HAND CALC: demand is sqrt(M2^2 + M3^2)."""
         layout = self._layout(4)
-        _, checks, _ = col._evaluate_column_candidate(
+        _, checks, _ = col_flexure._evaluate_column_candidate(
             frame_row(), force_table(combos={"L": (800.0, 0.0, 0.0, 30.0, 40.0)}),
             layout, 25.0, 10.0, 40.0, False,
         )
@@ -418,7 +445,7 @@ class TestCandidateCheck:
         capacities = []
         for per_side in (4, 5, 6):
             layout = self._layout(per_side)
-            _, checks, _ = col._evaluate_column_candidate(
+            _, checks, _ = col_flexure._evaluate_column_candidate(
                 frame_row(), forces, layout, 25.0, 10.0, 40.0, False)
             capacities.append(checks[0]["phi_Mn_kNm"])
         assert capacities == sorted(capacities)
@@ -426,7 +453,7 @@ class TestCandidateCheck:
     def test_tension_column_is_checked_against_bar_yield(self):
         """HAND CALC: phi*Pnt = 0.9 * fy * Ast."""
         layout = self._layout(4)
-        _, checks, _ = col._evaluate_column_candidate(
+        _, checks, _ = col_flexure._evaluate_column_candidate(
             frame_row(), force_table(combos={"T": (-500.0, 0.0, 0.0, 0.0, 0.0)}),
             layout, 25.0, 10.0, 40.0, False)
         n_bars = sum(c for *_, c in layout)
@@ -448,7 +475,7 @@ class TestSmrfConfinement:
     def test_required_ratio_hand_calc_low_axial_load(self):
         """HAND CALC: Ash/(s bc) >= max( 0.3(Ag/Ach - 1) fc'/fyt , 0.09 fc'/fyt )."""
         engine, ag, ach = self._numbers()
-        result = col._smrf_transverse_design(engine, 12, max_compression=1000e3,
+        result = col_transverse._smrf_transverse_design(engine, 12, max_compression=1000e3,
                                              spacing_limit=100.0)
         expected_a = 0.3 * (ag / ach - 1) * 28 / 415
         expected_b = 0.09 * 28 / 415
@@ -466,7 +493,7 @@ class TestSmrfConfinement:
         engine, ag, ach = self._numbers()
         pu = 0.4 * ag * 28  # above the 0.3 Ag fc' trigger, in N
         n_bars = 12
-        result = col._smrf_transverse_design(engine, n_bars, pu, spacing_limit=100.0)
+        result = col_transverse._smrf_transverse_design(engine, n_bars, pu, spacing_limit=100.0)
         kf = max(1.0, 28 / 175 + 0.6)
         kn = n_bars / (n_bars - 2)
         assert result["Confinement_18_7_5_c"] == pytest.approx(0.2 * kf * kn * pu / (415 * ach))
@@ -475,7 +502,7 @@ class TestSmrfConfinement:
     def test_spacing_obeys_all_limits(self):
         """ACI 18.7.5.3: s <= min(1/4 least dimension, 6 db, so), so = 100..150 mm."""
         engine, _, _ = self._numbers()
-        result = col._smrf_transverse_design(engine, 12, 1000e3, spacing_limit=400.0)
+        result = col_transverse._smrf_transverse_design(engine, 12, 1000e3, spacing_limit=400.0)
         so = 100 + (350 - 150) / 3  # hx = 150 mm  -> 166.7, capped at 150
         limit = min(0.25 * 500, 6 * 25, min(150.0, so))
         assert result["Transverse_Spacing_Provided_mm"] == pytest.approx(limit)
@@ -485,15 +512,15 @@ class TestSmrfConfinement:
         """BEHAVIOUR: a wider section needs at least as many hoop legs."""
         narrow, _, _ = self._numbers(width=400.0)
         wide, _, _ = self._numbers(width=800.0)
-        narrow_legs = col._smrf_transverse_design(narrow, 12, 1000e3, 100.0)["Transverse_Legs_Per_Direction"]
-        wide_legs = col._smrf_transverse_design(wide, 20, 1000e3, 100.0)["Transverse_Legs_Per_Direction"]
+        narrow_legs = col_transverse._smrf_transverse_design(narrow, 12, 1000e3, 100.0)["Transverse_Legs_Per_Direction"]
+        wide_legs = col_transverse._smrf_transverse_design(wide, 20, 1000e3, 100.0)["Transverse_Legs_Per_Direction"]
         assert wide_legs >= narrow_legs
 
     def test_spiral_ratio_hand_calc(self):
         """HAND CALC (spiral): rho_s >= max(0.45(Ag/Ach - 1) fc'/fyt, 0.12 fc'/fyt)."""
-        engine = col.ColumnFlexureDesign(0, 0, 600.0, 28, 415, 415, 25, 12, 40,
+        engine = col_section.ColumnFlexureDesign(0, 0, 600.0, 28, 415, 415, 25, 12, 40,
                                          shape="circular", is_smrf=True)
-        result = col._smrf_transverse_design(engine, 12, 1000e3, spacing_limit=80.0)
+        result = col_transverse._smrf_transverse_design(engine, 12, 1000e3, spacing_limit=80.0)
         ag = math.pi * 600**2 / 4
         ach = math.pi * (600 - 2 * 40) ** 2 / 4
         expected = max(0.45 * (ag / ach - 1) * 28 / 415, 0.12 * 28 / 415)
@@ -502,9 +529,9 @@ class TestSmrfConfinement:
     def test_alternate_bars_get_lateral_support(self):
         """Every second bar on a face needs a hook/leg: 5 bars per face -> 4 legs."""
         engine = build_rect_column(width=600, height=600, is_smrf=True)
-        layout = [layout for layout in col._enumerate_column_bar_layouts(engine, 40)
+        layout = [layout for layout in col_layouts._enumerate_column_bar_layouts(engine, 40)
                   if sum(c for *_, c in layout) == 16 and all(c == 1 for *_, c in layout)][0]
-        legs, added, message = col._post_check_alternating_support(engine, layout, 2)
+        legs, added, message = col_transverse._post_check_alternating_support(engine, layout, 2)
         assert legs >= 3 and added == legs - 2
         assert message.startswith("PASS")
 
@@ -515,9 +542,9 @@ class TestSmrfConfinement:
 class TestColumnShear:
     def _run(self, is_smrf, forces=None, spacing=150.0, legs=2):
         engine = build_rect_column(is_smrf=is_smrf)
-        layout = col._enumerate_column_bar_layouts(engine, 40)[3]
+        layout = col_layouts._enumerate_column_bar_layouts(engine, 40)[3]
         n_bars = sum(c for *_, c in layout)
-        return col._column_shear_checks(
+        return col_shear._column_shear_checks(
             frame_row(), forces if forces is not None else force_table(),
             engine, n_bars, spacing, legs, is_smrf, bundle_layout=layout)
 
@@ -547,10 +574,10 @@ class TestColumnShear:
     def test_smrf_ve_is_capped_by_the_beams(self):
         """ACI 18.7.6.1.1: Ve need not exceed the shear from the beams' Mpr at the joints."""
         engine = build_rect_column(is_smrf=True)
-        layout = col._enumerate_column_bar_layouts(engine, 40)[3]
+        layout = col_layouts._enumerate_column_bar_layouts(engine, 40)[3]
         n_bars = sum(c for *_, c in layout)
         limits = {("V2", "I"): 100.0, ("V2", "J"): 100.0}
-        rows, _ = col._column_shear_checks(
+        rows, _ = col_shear._column_shear_checks(
             frame_row(), force_table(), engine, n_bars, 100.0, 2, True, bundle_layout=layout,
             clear_height=2500.0, beam_moment_limits=limits)
         v2 = [r for r in rows if r["Shear_Direction"] == "V2"]
@@ -636,12 +663,12 @@ def build_joint_model(beam_top_bars=4, beam_bottom_bars=3, column_bars_layout_in
                  "n_right_L1": n_bars, "n_right_L2": 0, "n_right_L3": 0}
             )
     engine = build_rect_column(is_smrf=True)
-    layouts = col._enumerate_column_bar_layouts(engine, 40)
+    layouts = col_layouts._enumerate_column_bar_layouts(engine, 40)
     layout = layouts[column_bars_layout_index]
     n_bars = sum(c for *_, c in layout)
     column_results = pd.DataFrame(
         [{"UniqueName": name, "Longitudinal_Bars": n_bars, "Main_Bar_mm": 25.0,
-          "Longitudinal_Bar_Layout": col._column_layout_summary(layout)}
+          "Longitudinal_Bar_Layout": col_transverse._column_layout_summary(layout)}
          for name in ("C1", "C2")]
     )
     return dict(
@@ -655,30 +682,30 @@ def build_joint_model(beam_top_bars=4, beam_bottom_bars=3, column_bars_layout_in
 
 class TestSmrfJoint:
     def test_joint_rows_are_produced_for_both_sway_directions(self):
-        result = col._evaluate_smrf_joints(**build_joint_model())
+        result = col_joints._evaluate_smrf_joints(**build_joint_model())
         assert set(result["Sway_Direction"]) == {"Positive", "Negative"}
         assert set(result["Joint_Point"]) == {"P1"}
 
     def test_ratio_equals_column_over_beam_capacity(self):
-        result = col._evaluate_smrf_joints(**build_joint_model())
+        result = col_joints._evaluate_smrf_joints(**build_joint_model())
         for _, row in result.iterrows():
             assert row["Column_Beam_Ratio"] == pytest.approx(
                 row["Sum_Column_Mn_kNm"] / row["Sum_Beam_Mn_kNm"])
 
     def test_strong_columns_weak_beams_passes(self):
-        result = col._evaluate_smrf_joints(**build_joint_model(beam_top_bars=3, beam_bottom_bars=2,
+        result = col_joints._evaluate_smrf_joints(**build_joint_model(beam_top_bars=3, beam_bottom_bars=2,
                                                                column_bars_layout_index=8))
         assert (result["Strong_Column_Check"] == "PASS").all()
 
     def test_heavy_beams_fail_the_ratio(self):
-        result = col._evaluate_smrf_joints(**build_joint_model(beam_top_bars=9, beam_bottom_bars=9,
+        result = col_joints._evaluate_smrf_joints(**build_joint_model(beam_top_bars=9, beam_bottom_bars=9,
                                                                column_bars_layout_index=0))
         assert (result["Strong_Column_Check"] == "FAIL").any()
 
     def test_more_beam_steel_lowers_the_ratio(self):
         """BEHAVIOUR: stronger beams -> smaller column/beam ratio."""
-        light = col._evaluate_smrf_joints(**build_joint_model(beam_top_bars=3, beam_bottom_bars=3))
-        heavy = col._evaluate_smrf_joints(**build_joint_model(beam_top_bars=8, beam_bottom_bars=8))
+        light = col_joints._evaluate_smrf_joints(**build_joint_model(beam_top_bars=3, beam_bottom_bars=3))
+        heavy = col_joints._evaluate_smrf_joints(**build_joint_model(beam_top_bars=8, beam_bottom_bars=8))
         assert heavy["Column_Beam_Ratio"].min() < light["Column_Beam_Ratio"].min()
 
     def test_joint_shear_capacity_hand_calc(self):
@@ -687,7 +714,7 @@ class TestSmrfJoint:
         Joint confined on two opposite faces by the beams -> coefficient 1.2.
         Joint depth = 500 mm, effective width = min(500, 300 + 500) = 500 mm.
         """
-        result = col._evaluate_smrf_joints(**build_joint_model())
+        result = col_joints._evaluate_smrf_joints(**build_joint_model())
         row = result.iloc[0]
         aj = 500 * 500
         expected = 0.85 * row["Nominal_Joint_Shear_Coefficient"] * math.sqrt(28) * aj / 1000
@@ -716,7 +743,7 @@ class TestSmrfJoint:
         expected_vcol = (mpr_top + mpr_bottom) * 1000 / (0.5 * 3000 + 0.5 * 3000)
         expected_demand = abs(force_top + force_bottom - expected_vcol)
 
-        row = col._evaluate_smrf_joints(**build_joint_model()).iloc[0]
+        row = col_joints._evaluate_smrf_joints(**build_joint_model()).iloc[0]
         assert close(row["Capacity_Based_Column_Shear_kN"], expected_vcol, 0.04)
         assert close(row["Beam_Tension_Force_kN"], force_top + force_bottom, 0.001)
         assert close(row["Joint_Shear_Demand_kN"], expected_demand, 0.04)
@@ -727,21 +754,21 @@ class TestSmrfJoint:
         (Bug fixed: the column shear used to come from the COLUMN capacity, so
         more column bars wrongly lowered the joint shear.)
         """
-        few_bars = col._evaluate_smrf_joints(**build_joint_model(column_bars_layout_index=3))
-        many_bars = col._evaluate_smrf_joints(**build_joint_model(column_bars_layout_index=8))
+        few_bars = col_joints._evaluate_smrf_joints(**build_joint_model(column_bars_layout_index=3))
+        many_bars = col_joints._evaluate_smrf_joints(**build_joint_model(column_bars_layout_index=8))
         assert few_bars["Joint_Shear_Demand_kN"].tolist() == pytest.approx(
             many_bars["Joint_Shear_Demand_kN"].tolist())
 
     def test_missing_beam_design_is_reported_not_crashed(self):
         model = build_joint_model()
         model["beam_design"] = model["beam_design"][model["beam_design"]["UniqueName"] != "B2"]
-        result = col._evaluate_smrf_joints(**model)
+        result = col_joints._evaluate_smrf_joints(**model)
         assert result["Strong_Column_Check"].str.startswith("BLOCKED").all()
 
     def test_non_smrf_frames_skip_joint_checks(self):
         model = build_joint_model()
         model["is_smrf"] = False
-        assert col._evaluate_smrf_joints(**model).empty
+        assert col_joints._evaluate_smrf_joints(**model).empty
 
 
 # ==========================================================================
@@ -750,42 +777,42 @@ class TestSmrfJoint:
 class TestGeometryHelpers:
     def test_local_axes_of_a_vertical_column(self):
         """ETABS: local 1 = I to J (up).  Local axes stay perpendicular unit vectors."""
-        one, two, three = col._frame_local_axes(
+        one, two, three = col_tables._frame_local_axes(
             np.array([0.0, 0, 0]), np.array([0.0, 0, 3000]), 0.0)
         assert np.allclose(one, [0, 0, 1])
         assert abs(np.dot(one, two)) < 1e-9 and abs(np.dot(two, three)) < 1e-9
         assert np.allclose([np.linalg.norm(two), np.linalg.norm(three)], 1.0)
 
     def test_beta_angle_rotates_axes_2_and_3(self):
-        _, two, _ = col._frame_local_axes(np.array([0.0, 0, 0]), np.array([0.0, 0, 3000]), 0.0)
-        _, rotated, _ = col._frame_local_axes(np.array([0.0, 0, 0]), np.array([0.0, 0, 3000]), 90.0)
+        _, two, _ = col_tables._frame_local_axes(np.array([0.0, 0, 0]), np.array([0.0, 0, 3000]), 0.0)
+        _, rotated, _ = col_tables._frame_local_axes(np.array([0.0, 0, 0]), np.array([0.0, 0, 3000]), 90.0)
         assert abs(np.dot(two, rotated)) < 1e-9
 
     def test_same_start_and_end_point_is_rejected(self):
         with pytest.raises(ValueError):
-            col._frame_local_axes(np.zeros(3), np.zeros(3), 0.0)
+            col_tables._frame_local_axes(np.zeros(3), np.zeros(3), 0.0)
 
     def test_numeric_ids_from_excel_are_cleaned(self):
         """Excel turns object id 502 into 502.0; both must map to '502'."""
-        assert col._normalize_object_name(502.0) == "502"
-        assert col._normalize_object_name(" C12 ") == "C12"
-        assert col._normalize_object_name(float("nan")) == ""
+        assert col_tables._normalize_object_name(502.0) == "502"
+        assert col_tables._normalize_object_name(" C12 ") == "C12"
+        assert col_tables._normalize_object_name(float("nan")) == ""
 
     def test_common_column_mark(self):
-        assert col._common_column_mark("PD2C14A") == "C14A"
+        assert col_tables._common_column_mark("PD2C14A") == "C14A"
 
     def test_conflicting_frame_rows_are_detected(self):
         frame = pd.DataFrame([frame_row("C1"), frame_row("C1", width=600.0)])
         with pytest.raises(ValueError):
-            col._deduplicate_frame_data(frame)
+            col_tables._deduplicate_frame_data(frame)
 
     def test_missing_columns_are_named_in_the_error(self):
         with pytest.raises(ValueError, match="P"):
-            col._require_columns(pd.DataFrame({"M2": [1]}), {"P", "M2"}, "FACTORED LOADS")
+            col_tables._require_columns(pd.DataFrame({"M2": [1]}), {"P", "M2"}, "FACTORED LOADS")
 
     def test_story_ordering(self):
         stories = ["L3", "GF", "B1", "L1"]
-        assert sorted(stories, key=col._column_story_sort_key) == ["B1", "GF", "L1", "L3"]
+        assert sorted(stories, key=col_tables._column_story_sort_key) == ["B1", "GF", "L1", "L3"]
 
 
 # ==========================================================================
@@ -794,15 +821,15 @@ class TestGeometryHelpers:
 def _tie_bars_for(width=600.0, depth=600.0, n_bars=24, dmain=25.0, dties=10.0, cover=40.0):
     """Hoop + crossties drawn at 1:1 for a rectangular column."""
     engine = build_rect_column(width, depth, dmain=dmain, dties=dties, cover=cover, is_smrf=True)
-    layout = next(l for l in col._enumerate_column_bar_layouts(engine, 200)
+    layout = next(l for l in col_layouts._enumerate_column_bar_layouts(engine, 200)
                   if sum(c for *_, c in l) == n_bars and all(c == 1 for *_, c in l))
-    bars = col._hoop_tie_bars(0.0, 0.0, width, depth, cover, dmain, dties, 1.0)
-    bars += col._crosstie_bars(layout, 0.0, 0.0, 1.0, dmain, dties)
+    bars = col_schedule._hoop_tie_bars(0.0, 0.0, width, depth, cover, dmain, dties, 1.0)
+    bars += col_schedule._crosstie_bars(layout, 0.0, 0.0, 1.0, dmain, dties)
     return bars, dties
 
 
 def _visible_map(bars, thickness):
-    return [(bar, shape) for bar, shape in col._visible_tie_shapes(bars, thickness)]
+    return [(bar, shape) for bar, shape in col_schedule._visible_tie_shapes(bars, thickness)]
 
 
 @pytest.mark.parametrize("n_bars", [16, 24])
@@ -834,8 +861,8 @@ def test_crossties_sit_on_top_of_hoop():
 
 def test_horizontal_crossties_sit_on_top_of_vertical_crossties():
     bars, _ = _tie_bars_for()
-    vertical = [b.level for b in bars if b.layer == "CROSSTIES" and col.LEVEL_CROSSTIE_Y < b.level < col.LEVEL_CROSSTIE_X]
-    horizontal = [b.level for b in bars if b.layer == "CROSSTIES" and b.level > col.LEVEL_CROSSTIE_X]
+    vertical = [b.level for b in bars if b.layer == "CROSSTIES" and col_schedule.LEVEL_CROSSTIE_Y < b.level < col_schedule.LEVEL_CROSSTIE_X]
+    horizontal = [b.level for b in bars if b.layer == "CROSSTIES" and b.level > col_schedule.LEVEL_CROSSTIE_X]
     assert vertical and horizontal
     assert min(horizontal) > max(vertical)
 
@@ -852,15 +879,15 @@ def test_crowded_hook_extensions_are_stacked_in_order():
     """In a crowded section neighbouring crossties get different levels, so one
     hook extension lies on top of the next instead of crossing it."""
     bars, _ = _tie_bars_for(n_bars=24)
-    horizontal_levels = sorted(b.level for b in bars if b.level > col.LEVEL_CROSSTIE_X)
+    horizontal_levels = sorted(b.level for b in bars if b.level > col_schedule.LEVEL_CROSSTIE_X)
     assert len(horizontal_levels) >= 2
     assert len(set(horizontal_levels)) == len(horizontal_levels)
 
 
 def test_hook_tail_length_rule():
     """ACI 25.3.2: hook extension is 6 db but not less than 75 mm."""
-    assert col._hook_tail_length_dxf(10.0) == 75.0
-    assert col._hook_tail_length_dxf(16.0) == 96.0
+    assert col_schedule._hook_tail_length_dxf(10.0) == 75.0
+    assert col_schedule._hook_tail_length_dxf(16.0) == 96.0
 
 
 # ==========================================================================
@@ -868,13 +895,13 @@ def test_hook_tail_length_rule():
 # ==========================================================================
 def _report_row(name="PD1C1", story="L1", width=500.0, depth=500.0, bars=16):
     engine = build_rect_column(width, depth, is_smrf=True)
-    layout = next(l for l in col._enumerate_column_bar_layouts(engine, 200)
+    layout = next(l for l in col_layouts._enumerate_column_bar_layouts(engine, 200)
                   if sum(c for *_, c in l) == bars and all(c == 1 for *_, c in l))
     return {
         "Unique Name": name, "Column Label": "C1", "Story": story,
         "f′c (MPa)": 28.0, "Width (mm)": width, "Depth (mm)": depth,
         "Diameter (mm)": np.nan, "Longitudinal Bars": bars,
-        "Bundle Layout": col._column_layout_summary(layout),
+        "Bundle Layout": col_transverse._column_layout_summary(layout),
         "Tie Bar Diameter (mm)": 10.0, "Tie / Spiral Spacing (mm)": 100.0,
         "Hoop Legs X": 3, "Hoop Legs Y": 3,
     }
@@ -883,7 +910,7 @@ def _report_row(name="PD1C1", story="L1", width=500.0, depth=500.0, bars=16):
 def test_column_schedule_dxf_is_written_and_readable(tmp_path):
     report = pd.DataFrame([_report_row(story="L1"), _report_row("PD2C1", "L2")])
     target = tmp_path / "Column_Schedule.dxf"
-    col.generate_dxf_column_schedule(report, str(target), 25.0, 40.0, True)
+    col_schedule.generate_dxf_column_schedule(report, str(target), 25.0, 40.0, True)
 
     document = ezdxf.readfile(target)
     layers = {entity.dxf.layer for entity in document.modelspace()}
@@ -893,7 +920,7 @@ def test_column_schedule_dxf_is_written_and_readable(tmp_path):
 def test_dxf_draws_one_circle_per_longitudinal_bar(tmp_path):
     report = pd.DataFrame([_report_row(bars=16)])
     target = tmp_path / "one.dxf"
-    col.generate_dxf_column_schedule(report, str(target), 25.0, 40.0, True)
+    col_schedule.generate_dxf_column_schedule(report, str(target), 25.0, 40.0, True)
     circles = [e for e in ezdxf.readfile(target).modelspace()
                if e.dxftype() == "CIRCLE" and e.dxf.layer == "LONGITUDINAL"]
     assert len(circles) == 16  # corners are no longer drawn twice
@@ -901,7 +928,7 @@ def test_dxf_draws_one_circle_per_longitudinal_bar(tmp_path):
 
 def test_empty_report_is_rejected(tmp_path):
     with pytest.raises(ValueError):
-        col.generate_dxf_column_schedule(pd.DataFrame(), str(tmp_path / "x.dxf"), 25.0, 40.0, True)
+        col_schedule.generate_dxf_column_schedule(pd.DataFrame(), str(tmp_path / "x.dxf"), 25.0, 40.0, True)
 
 
 # --------------------------------------------------------------------------
@@ -917,7 +944,7 @@ def test_each_permutation_becomes_its_own_internal_combo():
             "P": [100.0, 200.0, 300.0],
         }
     )
-    expanded, display = col._expand_combo_permutations(forces)
+    expanded, display = col_tables._expand_combo_permutations(forces)
     assert expanded["Combo"].tolist() == ["ULS 1-1", "ULS 1-2", "ULS 2-1"]
     assert display == {"ULS 1-1": "ULS 1", "ULS 1-2": "ULS 1", "ULS 2-1": "ULS 2"}
     assert forces["Combo"].tolist() == ["ULS 1", "ULS 1", "ULS 2"]  # input untouched
@@ -926,7 +953,7 @@ def test_each_permutation_becomes_its_own_internal_combo():
 def test_tables_without_a_permutation_column_are_left_as_they_are():
     """BEHAVIOUR: workbooks extracted before the Permutation column still work."""
     forces = pd.DataFrame({"UniqueName": ["C1"], "Combo": ["ULS 1"], "P": [1.0]})
-    expanded, display = col._expand_combo_permutations(forces)
+    expanded, display = col_tables._expand_combo_permutations(forces)
     assert expanded["Combo"].tolist() == ["ULS 1"]
     assert display == {"ULS 1": "ULS 1"}
 
@@ -947,7 +974,7 @@ def test_report_keeps_the_governing_permutation_under_the_plain_combo_name():
     shear = pd.DataFrame({"UniqueName": ["C1"], "Combo": ["ULS 1-2"], "End": ["I"]})
     joints = pd.DataFrame({"Load_Combo": ["ULS 1-3"], "Column_Beam_Ratio": [1.5]})
 
-    load, shear, joints = col._collapse_combo_permutations(checks, shear, joints, display)
+    load, shear, joints = col_tables._collapse_combo_permutations(checks, shear, joints, display)
 
     assert load[["Combo", "End", "Pu_kN"]].values.tolist() == [
         ["ULS 1", "I", 30.0],  # the failing permutation
@@ -957,25 +984,46 @@ def test_report_keeps_the_governing_permutation_under_the_plain_combo_name():
     assert joints["Load_Combo"].tolist() == ["ULS 1"]
 
 
+def test_permutations_with_the_same_utilization_show_the_larger_axial_load():
+    """BEHAVIOUR: at a pinned end every permutation has utilization 0 (or the same
+    but for the last digits of the analysis). The row shown is the one with the
+    larger compression, whatever those digits are and whatever order they come in."""
+    display = {"ULS 1-1": "ULS 1", "ULS 1-2": "ULS 1", "ULS 1-3": "ULS 1"}
+
+    def governing(utilizations):
+        checks = pd.DataFrame({
+            "UniqueName": ["C1"] * 3, "Combo": ["ULS 1-1", "ULS 1-2", "ULS 1-3"],
+            "End": ["I"] * 3, "Pu_kN": [402.36, 417.31, 395.0],
+            "Flexure_Utilization": utilizations, "Strength_Check": ["PASS"] * 3})
+        load, _, _ = col_tables._collapse_combo_permutations(checks, pd.DataFrame(), pd.DataFrame(),
+                                                      display)
+        return load["Pu_kN"].tolist()
+
+    assert governing([0.0, 0.0, 0.0]) == [417.31]
+    assert governing([2.4e-16, 1.7e-16, 3.3e-16]) == [417.31]
+    assert governing([0.5, 0.5 + 1e-13, 0.5 - 1e-13]) == [417.31]
+    assert governing([0.6, 0.5, 0.5]) == [402.36]      # a real difference still governs
+
+
 # --------------------------------------------------------------------------
 # CIRCULAR COLUMNS IN THE SCHEDULE, SECTION REUSE, CONFIG VALUES
 # --------------------------------------------------------------------------
 def test_circular_column_is_drawn_with_a_circular_concrete_outline(tmp_path):
     """BEHAVIOUR: a circular column must not be drawn as a square."""
-    engine = col.ColumnFlexureDesign(
+    engine = col_section.ColumnFlexureDesign(
         width=0.0, height=0.0, diameter=600.0, dmain=25.0, dties=10.0, cc=40.0,
         shape="circular", is_smrf=True,
     )
-    layout = col._enumerate_column_bar_layouts(engine, 60)[0]
+    layout = col_layouts._enumerate_column_bar_layouts(engine, 60)[0]
     row = {
         "Unique Name": "PD1C9", "Column Label": "C9", "Story": "L1",
         "f′c (MPa)": 28.0, "Width (mm)": np.nan, "Depth (mm)": np.nan,
         "Diameter (mm)": 600.0, "Longitudinal Bars": sum(c for *_, c in layout),
-        "Bundle Layout": col._column_layout_summary(layout),
+        "Bundle Layout": col_transverse._column_layout_summary(layout),
         "Tie Bar Diameter (mm)": 10.0, "Tie / Spiral Spacing (mm)": 75.0,
     }
     target = tmp_path / "circular.dxf"
-    col.generate_dxf_column_schedule(pd.DataFrame([row]), str(target), 25.0, 40.0, True)
+    col_schedule.generate_dxf_column_schedule(pd.DataFrame([row]), str(target), 25.0, 40.0, True)
 
     concrete = [e for e in ezdxf.readfile(target).modelspace() if e.dxf.layer == "CONCRETE"]
     assert [entity.dxftype() for entity in concrete] == ["CIRCLE"]
@@ -988,13 +1036,13 @@ def test_analysis_section_is_built_once_and_reused():
     geometry = engine.add_reinf(
         engine.define_section(400.0, 400.0, 0.0, concrete), engine.dmain, steel, 8
     )
-    first = col._concrete_section_for(geometry)
-    assert col._concrete_section_for(geometry) is first
-    assert col._concrete_section_for(first) is first
+    first = col_section._concrete_section_for(geometry)
+    assert col_section._concrete_section_for(geometry) is first
+    assert col_section._concrete_section_for(first) is first
 
     capacity_low = engine.solve_moment_capacity(geometry, axial_load=200e3, bending_angle=0.0)
     capacity_high = engine.solve_moment_capacity(geometry, axial_load=800e3, bending_angle=0.0)
-    assert col._concrete_section_for(geometry) is first
+    assert col_section._concrete_section_for(geometry) is first
     assert capacity_low[0] != capacity_high[0]  # the axial load still matters
 
 
@@ -1013,12 +1061,12 @@ def test_material_models_use_megapascals_throughout():
 def _site(count, corner=False, shaft_side=-1.0):
     """A bottom-face position (or the bottom-left corner) holding ``count`` bars."""
     if corner:
-        return col.BarSite(0.0, 0.0, count, (1.0, 0.0), (0.0, 1.0), is_corner=True)
-    return col.BarSite(0.0, 0.0, count, (1.0, 0.0), (0.0, 1.0), shaft_side=shaft_side)
+        return col_schedule.BarSite(0.0, 0.0, count, (1.0, 0.0), (0.0, 1.0), is_corner=True)
+    return col_schedule.BarSite(0.0, 0.0, count, (1.0, 0.0), (0.0, 1.0), shaft_side=shaft_side)
 
 
 def _offsets(site, diameter=20.0):
-    return [(round(x, 3), round(y, 3)) for x, y in col._bundle_bar_offsets(site, diameter)]
+    return [(round(x, 3), round(y, 3)) for x, y in col_schedule._bundle_bar_offsets(site, diameter)]
 
 
 def test_two_bars_on_a_face_are_stacked_toward_the_core():
@@ -1042,11 +1090,11 @@ def test_three_bars_form_an_l_shape():
 
 def test_three_bars_on_a_circular_column_form_a_triangle():
     """BEHAVIOUR: with no tie shaft to clear, the third bar sits between the other two."""
-    engine = col.ColumnFlexureDesign(0.0, 0.0, 700.0, dmain=25.0, dties=10.0, cc=40.0,
+    engine = col_section.ColumnFlexureDesign(0.0, 0.0, 700.0, dmain=25.0, dties=10.0, cc=40.0,
                                      shape="circular", is_smrf=True)
-    layout = next(l for l in col._enumerate_column_bar_layouts(engine, 60) if l[0][2] == 3)
-    for site in col._circular_bar_sites(layout):
-        first, second, third = col._bundle_bar_offsets(site, 25.0)
+    layout = next(l for l in col_layouts._enumerate_column_bar_layouts(engine, 60) if l[0][2] == 3)
+    for site in col_schedule._circular_bar_sites(layout):
+        first, second, third = col_schedule._bundle_bar_offsets(site, 25.0)
         assert math.dist(first, second) == pytest.approx(25.0)
         assert math.dist(first, third) == pytest.approx(25.0)   # touches both outer bars
         assert math.dist(second, third) == pytest.approx(25.0)
@@ -1063,16 +1111,16 @@ def test_four_bars_form_a_square():
 def test_bars_of_a_bundle_touch_but_never_overlap():
     for count in (2, 3, 4):
         for site in (_site(count), _site(count, corner=True)):
-            centres = col._bundle_bar_offsets(site, 20.0)
+            centres = col_schedule._bundle_bar_offsets(site, 20.0)
             gaps = [math.dist(a, b) for i, a in enumerate(centres) for b in centres[i + 1:]]
             assert min(gaps) == pytest.approx(20.0)
 
 
 def test_bar_layout_text_round_trips():
     layout = [(62.5, 62.5, 3), (250.0, 62.5, 1), (437.5, 62.5, 2)]
-    assert col._decode_bar_layout(col._encode_bar_layout(layout)) == layout
-    assert col._decode_bar_layout(None) is None
-    assert col._decode_bar_layout(float("nan")) is None
+    assert col_transverse._decode_bar_layout(col_transverse._encode_bar_layout(layout)) == layout
+    assert col_transverse._decode_bar_layout(None) is None
+    assert col_transverse._decode_bar_layout(float("nan")) is None
 
 
 def test_drawing_uses_the_designed_layout_not_a_lookalike():
@@ -1082,10 +1130,10 @@ def test_drawing_uses_the_designed_layout_not_a_lookalike():
     with more on the short faces. The schedule must draw the one the design chose.
     """
     engine = build_rect_column(500.0, 800.0, is_smrf=True)
-    layouts = col._enumerate_column_bar_layouts(engine, 200)
+    layouts = col_layouts._enumerate_column_bar_layouts(engine, 200)
     by_summary = {}
     for layout in layouts:
-        key = (sum(c for *_, c in layout), col._column_layout_summary(layout))
+        key = (sum(c for *_, c in layout), col_transverse._column_layout_summary(layout))
         by_summary.setdefault(key, []).append(layout)
     twins = next(group for group in by_summary.values() if len(group) > 1)
     designed = twins[-1]  # not the first match, which the old lookup would return
@@ -1094,10 +1142,10 @@ def test_drawing_uses_the_designed_layout_not_a_lookalike():
         "Unique Name": "PD1C1", "Width (mm)": 500.0, "Depth (mm)": 800.0,
         "Diameter (mm)": np.nan, "f′c (MPa)": 28.0,
         "Longitudinal Bars": sum(c for *_, c in designed),
-        "Bundle Layout": col._column_layout_summary(designed),
-        "Bar Layout Data (x, y, n)": col._encode_bar_layout(designed),
+        "Bundle Layout": col_transverse._column_layout_summary(designed),
+        "Bar Layout Data (x, y, n)": col_transverse._encode_bar_layout(designed),
     })
-    drawn = col._column_layout_from_report(row, 25.0, 10.0, 40.0, True)
+    drawn = col_schedule._column_layout_from_report(row, 25.0, 10.0, 40.0, True)
     rounded = lambda layout: sorted((round(x, 2), round(y, 2), c) for x, y, c in layout)
     assert rounded(drawn) == rounded(designed)
     assert rounded(drawn) != rounded(twins[0])
@@ -1107,7 +1155,7 @@ def test_reports_without_layout_data_still_draw():
     """Older reports have only the bundle summary; the lookup falls back to it."""
     row = pd.Series(_report_row())
     assert "Bar Layout Data (x, y, n)" not in row
-    layout = col._column_layout_from_report(row, 25.0, 10.0, 40.0, True)
+    layout = col_schedule._column_layout_from_report(row, 25.0, 10.0, 40.0, True)
     assert sum(c for *_, c in layout) == 16
 
 
@@ -1115,7 +1163,7 @@ def test_reports_without_layout_data_still_draw():
 def test_bundle_of_three_or_four_gets_a_flat_run_before_the_hook(count):
     """The tie turns sharply, runs flat across the two outer bars, then bends 45
     degrees toward the core, so the extension leaves the bundle diagonally."""
-    points = col._crosstie_end_points(
+    points = col_schedule._crosstie_end_points(
         bar=(100.0, 50.0), count=count, outward=(0.0, -1.0), toward_tail=(1.0, 0.0),
         bar_diameter=20.0, bend_radius=15.0, tail_length=75.0,
     )
@@ -1129,7 +1177,7 @@ def test_bundle_of_three_or_four_gets_a_flat_run_before_the_hook(count):
 
 
 def test_single_bar_keeps_the_normal_hook():
-    points = col._crosstie_end_points(
+    points = col_schedule._crosstie_end_points(
         bar=(100.0, 50.0), count=1, outward=(0.0, -1.0), toward_tail=(1.0, 0.0),
         bar_diameter=20.0, bend_radius=15.0, tail_length=75.0,
     )
@@ -1141,11 +1189,11 @@ def _section_parts(layout, width, depth, dmain, dties, cover, style):
     """Tie bodies and bar circles of one drawn section, at 1:1."""
     from shapely.geometry import LineString, Point
 
-    sites = col._rect_bar_sites(layout, style)
+    sites = col_schedule._rect_bar_sites(layout, style)
     hook_corner = min((s for s in sites if s.is_corner), key=lambda s: (s.x, -s.y))
-    ties = col._hoop_tie_bars(
+    ties = col_schedule._hoop_tie_bars(
         0.0, 0.0, width, depth, cover, dmain, dties, 1.0, hook_corner_count=hook_corner.count
-    ) + col._crosstie_bars(layout, 0.0, 0.0, 1.0, dmain, dties, style)
+    ) + col_schedule._crosstie_bars(layout, 0.0, 0.0, 1.0, dmain, dties, style)
     bodies = [
         LineString(tie.path).buffer(dties / 2.0, cap_style="flat", join_style="mitre")
         for tie in ties
@@ -1153,12 +1201,12 @@ def _section_parts(layout, width, depth, dmain, dties, cover, style):
     bars = [
         Point(site.x + dx, site.y + dy).buffer(dmain / 2.0, 32)
         for site in sites
-        for dx, dy in col._bundle_bar_offsets(site, dmain)
+        for dx, dy in col_schedule._bundle_bar_offsets(site, dmain)
     ]
     return ties, bodies, bars
 
 
-@pytest.mark.parametrize("style", col.INNER_TIE_STYLES)
+@pytest.mark.parametrize("style", col_schedule.INNER_TIE_STYLES)
 @pytest.mark.parametrize(
     "width, depth, dmain, dties",
     [(700.0, 700.0, 25.0, 10.0), (500.0, 800.0, 28.0, 12.0), (400.0, 400.0, 20.0, 10.0)],
@@ -1174,23 +1222,23 @@ def test_no_tie_is_drawn_through_a_bar(width, depth, dmain, dties, style):
     engine = build_rect_column(width, depth, dmain=dmain, dties=dties, is_smrf=True)
     bar_area = math.pi * dmain**2 / 4.0
     max_bars = int(CODE.column_strength.rho_max_smrf * width * depth / bar_area)
-    for layout in col._enumerate_column_bar_layouts(engine, max_bars):
+    for layout in col_layouts._enumerate_column_bar_layouts(engine, max_bars):
         xs = sorted({round(x, 1) for x, _, _ in layout})
         ys = sorted({round(y, 1) for _, y, _ in layout})
         if min(xs[1] - xs[0], ys[1] - ys[0]) < 110.0:
             continue
         _, bodies, bars = _section_parts(layout, width, depth, dmain, dties, 40.0, style)
         worst = max(body.intersection(bar).area for body in bodies for bar in bars)
-        assert worst <= 0.05 * bar_area, col._column_layout_summary(layout)
+        assert worst <= 0.05 * bar_area, col_transverse._column_layout_summary(layout)
 
 
 def test_inner_hoops_replace_pairs_of_crossties():
     """BEHAVIOUR: each closed inner hoop encloses two neighbouring bar positions."""
     engine = build_rect_column(700.0, 700.0, is_smrf=True)
-    layout = next(l for l in col._enumerate_column_bar_layouts(engine, 200)
+    layout = next(l for l in col_layouts._enumerate_column_bar_layouts(engine, 200)
                   if len(l) == 20 and all(c == 1 for *_, c in l))  # 4 interior bars per face
-    crossties = col._crosstie_bars(layout, 0.0, 0.0, 1.0, 25.0, 10.0, "crossties")
-    hoops = col._crosstie_bars(layout, 0.0, 0.0, 1.0, 25.0, 10.0, "hoops")
+    crossties = col_schedule._crosstie_bars(layout, 0.0, 0.0, 1.0, 25.0, 10.0, "crossties")
+    hoops = col_schedule._crosstie_bars(layout, 0.0, 0.0, 1.0, 25.0, 10.0, "hoops")
     assert len(crossties) == 8          # 4 vertical + 4 horizontal single ties
     assert len(hoops) == 8              # 2 + 2 closed hoops, each drawn as two legs
     xs = [x for x, _ in hoops[1].path]  # right leg of the first vertical hoop
@@ -1199,24 +1247,24 @@ def test_inner_hoops_replace_pairs_of_crossties():
 
 def test_unknown_inner_tie_style_is_rejected():
     engine = build_rect_column(500.0, 500.0, is_smrf=True)
-    layout = col._enumerate_column_bar_layouts(engine, 60)[0]
+    layout = col_layouts._enumerate_column_bar_layouts(engine, 60)[0]
     with pytest.raises(ValueError, match="inner_tie_style"):
-        col._rect_bar_sites(layout, "spirals")
+        col_schedule._rect_bar_sites(layout, "spirals")
 
 
-@pytest.mark.parametrize("style", col.INNER_TIE_STYLES)
+@pytest.mark.parametrize("style", col_schedule.INNER_TIE_STYLES)
 def test_schedule_draws_every_bar_of_a_bundled_layout(tmp_path, style):
     engine = build_rect_column(700.0, 700.0, is_smrf=True)
-    layout = next(l for l in col._enumerate_column_bar_layouts(engine, 200)
+    layout = next(l for l in col_layouts._enumerate_column_bar_layouts(engine, 200)
                   if max(c for *_, c in l) == 3)
     row = _report_row(width=700.0, depth=700.0)
     row.update({
         "Longitudinal Bars": sum(c for *_, c in layout),
-        "Bundle Layout": col._column_layout_summary(layout),
-        "Bar Layout Data (x, y, n)": col._encode_bar_layout(layout),
+        "Bundle Layout": col_transverse._column_layout_summary(layout),
+        "Bar Layout Data (x, y, n)": col_transverse._encode_bar_layout(layout),
     })
     target = tmp_path / f"bundled_{style}.dxf"
-    col.generate_dxf_column_schedule(pd.DataFrame([row]), str(target), 25.0, 40.0, True, style)
+    col_schedule.generate_dxf_column_schedule(pd.DataFrame([row]), str(target), 25.0, 40.0, True, style)
     document = ezdxf.readfile(target)
     circles = [e for e in document.modelspace()
                if e.dxftype() == "CIRCLE" and e.dxf.layer == "LONGITUDINAL"]
@@ -1235,13 +1283,13 @@ def _positions_per_edge(layout):
 
 def test_square_column_gets_the_same_bars_on_every_face():
     """BEHAVIOUR: a square column is never offered an unequal bar arrangement."""
-    layouts = col._enumerate_column_bar_layouts(build_rect_column(500.0, 500.0), 80)
+    layouts = col_layouts._enumerate_column_bar_layouts(build_rect_column(500.0, 500.0), 80)
     assert layouts
     assert all(nx == ny for nx, ny in map(_positions_per_edge, layouts))
 
 
 def test_rectangular_column_may_still_have_unequal_faces():
-    layouts = col._enumerate_column_bar_layouts(build_rect_column(500.0, 800.0), 80)
+    layouts = col_layouts._enumerate_column_bar_layouts(build_rect_column(500.0, 800.0), 80)
     assert any(nx != ny for nx, ny in map(_positions_per_edge, layouts))
 
 
@@ -1249,25 +1297,25 @@ def test_support_legs_and_bar_counts_are_given_per_edge():
     """HAND CALC: 4 positions on the X edge need 2 + ceil(2/2) = 3 legs; 6 on the
     Y edge need 2 + ceil(4/2) = 4 legs."""
     engine = build_rect_column(500.0, 800.0, is_smrf=True)
-    layout = next(l for l in col._enumerate_column_bar_layouts(engine, 80)
+    layout = next(l for l in col_layouts._enumerate_column_bar_layouts(engine, 80)
                   if _positions_per_edge(l) == (4, 6) and all(c == 1 for *_, c in l))
-    assert col._alternating_support_legs(engine, layout) == (3, 4)
-    assert col._bars_per_edge(engine, layout) == (4, 6)
+    assert col_transverse._alternating_support_legs(engine, layout) == (3, 4)
+    assert col_transverse._bars_per_edge(engine, layout) == (4, 6)
 
 
 def test_circular_column_has_no_edges():
-    engine = col.ColumnFlexureDesign(0.0, 0.0, 600.0, shape="circular")
-    layout = col._enumerate_column_bar_layouts(engine, 40)[0]
-    assert col._alternating_support_legs(engine, layout) == (1, 1)
-    assert col._bars_per_edge(engine, layout) == (None, None)
+    engine = col_section.ColumnFlexureDesign(0.0, 0.0, 600.0, shape="circular")
+    layout = col_layouts._enumerate_column_bar_layouts(engine, 40)[0]
+    assert col_transverse._alternating_support_legs(engine, layout) == (1, 1)
+    assert col_transverse._bars_per_edge(engine, layout) == (None, None)
 
 
 def test_shear_legs_are_sized_per_direction():
     """BEHAVIOUR: V2 (along the depth) uses the legs counted along the X edge and
     V3 (along the width) the legs counted along the Y edge."""
     engine = build_rect_column(is_smrf=False)
-    layout = col._enumerate_column_bar_layouts(engine, 40)[1]
-    rows, most = col._column_shear_checks(
+    layout = col_layouts._enumerate_column_bar_layouts(engine, 40)[1]
+    rows, most = col_shear._column_shear_checks(
         frame_row(), force_table(), engine, sum(c for *_, c in layout), 100.0,
         (9, 7), False, bundle_layout=layout)
     by_direction = {row["Shear_Direction"]: row["Provided_Transverse_Legs"] for row in rows}
@@ -1282,7 +1330,7 @@ def test_column_stacks_are_listed_from_the_top_level_down():
         "GF-C2": ("Q0", "Q1"), "2F-C2": ("Q1", "Q2"),
         "GF-C3": ("R0", "R1"),
     }
-    stacks = col._column_stacks(ends)
+    stacks = col_shear._column_stacks(ends)
     assert sorted(stacks) == [
         ["2F-C2", "GF-C2"], ["3F-C1", "2F-C1", "GF-C1"], ["GF-C3"],
     ]
@@ -1312,7 +1360,7 @@ def _joint(axis, ratio, utilization, sway):
 
 
 def _report(joints):
-    report, _ = col._build_consolidated_column_report(
+    report, _ = col_report._build_consolidated_column_report(
         pd.DataFrame([_column_result()]),
         pd.DataFrame([_load_check("I"), _load_check("J")]),
         pd.DataFrame(),
@@ -1361,17 +1409,17 @@ def _wide_column(width=800.0, depth=600.0):
     row = frame_row(width=width, depth=depth)
     engine = build_rect_column(width, depth)
     layout = next(
-        l for l in col._enumerate_column_bar_layouts(engine, 40)
+        l for l in col_layouts._enumerate_column_bar_layouts(engine, 40)
         if _positions_per_edge(l)[0] == _positions_per_edge(l)[1]
     )
     bars = sum(count for *_, count in layout)
-    engine, section = col._build_column_section(
+    engine, section = col_layouts._build_column_section(
         row, bars, 25.0, 10.0, 40.0, False, bundle_layout=layout)
     return row, engine, section, layout, bars
 
 
 def _capacity(engine, section, m2, m3):
-    angle = col._section_bending_angle(m2, m3)
+    angle = col_tables._section_bending_angle(m2, m3)
     return abs(float(engine.solve_moment_capacity(section, 0.0, angle)[0]))
 
 
@@ -1389,7 +1437,7 @@ def test_m3_capacity_matches_the_turned_section():
     """An 800 x 600 column under M3 is a 600 x 800 column under M2."""
     _, engine, section, layout, bars = _wide_column(800.0, 600.0)
     turned_layout = [(y, x, count) for x, y, count in layout]
-    turned_engine, turned_section = col._build_column_section(
+    turned_engine, turned_section = col_layouts._build_column_section(
         frame_row(width=600.0, depth=800.0), bars, 25.0, 10.0, 40.0, False,
         bundle_layout=turned_layout)
     assert _capacity(engine, section, 0.0, 1.0) == pytest.approx(
@@ -1400,7 +1448,7 @@ def test_v2_shear_uses_the_depth_as_its_effective_depth():
     """HAND CALC: V2 acts along local 2 (the depth): d = 600 - 40 - 10 - 12.5 = 537.5 mm.
     V3 acts along the width: d = 800 - 62.5 = 737.5 mm."""
     row, engine, _, layout, bars = _wide_column(800.0, 600.0)
-    rows, _ = col._column_shear_checks(
+    rows, _ = col_shear._column_shear_checks(
         row, force_table(), engine, bars, 100.0, 4, False, bundle_layout=layout)
     vc = {r["Shear_Direction"]: r["Vc_kN"] for r in rows}  # Vc is proportional to b * d
     assert vc["V2"] / vc["V3"] == pytest.approx((800 * 537.5) / (600 * 737.5))
@@ -1421,11 +1469,11 @@ def test_column_report_shows_the_governing_combination_per_end():
         {**_load_check("I", "ULS 1"), "Flexure_Utilization": 0.55},
         {**_load_check("I", "ULS 2"), "Flexure_Utilization": 0.10},
     ])
-    report, _ = col._build_consolidated_column_report(
+    report, _ = col_report._build_consolidated_column_report(
         pd.DataFrame([_column_result()]), checks, pd.DataFrame(),
         pd.DataFrame([_joint("X", 1.5, 0.4, "Positive"), _joint("X", 1.3, 0.6, "Negative")]),
     )
-    member = col._column_calc_member(report)
+    member = col_calculations._column_calc_member(report)
     flexure = _tables(member)["Axial load and flexure - governing combination at each end"]
     assert [(row[0], row[1], row[6]) for row in flexure.rows] == [
         ("Top (J)", "ULS 2", "0.80"), ("Bottom (I)", "ULS 1", "0.55"),
@@ -1436,7 +1484,7 @@ def test_column_report_shows_the_governing_combination_per_end():
 
 def test_column_report_keeps_the_reason_where_a_joint_check_is_missing():
     report = _report([_joint("X", 1.5, 0.4, "Positive")])
-    member = col._column_calc_member(report)
+    member = col_calculations._column_calc_member(report)
     capacity = _tables(member)["Strong column - weak beam"]
     by_end_axis = {(row[0], row[1]): row for row in capacity.rows}
     assert by_end_axis[("Top (J)", "X")][5] == "1.50"
@@ -1445,13 +1493,13 @@ def test_column_report_keeps_the_reason_where_a_joint_check_is_missing():
 
 def test_report_sheet_headers_map_back_to_field_names():
     """Every worksheet header must be unique, or the sheet cannot be read back."""
-    labels = list(col.COLUMN_REPORT_LABELS.values())
+    labels = list(col_report.COLUMN_REPORT_LABELS.values())
     assert len(labels) == len(set(labels))
 
 
 def test_column_report_joint_shear_names_no_combination():
     """Joint shear does not depend on the load combination, so none is shown."""
-    member = col._column_calc_member(_report([_joint("X", 1.5, 0.4, "Positive")]))
+    member = col_calculations._column_calc_member(_report([_joint("X", 1.5, 0.4, "Positive")]))
     joint = _tables(member)["Joint shear"]
     assert "Combination" not in joint.header
     by_end_axis = {(row[0], row[1]): row for row in joint.rows}
@@ -1465,7 +1513,7 @@ def test_column_report_joint_shear_names_no_combination():
 ])
 def test_column_mark_from_unique_name(name, mark):
     """The level is dropped; a planted column keeps its P."""
-    assert col._common_column_mark(name) == mark
+    assert col_tables._common_column_mark(name) == mark
 
 
 def _stack_connectivity():
@@ -1482,12 +1530,12 @@ def _stack_connectivity():
 def test_story_order_comes_from_the_stacks_not_the_names():
     """By name, PD1 (the number 1) would sort below 2F. The stack says otherwise."""
     story_of = {"UG-C1": "UG", "2-C1": "2F", "PD1-C1": "PD1", "2-C2": "2F", "PD1-C2": "PD1"}
-    assert col._story_order_from_stacks(_stack_connectivity(), story_of) == ["UG", "2F", "PD1"]
+    assert col_tables._story_order_from_stacks(_stack_connectivity(), story_of) == ["UG", "2F", "PD1"]
 
 
 def test_story_order_falls_back_to_the_names_without_connectivity():
     story_of = {"a": "3F", "b": "2F"}
-    assert col._story_order_from_stacks(pd.DataFrame(), story_of) == ["2F", "3F"]
+    assert col_tables._story_order_from_stacks(pd.DataFrame(), story_of) == ["2F", "3F"]
 
 
 # ==========================================================================
@@ -1508,7 +1556,7 @@ def _two_story_frame():
 
 def test_bottom_story_cover_can_move_the_bars_inward():
     frame, connectivity = _two_story_frame()
-    out, story = col._apply_bottom_story_cover(frame, connectivity, 40.0, "bars")
+    out, story = col_options._apply_bottom_story_cover(frame, connectivity, 40.0, "bars")
     by_name = out.set_index("UniqueName")
     assert story == "GF"
     assert by_name.loc["GF-C1", "DesignCover"] == 75.0
@@ -1519,7 +1567,7 @@ def test_bottom_story_cover_can_move_the_bars_inward():
 def test_bottom_story_cover_can_enlarge_the_section_instead():
     """HAND CALC: 75 - 40 = 35 mm more on every face, so 70 mm on each dimension."""
     frame, connectivity = _two_story_frame()
-    out, _ = col._apply_bottom_story_cover(frame, connectivity, 40.0, "enlarge")
+    out, _ = col_options._apply_bottom_story_cover(frame, connectivity, 40.0, "enlarge")
     by_name = out.set_index("UniqueName")
     assert (by_name.loc["GF-C1", "Width"], by_name.loc["GF-C1", "Depth"]) == (870.0, 670.0)
     assert (by_name.loc["2-C1", "Width"], by_name.loc["2GX-1", "Width"]) == (800.0, 300.0)
@@ -1527,7 +1575,7 @@ def test_bottom_story_cover_can_enlarge_the_section_instead():
 
 def test_no_bottom_story_cover_changes_nothing():
     frame, connectivity = _two_story_frame()
-    out, story = col._apply_bottom_story_cover(frame, connectivity, 40.0, "none")
+    out, story = col_options._apply_bottom_story_cover(frame, connectivity, 40.0, "none")
     assert story is None and out is frame
 
 
@@ -1535,8 +1583,8 @@ def test_section_uses_the_cover_of_its_own_row():
     """With 75 mm cover the first bar sits at 75 + 10 + 12.5 = 97.5 mm."""
     row = frame_row()
     row["DesignCover"] = 75.0
-    engine, _ = col._build_column_section(row, 8, 25.0, 10.0, 40.0, False)
-    layout = col._enumerate_column_bar_layouts(engine, 20)[0]
+    engine, _ = col_layouts._build_column_section(row, 8, 25.0, 10.0, 40.0, False)
+    layout = col_layouts._enumerate_column_bar_layouts(engine, 20)[0]
     assert engine.cc == 75.0
     assert min(x for x, _, _ in layout) == pytest.approx(97.5)
 
@@ -1546,7 +1594,7 @@ def test_schedule_text_follows_the_office_convention(tmp_path):
     report = pd.DataFrame([_report_row()])
     report["Tie / Spiral Spacing (mm)"] = 150.0
     target = tmp_path / "schedule.dxf"
-    col.generate_dxf_column_schedule(report, str(target), 25.0, 40.0, True)
+    col_schedule.generate_dxf_column_schedule(report, str(target), 25.0, 40.0, True)
     texts = {entity.dxf.text for entity in ezdxf.readfile(target).modelspace().query("TEXT")}
     tie = f"{float(report.iloc[0]['Tie Bar Diameter (mm)']):g}mm%%C"
     assert {"500X500", "16-25mm%%C", f"{tie} @ 100mm", f"{tie} @ 150mm"} <= texts
@@ -1560,7 +1608,7 @@ def test_schedule_floor_level_is_the_range_the_column_spans(tmp_path):
         _report_row("GF-C1", "GF"), _report_row("2-C1", "2F"), _report_row("PD1-C1", "PD1"),
     ])
     target = tmp_path / "schedule.dxf"
-    col.generate_dxf_column_schedule(
+    col_schedule.generate_dxf_column_schedule(
         report, str(target), 25.0, 40.0, True, story_order=["GF", "2F", "PD1"])
     texts = {entity.dxf.text for entity in ezdxf.readfile(target).modelspace().query("TEXT")}
     assert {"FDN TO GF", "GF TO 2F", "2F TO PD1"} <= texts
@@ -1569,11 +1617,11 @@ def test_schedule_floor_level_is_the_range_the_column_spans(tmp_path):
 def test_circular_smrf_spiral_detailing_passes():
     """A spiral supports every bar: its 'N/A for continuous spiral' bar-support result
     must not fail the detailing (it made every circular SMRF column fail)."""
-    engine = col.ColumnFlexureDesign(0, 0, 700.0, 27.6, 414, 414, 25, 12, 40,
+    engine = col_section.ColumnFlexureDesign(0, 0, 700.0, 27.6, 414, 414, 25, 12, 40,
                                      shape="circular", is_smrf=True)
-    layout = next(lay for lay in col._enumerate_column_bar_layouts(engine, 24)
+    layout = next(lay for lay in col_layouts._enumerate_column_bar_layouts(engine, 24)
                   if sum(c for _, _, c in lay) == 12)
-    passes, _, _ = col._column_transverse_candidate_passes(
+    passes, _, _ = col_transverse._column_transverse_candidate_passes(
         pd.Series({"UniqueName": "C1C"}), pd.DataFrame(), engine, layout, 2.0e6, True)
     assert passes is True
 
@@ -1586,12 +1634,12 @@ def test_column_bars_keep_40mm_and_1_5db_clear():
     clear < 40 mm, not allowed. 6 bars a face (5 gaps): 75 - 25 = 50 mm, allowed.
     """
     engine = build_rect_column(500.0, 500.0, dmain=25.0, dties=10.0, cover=40.0)
-    single = [sum(c for *_, c in lay) for lay in col._enumerate_column_bar_layouts(engine, 200)
+    single = [sum(c for *_, c in lay) for lay in col_layouts._enumerate_column_bar_layouts(engine, 200)
               if all(c == 1 for *_, c in lay)]
     assert 20 in single and 24 not in single
     # 36 mm bars: 1.5 db = 54 mm governs over 40 mm
-    assert float(col._column_clear_spacing(36.0, 20.0)) == pytest.approx(54.0)
-    assert float(col._column_clear_spacing(20.0, 20.0)) == pytest.approx(40.0)
+    assert float(col_layouts._column_clear_spacing(36.0, 20.0)) == pytest.approx(54.0)
+    assert float(col_layouts._column_clear_spacing(20.0, 20.0)) == pytest.approx(40.0)
 
 
 # ==========================================================================
@@ -1600,10 +1648,10 @@ def test_column_bars_keep_40mm_and_1_5db_clear():
 def test_beam_bars_through_a_joint_need_a_column_of_20_db():
     """500 mm column: 25 mm beam bars need 500 mm (passes), 28 mm bars 560 mm (fails)."""
     model = build_joint_model()
-    ok = col._evaluate_smrf_joints(**model)
+    ok = col_joints._evaluate_smrf_joints(**model)
     assert (ok["Joint_Dimension_Check"] == "PASS").all()
     model["beam_design"] = model["beam_design"].assign(dm=28.0)
-    big = col._evaluate_smrf_joints(**model)
+    big = col_joints._evaluate_smrf_joints(**model)
     assert big["Joint_Shear_Check"].str.contains("18.8.2.3").all()
     assert (big["Joint_Shear_Utilization"] >= 560 / 500 - 1e-9).all()
 
@@ -1621,10 +1669,10 @@ def _top_joint_model(axial_kN):
 
 def test_strong_column_rule_is_waived_at_a_lightly_loaded_top_joint():
     """0.1 Ag fc' = 0.1 x 500 x 500 x 28 = 700 kN."""
-    light = col._evaluate_smrf_joints(**_top_joint_model(400.0))
+    light = col_joints._evaluate_smrf_joints(**_top_joint_model(400.0))
     assert light["Strong_Column_Check"].str.contains("18.7.3.1").all()
     assert light["Column_Beam_Ratio"].isna().all()
-    heavy = col._evaluate_smrf_joints(**_top_joint_model(900.0))
+    heavy = col_joints._evaluate_smrf_joints(**_top_joint_model(900.0))
     assert heavy["Strong_Column_Check"].isin(["PASS", "FAIL"]).all()
 
 
@@ -1634,7 +1682,7 @@ def test_strong_column_rule_is_waived_at_a_lightly_loaded_top_joint():
 def test_the_clear_height_is_the_storey_less_the_beam_taken_out_once():
     """ETABS stations stop at the rigid end zones, so they already leave the
     beam out; it must not be taken out of their span a second time."""
-    clear = col.capacity_clear_height
+    clear = col_design.capacity_clear_height
     # a typical story: 4500 joint to joint, 500 beam, stations over 4000
     assert clear(4500.0, 4000.0, 500.0) == 4000.0
     # footing story, edge column: 1000 joint to joint, stations over 500
@@ -1644,7 +1692,7 @@ def test_the_clear_height_is_the_storey_less_the_beam_taken_out_once():
 
 
 def test_the_clear_height_never_exceeds_the_station_span_and_falls_back_to_it():
-    clear = col.capacity_clear_height
+    clear = col_design.capacity_clear_height
     assert clear(4500.0, 3800.0, 500.0) == 3800.0      # a longer end zone in the model
     assert clear(0.0, 4000.0, 500.0) == 4000.0         # joint coordinates not known
     assert clear(400.0, 300.0, 500.0) == 300.0         # a beam deeper than the stub
@@ -1654,7 +1702,7 @@ def test_the_clear_height_never_exceeds_the_station_span_and_falls_back_to_it():
 def test_a_confinement_ratio_equal_to_the_required_one_passes_whatever_the_last_digit():
     """The tie spacing is the one at which provided = required: values of a real column
     came out one digit apart, and failed or passed by chance."""
-    from design.column_designer_aci318 import _meets
+    from design.concrete.columns.transverse import _meets
 
     assert _meets(0.01220294102960668, 0.012202941029606682)     # one ulp under: the same number
     assert _meets(0.012182885935757375, 0.012182885935757377)
@@ -1663,7 +1711,7 @@ def test_a_confinement_ratio_equal_to_the_required_one_passes_whatever_the_last_
 
 
 def test_names_are_cleaned_once_for_each_different_name():
-    from design.column_designer_aci318 import _normalize_names, _normalize_object_name
+    from design.concrete.columns.tables import _normalize_names, _normalize_object_name
 
     names = pd.Series([502.0, "C1 ", None, 502, "007.0", float("nan"), "C1 ", 12.5, "3.0"],
                       index=list("abcdefghi"), name="UniqueName")

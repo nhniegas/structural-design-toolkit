@@ -13,7 +13,7 @@ Every design module run from the terminal offers the same names:
 | `run()` | the terminal workflow (`sdt composite`, `sdt steel`) |
 
 
-## Composite column: `design/composite_column_designer_aiscDG06.py`
+## Composite column: `design/steel/composite_column_aiscDG06.py`
 
 Rectangular or square concrete-filled steel box members, LRFD, per AISC Design Guide 6 (2nd edition) Section 2.5 and AISC 360 Chapter I.
 
@@ -29,7 +29,7 @@ sdt composite
 2. If a value is not valid, a message names it and the dialog opens again with your entries.
 3. A second dialog asks what to do with the results: **Print the results in the terminal**, **Export a PDF calculation report**, or **Both**. Exporting asks where to save the PDF.
 
-Closing either dialog stops without printing or saving anything. Running the file directly (`python design/composite_column_designer_aiscDG06.py`) does the same.
+Closing either dialog stops without printing or saving anything. Running the file directly (`python design/steel/composite_column_aiscDG06.py`) does the same.
 
 Inputs: Pu (kN); Mb, Mh (kN-m); Vb, Vh (kN); b, h, t (mm); f'c, Fy (MPa); Lb, Lh (m), the unbraced lengths. The printout lists the compactness checks, phi Pn, phi Mn and phi Vn about each axis, the shear ratios and the interaction ratios with OK / NOT OK.
 
@@ -47,7 +47,7 @@ Inputs are metric. The engine converts to US customary units internally and conv
 ### Python use
 
 ```python
-from design import composite_column_designer_aiscDG06 as composite
+from design.steel import composite_column_aiscDG06 as composite
 
 column = composite.calculate(dict(
     Pu=6672.3, Mb=2440.5, Mh=0, Vb=400.3, Vh=0,
@@ -65,7 +65,7 @@ composite.export_pdf(column, "column_report.pdf")
 - The bare-steel floor of DG6 p.32 (design strength not less than the bare steel section's) is not applied. The result is the composite strength only, which is conservative.
 - Normal-weight concrete (145 pcf) and E = 29,000 ksi are fixed.
 
-## General steel section: `design/general_steel_section_designer_aisc360.py`
+## General steel section: `design/steel/wide_flange_aisc360.py`
 
 AISC 360-22 capacity checks for doubly symmetric I-shapes, LRFD or ASD, with a one-page PDF report.
 
@@ -81,7 +81,7 @@ sdt steel
 2. If a value is not valid, a message names it and the dialog opens again with your entries.
 3. A second dialog asks what to do with the results: **Print the results in the terminal**, **Export a PDF calculation report**, or **Both**. Exporting asks where to save the PDF.
 
-Closing either dialog stops without printing or saving anything. Running the file directly (`python design/general_steel_section_designer_aisc360.py`) does the same.
+Closing either dialog stops without printing or saving anything. Running the file directly (`python design/steel/wide_flange_aisc360.py`) does the same.
 
 Inputs: the section name (e.g. `W14X90`), Fy and Fu (MPa), LRFD or ASD, unbraced lengths Lx, Ly, Lz and Lb (m; a blank length takes Ly), K factors, Cb, compression or tension, the demands Pr (kN), Mrx, Mry (kN-m), Vrx, Vry (kN), Tr (kN-m), and optionally the stiffener spacing and plate size (mm) and tension-field action. The printout lists the section properties, every capacity table and the summary with the governing ratio, PASS or FAIL.
 
@@ -91,7 +91,7 @@ Inputs: the section name (e.g. `W14X90`), Fy and Fu (MPa), LRFD or ASD, unbraced
 - **Checks**: classification (Table B4.1), tension (Chapter D), compression including slender elements (E3, E4, E7), flexure about both axes (F2 to F6, F13), shear including tension-field action and stiffeners (G2, G6), combined forces and torsion (H1 to H4).
 
 ```python
-from design import general_steel_section_designer_aisc360 as steel
+from design.steel import wide_flange_aisc360 as steel
 
 check = steel.calculate({"section": "W14X90", "Fy": 345, "Fu": 450, "Ly": 4.0,
                          "Pr": 800, "Mrx": 150, "Mry": 20, "Vrx": 100, "Vry": 10})
@@ -102,7 +102,7 @@ steel.export_pdf(check, "W14X90_report.pdf")
 `calculate` takes lengths in m. The class can also be used directly, with lengths in mm:
 
 ```python
-from design.general_steel_section_designer_aisc360 import WideFlangeCapacity
+from design.steel.wide_flange_aisc360 import WideFlangeCapacity
 
 member = WideFlangeCapacity("W14X90", Fy=345, Fu=450, Lx=4000, Ly=4000, Lb=4000)
 print(member.summary())

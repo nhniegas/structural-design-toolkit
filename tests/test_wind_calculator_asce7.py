@@ -1,4 +1,4 @@
-"""Unit tests for design/wind_calculator_directional_asce7.py  (ASCE 7, MWFRS).
+"""Unit tests for design/loads/wind_directional_asce7.py  (ASCE 7, MWFRS).
 
 HOW TO RUN (from the project root):
     python -m pytest tests/test_wind_calculator_asce7.py -v
@@ -10,7 +10,7 @@ import math
 
 import pytest
 
-from design.wind_calculator_directional_asce7 import (
+from design.loads.wind_directional_asce7 import (
     KZ_TABLE,
     WindLoadCalculatorDirectionalASCE7,
 )
@@ -137,7 +137,7 @@ def test_invalid_inputs_are_rejected_with_a_message_naming_the_input(changes, me
 def test_roof_cp_table_35_and_45_degrees_follow_asce7_fig_27_4_1():
     """ASCE 7-10 Fig. 27.4-1, windward, theta = 35 deg: h/L <= 0.25: 0.0 and 0.4;
     h/L = 0.5: -0.2 and 0.3; h/L >= 1.0: -0.2 and 0.2. At 45 deg, h/L <= 0.25: 0.4."""
-    from design.wind_calculator_directional_asce7 import TABLE_ROOF_OVER_10 as table
+    from design.loads.wind_directional_asce7 import TABLE_ROOF_OVER_10 as table
 
     assert table[35].tolist() == [0.0, 0.4, -0.2, 0.3, -0.2, 0.2]
     assert table[45].tolist()[:2] == [0.4, 0.4]

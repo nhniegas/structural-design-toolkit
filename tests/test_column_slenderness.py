@@ -1,4 +1,4 @@
-"""Checks for design/column_slenderness.py (ACI 318M-14 6.2.5, 6.6.4.5).
+"""Checks for design/concrete/columns/slenderness.py (ACI 318M-14 6.2.5, 6.6.4.5).
 
 HAND CALC values are worked out in the test with the code equations. None of
 these tests needs ETABS.
@@ -13,7 +13,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from design import column_slenderness as cs  # noqa: E402
+from design.concrete.columns import slenderness as cs  # noqa: E402
 
 SECTION = cs.ColumnSection(width=400.0, depth=400.0, circular=False, fc=28.0)
 LONG = cs.AxisGeometry(lu=6000.0, k=1.0)

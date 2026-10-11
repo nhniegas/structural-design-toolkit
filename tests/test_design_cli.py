@@ -13,9 +13,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from design import composite_column_designer_aiscDG06 as composite  # noqa: E402
-from design import general_steel_section_designer_aisc360 as steel  # noqa: E402
-from design import wind_calculator_directional_asce7 as wind  # noqa: E402
+from design.steel import composite_column_aiscDG06 as composite  # noqa: E402
+from design.steel import wide_flange_aisc360 as steel  # noqa: E402
+from design.loads import wind_directional_asce7 as wind  # noqa: E402
 from utilities import _gui_helpers, design_cli  # noqa: E402
 from utilities.design_cli import Field, dialog_label, parse_inputs  # noqa: E402
 

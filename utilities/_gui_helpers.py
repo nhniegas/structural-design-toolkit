@@ -10,6 +10,8 @@ import os
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
+from utilities import answers
+
 # Fix blurry text on High-DPI displays for all Tkinter popups
 try:
     ctypes.windll.shcore.SetProcessDpiAwareness(2)
@@ -22,11 +24,14 @@ except Exception:
 
 def select_output_directory(title: str = "Select the output folder") -> str:
     """Opens a native Windows directory dialog to select an output folder."""
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes("-topmost", True)
-    folder_path = filedialog.askdirectory(title=title)
-    root.destroy()
+    folder_path = answers.folder(title)   # from the answers file, when there is one
+    if folder_path is answers.ASK:
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        folder_path = filedialog.askdirectory(title=title)
+        root.destroy()
+        answers.keep(title, "", os.path.normpath(folder_path) if folder_path else None)
     if not folder_path:
         return ""
     # A folder typed in the dialog, or removed since it was last used, does not
@@ -42,18 +47,23 @@ def select_output_directory(title: str = "Select the output folder") -> str:
 
 def select_save_file(default_name="Composite_Column_Report") -> str:
     """Opens a native Windows Save As dialog to name the PDF."""
+    title = "Save PDF Report As"
+    scripted = answers.save_path(title, default_name, ".pdf")
+    if scripted is not answers.ASK:
+        return scripted
     root = tk.Tk()
     root.withdraw()
     root.attributes("-topmost", True)  # Forces dialog over Excel
 
     file_path = filedialog.asksaveasfilename(
-        title="Save PDF Report As",
+        title=title,
         initialfile=default_name,
         defaultextension=".pdf",
         filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")],
     )
 
     root.destroy()
+    answers.keep(title, "", file_path or None)
     return file_path
 
 
@@ -61,6 +71,9 @@ def select_save_path(
     title: str, default_name: str, extension: str, description: str
 ) -> str:
     """Opens a native Windows Save As dialog for a file of the given extension."""
+    scripted = answers.save_path(title, default_name, extension)
+    if scripted is not answers.ASK:
+        return scripted
     root = tk.Tk()
     root.withdraw()
     root.attributes("-topmost", True)
@@ -71,11 +84,15 @@ def select_save_path(
         filetypes=[(description, f"*{extension}"), ("All files", "*.*")],
     )
     root.destroy()
+    answers.keep(title, "", file_path or None)
     return file_path
 
 
 def select_open_path(title: str, extension: str, description: str) -> str:
     """Opens a native Windows file dialog for one file of the given extension."""
+    scripted = answers.open_path(title)
+    if scripted is not answers.ASK:
+        return scripted
     root = tk.Tk()
     root.withdraw()
     root.attributes("-topmost", True)
@@ -83,19 +100,25 @@ def select_open_path(title: str, extension: str, description: str) -> str:
         title=title, filetypes=[(description, f"*{extension}"), ("All files", "*.*")]
     )
     root.destroy()
+    answers.keep(title, "", file_path or None)
     return file_path
 
 
 def select_etabs_file() -> str:
     """Opens a native Windows file dialog to select an ETABS .edb file."""
+    title = "Select ETABS Model File"
+    scripted = answers.open_path(title)
+    if scripted is not answers.ASK:
+        return scripted
     root = tk.Tk()
     root.withdraw()
     root.attributes("-topmost", True)
     file_path = filedialog.askopenfilename(
-        title="Select ETABS Model File",
+        title=title,
         filetypes=[("ETABS Database Files", "*.edb"), ("All Files", "*.*")],
     )
     root.destroy()
+    answers.keep(title, "", file_path or None)
     return file_path
 
 
@@ -109,6 +132,9 @@ def select_option(
     """
     if not options:
         raise ValueError("select_option needs at least one option.")
+    scripted = answers.option(title, prompt, options, default_index)
+    if scripted is not answers.ASK:   # answered from the answers file
+        return scripted
     result: dict[str, str | None] = {"value": None}
 
     root = tk.Tk()
@@ -177,6 +203,7 @@ def select_option(
         root.mainloop()
     except tk.TclError:
         pass
+    answers.keep(title, prompt, result["value"])
     return result["value"]
 
 
@@ -190,6 +217,9 @@ def enter_values(
     """
     if not labels:
         raise ValueError("enter_values needs at least one label.")
+    scripted = answers.values(title, prompt, labels, defaults)
+    if scripted is not answers.ASK:   # answered from the answers file
+        return scripted
     result: dict[str, dict[str, str] | None] = {"value": None}
 
     root = tk.Tk()
@@ -259,6 +289,7 @@ def enter_values(
         root.mainloop()
     except tk.TclError:
         pass
+    answers.keep(title, prompt, result["value"])
     return result["value"]
 
 
@@ -268,6 +299,11 @@ class DualListboxSelector:
     def __init__(self, title: str, available_items: list[str]):
         self.selected_items: list[str] = []
         self.available_items = available_items
+        self.title = title
+        # with an answers file the list is answered from it and no window is made
+        self.scripted = answers.items(title, list(available_items))
+        if self.scripted is not answers.ASK:
+            return
 
         self.root = tk.Tk()
         self.root.title(title)
@@ -423,6 +459,9 @@ class DualListboxSelector:
 
     def show(self) -> list[str]:
         """Displays dialog safely and blocks until user confirms or closes."""
+        if self.scripted is not answers.ASK:
+            self.selected_items = list(self.scripted)
+            return self.selected_items
         try:
             if self.root.winfo_exists():
                 self.root.lift()
@@ -431,6 +470,7 @@ class DualListboxSelector:
         except tk.TclError:
             pass
 
+        answers.keep(self.title, "", list(self.selected_items) or None)
         return self.selected_items
 
 
@@ -527,7 +567,9 @@ class LoadingWindow:
         self.stop()
 
     def start(self):
-        """Starts the loading popup."""
+        """Starts the loading popup (none with an answers file: no one is watching)."""
+        if answers.replaying():
+            return
         # the window's process must find this package wherever the command was typed
         project = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         environment = dict(os.environ)
@@ -571,8 +613,11 @@ def show_summary(text: str, title: str = "Summary") -> None:
     """Show a command's closing summary in a window, until it is closed.
 
     The text is shown in a fixed-width font so its columns line up, and can be
-    selected and copied. Enter, Escape or OK closes it.
+    selected and copied. Enter, Escape or OK closes it. With an answers file
+    it is printed instead, and nothing waits to be closed.
     """
+    if answers.summary(text, title):
+        return
     lines = text.strip("\n").split("\n")
     root = tk.Tk()
     root.title(title)
@@ -626,7 +671,12 @@ def show_summary(text: str, title: str = "Summary") -> None:
 
 
 def show_warning(message: str, title: str = "Warning", topmost: bool = True) -> None:
-    """Displays a GUI warning popup box with a custom message and title."""
+    """Displays a GUI warning popup box with a custom message and title.
+
+    With an answers file it is printed instead.
+    """
+    if answers.warning(message, title):
+        return
     root = tk.Tk()
     root.withdraw()  # Hide the main Tkinter root window
 

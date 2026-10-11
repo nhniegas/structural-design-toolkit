@@ -1,4 +1,4 @@
-"""Where a beam line is supported, read from its shear (design/beam_deflection.py)."""
+"""Where a beam line is supported, read from its shear (design/concrete/beams/deflection.py)."""
 import math
 import sys
 from pathlib import Path
@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from design import beam_deflection as bd  # noqa: E402
+from design.concrete.beams import deflection as bd  # noqa: E402
 
 L = 6000.0
 X = np.linspace(0, L, 41)
@@ -170,7 +170,7 @@ def test_a_cantilever_that_carries_a_beam_at_its_tip_is_still_a_cantilever():
 
 def test_an_edge_beam_on_the_tips_of_cantilevers_does_not_hold_them_and_rests_on_them():
     """Two cantilever girders from their columns, an edge beam across their tips."""
-    from design.beam_carriers import BeamNetwork
+    from design.concrete.beams.carriers import BeamNetwork
 
     table = connectivity([("2GX-1", "a", "t1"), ("2GX-2", "b", "t2"), ("2BY-8", "t1", "t2")],
                          [("C1", "a0", "a"), ("C2", "b0", "b")])
@@ -205,7 +205,7 @@ def tip_loaded(x, w):
 def test_the_diagrams_tell_an_edge_beam_that_carries_girders_from_one_that_rests_on_them():
     """Two girders from their columns to an edge beam that reaches no column itself.
     By the framing alone the edge beam rests on the girders. The diagrams decide."""
-    from design.beam_carriers import BEAM_END, FREE_END, BeamNetwork, end_conditions, end_pushes
+    from design.concrete.beams.carriers import BEAM_END, FREE_END, BeamNetwork, end_conditions, end_pushes
 
     table = connectivity([("2GX-1", "a", "t1"), ("2GX-2", "b", "t2"), ("2BY-8", "t1", "t2")],
                          [("C1", "a0", "a"), ("C2", "b0", "b")])
@@ -234,7 +234,7 @@ def test_the_diagrams_tell_an_edge_beam_that_carries_girders_from_one_that_rests
 def test_the_carrier_of_the_depth_rule_follows_the_diagrams():
     """A girder ends on an edge beam in two pieces. Pushed up there, the edge beam is its
     carrier even though it reaches no column; with a load on its end, the girder is."""
-    from design.beam_carriers import carried_beams, end_pushes
+    from design.concrete.beams.carriers import carried_beams, end_pushes
 
     table = connectivity([("2GX-1", "a", "t"), ("2BY-8", "e0", "t"), ("2BY-8A", "t", "e1")],
                          [("C1", "a0", "a")])
@@ -253,7 +253,7 @@ def test_the_carrier_of_the_depth_rule_follows_the_diagrams():
 def test_the_deflected_shape_tells_a_free_tip_from_an_end_that_is_held_down():
     """A girder from its column to a joint where another girder runs through between its own
     columns, with a downward force on that end. The diagrams are the same either way."""
-    from design.beam_carriers import (DOWN_I, DOWN_J, TIP_I, TIP_J, BeamNetwork, end_moves,
+    from design.concrete.beams.carriers import (DOWN_I, DOWN_J, TIP_I, TIP_J, BeamNetwork, end_moves,
                                       read_load_path)
 
     table = connectivity([("2GX-7", "a", "t"), ("2GY-9", "s", "t"), ("2GY-9A", "t", "u")],
@@ -289,7 +289,7 @@ def test_the_deflected_shape_tells_a_free_tip_from_an_end_that_is_held_down():
 def test_a_girder_that_is_not_held_at_both_ends_does_not_hold_another_down():
     """With no movements to read, the member that would hold an end down must itself be
     supported at both its ends (by the diagrams): otherwise the end is free."""
-    from design.beam_carriers import BeamNetwork, end_pushes
+    from design.concrete.beams.carriers import BeamNetwork, end_pushes
 
     table = connectivity([("2GX-7", "a", "t"), ("2GY-9", "s", "t"), ("2GY-9A", "t", "u")],
                          [("C1", "a0", "a"), ("C2", "s0", "s")])        # no column at u

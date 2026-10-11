@@ -18,14 +18,16 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 # A folder (--onedir), not one file: it starts faster and antivirus tools
 # flag it less. --console keeps the terminal the commands print to.
 # The data files of these packages (section tables, fonts, templates) are not
-# found by PyInstaller on its own. The notebook tools are only used by Quarto.
+# found by PyInstaller on its own. The notebook tools are only used by Quarto;
+# IPython stays in, because build123d (sdt 3d) imports it. lib3mf.dll is named
+# here because build123d loads it and PyInstaller does not find it.
 # The icon is assets\sdt.ico (tools\make_icon.py draws it; the build only reads it).
 python -m PyInstaller main.py --name sdt --console --onedir --noconfirm --clean `
     --icon assets\sdt.ico `
     --collect-data steelpy --collect-data ezdxf `
     --collect-data sectionproperties --collect-data concreteproperties `
-    --collect-data pylatex `
-    --exclude-module IPython --exclude-module ipykernel --exclude-module nbformat `
+    --collect-data pylatex --collect-binaries lib3mf `
+    --exclude-module ipykernel --exclude-module nbformat `
     --exclude-module nbclient --exclude-module pytest --exclude-module tests
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

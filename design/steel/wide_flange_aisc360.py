@@ -1,5 +1,5 @@
 """
-general_steel_section_designer_aisc360.py   -   ONE self-contained script
+steel/wide_flange_aisc360.py   -   ONE self-contained script
 =======================================================
 AISC 360-22 capacity checks for wide-flange / I-shaped members  +  one-page PDF calculation
 report (pylatex).
@@ -54,7 +54,8 @@ import sys
 
 if __package__ in (None, ""):
     # Run as a script: make the project folder importable.
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__)))))
 
 from utilities.design_cli import Field, run_design  # noqa: E402
 
@@ -2433,6 +2434,36 @@ def summary_text(check: SteelCheck) -> str:
             lines += [f"* {_plain(entry)}" for entry in item.items]
     lines.append("=" * 72)
     return "\n".join(lines)
+
+
+def terminal_report(check: SteelCheck):
+    """The check for the terminal: the tables and the equations of the calculation
+    report, the equations written with the symbols a terminal has."""
+    from utilities.terminal import Report, math
+
+    content = ReportBuilder(check.member).build(check.demands)
+    out = Report(math(content.title))
+
+    def add(items) -> None:
+        for item in items:
+            if isinstance(item, Head):
+                out.lines(["", math(item.latex)], "bold")
+            elif isinstance(item, Eq):
+                out.equations([math(line) for line in item.lines])
+            elif isinstance(item, Text):
+                out.lines([math(item.latex)])
+            elif isinstance(item, Tbl):
+                out.table([math(h) for h in item.header],
+                          [[math(cell) for cell in row] for row in item.rows])
+            elif isinstance(item, Bullets):
+                out.lines([f"  • {math(entry)}" for entry in item.items])
+
+    for section in content.columns:
+        out.heading(math(section.title))
+        add(section.items)
+    out.heading(math(content.summary.title))
+    add(content.summary.items)
+    return out
 
 
 def export_pdf(check: SteelCheck, path: str) -> Optional[str]:

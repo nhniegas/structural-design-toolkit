@@ -109,7 +109,7 @@ class LoopSettings:
     compatibility_torsion: bool = False  # beam torsion at most phi Tcr (ACI 22.7.3.2)
     office_bar_spacing: bool = True  # beam bars at most 150 mm clear (False: crack control)
     exempt_short_spans: bool = False  # girders under 4d clear span without the SMRF rules
-    deflection_stages: object = None  # beam_deflection.DeflectionStages: when partitions are built
+    deflection_stages: object = None  # deflection.DeflectionStages: when partitions are built
 
 
 @dataclass
@@ -130,7 +130,7 @@ def _line(name: str, lines: dict[str, str] | None = None) -> str:
     which covers members with any name) or from the tag in its name."""
     if lines and str(name) in lines:
         return lines[str(name)]
-    from design.beam_deflection import _MARK
+    from design.concrete.beams.deflection import _MARK
 
     match = _MARK.match(str(name))
     return (match.group(1) + match.group(2) + "-" + match.group(3)).upper() if match else name
@@ -305,7 +305,7 @@ def _beam_rho(row: pd.Series, zone: str) -> float:
 
 def _tension_controlled_rho(fc: float, fy: float) -> float:
     """Steel ratio at a net tensile strain of 0.005 (ACI 21.2.2): 0.85 b1 fc/fy * 3/8."""
-    from design.code_config import CODE
+    from design.criteria.code_config import CODE
 
     ecu = CODE.material.concrete_ultimate_strain
     depth_ratio = ecu / (ecu + CODE.strength.tension_controlled_strain)  # c/d = 3/8
@@ -315,8 +315,8 @@ def _tension_controlled_rho(fc: float, fy: float) -> float:
 def beam_comfortable(rows: pd.DataFrame, ratio: float, seismic: bool) -> bool:
     """A passing beam whose steel, shear and deflection all stay below ``ratio`` of the
     limits. With target ratios, below ``ratio`` of the targets."""
-    from design import dcr_targets
-    from design.beam_designer_aci318 import smrf_applies
+    from design.criteria import dcr_targets
+    from design.concrete.beams.supports import smrf_applies
 
     top = rows.iloc[0]
     kind = dcr_targets.beam_type(top.get("SupportStatus", ""))
@@ -557,7 +557,7 @@ def _number(value) -> float | None:
 
 def column_needs(rows: pd.DataFrame) -> set[str]:
     """What a column's report rows say it needs: "X", "Y" (a side) or "square"."""
-    from design import dcr_targets
+    from design.criteria import dcr_targets
 
     needs: set[str] = set()
     text = lambda column: " ".join(rows.get(column, pd.Series(dtype=str)).astype(str)).upper()
@@ -584,7 +584,7 @@ def column_needs(rows: pd.DataFrame) -> set[str]:
 def column_comfortable(rows: pd.DataFrame, ratio: float) -> bool:
     """A passing column whose ratios all stay below ``ratio`` of the limits, or of
     the target ratios when the engineer set some."""
-    from design import dcr_targets
+    from design.criteria import dcr_targets
 
     checks = {"Flexure_Utilization": dcr_targets.FLEXURE, "Shear_Utilization": dcr_targets.SHEAR,
               "Joint_Shear_Utilization_X": dcr_targets.JOINT_SHEAR,
@@ -656,7 +656,7 @@ def confirm_sections(found: ModelSections, title: str) -> bool:
 def joint_min_side(settings: LoopSettings) -> float:
     """The smallest column side the beam bars through a joint allow: 20 bar
     diameters (ACI 18.8.2.3). Zero without seismic design."""
-    from design.code_config import CODE
+    from design.criteria.code_config import CODE
 
     if not settings.smrf:
         return 0.0
@@ -822,7 +822,7 @@ class Workbench:
         of the loop and kept: read again after every resizing, a stiffer member
         attracts more load and the classification and the sizes chase each other."""
         if getattr(self, "_load_path", None) is None:
-            from design.beam_designer_aci318 import load_path_pushes
+            from design.concrete.beams.design import load_path_pushes
 
             self._load_path = load_path_pushes(self.tables, self.settings.gravity_combo)
         return self._load_path
@@ -901,7 +901,7 @@ class Workbench:
         return report
 
     def extract(self) -> None:
-        from design.concrete_workflow import extract
+        from design.concrete.workflow import extract
 
         self.show("Extraction", "forces, service loads, frame data, connectivity")
         beams, columns = self.members()
@@ -912,7 +912,7 @@ class Workbench:
             self.log("  " + note)
 
     def design_beams(self) -> pd.DataFrame:
-        from design.beam_designer_aci318 import design_beams
+        from design.concrete.beams.design import design_beams
 
         def beam_progress(detail: str) -> None:
             self.show("Beam design", str(detail))
@@ -930,7 +930,7 @@ class Workbench:
                             load_path=self.load_path())
 
     def design_columns(self, beams: pd.DataFrame) -> pd.DataFrame:
-        from design.column_designer_aci318 import design_columns
+        from design.concrete.columns.design import design_columns
 
         def column_progress(detail: str) -> None:
             self.show("Column design", str(detail))
@@ -955,7 +955,7 @@ class Workbench:
     def column_sizer(self):
         """``sizer`` for column_actions: the member checks of each trial size on the
         forces of the last analysis (column_size_passes), without ETABS."""
-        from design.column_designer_aci318 import column_size_passes
+        from design.concrete.columns.sizing import column_size_passes
 
         frame = self.tables.get("FRAME DATA")
         loads = self.tables.get("FACTORED LOADS")
@@ -1159,7 +1159,7 @@ def stop_unhelped_deflection_growth(actions: dict, sections: dict, results: pd.D
     """
     if results is None or results.empty or "Defl_ratio" not in results.columns:
         return []
-    from design import dcr_targets
+    from design.criteria import dcr_targets
 
     names = results["UniqueName"].astype(str)
     now = pd.to_numeric(results["Defl_ratio"], errors="coerce").groupby(names).max()
@@ -1557,12 +1557,12 @@ def final_drift_check(bench: Workbench, options, folder: str, stem: str) -> dict
 
 def run_design_cli() -> dict | None:
     """Entry point: ask everything once, then run the loop on a working copy."""
-    from design.beam_designer_aci318 import ask_deflection_limit, ask_earth_cover_stories
-    from design.column_designer_aci318 import (
+    from design.concrete.beams.options import ask_deflection_limit, ask_earth_cover_stories
+    from design.concrete.columns.options import (
         ask_capacity_check_levels,
         ask_column_design_options,
-        ask_inner_tie_style,
     )
+    from design.concrete.columns.schedule import ask_inner_tie_style
     from etabs_api.core.connection import attach_running_etabs
     from etabs_api.workflows.analysis_forces import ask_force_options
     from etabs_api.workflows.model_setup import load_settings, merge_settings, save_settings
@@ -1581,7 +1581,7 @@ def run_design_cli() -> dict | None:
         return None
 
     # combinations, forces and the design inputs (as in sdt beams and sdt columns)
-    from design.concrete_workflow import (
+    from design.concrete.workflow import (
         confirm_pdelta,
         BEAM_FIELDS,
         COLUMN_FIELDS,
@@ -1594,7 +1594,7 @@ def run_design_cli() -> dict | None:
     if not confirm_pdelta(connector, title):
         return None
     last = _last()
-    from design.concrete_workflow import prepare_model
+    from design.concrete.workflow import prepare_model
     from etabs_api.workflows import model_inputs as mi
 
     ready = prepare_model(connector, original, title, "sdt design", last)
@@ -1620,7 +1620,7 @@ def run_design_cli() -> dict | None:
     gravity = None
     if smrf:
         choices = ready.gravity_choices[:24]  # what one choice dialog can show
-        from design.concrete_workflow import VE_GRAVITY_PROMPT
+        from design.concrete.workflow import VE_GRAVITY_PROMPT
 
         gravity = select_option(title, VE_GRAVITY_PROMPT, choices,
                                 default_index=choices.index(ready.gravity_default)
@@ -1636,7 +1636,7 @@ def run_design_cli() -> dict | None:
     column_answers = ask_column_design_options(normal_cover=column_bars["cover"])
     if column_answers is None:
         return None
-    from design.concrete_workflow import beam_stories
+    from design.concrete.workflow import beam_stories
 
     earth_stories = ask_earth_cover_stories(beam_stories(connector), beam_bars["cc"],
                                             last.get("beam_earth_cover_stories"))
@@ -1651,13 +1651,13 @@ def run_design_cli() -> dict | None:
     long_limit = ask_deflection_limit()
     if long_limit is None:
         return None
-    from design.beam_designer_aci318 import ask_deflection_stages
+    from design.concrete.beams.options import ask_deflection_stages
 
     deflection_stages = ask_deflection_stages(title)
     if deflection_stages is None:
         return None
-    from design import dcr_targets
-    from design.concrete_workflow import ask_carrier_depth, ask_dcr_targets
+    from design.criteria import dcr_targets
+    from design.concrete.workflow import ask_carrier_depth, ask_dcr_targets
 
     all_types = (dcr_targets.GIRDER, dcr_targets.BEAM, dcr_targets.COLUMN)
     targets = ask_dcr_targets(original, title, all_types)
@@ -1666,17 +1666,17 @@ def run_design_cli() -> dict | None:
     carrier_depth = ask_carrier_depth(title, last)
     if carrier_depth is None:
         return None
-    from design.concrete_workflow import ask_compatibility_torsion
+    from design.concrete.workflow import ask_compatibility_torsion
 
     compatibility_torsion = ask_compatibility_torsion(title, last)
     if compatibility_torsion is None:
         return None
-    from design.concrete_workflow import ask_bar_spacing
+    from design.concrete.workflow import ask_bar_spacing
 
     office_bar_spacing = ask_bar_spacing(title, last)
     if office_bar_spacing is None:
         return None
-    from design.concrete_workflow import ask_short_span_girders
+    from design.concrete.workflow import ask_short_span_girders
 
     exempt_short_spans = ask_short_span_girders(title, last) if smrf else False
     if exempt_short_spans is None:
@@ -1829,6 +1829,12 @@ def run_design_cli() -> dict | None:
         save_final_design(bench, summary, working, folder)
         summary["drift"] = final_drift_check(bench, drift_options, folder,
                                              os.path.splitext(os.path.basename(working))[0])
+    from design.concrete.results_tables import beam_results_report, column_results_report
+
+    if summary.get("beams") is not None and len(summary["beams"]):
+        beam_results_report(summary["beams"], "DESIGN LOOP - FINAL BEAMS").show()
+    if summary.get("columns") is not None and len(summary["columns"]):
+        column_results_report(summary["columns"], "DESIGN LOOP - FINAL COLUMNS").show()
     print(f"Working copy: {working}\nLog: {log_path}\nOutputs: {folder}")
     if summary["drift"]["failed"]:
         print("DRIFT FAILS: the sections were not resized for drift. Reconfigure the model "
@@ -1885,21 +1891,21 @@ def loop_summary(summary: dict, settings: LoopSettings, original: str, working: 
         out.fail("Drift fails: the sections are not resized for drift. Reconfigure the model "
                  "(stiffer members, walls) and run sdt design again.")
     if settings.targets is not None:
-        from design import dcr_targets
-        from design.concrete_workflow import add_targets_to
+        from design.criteria import dcr_targets
+        from design.concrete.workflow import add_targets_to
 
         add_targets_to(out, settings.targets,
                        (dcr_targets.GIRDER, dcr_targets.BEAM, dcr_targets.COLUMN))
     if settings.carrier_depth:
         out.add("Carrier depth", "a beam is at least as deep as the beams it carries")
     if settings.compatibility_torsion:
-        from design.concrete_workflow import TORSION_NOTE
+        from design.concrete.workflow import TORSION_NOTE
 
         out.add("Beam torsion", "at most phi Tcr (compatibility torsion, ACI 22.7.3.2)")
         out.note(TORSION_NOTE)
     out.add("Beam bar spacing", "office rule, 150 mm clear" if settings.office_bar_spacing
             else "crack control only (ACI 24.3.2)")
-    from design.concrete_workflow import add_short_spans_to
+    from design.concrete.workflow import add_short_spans_to
 
     add_short_spans_to(out, beams, settings.exempt_short_spans)
     if settings.deflection_stages is not None:
@@ -1925,17 +1931,13 @@ def loop_summary(summary: dict, settings: LoopSettings, original: str, working: 
 def save_final_design(bench: Workbench, summary: dict, working: str, folder: str) -> None:
     """Store the final design for sdt columns and write the result files."""
     say = bench.progress
-    from design.beam_designer_aci318 import (
-        export_beam_dxf,
-        export_beam_pdf,
-        write_beam_results_xlsx,
-    )
-    from design.column_designer_aci318 import (
-        export_column_cad_drawings,
-        export_column_pdf,
-        write_column_results_xlsx,
-    )
-    from design.concrete_workflow import DesignStore
+    from design.concrete.beams.calculations import export_beam_pdf
+    from design.concrete.beams.results import write_beam_results_xlsx
+    from design.concrete.beams.schedule import export_beam_dxf
+    from design.concrete.columns.calculations import export_column_pdf
+    from design.concrete.columns.report import write_column_results_xlsx
+    from design.concrete.columns.schedule import export_column_cad_drawings
+    from design.concrete.workflow import DesignStore
     from utilities.latex_help import missing_pdf_reason
 
     settings = bench.settings

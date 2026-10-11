@@ -15,9 +15,16 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from design import beam_designer_aci318 as beam  # noqa: E402
-from design import column_designer_aci318 as col  # noqa: E402
-from design import concrete_workflow as cw  # noqa: E402
+from design.concrete.beams import calculations as beam_calculations  # noqa: E402
+from design.concrete.beams import design as beam_design  # noqa: E402
+from design.concrete.beams import options as beam_options  # noqa: E402
+from design.concrete.beams import results as beam_results  # noqa: E402
+from design.concrete.columns import calculations as col_calculations  # noqa: E402
+from design.concrete.columns import options as col_options  # noqa: E402
+from design.concrete.columns import report as col_report  # noqa: E402
+from design.concrete.columns import schedule as col_schedule  # noqa: E402
+from design.concrete.columns import tables as col_tables  # noqa: E402
+from design.concrete import workflow as cw  # noqa: E402
 from etabs_api.workflows import analysis_forces as af  # noqa: E402
 from etabs_api.workflows import design_loop as dl  # noqa: E402
 from utilities._xlsx_values import cell_value, is_blank  # noqa: E402
@@ -52,14 +59,14 @@ def test_an_infinite_ratio_is_written_as_text():
 def test_column_blanks_say_why_they_do_not_apply():
     rectangular = {"Shape": "Rectangular", "Confinement_Check": "PASS"}
     circular = {"Shape": "Circular", "Confinement_Check": "PASS"}
-    assert col.column_blank_reason("Diameter_mm", rectangular) == "N/A - rectangular column"
-    assert col.column_blank_reason("Width_mm", circular) == "N/A - circular column"
-    assert "rectangular hoops" in col.column_blank_reason("Confinement_18_7_5_d", rectangular)
-    assert "0.3 Ag" in col.column_blank_reason("Confinement_18_7_5_c", rectangular)
-    assert "spiral column" in col.column_blank_reason("Confinement_18_7_5_a", circular)
-    assert "0.3 Ag" in col.column_blank_reason("Kf", rectangular)
+    assert col_report.column_blank_reason("Diameter_mm", rectangular) == "N/A - rectangular column"
+    assert col_report.column_blank_reason("Width_mm", circular) == "N/A - circular column"
+    assert "rectangular hoops" in col_report.column_blank_reason("Confinement_18_7_5_d", rectangular)
+    assert "0.3 Ag" in col_report.column_blank_reason("Confinement_18_7_5_c", rectangular)
+    assert "spiral column" in col_report.column_blank_reason("Confinement_18_7_5_a", circular)
+    assert "0.3 Ag" in col_report.column_blank_reason("Kf", rectangular)
     off = {"Shape": "Rectangular", "Confinement_Check": "N/A - non-SMRF detailing"}
-    assert col.column_blank_reason("Kn", off) == "N/A - seismic design is off"
+    assert col_report.column_blank_reason("Kn", off) == "N/A - seismic design is off"
 
 
 def _column_report(**extra) -> tuple[pd.DataFrame, list]:
@@ -72,7 +79,7 @@ def _column_report(**extra) -> tuple[pd.DataFrame, list]:
                "Mu2_kNm": 1.0, "Mu3_kNm": 66.1649, "phi_Mn_kNm": 420.0,
                "Flexure_Utilization": 0.157535, "Axial_Check": "PASS", "Flexure_Check": "PASS",
                "Strength_Check": "PASS"} for end in ("I", "J")]
-    return col._build_consolidated_column_report(
+    return col_report._build_consolidated_column_report(
         pd.DataFrame([result]), pd.DataFrame(checks), pd.DataFrame(), pd.DataFrame(),
         joint_na_reason="N/A - no beam frames into this end")
 
@@ -81,7 +88,7 @@ def test_column_workbook_has_no_empty_cell_and_no_long_decimal(tmp_path):
     from openpyxl import load_workbook
 
     report, groups = _column_report()
-    path = col.write_column_results_xlsx(report, groups, str(tmp_path / "columns.xlsx"))
+    path = col_report.write_column_results_xlsx(report, groups, str(tmp_path / "columns.xlsx"))
     sheet = load_workbook(path).active
     headers = [cell.value for cell in sheet[3]]
     row = dict(zip(headers, [cell.value for cell in sheet[4]]))
@@ -91,7 +98,7 @@ def test_column_workbook_has_no_empty_cell_and_no_long_decimal(tmp_path):
     assert row["ρₛ,req from 18.7.5(b)"] == 0.006
     assert row["Diameter (mm)"] == "N/A - rectangular column"
     assert row["ρₛ,req from 18.7.5(d)"].startswith("N/A - rectangular hoops")
-    assert row["Slenderness Check"] == col.SLENDERNESS_NOT_RUN     # stated, not blank
+    assert row["Slenderness Check"] == col_report.SLENDERNESS_NOT_RUN     # stated, not blank
 
 
 def test_beam_workbook_drops_the_unused_etabs_fields_and_states_its_blanks(tmp_path):
@@ -104,7 +111,7 @@ def test_beam_workbook_drops_the_unused_etabs_fields_and_states_its_blanks(tmp_p
         "Defl_ratio": [0.4884, 0.4884], "Deflection_Check": ["PASS", "PASS"],
         "Design_Status": ["OK", "OK"],
     })
-    path = beam.write_beam_results_xlsx(results, str(tmp_path / "beams.xlsx"))
+    path = beam_results.write_beam_results_xlsx(results, str(tmp_path / "beams.xlsx"))
     sheet = load_workbook(path).active
     headers = [cell.value for cell in sheet[1]]
     assert "Diameter" not in headers and "NumCBars2" not in headers
@@ -126,10 +133,10 @@ def _joint_rows() -> pd.DataFrame:
 
 
 def test_joints_the_user_left_out_are_marked_and_no_longer_fail():
-    joints = col._skip_joint_checks(_joint_rows(), {"top": col.TOP_LEVEL_SKIPPED})
+    joints = col_report._skip_joint_checks(_joint_rows(), {"top": col_report.TOP_LEVEL_SKIPPED})
     top, mid = joints.iloc[0], joints.iloc[1]
-    assert top["Strong_Column_Check"] == col.TOP_LEVEL_SKIPPED
-    assert top["Joint_Shear_Check"] == col.TOP_LEVEL_SKIPPED
+    assert top["Strong_Column_Check"] == col_report.TOP_LEVEL_SKIPPED
+    assert top["Joint_Shear_Check"] == col_report.TOP_LEVEL_SKIPPED
     assert bool(top["BCC_Exempt"]) and pd.isna(top["Column_Beam_Ratio"])
     assert pd.isna(top["Joint_Shear_Utilization"])
     assert mid["Strong_Column_Check"] == "FAIL" and mid["Column_Beam_Ratio"] == 0.9
@@ -137,26 +144,26 @@ def test_joints_the_user_left_out_are_marked_and_no_longer_fail():
 
 def test_nothing_changes_when_every_level_is_checked():
     joints = _joint_rows()
-    pd.testing.assert_frame_equal(col._skip_joint_checks(joints, {}), joints)
+    pd.testing.assert_frame_equal(col_report._skip_joint_checks(joints, {}), joints)
 
 
 def test_the_report_states_the_level_that_was_left_out():
     joint = {"Joint_Point": "top", "Load_Combo": "ULS 1", "Column_End_Members": "C1:J:X",
-             "Column_Beam_Ratio": np.nan, "Strong_Column_Check": col.TOP_LEVEL_SKIPPED,
-             "Joint_Shear_Utilization": np.nan, "Joint_Shear_Check": col.TOP_LEVEL_SKIPPED,
-             "Joint_Check_Reason": col.TOP_LEVEL_SKIPPED}
+             "Column_Beam_Ratio": np.nan, "Strong_Column_Check": col_report.TOP_LEVEL_SKIPPED,
+             "Joint_Shear_Utilization": np.nan, "Joint_Shear_Check": col_report.TOP_LEVEL_SKIPPED,
+             "Joint_Check_Reason": col_report.TOP_LEVEL_SKIPPED}
     result = {"UniqueName": "C1", "Story": "RD", "Width_mm": 500.0, "Depth_mm": 500.0,
               "Longitudinal_Bars": 12, "Design_Status": "PASS"}
     checks = [{"UniqueName": "C1", "Combo": "ULS 1", "End": end, "Pu_kN": 100.0,
                "Mu2_kNm": 1.0, "Mu3_kNm": 2.0, "phi_Mn_kNm": 50.0, "Flexure_Utilization": 0.1,
                "Axial_Check": "PASS", "Flexure_Check": "PASS", "Strength_Check": "PASS"}
               for end in ("I", "J")]
-    report, _ = col._build_consolidated_column_report(
+    report, _ = col_report._build_consolidated_column_report(
         pd.DataFrame([result]), pd.DataFrame(checks), pd.DataFrame(), pd.DataFrame([joint]))
     top = report[report["End"] == "J"].iloc[0]
-    assert top["BCC_Ratio_X"] == col.TOP_LEVEL_SKIPPED
-    assert top["BCC_Status"] == col.TOP_LEVEL_SKIPPED
-    assert top["Joint_Shear_Status"] == col.TOP_LEVEL_SKIPPED
+    assert top["BCC_Ratio_X"] == col_report.TOP_LEVEL_SKIPPED
+    assert top["BCC_Status"] == col_report.TOP_LEVEL_SKIPPED
+    assert top["Joint_Shear_Status"] == col_report.TOP_LEVEL_SKIPPED
     assert top["Column_Design_Status"] == "PASS"
 
 
@@ -170,18 +177,18 @@ def test_a_combination_without_a_joint_check_says_where_to_look():
                "Mu3_kNm": 1.0, "phi_Mn_kNm": 5.0, "Flexure_Utilization": 0.2,
                "Axial_Check": "PASS", "Flexure_Check": "PASS", "Strength_Check": "PASS"}
               for combo in ("ULS 1", "ULS 2") for end in ("I", "J")]
-    report, _ = col._build_consolidated_column_report(
+    report, _ = col_report._build_consolidated_column_report(
         pd.DataFrame([result]), pd.DataFrame(checks), pd.DataFrame(), pd.DataFrame([joint]),
         joint_na_reason="N/A - no beam frames into this end")
     top = report[report["End"] == "J"].set_index("Combo")
     assert top.loc["ULS 2", "BCC_Status"] == "PASS"
-    assert top.loc["ULS 1", "BCC_Status"] == col.JOINT_OTHER_COMBINATION
+    assert top.loc["ULS 1", "BCC_Status"] == col_report.JOINT_OTHER_COMBINATION
     bottom = report[report["End"] == "I"].set_index("Combo")
     assert bottom.loc["ULS 1", "BCC_Status"] == "N/A - no beam frames into this end"
 
 
 def test_no_seismic_design_asks_nothing_about_the_levels():
-    assert col.ask_capacity_check_levels(False) == (True, True)
+    assert col_options.ask_capacity_check_levels(False) == (True, True)
 
 
 def test_a_slenderness_failure_asks_the_loop_for_a_larger_column():
@@ -212,19 +219,19 @@ def _beam_tables():
 def test_beams_of_the_chosen_levels_get_the_earth_contact_cover():
     frame, conn = _beam_tables()
     bars = {"dm": 20, "ds": 10, "dw": 12, "fyw": 275, "cc": 40}
-    table = beam.prepare_beam_table(frame, conn, bars, earth_cover_stories=["GF"])
+    table = beam_design.prepare_beam_table(frame, conn, bars, earth_cover_stories=["GF"])
     cover = dict(zip(table["UniqueName"], table["cc"]))
     assert cover == {"GFTB-1": 75.0, "2GX-1": 40.0}
-    plain = beam.prepare_beam_table(frame, conn, bars)
+    plain = beam_design.prepare_beam_table(frame, conn, bars)
     assert set(plain["cc"]) == {40.0}
 
 
 def test_a_typed_cover_above_75_is_kept():
     frame, conn = _beam_tables()
     bars = {"dm": 20, "ds": 10, "dw": 12, "fyw": 275, "cc": 90}
-    table = beam.prepare_beam_table(frame, conn, bars, earth_cover_stories=["GF"])
+    table = beam_design.prepare_beam_table(frame, conn, bars, earth_cover_stories=["GF"])
     assert set(table["cc"]) == {90.0}
-    assert beam.ask_earth_cover_stories(["GF", "2F"], 90.0) == []   # nothing to ask
+    assert beam_options.ask_earth_cover_stories(["GF", "2F"], 90.0) == []   # nothing to ask
 
 
 def test_the_beam_report_has_a_deflection_table():
@@ -233,7 +240,7 @@ def test_the_beam_report_has_a_deflection_table():
         "Defl_lambda": 1.454, "Defl_live_mm": 2.05, "Defl_live_limit_mm": 27.78,
         "Defl_roof_mm": None, "Defl_roof_limit_mm": None, "Defl_long_mm": 10.16,
         "Defl_long_limit_mm": 20.83, "Defl_ratio": 0.488, "Deflection_Check": "PASS"})
-    table = beam._beam_deflection_table(top)
+    table = beam_calculations._beam_deflection_table(top)
     assert table.title == "Deflection (ACI 24.2)"
     live, roof, long_term = table.rows
     assert live[1:] == ["2.05", "27.78", "0.07"]
@@ -243,22 +250,22 @@ def test_the_beam_report_has_a_deflection_table():
 
 
 def test_a_beam_without_deflection_data_says_why_and_old_results_get_no_table():
-    none = beam._beam_deflection_table(pd.Series({"Deflection_Check": "NO DEF COMBOS",
+    none = beam_calculations._beam_deflection_table(pd.Series({"Deflection_Check": "NO DEF COMBOS",
                                                   "Defl_ratio": None}))
     assert none.rows == [["Deflection check", "NO DEF COMBOS"]]
-    assert beam._beam_deflection_table(pd.Series({"Design_Status": "OK"})) is None
+    assert beam_calculations._beam_deflection_table(pd.Series({"Design_Status": "OK"})) is None
 
 
 def test_the_column_plot_caption_reports_bcc_without_drawing_it():
     rows = pd.DataFrame({"BCC_Ratio_X": [1.50, 1.31, "N/A"], "BCC_Ratio_Y": [2.2, 2.0, "N/A"],
                          "BCC_Status": ["PASS", "PASS", "N/A"]})
-    text = col._bcc_caption(rows)
+    text = col_calculations._bcc_caption(rows)
     assert "along X 1.31, along Y 2.00" in text and "PASS" in text and "not drawn" in text
     rows["BCC_Status"] = ["PASS", "FAIL", "N/A"]
-    assert "FAIL" in col._bcc_caption(rows)
-    skipped = pd.DataFrame({"BCC_Ratio_X": [col.TOP_LEVEL_SKIPPED],
-                            "BCC_Status": [col.TOP_LEVEL_SKIPPED]})
-    assert col.TOP_LEVEL_SKIPPED in col._bcc_caption(skipped)
+    assert "FAIL" in col_calculations._bcc_caption(rows)
+    skipped = pd.DataFrame({"BCC_Ratio_X": [col_report.TOP_LEVEL_SKIPPED],
+                            "BCC_Status": [col_report.TOP_LEVEL_SKIPPED]})
+    assert col_report.TOP_LEVEL_SKIPPED in col_calculations._bcc_caption(skipped)
 
 
 # --------------------------------------------------------------------------
@@ -304,7 +311,7 @@ def test_beams_keep_the_same_columns_as_before():
 
 def test_the_sustained_force_follows_the_compression_positive_convention():
     table = pd.DataFrame({"P": [-900.0], "P_sustained": [-600.0]})
-    converted = col._to_compression_positive(table)
+    converted = col_tables._to_compression_positive(table)
     assert converted["P"].iloc[0] == 900.0 and converted["P_sustained"].iloc[0] == 600.0
 
 
@@ -481,11 +488,11 @@ def test_a_summary_that_cannot_open_its_window_falls_back_to_the_terminal(monkey
 def test_the_loop_draws_the_column_schedule_with_the_chosen_tie_style(tmp_path, monkeypatch):
     """sdt design asks the interior tie style, like sdt columns, and uses it."""
     drawn = []
-    monkeypatch.setattr(col, "export_column_cad_drawings",
+    monkeypatch.setattr(col_schedule, "export_column_cad_drawings",
                         lambda report, folder, dmain, cover, smrf, style, connectivity:
                         drawn.append(style) or [])
-    monkeypatch.setattr(col, "write_column_results_xlsx", lambda *a, **k: "x")
-    monkeypatch.setattr(col, "export_column_pdf", lambda *a, **k: None)
+    monkeypatch.setattr(col_report, "write_column_results_xlsx", lambda *a, **k: "x")
+    monkeypatch.setattr(col_calculations, "export_column_pdf", lambda *a, **k: None)
     working = tmp_path / "m - DESIGN.EDB"
     working.write_text("")
     bench = dl.Workbench.__new__(dl.Workbench)

@@ -18,7 +18,7 @@ For each beam, after its bars are chosen:
    support pushing up (a girder that carries the line). An end of the line
    is held when the diagrams show it pushed up. With a downward force on
    it, the deflected shape of the analysis decides: a free tip drops, an end
-   that is held down stays (``beam_carriers.BeamNetwork``).
+   that is held down stays (``carriers.BeamNetwork``).
    A planted column and a beam that rests on the line are loads: the span
    runs on through them.
 4. Long-term factor lambda = xi / (1 + 50 rho'), rho' the compression steel
@@ -53,7 +53,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from design import dcr_targets
+from design.criteria import dcr_targets
 
 ES = 200000.0           # MPa
 XI_LONG_TERM = 2.0      # 5 years or more, ACI Table 24.2.4.1.3
@@ -571,7 +571,7 @@ def beam_spans(connectivity, members: list[str], points=None,
 
     held: dict[tuple[str, str], str] = {}
     if points is not None and len(points):
-        from design.beam_carriers import FREE_END, _name, end_conditions
+        from design.concrete.beams.carriers import FREE_END, _name, end_conditions
 
         for (member, joint), state in end_conditions(connectivity, points).items():
             if state != FREE_END:
@@ -663,7 +663,7 @@ def add_deflection_columns(results, service, long_limit_divisor: float = LIMIT_D
     deflection before them and adds the deflection at those stages.
     ``points`` (the joint coordinates) lets an end on an unsplit girder count
     as supported (see ``beam_spans``). ``pushes`` is what holds each beam end
-    (``beam_carriers.end_pushes``); it is read from ``service`` when not given.
+    (``carriers.end_pushes``); it is read from ``service`` when not given.
     """
     import pandas as pd
 
@@ -873,7 +873,7 @@ def add_deflection_columns(results, service, long_limit_divisor: float = LIMIT_D
 
     checked: dict[str, DeflectionResult] = {}
     if has_lines:
-        from design.beam_carriers import network_for, read_load_path
+        from design.concrete.beams.carriers import network_for, read_load_path
 
         network = network_for(connectivity, points, pushes if pushes is not None
                               else read_load_path(service, COMBO_FULL, connectivity))

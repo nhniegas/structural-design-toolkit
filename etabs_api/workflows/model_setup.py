@@ -37,7 +37,7 @@ if __package__ in (None, ""):
     sys.path.insert(
         0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from design.code_config import CODE, NSCP
+from design.criteria.code_config import CODE, NSCP
 from etabs_api.core.helpers import as_list, return_code
 from etabs_api.workflows.load_combinations import DRIFT_SPECTRUM_CASES as lc_drift_cases
 from etabs_api.workflows.load_combinations import Combination, build_combinations

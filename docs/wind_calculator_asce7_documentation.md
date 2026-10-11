@@ -1,6 +1,6 @@
 # ASCE 7 Directional Wind Load Calculator
 
-`design/wind_calculator_directional_asce7.py` computes MWFRS wind pressures for a rectangular building with a symmetrical gable roof, using the ASCE 7 directional procedure in SI units.
+`design/loads/wind_directional_asce7.py` computes MWFRS wind pressures for a rectangular building with a symmetrical gable roof, using the ASCE 7 directional procedure in SI units.
 
 ## From the terminal
 
@@ -14,7 +14,7 @@ sdt wind
 2. If a value is not valid, a message names it and the dialog opens again with your entries.
 3. A second dialog asks what to do with the results: **Print the results in the terminal**, **Export a PDF calculation report**, or **Both**. Exporting asks where to save the PDF.
 
-Closing either dialog stops without printing or saving anything. Running the file directly (`python design/wind_calculator_directional_asce7.py`) does the same.
+Closing either dialog stops without printing or saving anything. Running the file directly (`python design/loads/wind_directional_asce7.py`) does the same.
 
 Inputs:
 
@@ -56,7 +56,7 @@ The reference tables are constants in the module.
 ## Python use
 
 ```python
-from design import wind_calculator_directional_asce7 as wind
+from design.loads import wind_directional_asce7 as wind
 
 calculator = wind.calculate(dict(
     building_class="Risk Category II", basic_wind_speed=60.0,

@@ -79,8 +79,18 @@ def running_etabs(helper=None):
     ``Helper.GetObject`` returns None, without raising, when it finds no
     session, so its result is checked. A session it misses is looked for
     again by its process.
+
+    ``SDT_ETABS_PID`` in the environment names the one ETABS process to use.
+    The test runs set it to the ETABS they started, so that a command never
+    attaches to another ETABS that is open on the machine.
     """
     helper = helper or etabs_helper()
+    pinned = os.environ.get("SDT_ETABS_PID", "").strip()
+    if pinned.isdigit():
+        try:
+            return helper.GetObjectProcess(ETABS_OBJECT, int(pinned))
+        except Exception:
+            return None
     try:
         etabs = helper.GetObject(ETABS_OBJECT)
     except Exception:
@@ -111,14 +121,18 @@ def use_working_units(model) -> None:
     model in kN-m would get a spectrum a thousand times too large. The units
     the model had are put back by ``restore_units`` when the command ends.
     Call it again after opening a file: ETABS then shows that file's units.
+
+    The units are set even when ETABS says they are N-mm already. An ETABS
+    started through the API reports the units of the file it opened, but keeps
+    working in lb-in until the units are set once: every coordinate, size and
+    force then passes through the API in lb and inches (found on ETABS 22).
     """
     try:
         original = int(model.GetPresentUnits())
     except Exception:
         return
-    if original == EXTRACTION_UNITS:
-        return
-    if not any(borrowed is model for borrowed, _ in _BORROWED_UNITS):
+    if original != EXTRACTION_UNITS and not any(
+            borrowed is model for borrowed, _ in _BORROWED_UNITS):
         _BORROWED_UNITS.append((model, original))
     ensure_success(model.SetPresentUnits(EXTRACTION_UNITS),
                    f"SetPresentUnits({UNIT_NAMES[EXTRACTION_UNITS]})")
