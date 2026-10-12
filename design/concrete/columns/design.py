@@ -61,6 +61,7 @@ from design.concrete.columns.transverse import (
 from design.concrete.columns.shear import (
     _column_shear_checks,
     _column_stacks,
+    spiral_pitch,
 )
 from design.concrete.columns.joints import (
     _evaluate_smrf_joints,
@@ -76,6 +77,15 @@ from design.concrete.columns.report import (
 from design.concrete.columns.options import (
     _apply_bottom_story_cover,
 )
+
+
+
+def transverse_text(tie: float, kind: str, spacing: float, legs_x, legs_y) -> str:
+    """The transverse reinforcement of a column in words. A spiral has a pitch and
+    no legs along an edge; ties have their legs along X and along Y."""
+    if "spiral" in str(kind).lower():
+        return f"{tie:g} mm {kind} @ {spacing:.0f} mm pitch"
+    return f"{tie:g} mm {kind} @ {spacing:.0f} mm; X: {legs_x} legs, Y: {legs_y} legs"
 
 
 def design_columns(
@@ -1082,8 +1092,22 @@ def design_columns(
             default=math.inf,
         )
         if shear_spacing < spacing_provided - 1e-6:
-            spacing_provided = math.floor(shear_spacing / 5.0) * 5.0
+            if final_engine.shape == "circular":
+                # A spiral takes no added leg: the shear is answered with a closer
+                # pitch, down to the least clear spacing of ACI 25.7.3.1. Under
+                # that the shear check fails.
+                least = final_engine.solve_max_spacing()["min_spiral_pitch_mm"]
+                spacing_provided = spiral_pitch(max(shear_spacing, least), least)
+            else:
+                spacing_provided = math.floor(shear_spacing / 5.0) * 5.0
             member_shear_checks = shear_checks_at(spacing_provided)
+            if final_engine.shape == "circular" and is_smrf:
+                core = final_engine.diameter - 2.0 * final_engine.cc
+                provided = math.pi * final_engine.dties ** 2 / (core * spacing_provided)
+                for key in ("Provided_Ash_s_Ratio_X", "Provided_Ash_s_Ratio_Y",
+                            "Provided_Confinement_Ratio"):
+                    transverse[key] = provided
+                transverse["Spiral_Clear_Spacing_mm"] = spacing_provided - final_engine.dties
         # Shear along the depth (V2) uses the legs counted along the X edge and
         # shear along the width (V3) the legs counted along the Y edge.
         for check in member_shear_checks:
@@ -1150,12 +1174,9 @@ def design_columns(
                 status = "FAIL: column slenderness (ACI 6.2.6) - enlarge the section"
         force_check_rows.extend(selected_checks)
         layout_summary = _column_layout_summary(selected_layout)
-        transverse_summary = (
-            f"{dties:g} mm {transverse['Transverse_Type']} @ "
-            f"{spacing_provided:.0f} mm; "
-            f"X: {transverse['Transverse_Legs_X']} legs, "
-            f"Y: {transverse['Transverse_Legs_Y']} legs"
-        )
+        transverse_summary = transverse_text(
+            dties, transverse["Transverse_Type"], spacing_provided,
+            transverse["Transverse_Legs_X"], transverse["Transverse_Legs_Y"])
         output_rows.append(
             {
                 "Story": row.get("Story"),
@@ -1185,8 +1206,11 @@ def design_columns(
                 "Transverse_Legs_Per_Direction": transverse[
                     "Transverse_Legs_Per_Direction"
                 ],
-                "Transverse_Legs_X": transverse["Transverse_Legs_X"],
-                "Transverse_Legs_Y": transverse["Transverse_Legs_Y"],
+                # a spiral has no legs along an edge
+                "Transverse_Legs_X": (np.nan if final_engine.shape == "circular"
+                                      else transverse["Transverse_Legs_X"]),
+                "Transverse_Legs_Y": (np.nan if final_engine.shape == "circular"
+                                      else transverse["Transverse_Legs_Y"]),
                 "Confinement_Criteria_Governing": transverse[
                     "Confinement_Criteria_Governing"
                 ],

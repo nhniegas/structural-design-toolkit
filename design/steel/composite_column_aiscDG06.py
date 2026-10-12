@@ -642,9 +642,9 @@ def terminal_report(column: "RectangularFilledComposite"):
     out.equations([
         "Axial:        compact walls: Pₙₒ = Fy Aₛ + 0.85 f′c (Ac + Aₛᵣ Eₛ/Ec)   (DG6 2.5.2, "
         "AISC I2.2)",
-        "              Pₑ = π² EI_eff / L²,  EI_eff = Eₛ Iₛ + C₃ Ec Ic,  "
+        "              Pₑ = π² EIeff / L²,  EIeff = Eₛ Iₛ + C₃ Ec Ic,  "
         "C₃ = 0.45 + 3 (Aₛ + Aₛᵣ)/Ag ≤ 0.9",
-        "              Pₙ = Pₙₒ 0.658^(Pₙₒ/Pₑ)  when Pₙₒ/Pₑ ≤ 2.25,  else Pₙ = 0.877 Pₑ;  "
+        "              Pₙ = Pₙₒ × 0.658ˣ with x = Pₙₒ/Pₑ, when x ≤ 2.25;  else Pₙ = 0.877 Pₑ;  "
         "strength φc Pₙ",
         "Flexure:      φb Mₙ, the plastic stress distribution of the filled section about "
         "each axis   (DG6 Fig. 2-13)",
@@ -652,7 +652,7 @@ def terminal_report(column: "RectangularFilledComposite"):
         "Interaction:  Pᵤ < Pcc:  Mᵤₓ/φMₙₓ + Mᵤᵧ/φMₙᵧ ≤ 1.0",
         "              Pᵤ ≥ Pcc:  (Pᵤ − Pcc) / (φPₙ − Pcc) + Mᵤₓ/φMₙₓ + Mᵤᵧ/φMₙᵧ ≤ 1.0   "
         "(DG6 2.5.6)",
-        "              with α = 1.5:  the moment term is [(Mᵤₓ/φMₙₓ)^α + (Mᵤᵧ/φMₙᵧ)^α]^(1/α)",
+        "              with α = 1.5:  the moment term is [(Mᵤₓ/φMₙₓ)ᵅ + (Mᵤᵧ/φMₙᵧ)ᵅ]¹⁄ᵅ",
     ])
     return out
 
@@ -729,23 +729,18 @@ def export_pdf(col: RectangularFilledComposite, filepath_with_ext: str):
     Pcc_kN = _kips_to_kN(results.get("Pcc (kips)", 0))
 
     # --- Build PDF Document ---
-    doc = Document(geometry_options={"a4paper": True, "margin": "0.5in"})
-    doc.packages.append(Package("booktabs"))
-    doc.packages.append(Package("amsmath"))
-    doc.packages.append(Package("multicol"))
-    doc.preamble.append(NoEscape(r"\pagestyle{empty}"))
+    from utilities import report_style as style
 
-    doc.append(NoEscape(r"\begin{center}"))
-    doc.append(
-        NoEscape(
-            r"{\LARGE \textbf{Rectangular Filled Composite Member Capacity (AISC DG6)}}\\[0.35cm]"
-        )
-    )
-    doc.append(
-        NoEscape(r"{\normalsize " + datetime.today().strftime("%B %d, %Y") + r"}")
-    )
-    doc.append(NoEscape(r"\end{center}"))
-    doc.append(NoEscape(r"\vspace{0.4cm}"))
+    size = f"{vals['b']:.0f} x {vals['h']:.0f} x {vals['t']:.1f} mm"
+    doc = style.new_document("Filled Composite Column Capacity", "AISC Design Guide 6, AISC 360",
+                             f"Section: {size}", "sdt composite",
+                             os.path.basename(filepath) + ".pdf", packages=("multicol",))
+    doc.append(NoEscape(style.title_block(
+        "Rectangular Filled Composite Column", "Member capacity and interaction", [
+            ("Section", size), ("Date", datetime.today().strftime("%d %B %Y").lstrip("0")),
+            ("Design code", "AISC Design Guide 6"),
+            ("Prepared with", f"sdt composite {style.program_version()}".strip())])))
+    doc.append(NoEscape(r"\vspace{2mm}"))
 
     doc.append(NoEscape(r"\begin{multicols}{2}"))
 
@@ -905,9 +900,6 @@ def export_pdf(col: RectangularFilledComposite, filepath_with_ext: str):
             )
 
     doc.append(NoEscape(r"\end{multicols}"))
-    doc.append(NoEscape(r"\vspace{0.3cm}"))
-    doc.append(NoEscape(r"\hrule"))
-    doc.append(NoEscape(r"\vspace{0.4cm}"))
 
     # Section 5: Executive Summary
     with doc.create(Section("Executive Summary of Results")):
@@ -954,6 +946,8 @@ def export_pdf(col: RectangularFilledComposite, filepath_with_ext: str):
 
     # --- Compile PDF ---
     try:
+        # twice: the header says "Page x of y", which LaTeX knows after one pass
+        doc.generate_pdf(filepath, clean=False, clean_tex=False, compiler="pdflatex")
         doc.generate_pdf(filepath, clean_tex=True, compiler="pdflatex")
         return filepath + ".pdf"
     except Exception as e:

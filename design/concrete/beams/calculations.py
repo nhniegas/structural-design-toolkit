@@ -337,7 +337,8 @@ def build_beam_calc_report(
         ["Beam", "Story", "Section", "Flexure", "Design status"],
         members,
         filepath,
-        "p{3.2cm}p{1.3cm}p{5.2cm}p{1.6cm}p{5.5cm}",
+        "p{3.0cm}p{1.3cm}p{5.0cm}p{1.6cm}p{5.2cm}",
+        command="sdt beams",
     )
 
 

@@ -173,3 +173,9 @@ def test_a_column_inside_the_floor_is_taken_out_whole_and_a_turned_one_by_its_ow
     story = cq.measure_story("2F", [inner, round_one], [FloorShell("S", "2F", FLOOR, 200.0)])
     assert cq.column_outline(inner).area == pytest.approx(240000.0)
     assert story.slabs == pytest.approx((24.0 - 0.24 - math.pi * 0.25**2) * 0.2, rel=2e-3)
+
+
+def test_the_ratio_is_printed_with_its_units_not_as_latex():
+    bars, shells = bay()
+    text = cq.quantities_report(cq.measure(bars, shells, ["2F"], 100.0)).plain()
+    assert "m³/m²" in text and "^" not in text and "\\" not in text

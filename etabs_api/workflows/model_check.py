@@ -166,12 +166,12 @@ def check_model(d: ModelData) -> list[Finding]:
         no_section = info[info["SectProp"].astype(str).isin(["None", "", "nan"])] \
             if "SectProp" in info else info.iloc[0:0]
         out.append(Finding("Model", WARN if len(no_diaphragm) else OK,
-                           f"{len(no_diaphragm)} floors without a diaphragm" if len(no_diaphragm)
-                           else f"All {len(floor_names)} floors have a diaphragm.",
+                           f"{len(no_diaphragm)} floor panels without a diaphragm" if len(no_diaphragm)
+                           else f"All {len(floor_names)} floor panels have a diaphragm.",
                            "NSCP 208.5.1.3"))
         out.append(Finding("Model", WARN if len(no_section) else OK,
-                           f"{len(no_section)} floors without a slab section" if len(no_section)
-                           else "All floors have a slab section."))
+                           f"{len(no_section)} floor panels without a slab section" if len(no_section)
+                           else "All floor panels have a slab section."))
     else:
         out.append(Finding("Model", WARN, "The model has no floor objects: no slabs, no floor "
                            "loads and no rigid diaphragms from slabs."))
@@ -334,7 +334,7 @@ def nscp_coefficient(ca: float, cv: float, importance: float, r: float, period: 
 
 
 def method_a_period(ct_ft: float, height_mm: float) -> float:
-    """NSCP Eq. 208-12, T_A = Ct hn^(3/4), with Ct in ft units as ETABS has it."""
+    """NSCP Eq. 208-12, TA = Ct hn^(3/4), with Ct in ft units as ETABS has it."""
     return ct_ft * (height_mm / FT) ** SEIS.period_exponent
 
 
@@ -592,7 +592,7 @@ def check_seismic(d: ModelData, settings: dict | None = None) -> list[Finding]:
         kinds = {str(x["PeriodType"]) for _, x in strength.iterrows()}
         out.append(Finding("Seismic", INFO, "Period: " + ", ".join(sorted(kinds)) +
                            f" (Program Calculated = Method B, capped at {SEIS.period_cap_zone4:g}"
-                           f" T_A in zone 4, {SEIS.period_cap_other:g} T_A in zone 2)",
+                           f" TA in zone 4, {SEIS.period_cap_other:g} TA in zone 2)",
                            "NSCP 208.5.2.2"))
     # response spectrum function and cases (UBC 97 function = NSCP Fig. 208-3)
     function = d.table("Functions - Response Spectrum - UBC 97")
@@ -658,7 +658,7 @@ def check_seismic(d: ModelData, settings: dict | None = None) -> list[Finding]:
                             f"scales it to {irregular * 100:g} %)" if status == WARN else
                             f" (below {regular * 100:g} %: scale it, sdt analyze)"),
                            "NSCP 208.5.3.5.4",
-                           equation=f"{case}: V_spectrum / V_static = "
+                           equation=f"{case}: Vspectrum / Vstatic = "
                                     f"{abs(values[axis]) / 1e3:,.1f} / {static / 1e3:,.1f} = "
                                     f"{ratio:.3f}"))
     if not d.modal.empty:
@@ -751,12 +751,12 @@ def _check_static_results(d: ModelData, seismic: pd.DataFrame, bottom: str) -> l
             cap = (SEIS.period_cap_zone4 if z >= SEIS.zone4_factor or z != z
                    else SEIS.period_cap_other) * t_a
             out.append(Finding("Seismic", OK if period <= cap * (1 + CAP_TOLERANCE) else FAIL,
-                               f"{name}: T {period:.3f} s, T_A {t_a:.3f} s for hn "
+                               f"{name}: T {period:.3f} s, TA {t_a:.3f} s for hn "
                                f"{height / 1e3:.2f} m ({low} to {high}), cap {cap:.3f} s",
                                "NSCP 208.5.2.2",
-                               equation=f"{name}: T_A = Cₜ hₙ^(3/4) = {ct:g} × "
-                                        f"({height / FT:.2f} ft)^0.75 = {t_a:.3f} s;  T ≤ "
-                                        f"{cap / t_a:.1f} T_A = {cap:.3f} s"))
+                               equation=f"{name}: TA = Cₜ hₙ³⁄⁴ = {ct:g} × "
+                                        f"({height / FT:.2f} ft)⁰·⁷⁵ = {t_a:.3f} s;  T ≤ "
+                                        f"{cap / t_a:.1f} TA = {cap:.3f} s"))
     return out
 
 
@@ -817,12 +817,12 @@ def _check_drift(d: ModelData, seismic: pd.DataFrame) -> list[Finding]:
         limit = drift_limit(period) if period == period else SEIS.drift_limit_long
         inelastic = SEIS.drift_amplification * r_factor * ratio
         out.append(Finding("Seismic", OK if inelastic <= limit else FAIL,
-                           f"{case}: drift {ratio:.5f} at {story}, Delta_M = "
+                           f"{case}: drift {ratio:.5f} at {story}, ΔM = "
                            f"{SEIS.drift_amplification:g} R x = {inelastic:.4f} (limit "
                            f"{limit:.3f}" + (f", T {period:.2f} s" if period == period else "")
                            + (f"; {source}" if source != case else "") + ")",
                            "NSCP 208.6.4.1, 208.6.5.1",
-                           equation=f"{case}: Δ_M = {SEIS.drift_amplification:g} R Δ_S = "
+                           equation=f"{case}: ΔM = {SEIS.drift_amplification:g} R ΔS = "
                                     f"{SEIS.drift_amplification:g} × {r_factor:g} × {ratio:.5f}"
                                     f" = {inelastic:.4f} ≤ {limit:.3f} h"))
     return out
@@ -1067,6 +1067,37 @@ def modifier_findings(effective: dict[str, tuple], columns: set[str],
     return out
 
 
+def clear_spans(beams: pd.DataFrame, columns: pd.DataFrame, section_of: dict[str, str]
+                ) -> dict[str, float]:
+    """The clear span of each beam, mm: its joint-to-joint length less half of the
+    column at each end (the larger side of the column, as the beam design takes
+    it). ACI 18.6.2.1(a) sets the 4d rule on the clear span, so sdt check and
+    sdt beams measure a girder the same way."""
+    from etabs_api.workflows.sections import parse_section
+
+    needed = {"UniqueName", "UniquePtI", "UniquePtJ"}
+    if beams.empty or not needed <= set(beams.columns) or "Length" not in beams.columns:
+        return {}
+    side_at: dict[str, float] = {}
+    if not columns.empty and needed <= set(columns.columns):
+        for name, i, j in zip(columns["UniqueName"].astype(str), columns["UniquePtI"].astype(str),
+                              columns["UniquePtJ"].astype(str)):
+            found = parse_section(section_of.get(name, ""))
+            if found is None:
+                continue
+            side = max(found.width, found.depth)
+            for joint in (i, j):
+                side_at[joint] = max(side_at.get(joint, 0.0), side)
+    out = {}
+    for name, i, j, length in zip(beams["UniqueName"].astype(str), beams["UniquePtI"].astype(str),
+                                  beams["UniquePtJ"].astype(str),
+                                  pd.to_numeric(beams["Length"], errors="coerce")):
+        if length == length:
+            clear = float(length) - 0.5 * (side_at.get(i, 0.0) + side_at.get(j, 0.0))
+            out[name] = clear if clear > 0 else float(length)
+    return out
+
+
 def check_smrf_members(d: ModelData) -> list[Finding]:
     from etabs_api.workflows.sections import parse_section
 
@@ -1080,6 +1111,10 @@ def check_smrf_members(d: ModelData) -> list[Finding]:
                        pd.to_numeric(d.table("Beam Object Connectivity").get("Length",
                                                                              pd.Series(dtype=float)),
                                      errors="coerce")))
+    clear = clear_spans(d.table("Beam Object Connectivity"),
+                        d.table("Column Object Connectivity"),
+                        dict(zip(sections["UniqueName"].astype(str),
+                                 sections["SectProp"].astype(str))))
     narrow, short, small_col, slender_col = [], [], [], []
     for member, prop in zip(sections["UniqueName"].astype(str), sections["SectProp"].astype(str)):
         s = parse_section(prop)
@@ -1094,7 +1129,8 @@ def check_smrf_members(d: ModelData) -> list[Finding]:
         elif s.family in ("G",):
             if s.width < min(SMRF_BEAM.min_width_to_depth * s.depth, SMRF_BEAM.min_width) - 0.5:
                 narrow.append(member)
-            length = lengths.get(member, math.nan)
+            # the clear span between the column faces, as sdt beams measures it
+            length = clear.get(member, lengths.get(member, math.nan))
             if length == length and \
                     length < SMRF_BEAM.min_clear_span_to_depth * (s.depth - COVER_TO_BAR):
                 short.append(member)
@@ -1107,12 +1143,12 @@ def check_smrf_members(d: ModelData) -> list[Finding]:
                 f"{', '.join(narrow[:8])}" if narrow else f"Girder widths at least the smaller of "
                 f"{SMRF_BEAM.min_width_to_depth:g}h and {SMRF_BEAM.min_width:g} mm.",
                 ref + "418.6.2.1(b)"),
-        Finding(group, WARN if short else OK, f"Girders with a span under "
+        Finding(group, WARN if short else OK, f"Girders with a clear span under "
                 f"{span_ratio:g}d (deep beams): {', '.join(short[:8])}"
                 + (f", ... ({len(short)} in all)" if len(short) > 8 else "")
                 + " - they do not qualify as beams of a special moment frame; sdt beams and "
                 "sdt design can design them without the SMRF rules" if short else
-                f"Girder spans at least {span_ratio:g}d.", ref + "418.6.2.1(a)"),
+                f"Girder clear spans at least {span_ratio:g}d.", ref + "418.6.2.1(a)"),
         Finding(group, WARN if small_col else OK, f"Columns with a side under {least_side:g} mm: "
                 f"{', '.join(small_col[:8])}" if small_col else
                 f"Column sides at least {least_side:g} mm.", ref + "418.7.2.1(a)"),

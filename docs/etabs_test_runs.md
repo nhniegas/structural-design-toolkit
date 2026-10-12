@@ -96,7 +96,7 @@ The first runs showed three things:
 
 - The models are not part of the repository, so the scenarios and references stay with the models on your machine.
 - A reference is only as right as the code that made it: the comparison says that nothing changed, not that the results are correct. The checks against hand calculations are in `tests/`.
-- A dialog that ETABS itself shows stops the run until it is closed.
+- A dialog that ETABS itself shows stops the run until it is closed. One is closed by the runner: the "Error initializing shader" box that ETABS can show after an analysis, which is about its own drawing. The runner presses OK on it and says so at the end of the run.
 - Run it with its output in a file or a terminal of its own. An ETABS left open with `--keep-open` keeps a pipe of the command that started it open.
 
 ## Tests

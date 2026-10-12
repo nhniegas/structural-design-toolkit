@@ -11,7 +11,7 @@ When a command ends, the terminal shows its results as tables, with the equation
 | Equations | In a box of their own, written with the symbols a terminal has: `φMₙ ≥ Mᵤ`, `√f′c`, `Δ_M = 0.7 R Δ_S` |
 | What needs attention | In red, in the closing summary |
 
-A terminal cannot draw LaTeX as a PDF does. The equations use Greek letters, the root sign and small letters above and below the line. Where no such letter exists (there is no small `b` or `g` below the line), the mark is kept: `L_b`, `A_g`.
+A terminal cannot draw LaTeX as a PDF does. The equations use Greek letters, the root sign and small letters above and below the line. Where no such letter exists (there is no small `b`, `c`, `d`, `f`, `g`, `w` or `z` below the line, and no capital), the subscript is written beside its symbol, as engineers type it: `Lb`, `Ag`, `bf`, `φc`, `ΔM`. An exponent is raised (`hₙ³⁄⁴`); one that is itself an expression keeps its mark, `0.658^(Fy/Fe)`. No command prints LaTeX source, an underscore before a subscript, or a caret before a plain exponent; a test checks the equations of every command for this.
 
 ## What each command shows
 

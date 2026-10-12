@@ -1720,3 +1720,60 @@ def test_names_are_cleaned_once_for_each_different_name():
     assert list(cleaned) == ["502", "C1", "", "502", "007.0", "", "C1", "12.5", "3"]
     assert list(cleaned.index) == list("abcdefghi") and cleaned.name == "UniqueName"
     assert _normalize_names(pd.Series([], dtype=object)).empty
+
+
+# ==========================================================================
+# SHEAR OF A CIRCULAR COLUMN: THE SPIRAL
+# ==========================================================================
+def _spiral_shear(v2: float, pitch: float):
+    engine = col_section.ColumnFlexureDesign(0, 0, 1000.0, 41.38, 414, 414, 25, 12, 40,
+                                             shape="circular", is_smrf=False)
+    layout = next(lay for lay in col_layouts._enumerate_column_bar_layouts(engine, 40)
+                  if sum(c for _, _, c in lay) == 20)
+    rows, most = col_shear._column_shear_checks(
+        frame_row(width=0.0, depth=0.0, diameter=1000.0, fc=41.38, fy=414.0, fys=414.0),
+        force_table(combos={"COMBO1": (0.0, v2, 0.0, 0.0, 0.0)}), engine, 20, pitch,
+        (1, 1), False, bundle_layout=layout)
+    return [row for row in rows if row["Shear_Direction"] == "V2"][0], most
+
+
+def test_a_spiral_has_two_legs_in_shear_and_d_of_0_8_diameter():
+    """HAND CALC: D = 1000, 12 mm spiral at 75 mm pitch, fc' 41.38, fyt 414, Nu = 0.
+
+    d = 0.8 x 1000 = 800 mm (ACI 22.5.2.2); bw = D.
+    Vc = 0.17 sqrt(41.38) x 1000 x 800 = 874.9 kN
+    Vs = 2 x 113.1 x 414 x 800 / 75 = 998.9 kN  (two legs, ACI 22.5.10.5.3)
+    phi Vn = 0.75 x (874.9 + 998.9) = 1405.3 kN
+
+    The check gave a spiral as many "legs" as the shear asked for, 4 or more,
+    and took d to the far bar (935 mm): a capacity no spiral has.
+    """
+    row, most = _spiral_shear(1300.0, 75.0)
+    assert row["Provided_Transverse_Legs"] == 2 and most == 2
+    assert row["Vc_kN"] == pytest.approx(874.9, abs=0.5)
+    assert row["phi_Vn_kN"] == pytest.approx(1405.3, abs=1.0)
+    assert row["Shear_Check"] == "PASS"
+
+
+def test_the_shear_a_spiral_cannot_carry_asks_for_a_closer_pitch_not_for_legs():
+    """Vu = 2000 kN: Vs needed = 2000 / 0.75 - 874.9 = 1791.8 kN, so the pitch is
+    2 x 113.1 x 414 x 800 / 1791.8e3 = 41.8 mm. At 75 mm the check fails and says so."""
+    row, most = _spiral_shear(2000.0, 75.0)
+    assert most == 2 and row["Provided_Transverse_Legs"] == 2
+    assert row["Shear_Spacing_Limit_mm"] == pytest.approx(41.8, abs=0.2)
+    assert row["Shear_Check"] == col_shear.SPIRAL_SHEAR_FAIL
+    closer, _ = _spiral_shear(2000.0, 40.0)
+    assert closer["Shear_Check"] == "PASS"
+
+
+def test_a_spiral_pitch_is_taken_down_never_up():
+    """40.97 mm was shown and built as 41: less spiral than was counted."""
+    assert col_shear.spiral_pitch(40.97, 37.0) == 40.0
+    assert col_shear.spiral_pitch(38.6, 37.0) == 38.0      # 35 would leave under 25 mm clear
+    assert col_shear.spiral_pitch(87.0, 37.0) == 85.0
+    engine = col_section.ColumnFlexureDesign(0, 0, 1000.0, 41.38, 414, 414, 25, 12, 40,
+                                             shape="circular", is_smrf=True)
+    spiral = col_transverse._smrf_transverse_design(engine, 20, 4.0e6, 87.0)
+    assert spiral["Transverse_Spacing_Provided_mm"] == 40.0
+    assert spiral["Provided_Confinement_Ratio"] >= spiral["Required_Confinement_Ratio"]
+    assert spiral["Required_Legs_X"] == 2

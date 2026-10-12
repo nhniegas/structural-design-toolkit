@@ -257,3 +257,70 @@ def test_the_report_lists_every_check_with_its_table_and_equations():
         assert expected in text
     summary = ir.irregularity_summary(report, "m - Irregularity.txt").text()
     assert "IRREGULAR: soft story at 4F" in summary and "The model was not changed." in summary
+
+
+# --------------------------------------------------------------------------
+# A CASE IN ITS OWN DIRECTION, AND THE EQUATIONS IN THE TERMINAL
+# --------------------------------------------------------------------------
+def test_a_seismic_case_is_checked_in_its_own_direction_only():
+    """ETABS lists an X case in Y too, where it hardly moves the structure: 9.3
+    over 1.8 there is not a torsional irregularity."""
+    rows = [("LG", "EQXNE", "X", 8.2, 7.9), ("LG", "EQXNE", "Y", 9.288, 1.785),
+            ("UG", "EQXNE", "X", 12.1, 11.8), ("UG", "EQXNE", "Y", 0.9, 0.2),
+            ("LG", "EQYPE", "Y", 9.0, 8.1), ("LG", "EQYPE", "X", 1.1, 0.2)]
+    kept = ir.own_direction(rows)
+    assert {(r[1], r[2]) for r in kept} == {("EQXNE", "X"), ("EQYPE", "Y")}
+    item = ir.torsion_item(kept, kept, ["UG", "LG"])
+    assert item.status == ir.OK and all(r[-1] == ir.REGULAR for r in item.rows)
+    assert {(r[1], r[2]) for r in item.rows} == {("X", "EQXNE"), ("Y", "EQYPE")}
+
+
+def test_the_direction_of_a_case_can_be_told_by_another_column():
+    rows = [("2F", "EQX", "X", 50e3, 600e3), ("2F", "EQX", "Y", 90e3, 2.0)]   # stiffness, shear
+    assert [r[2] for r in ir.own_direction(rows)] == ["X"]             # by the shear, the last
+    assert [r[2] for r in ir.own_direction(rows, weight=3)] == ["Y"]
+
+
+def test_the_equations_are_printed_with_symbols_not_as_latex():
+    report = ir.IrregularityReport("m.EDB", cases=["EQX"], items=[
+        ir.soft_story_item(stiff({"RF": 100e3, "4F": 50e3}), ORDER),
+        ir.mass_item([("RF", 100.0), ("4F", 200.0), ("3F", 310.0)]),
+        ir.weak_story_item([("RF", 1000.0, 8), ("4F", 700.0, 8)]),
+        ir.torsion_item([("RF", "EQX", "X", 13.0, 10.0)], [("RF", "EQX", "X", 13.0, 10.0)], ORDER),
+        ir.stability_item([("2F", "EQX", "X", 6e6, 6e5, 15.0, 3000.0)], True)])
+    text = report.text()
+    assert "\\" not in text and "_{" not in text and "_(" not in text
+    for expected in ("δₘₐₓ / δₐᵥₑ > 1.2 ⇒ irregular", "Aₓ = (δₘₐₓ / (1.2 δₐᵥₑ))²",
+                     "θ = Pₓ Δ / (Vₓ h) ≤ 0.10", "Kᵢ < 0.70 Kᵢ₊₁", "Vᵢ < 0.80 Vᵢ₊₁ ⇒ weak story"):
+        assert expected in text
+
+
+# --------------------------------------------------------------------------
+# WHICH LEVELS ARE STORIES
+# --------------------------------------------------------------------------
+def test_a_minor_level_and_the_levels_at_the_base_are_not_compared_as_stories():
+    """The masses of a real model: a footing tie level of 62 t among floors of
+    15,000 t gave a mass ratio of 270."""
+    masses = [("PD2", 7333.6), ("PD1", 19228.9), ("3F", 15157.3), ("2F", 15260.7),
+              ("UG", 16684.0), ("UG - FT", 61.9), ("LG", 2742.7), ("LG - FT", 378.0)]
+    stories, below, minor = ir.compared_stories(masses, "LG")
+    assert stories == ["PD2", "PD1", "3F", "2F", "UG"]
+    assert below == ["LG", "LG - FT"] and minor == ["UG - FT"]
+    note = ir.levels_note(below, minor)
+    assert "LG, LG - FT (at or below the base" in note and "UG - FT (under 10 %" in note
+    item = ir.mass_item([(s, m) for s, m in masses if s in stories])
+    assert item.status == ir.OK      # PD1 is 2.6 times the roof above it, which is not counted
+
+
+def test_with_no_base_named_every_level_with_enough_mass_is_a_story():
+    stories, below, minor = ir.compared_stories([("RD", 156.0), ("3F", 184.0), ("GF", 12.0)], None)
+    assert (stories, below, minor) == (["RD", "3F"], [], ["GF"])
+    assert ir.levels_note([], []) == ""
+
+
+def test_ax_is_not_given_where_etabs_has_no_displacement_of_the_level():
+    drifts = [("2F", "EQX", "X", 13.0, 10.0), ("LG", "EQX", "X", 17.3, 10.0)]
+    item = ir.torsion_item(drifts, [("2F", "EQX", "X", 26.0, 20.0)], ["2F", "LG"])
+    rows = {r[0]: r for r in item.rows}
+    assert rows["2F"][6] == "1.17" and rows["LG"][6] == "-" and rows["LG"][-1] == ir.IRREGULAR
+    assert any("no diaphragm" in note for note in item.notes)

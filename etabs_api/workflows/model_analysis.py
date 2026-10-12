@@ -10,9 +10,9 @@
 3. Report:
 
    * periods: the governing modal period in each direction against UBC 97
-     Method A, T_A = Ct hn^(3/4) (Ct in ft units, hn in ft, measured from the
+     Method A, TA = Ct hn^(3/4) (Ct in ft units, hn in ft, measured from the
      ground level: elevation 0 when the base is below it), and its cap of
-     1.3 T_A in zone 4 or 1.4 T_A in zones 1 to 3;
+     1.3 TA in zone 4 or 1.4 TA in zones 1 to 3;
    * modal participating mass: a warning when the sum is below 90 % in X or Y;
    * weight: the seismic weight from the mass source against the base reaction
      of the same loads (they must agree within 1 %), and the weight per story.
@@ -47,12 +47,12 @@ DRIFT_SUFFIX = "D"  # RSAXD, RSAYD: the drift spectrum cases (model_setup.DRIFT_
 
 
 def method_a_period(ct: float, height_mm: float) -> float:
-    """NSCP Eq. 208-12 (UBC 97 Eq. 30-8): T_A = Ct hn^(3/4), Ct in ft units."""
+    """NSCP Eq. 208-12 (UBC 97 Eq. 30-8): TA = Ct hn^(3/4), Ct in ft units."""
     return ct * (height_mm / FT) ** NSCP.seismic.period_exponent
 
 
 def period_cap(zone_factor: float) -> float:
-    """NSCP 208.5.2.2: Method B may not exceed 1.3 T_A in zone 4, 1.4 T_A otherwise."""
+    """NSCP 208.5.2.2: Method B may not exceed 1.3 TA in zone 4, 1.4 TA otherwise."""
     k = NSCP.seismic
     return k.period_cap_zone4 if zone_factor >= k.zone4_factor else k.period_cap_other
 
@@ -97,7 +97,10 @@ class AnalysisReport:
     ground_elevation: float = 0.0              # mm
     height_from: str = ""                      # the stories hn runs between, when the patterns say
     mass_sum: dict[str, float] = field(default_factory=dict)
-    seismic_weight: float | None = None        # N, from the mass source
+    seismic_weight: float | None = None        # N, from the mass source, every level
+    # N: the weight above the base of the static seismic patterns, the W of the
+    # base shear V = Cs W (sdt check compares the patterns with it)
+    base_shear_weight: float | None = None
     reaction_weight: float | None = None       # N, base reaction of the mass-source loads
     story_weights: pd.DataFrame = field(default_factory=pd.DataFrame)
     warnings: list[str] = field(default_factory=list)
@@ -115,7 +118,7 @@ class AnalysisReport:
                   [[s.direction, s.static_case, f"{s.static_shear / 1e3:,.1f}", s.spectrum_case,
                     f"{s.spectrum_before / 1e3:,.1f}", f"{s.spectrum_after / 1e3:,.1f}",
                     f"{s.factor:.4f}"] for s in self.scaling])
-        out.equations([f"{s.spectrum_case}: factor = V_static / V_spectrum = "
+        out.equations([f"{s.spectrum_case}: factor = Vstatic / Vspectrum = "
                        f"{s.static_shear / 1e3:,.1f} / {s.spectrum_before / 1e3:,.1f} = "
                        f"{s.factor:.4f}" for s in self.scaling if s.factor != 1.0])
         if not self.scaling:
@@ -138,9 +141,9 @@ class AnalysisReport:
                      f"above the ground at elevation {self.ground_elevation / 1e3:g} m")
             out.equations([
                 f"hₙ = {self.height / 1e3:.2f} m = {self.height / FT:.2f} ft  ({where})",
-                f"T_A = Cₜ hₙ^(3/4) = {self.method_a / (self.height / FT) ** 0.75:g} × "
-                f"{self.height / FT:.2f}^0.75 = {self.method_a:.3f} s   (NSCP Eq. 208-12)",
-                f"T ≤ {self.cap:.1f} T_A = {self.cap * self.method_a:.3f} s   (Method B cap, "
+                f"TA = Cₜ hₙ³⁄⁴ = {self.method_a / (self.height / FT) ** 0.75:g} × "
+                f"{self.height / FT:.2f}⁰·⁷⁵ = {self.method_a:.3f} s   (NSCP Eq. 208-12)",
+                f"T ≤ {self.cap:.1f} TA = {self.cap * self.method_a:.3f} s   (Method B cap, "
                 "NSCP 208.5.2.2)"])
         if not self.periods.empty:
             head = self.periods.head(12)
@@ -152,7 +155,12 @@ class AnalysisReport:
         out.heading("Weight")
         rows = []
         if self.seismic_weight is not None:
-            rows.append(["Seismic weight from the mass source", f"{self.seismic_weight / 1e3:,.1f}"])
+            rows.append(["Weight from the mass source, every level",
+                         f"{self.seismic_weight / 1e3:,.1f}"])
+        if self.base_shear_weight is not None:
+            rows.append([f"Seismic weight W, above {self.height_from.split(' to ')[0]} "
+                         "(the base of the seismic patterns)",
+                         f"{self.base_shear_weight / 1e3:,.1f}"])
         if self.reaction_weight is not None:
             rows.append(["Base reaction of the same loads", f"{self.reaction_weight / 1e3:,.1f}"])
         out.table(["", "kN"], rows)
@@ -198,8 +206,8 @@ class AnalysisReport:
                          f"Height above the ground hn = {self.height / 1e3:.2f} m "
                          f"(ground level at elevation {self.ground_elevation / 1e3:g} m)")
         if self.method_a is not None:
-            lines.append(f"Method A, T_A = Ct hn^(3/4): {self.method_a:.3f} s; "
-                         f"Method B cap {self.cap:.1f} T_A = {self.cap * self.method_a:.3f} s")
+            lines.append(f"Method A, TA = Cₜ hₙ³⁄⁴: {self.method_a:.3f} s; "
+                         f"Method B cap {self.cap:.1f} TA = {self.cap * self.method_a:.3f} s")
         if not self.periods.empty:
             lines.append(self.periods.head(12).to_string(index=False))
         lines += ["", "--- Modal participating mass ---"]
@@ -207,7 +215,11 @@ class AnalysisReport:
             lines.append(f"Sum {direction}: {total * 100:.1f} %")
         lines += ["", "--- Weight ---"]
         if self.seismic_weight is not None:
-            lines.append(f"Seismic weight from the mass source: {self.seismic_weight / 1e3:,.1f} kN")
+            lines.append("Weight from the mass source, every level: "
+                         f"{self.seismic_weight / 1e3:,.1f} kN")
+        if self.base_shear_weight is not None:
+            lines.append(f"Seismic weight W, above {self.height_from.split(' to ')[0]} (the base "
+                         f"of the seismic patterns): {self.base_shear_weight / 1e3:,.1f} kN")
         if self.reaction_weight is not None:
             lines.append(f"Base reaction of the same loads:     {self.reaction_weight / 1e3:,.1f} kN")
         if not self.story_weights.empty:
@@ -412,6 +424,16 @@ def story_weights(connector) -> pd.DataFrame:
     out = mass[["Story", "UX"]].copy()
     out["Weight (kN)"] = (out.pop("UX") * G / 1e3).round(1)  # N-s2/mm * mm/s2 = N
     return out
+
+
+def weight_above(weights: pd.DataFrame, bottom: str) -> float | None:
+    """The weight, in N, of the levels above ``bottom``, the story the static
+    seismic patterns start from. ``weights``: Story and Weight (kN), from the
+    top down. None when the story is not in the table."""
+    stories = [str(name) for name in weights["Story"]]
+    if bottom not in stories:
+        return None
+    return float(weights["Weight (kN)"].iloc[:stories.index(bottom)].sum() * 1e3)
 
 
 def mass_source_loads(connector) -> list[tuple[str, float]]:
@@ -658,13 +680,15 @@ def analyze_model(connector, zone_factor: float | None = None, ct: float | None 
         for direction, period in report.governing_period.items():
             if period > limit:
                 report.warnings.append(
-                    f"Modal period {direction} {period:.3f} s is above {report.cap:.1f} T_A = "
+                    f"Modal period {direction} {period:.3f} s is above {report.cap:.1f} TA = "
                     f"{limit:.3f} s: the static base shear uses the capped period.")
 
     say("Reading the seismic weight and the base reactions")
     weights = story_weights(connector)
     report.story_weights = weights
     report.seismic_weight = float(weights["Weight (kN)"].sum() * 1e3)
+    report.base_shear_weight = weight_above(weights, report.height_from.split(" to ")[0]) \
+        if report.height_from else None
     report.reaction_weight = reaction_weight(connector, mass_source_loads(connector))
     if report.reaction_weight:
         difference = report.seismic_weight / report.reaction_weight - 1
@@ -779,12 +803,15 @@ def analysis_summary(report: AnalysisReport, model_path: str | None = None):
     for direction, period in report.governing_period.items():
         summary.add(f"Period {direction}", f"{period:.3f} s")
     if report.method_a is not None and report.height is not None:
-        summary.add("Method A", f"T_A {report.method_a:.3f} s, hn {report.height / 1e3:.2f} m "
+        summary.add("Method A", f"TA {report.method_a:.3f} s, hn {report.height / 1e3:.2f} m "
                                 f"above the ground; cap {report.cap * report.method_a:.3f} s")
     for direction, total in report.mass_sum.items():
         summary.add(f"Modal mass {direction}", f"{total * 100:.1f} %")
+    if report.base_shear_weight is not None:
+        summary.add("Seismic weight W", f"{report.base_shear_weight / 1e3:,.0f} kN above "
+                    f"{report.height_from.split(' to ')[0]}")
     if report.seismic_weight is not None:
-        summary.add("Seismic weight", f"{report.seismic_weight / 1e3:,.0f} kN")
+        summary.add("Weight of every level", f"{report.seismic_weight / 1e3:,.0f} kN")
     for warning in report.warnings:
         summary.fail(warning)
     for note in report.notes:

@@ -224,7 +224,7 @@ def story_table_text(rows: list[tuple]) -> list[str]:
     if not rows:
         return []
     lines = ["Drift of every story (the largest of the combinations checked):",
-             f"  {'Story':<20}{'seismic':>10}{'Delta_M':>10}  {'combination':<44}"
+             f"  {'Story':<20}{'seismic':>10}{'ΔM':>10}  {'combination':<44}"
              f"{'wind':>9}  combination"]
     for story, s_ratio, delta_m, s_combo, w_ratio, w_combo in rows:
         seismic = "-" if s_ratio is None else f"{s_ratio:.5f}"
@@ -324,7 +324,7 @@ class DriftReport:
             out.table(["Status", "Check", "Clause"], [[f.status, f.text, f.ref] for f in findings])
             out.equations([f.equation for f in findings if getattr(f, "equation", "")])
             rows = self.stories.get(level.name, [])
-            out.table(["Story", "Seismic Δ_S / h", "Δ_M / h", "Combination", "Wind", "Combination"],
+            out.table(["Story", "Seismic ΔS / h", "ΔM / h", "Combination", "Wind", "Combination"],
                       [[story, "-" if s is None else f"{s:.5f}",
                         "-" if m is None else f"{m:.4f}", str(sc or "-"),
                         "-" if not w else f"h/{1.0 / w:,.0f}", str(wc or "-")]

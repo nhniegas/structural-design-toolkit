@@ -22,8 +22,9 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 # IPython stays in, because build123d (sdt 3d) imports it. lib3mf.dll is named
 # here because build123d loads it and PyInstaller does not find it.
 # The icon is assets\sdt.ico (tools\make_icon.py draws it; the build only reads it).
+# It is also packed as a file: the dialogs show it on their windows.
 python -m PyInstaller main.py --name sdt --console --onedir --noconfirm --clean `
-    --icon assets\sdt.ico `
+    --icon assets\sdt.ico --add-data "assets\sdt.ico;assets" `
     --collect-data steelpy --collect-data ezdxf `
     --collect-data sectionproperties --collect-data concreteproperties `
     --collect-data pylatex --collect-binaries lib3mf `

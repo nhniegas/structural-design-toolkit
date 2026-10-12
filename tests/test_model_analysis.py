@@ -56,7 +56,7 @@ def test_report_text_lists_scaling_periods_and_warnings():
     )
     text = report.text()
     assert "RSAX 500.0 kN -> 1,000.0 kN (scale factor x 2.0000)" in text
-    assert "1.3 T_A = 1.040 s" in text
+    assert "1.3 TA = 1.040 s" in text
     assert "Sum X: 95.0 %" in text
     assert "something" in text
 
@@ -109,3 +109,17 @@ def test_the_model_is_unlocked_before_the_spectrum_scale_is_changed():
 
     ma.multiply_spectrum_scale(Connector(), "RSAX", 1.25)
     assert calls == [("locked", False), ("set", [1250.0])]
+
+
+def test_the_seismic_weight_is_that_above_the_base_of_the_patterns():
+    """sdt check compares the base shear with the weight above the story the
+    patterns start from; the weight of every level is larger by the levels at
+    and below it."""
+    import pandas as pd
+
+    from etabs_api.workflows.model_analysis import weight_above
+
+    weights = pd.DataFrame({"Story": ["RD", "3F", "2F", "GF", "Base"],
+                            "Weight (kN)": [1529.9, 1806.7, 1935.1, 591.5, 54.0]})
+    assert weight_above(weights, "GF") == pytest.approx(5_271_700.0)
+    assert weight_above(weights, "RD") == 0.0 and weight_above(weights, "B2") is None

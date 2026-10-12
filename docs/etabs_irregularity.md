@@ -24,7 +24,7 @@ The report is printed and saved beside the model as `<model> - Irregularity.txt`
 
 ## What is checked
 
-The checks use the static seismic load cases of the model: its seismic patterns, each with its accidental eccentricity, or the drift patterns when the model has no other. For each story and direction, the case that governs is shown.
+The checks use the static seismic load cases of the model: its seismic patterns, each with its accidental eccentricity, or the drift patterns when the model has no other. Each case is checked in its own direction only: ETABS also lists an X case in Y, where it hardly moves the structure and a ratio of drifts means nothing. For each story and direction, the case that governs is shown.
 
 ### Vertical irregularities (Table 16-L)
 
@@ -98,7 +98,8 @@ The report ends with what the irregularities found ask for:
 
 ## Limits
 
-- **A level at or below the ground.** A level of tie beams only is a story in ETABS. It has little mass and a short, stiff story under it, so the story above can be reported as a mass irregularity. Judge whether that level is a story of the structure.
+- **Levels that are not stories.** ETABS has a story for every level. Two kinds are left out of the stiffness, mass, geometry and strength comparisons, and the report names them: the level the static seismic patterns start from with those below it, and a minor level, one with under 10 % of the mass of the largest story (a footing tie level, a landing). Compared with a full story, either gave a mass ratio in the hundreds. The 10 % is a rule of the toolkit, not of the code: read the line and judge a level it leaves out. Torsion, the plan checks and the stability coefficient still cover every level.
+- **Ax where a level has no diaphragm.** Ax is from the displacements of a level. Where ETABS gives none, Ax is shown as "-", not as 1.00.
 - **Re-entrant corners** are measured where the floor outline turns inward. A corner cut off at an angle is not one. A model with no floor shells has no outline, and the check is not made.
 - **Penthouses.** A one-story penthouse need not be considered for the vertical geometric type; the command does not know which story is a penthouse.
 - **Flexible diaphragms.** The torsion check and Ax are for diaphragms that are not flexible. The command does not check the diaphragm type.

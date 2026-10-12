@@ -45,3 +45,95 @@ def test_table_has_one_line_per_row():
     text = _table_latex(table)
     assert r"\begin{tabular}{lr}" in text
     assert r"Left & 1.00 \\" in text and r"Right & 2.00 \\" in text
+
+
+# --------------------------------------------------------------------------
+# THE LOOK OF THE REPORTS (utilities/report_style.py)
+# --------------------------------------------------------------------------
+def test_a_result_in_a_cell_is_a_tag_and_other_text_is_left():
+    from utilities._calc_report import status_cell
+
+    assert status_cell("PASS") == r"\sdtpass{PASS}"
+    assert status_cell("OK") == r"\sdtpass{OK}"
+    assert status_cell("FAIL: flexure") == r"\sdtfail{FAIL}: flexure"
+    assert status_cell("PASS - 3 legs needed") == r"\sdtpass{PASS} - 3 legs needed"
+    assert status_cell("Passing lane") == "Passing lane"          # a word, not a result
+    assert status_cell(1.25) == "1.25" and status_cell(None) == "--"
+    assert status_cell(Tex(r"$\phi$")) == r"$\phi$"
+
+
+def test_a_sentence_in_a_cell_is_wrapped_so_the_table_keeps_its_width():
+    from utilities._calc_report import status_cell
+
+    long = "N/A - the joint is checked in the combinations that govern it (see the other rows)"
+    assert status_cell(long).startswith(r"\parbox[t]{62mm}{\raggedright")
+    assert status_cell("ULS 105 1.2 DL + 1.0 LL") == "ULS 105 1.2 DL + 1.0 LL"
+
+
+def test_a_table_wider_than_the_page_is_scaled_to_it():
+    text = _table_latex(ReportTable("Shear", ["Zone", "Vu"], [["Left", "PASS"]]))
+    assert r"\rowcolor{sdtband}" in text and r"\bfseries Zone & \bfseries Vu" in text
+    assert r"\ifdim\wd\sdttable>\linewidth\resizebox{\linewidth}{!}" in text
+    assert r"\sdtpass{PASS}" in text
+
+
+def test_the_code_of_a_title_goes_to_the_header():
+    from utilities._calc_report import split_title
+
+    assert split_title("Concrete Beam Design Calculations (ACI 318M-14)") == (
+        "Concrete Beam Design Calculations", "ACI 318M-14")
+    assert split_title("Wind Loads") == ("Wind Loads", "")
+
+
+def test_the_style_names_what_the_report_is_of_and_marks_a_ratio_over_its_limit():
+    from utilities import report_style as style
+
+    assert style.source_name(r"C:\jobs\t34 - Beam Design.pdf") == "t34"
+    assert style.source_name("W14X90.pdf") == "W14X90"
+    assert style.ratio(0.874) == "0.87" and style.ratio(1.0) == "1.00"
+    assert style.ratio(1.06) == r"\sdtover{1.06}" and style.ratio("N/A") == "N/A"
+    assert style.tag("PASS (OK)") == r"\sdtpass{PASS} (OK)"
+    assert style.tag("FAIL") == r"\sdtfail{FAIL}" and style.tag("Compact") == "Compact"
+    assert style.escape(r"B_300X500 & 50% of C:\x") == (
+        r"B\_300X500 \& 50\% of C:\textbackslash{}x")
+
+
+def test_the_preamble_has_the_header_the_footer_and_a_fallback_for_each_package():
+    from utilities import report_style as style
+
+    text = style.preamble("Beam Design", "ACI 318M-14", "Model: t34", "sdt beams", "t34.pdf",
+                          "11 October 2026")
+    for expected in ("Beam Design", "ACI 318M-14", "Model: t34", "11 October 2026",
+                     "sdt beams", "t34.pdf", "Check the results independently",
+                     r"\definecolor{sdtamber}{HTML}{FFAA2C}", r"Page \sdtpages"):
+        assert expected in text
+    # a missing package gives a plainer report, never a failed one
+    for package in ("tgheros", "sansmath", "colortbl", "lastpage", "fancyhdr"):
+        assert rf"\IfFileExists{{{package}.sty}}" in text
+    assert style.INK == "1C1E24" and style.AMBER == "FFAA2C"       # those of the icon
+
+
+def test_the_title_block_sets_its_pairs_two_to_a_line():
+    from utilities import report_style as style
+
+    text = style.title_block("Beam Design", "Special moment frame", [
+        ("Model", "t34"), ("Date", "11 October 2026"), ("Design code", "ACI 318M-14"),
+        ("Empty", "")])
+    assert r"{\LARGE\bfseries Beam Design}" in text and "Special moment frame" in text
+    assert r"Model & t34 & Date & 11 October 2026 \\ \hline" in text
+    assert "Empty" not in text and r"Design code & ACI 318M-14 &  &  \\ \hline" in text
+
+
+def test_a_figure_is_set_beside_a_narrow_table_and_the_table_keeps_its_size():
+    """A tall figure under the tables jumps to the next page and leaves a half empty one."""
+    from utilities._calc_report import _beside_latex
+
+    table = ReportTable("Transverse reinforcement", ["Parameter", "Value"], [
+        ["Provided", "16 mm Rectilinear hoops and crossties @ 125 mm; X: 3 legs, Y: 3 legs"],
+        ["Tie spacing check", "PASS"]], "ll")
+    text = _beside_latex(table, "figures_tmp" + chr(92) + "C1.jpg", "Interaction surface")
+    assert text.count(chr(92) + "begin{minipage}[t]") == 2 and "0.5" + chr(92) + "textwidth" in text
+    assert chr(92) + "includegraphics[width=" + chr(92) + "linewidth]{figures_tmp/C1.jpg}" in text
+    # the two columns wrap their own text: no box around the sentence, no fixed "ll"
+    assert "p{0.54" + chr(92) + "linewidth}" in text and chr(92) + "parbox" not in text
+    assert chr(92) + "sdtpass{PASS}" in text and "Interaction surface" in text

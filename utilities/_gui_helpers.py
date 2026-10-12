@@ -1,5 +1,10 @@
 """
-GUI Helper module providing interactive file picking and dual listbox selection dialogs.
+The windows of the toolkit: the dialogs that ask, the progress window, the
+closing summary and the warnings.
+
+They share one look, that of the program's icon: a graphite window, light
+text, and amber for the mark, the choice made and the button that confirms.
+File and folder pickers are those of Windows.
 """
 
 import ctypes
@@ -8,7 +13,7 @@ import sys
 import time
 import os
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog
 
 from utilities import answers
 
@@ -22,13 +27,201 @@ except Exception:
         pass
 
 
+# =============================================================================
+# THEME
+# =============================================================================
+# The graphite and amber of the icon (tools/make_icon.py), and the greys between.
+BG = "#1C1E24"            # the window
+PANEL = "#23262E"         # the header band and the footer
+FIELD = "#2C3039"         # text boxes, lists, the row of the choice made
+LINE = "#3B404B"          # borders
+TEXT = "#E9EAEE"
+MUTED = "#A3A8B3"         # explanations, labels of little weight
+AMBER = "#FFAA2C"
+AMBER_LIGHT = "#FFC062"   # the confirm button under the pointer
+ON_AMBER = "#1C1E24"      # text on amber
+AMBER_DIM = "#7A5A22"     # selected text in a box: the text stays light, with or without focus
+RED = "#FF7366"
+GREEN = "#78D27C"
+
+HEADING_FONT = "Bahnschrift"      # the font of the icon's letters; Windows has it
+BODY_FONT = "Segoe UI"
+MONO_FONT = "Consolas"
+MARK = "SDT"
+
+
+def icon_path() -> str:
+    """The program's icon file, in the source tree or in the packaged program."""
+    base = getattr(sys, "_MEIPASS", None) or os.path.dirname(
+        os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, "assets", "sdt.ico")
+
+
+def _px(widget, points: float) -> int:
+    """A length given for a 96 dpi screen, in the pixels of this screen."""
+    try:
+        return max(int(round(points * widget.winfo_fpixels("1i") / 96.0)), 1)
+    except tk.TclError:
+        return int(points)
+
+
+def _dress(root) -> None:
+    """Give a window the icon, the graphite background and a dark title bar."""
+    root.configure(bg=BG)
+    try:
+        root.iconbitmap(icon_path())
+    except tk.TclError:
+        pass                      # no icon file: the window still works
+    try:
+        root.update_idletasks()
+        handle = ctypes.windll.user32.GetParent(root.winfo_id())
+        value = ctypes.c_int(1)
+        for attribute in (20, 19):          # DWMWA_USE_IMMERSIVE_DARK_MODE, and before 20H1
+            if ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                    handle, attribute, ctypes.byref(value), ctypes.sizeof(value)) == 0:
+                break
+    except Exception:  # noqa: BLE001 - not Windows, or an older one: a light title bar
+        pass
+
+
+def _window(title: str, topmost: bool = True) -> tk.Tk:
+    """A new themed window, hidden until it is placed with ``_place``."""
+    root = tk.Tk()
+    root.withdraw()
+    root.title(title)
+    root.resizable(False, False)
+    if topmost:
+        root.attributes("-topmost", True)
+    _dress(root)
+    return root
+
+
+def _hidden_root() -> tk.Tk:
+    """The unseen window a Windows file dialog belongs to; it gives it the icon."""
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+    try:
+        root.iconbitmap(icon_path())
+    except tk.TclError:
+        pass
+    return root
+
+
+def _place(root, width: int | None = None, high: bool = False) -> None:
+    """Size a window to its content, centre it on the screen and show it."""
+    root.update_idletasks()
+    width = width or root.winfo_reqwidth()
+    height = root.winfo_reqheight()
+    x = max((root.winfo_screenwidth() - width) // 2, 0)
+    y = max((root.winfo_screenheight() - height) // (3 if high else 2), 0)
+    root.geometry(f"{width}x{height}+{x}+{y}")
+    root.deiconify()
+    _dress(root)           # the title bar takes its colour once the window is shown
+
+
+def _close(root) -> None:
+    """Tear a window down without raising Tcl errors."""
+    try:
+        root.quit()
+        root.destroy()
+    except tk.TclError:
+        pass
+
+
+def _header(root, title: str) -> tk.Frame:
+    """The band at the top of a window: the mark in amber, then what is asked."""
+    band = tk.Frame(root, bg=PANEL)
+    band.pack(side=tk.TOP, fill=tk.X)
+    inner = tk.Frame(band, bg=PANEL)
+    inner.pack(fill=tk.X, padx=_px(root, 20), pady=_px(root, 12))
+    tk.Label(inner, text=MARK, bg=PANEL, fg=AMBER, font=(HEADING_FONT, 13, "bold")).pack(
+        side=tk.LEFT)
+    tk.Label(inner, text=title, bg=PANEL, fg=TEXT, font=(HEADING_FONT, 12)).pack(
+        side=tk.LEFT, padx=(_px(root, 12), 0))
+    tk.Frame(root, bg=AMBER, height=_px(root, 2)).pack(side=tk.TOP, fill=tk.X)
+    return band
+
+
+def _button(parent, text: str, command, primary: bool = False, width: int = 0) -> tk.Button:
+    """A flat button: amber for the one that confirms, grey for the others."""
+    normal, over = (AMBER, AMBER_LIGHT) if primary else (FIELD, LINE)
+    button = tk.Button(
+        parent, text=text, command=command, bg=normal, fg=ON_AMBER if primary else TEXT,
+        activebackground=over, activeforeground=ON_AMBER if primary else TEXT,
+        font=(BODY_FONT, 10, "bold" if primary else "normal"), relief=tk.FLAT, bd=0,
+        padx=_px(parent, 18), pady=_px(parent, 6), cursor="hand2", highlightthickness=0)
+    if width:
+        button.configure(width=width)
+    button.bind("<Enter>", lambda _e: button.configure(bg=over))
+    button.bind("<Leave>", lambda _e: button.configure(bg=normal))
+    return button
+
+
+def _footer(root, confirm, cancel=None, confirm_text: str = "Confirm",
+            cancel_text: str = "Cancel") -> tk.Frame:
+    """The band at the bottom: the confirm button at the right, cancel before it."""
+    tk.Frame(root, bg=LINE, height=1).pack(side=tk.BOTTOM, fill=tk.X)
+    band = tk.Frame(root, bg=PANEL)
+    band.pack(side=tk.BOTTOM, fill=tk.X, before=root.pack_slaves()[-1])
+    inner = tk.Frame(band, bg=PANEL)
+    inner.pack(fill=tk.X, padx=_px(root, 20), pady=_px(root, 12))
+    _button(inner, confirm_text, confirm, primary=True).pack(side=tk.RIGHT)
+    if cancel is not None:
+        _button(inner, cancel_text, cancel).pack(side=tk.RIGHT, padx=(0, _px(root, 10)))
+    return inner
+
+
+def _prompt(parent, prompt: str, wrap: int) -> None:
+    """The question in bright text, and what explains it under it in grey."""
+    question, _, rest = prompt.strip().partition("\n\n")
+    tk.Label(parent, text=question, bg=BG, fg=TEXT, font=(BODY_FONT, 11, "bold"),
+             wraplength=wrap, justify="left", anchor="w").pack(fill=tk.X, anchor="w")
+    if rest.strip():
+        tk.Label(parent, text=rest.strip(), bg=BG, fg=MUTED, font=(BODY_FONT, 10),
+                 wraplength=wrap, justify="left", anchor="w").pack(
+            fill=tk.X, anchor="w", pady=(_px(parent, 8), 0))
+
+
+def _scrollbar_style(root) -> str:
+    """A thin dark scrollbar; returns the name of its style."""
+    from tkinter import ttk
+
+    style = ttk.Style(root)
+    try:
+        style.theme_use("clam")
+    except tk.TclError:
+        return "Vertical.TScrollbar"
+    for name, side in (("SDT.Vertical.TScrollbar", "ns"), ("SDT.Horizontal.TScrollbar", "ew")):
+        kind = name.split(".", 1)[1]
+        style.layout(name, [(f"{kind.split('.')[0]}.Scrollbar.trough", {
+            "sticky": "nsew" if side == "ns" else "ew",
+            "children": [(f"{kind.split('.')[0]}.Scrollbar.thumb", {"expand": "1",
+                                                                     "sticky": "nsew"})]})])
+        style.configure(name, troughcolor=FIELD, background=LINE, bordercolor=FIELD,
+                        lightcolor=LINE, darkcolor=LINE, relief=tk.FLAT, gripcount=0)
+        style.map(name, background=[("active", MUTED)])
+    style.configure("SDT.Horizontal.TProgressbar", troughcolor=FIELD, background=AMBER,
+                    bordercolor=FIELD, lightcolor=AMBER, darkcolor=AMBER)
+    return "SDT.Vertical.TScrollbar"
+
+
+def _scroll_when_needed(bar, show, hide):
+    """The ``set`` of a scrollbar that is there only while something is out of view."""
+    def update(first, last):
+        if float(first) <= 0.0 and float(last) >= 1.0:
+            hide()
+        else:
+            show()
+        bar.set(first, last)
+    return update
+
+
 def select_output_directory(title: str = "Select the output folder") -> str:
     """Opens a native Windows directory dialog to select an output folder."""
     folder_path = answers.folder(title)   # from the answers file, when there is one
     if folder_path is answers.ASK:
-        root = tk.Tk()
-        root.withdraw()
-        root.attributes("-topmost", True)
+        root = _hidden_root()
         folder_path = filedialog.askdirectory(title=title)
         root.destroy()
         answers.keep(title, "", os.path.normpath(folder_path) if folder_path else None)
@@ -51,9 +244,7 @@ def select_save_file(default_name="Composite_Column_Report") -> str:
     scripted = answers.save_path(title, default_name, ".pdf")
     if scripted is not answers.ASK:
         return scripted
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes("-topmost", True)  # Forces dialog over Excel
+    root = _hidden_root()
 
     file_path = filedialog.asksaveasfilename(
         title=title,
@@ -74,9 +265,7 @@ def select_save_path(
     scripted = answers.save_path(title, default_name, extension)
     if scripted is not answers.ASK:
         return scripted
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes("-topmost", True)
+    root = _hidden_root()
     file_path = filedialog.asksaveasfilename(
         title=title,
         initialfile=default_name,
@@ -93,9 +282,7 @@ def select_open_path(title: str, extension: str, description: str) -> str:
     scripted = answers.open_path(title)
     if scripted is not answers.ASK:
         return scripted
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes("-topmost", True)
+    root = _hidden_root()
     file_path = filedialog.askopenfilename(
         title=title, filetypes=[(description, f"*{extension}"), ("All files", "*.*")]
     )
@@ -110,9 +297,7 @@ def select_etabs_file() -> str:
     scripted = answers.open_path(title)
     if scripted is not answers.ASK:
         return scripted
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes("-topmost", True)
+    root = _hidden_root()
     file_path = filedialog.askopenfilename(
         title=title,
         filetypes=[("ETABS Database Files", "*.edb"), ("All Files", "*.*")],
@@ -128,7 +313,8 @@ def select_option(
     """Show a screen-centered dialog with one choice per option.
 
     Returns the chosen option, or ``None`` when the window is closed without
-    confirming.
+    confirming. Enter confirms, Escape cancels, the arrow keys move the choice,
+    and a double click on an option confirms it.
     """
     if not options:
         raise ValueError("select_option needs at least one option.")
@@ -137,65 +323,71 @@ def select_option(
         return scripted
     result: dict[str, str | None] = {"value": None}
 
-    root = tk.Tk()
-    root.title(title)
-    root.withdraw()  # shown once it has been sized to its content
-    width = 460 if max(len(line) for line in prompt.split("\n")) < 80 else 620
-    root.resizable(False, False)
-    root.attributes("-topmost", True)
+    root = _window(title)
+    longest = max(len(line) for line in (prompt + "\n" + "\n".join(options)).split("\n"))
+    width = _px(root, 480 if longest < 70 else 640)
+    wrap = width - _px(root, 48)
+    chosen = {"index": min(max(default_index, 0), len(options) - 1)}
 
     def close():
-        """Tear the window down without raising Tcl errors."""
-        try:
-            root.quit()
-            root.destroy()
-        except tk.TclError:
-            pass
+        _close(root)
 
     def confirm():
-        result["value"] = options[choice.get()]
+        result["value"] = options[chosen["index"]]
         close()
 
     root.protocol("WM_DELETE_WINDOW", close)
-    root.bind("<Return>", lambda _event: confirm())  # Enter confirms the selection
+    _header(root, title)
+    body = tk.Frame(root, bg=BG)
+    body.pack(fill=tk.BOTH, expand=True, padx=_px(root, 24), pady=(_px(root, 18), _px(root, 16)))
+    _prompt(body, prompt, wrap)
 
-    tk.Label(
-        root, text=prompt, font=("Arial", 9, "bold"), wraplength=width - 40,
-        justify="left" if "\n" in prompt else "center",
-    ).pack(pady=(18, 8), padx=20)
-    choice = tk.IntVar(root, value=min(max(default_index, 0), len(options) - 1))
-    frame_options = tk.Frame(root)
-    frame_options.pack(fill=tk.X, padx=30)
+    rows: list[tuple[tk.Frame, tk.Frame, tk.Canvas, tk.Label]] = []
+    dot = _px(root, 16)
+
+    def paint():
+        for index, (row, edge, mark, label) in enumerate(rows):
+            on = index == chosen["index"]
+            colour = FIELD if on else BG
+            for widget in (row, mark, label):
+                widget.configure(bg=colour)
+            edge.configure(bg=AMBER if on else BG)
+            label.configure(fg=TEXT if on else MUTED,
+                            font=(BODY_FONT, 10, "bold" if on else "normal"))
+            mark.delete("all")
+            mark.create_oval(2, 2, dot - 2, dot - 2, outline=AMBER if on else LINE, width=2)
+            if on:
+                mark.create_oval(dot * 0.32, dot * 0.32, dot * 0.68, dot * 0.68, fill=AMBER,
+                                 outline=AMBER)
+
+    def choose(index: int):
+        chosen["index"] = index % len(options)
+        paint()
+
+    listed = tk.Frame(body, bg=BG)
+    listed.pack(fill=tk.X, pady=(_px(root, 16), 0))
     for index, option in enumerate(options):
-        tk.Radiobutton(
-            frame_options,
-            text=option,
-            variable=choice,
-            value=index,
-            font=("Arial", 9),
-            anchor="w",
-            justify="left",
-            wraplength=width - 80,
-        ).pack(fill=tk.X, anchor="w")
+        row = tk.Frame(listed, bg=BG, cursor="hand2")
+        row.pack(fill=tk.X, pady=1)
+        edge = tk.Frame(row, bg=BG, width=_px(root, 3))
+        edge.pack(side=tk.LEFT, fill=tk.Y)
+        mark = tk.Canvas(row, width=dot, height=dot, bg=BG, highlightthickness=0)
+        mark.pack(side=tk.LEFT, padx=(_px(root, 10), _px(root, 10)), pady=_px(root, 8))
+        label = tk.Label(row, text=option, bg=BG, fg=MUTED, font=(BODY_FONT, 10), anchor="w",
+                         justify="left", wraplength=wrap - _px(root, 60))
+        label.pack(side=tk.LEFT, fill=tk.X, expand=True, pady=_px(root, 6))
+        for widget in (row, mark, label):
+            widget.bind("<Button-1>", lambda _e, i=index: choose(i))
+            widget.bind("<Double-Button-1>", lambda _e, i=index: (choose(i), confirm()))
+        rows.append((row, edge, mark, label))
+    paint()
 
-    tk.Button(
-        root,
-        text="OK / Confirm",
-        width=16,
-        height=1,
-        bg="#007ACC",
-        fg="white",
-        font=("Arial", 9, "bold"),
-        command=confirm,
-    ).pack(side=tk.BOTTOM, pady=(12, 15))
-
-    # The height follows the prompt, so a long list of lines still fits.
-    root.update_idletasks()
-    height = root.winfo_reqheight()
-    x = (root.winfo_screenwidth() // 2) - (width // 2)
-    y = max((root.winfo_screenheight() // 2) - (height // 2), 0)
-    root.geometry(f"{width}x{height}+{x}+{y}")
-    root.deiconify()
+    _footer(root, confirm, close)
+    root.bind("<Return>", lambda _event: confirm())   # Enter confirms the selection
+    root.bind("<Escape>", lambda _event: close())
+    root.bind("<Down>", lambda _event: choose(chosen["index"] + 1))
+    root.bind("<Up>", lambda _event: choose(chosen["index"] - 1))
+    _place(root, width)
 
     try:
         root.lift()
@@ -205,6 +397,22 @@ def select_option(
         pass
     answers.keep(title, prompt, result["value"])
     return result["value"]
+
+
+def _entry(parent, width: int) -> tuple[tk.Frame, tk.Entry]:
+    """A text box of the theme, in its frame: the border turns amber while it is
+    typed in. The frame is what is placed in the window."""
+    border = tk.Frame(parent, bg=LINE)
+    inside = tk.Frame(border, bg=FIELD)
+    inside.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
+    entry = tk.Entry(inside, width=width, font=(BODY_FONT, 10), bg=FIELD, fg=TEXT,
+                     insertbackground=AMBER, selectbackground=AMBER_DIM, selectforeground=TEXT,
+                     relief=tk.FLAT, bd=0, highlightthickness=0)
+    entry.pack(fill=tk.X, padx=_px(parent, 8), pady=_px(parent, 5))
+    entry.bind("<FocusIn>", lambda _e: border.configure(bg=AMBER))
+    entry.bind("<FocusOut>", lambda _e: border.configure(bg=LINE))
+    inside.bind("<Button-1>", lambda _e: entry.focus_set())
+    return border, entry
 
 
 def enter_values(
@@ -213,7 +421,7 @@ def enter_values(
     """Show a screen-centered dialog with one text box per label.
 
     Returns ``{label: typed text}``, or ``None`` when the window is closed
-    without confirming.
+    without confirming. Enter confirms and Escape cancels.
     """
     if not labels:
         raise ValueError("enter_values needs at least one label.")
@@ -222,70 +430,49 @@ def enter_values(
         return scripted
     result: dict[str, dict[str, str] | None] = {"value": None}
 
-    root = tk.Tk()
-    root.title(title)
-    root.withdraw()  # shown once it has been sized to its content
-    root.resizable(False, False)
-    root.attributes("-topmost", True)
+    root = _window(title)
     # Wide enough to show the longest value in full, and never a cramped box.
-    box_width = max([28] + [len(str(value)) + 4 for value in (defaults or {}).values()])
+    box_width = max([24] + [len(str(value)) + 4 for value in (defaults or {}).values()])
 
     def close():
-        """Tear the window down without raising Tcl errors."""
-        try:
-            root.quit()
-            root.destroy()
-        except tk.TclError:
-            pass
+        _close(root)
 
     def confirm():
         result["value"] = {label: entry.get() for label, entry in entries.items()}
         close()
 
     root.protocol("WM_DELETE_WINDOW", close)
-    root.bind("<Return>", lambda _event: confirm())  # Enter confirms the values
-
-    prompt_label = tk.Label(root, text=prompt, font=("Arial", 9, "bold"), justify="center")
-    prompt_label.pack(pady=(18, 8), padx=30)
-    frame_entries = tk.Frame(root)
-    frame_entries.pack(fill=tk.X, padx=30)
-    frame_entries.columnconfigure(1, weight=1)
+    _header(root, title)
+    body = tk.Frame(root, bg=BG)
+    body.pack(fill=tk.BOTH, expand=True, padx=_px(root, 24), pady=(_px(root, 18), _px(root, 18)))
+    text = tk.Frame(body, bg=BG)
+    text.pack(fill=tk.X)
+    boxes = tk.Frame(body, bg=BG)
+    boxes.pack(fill=tk.X, pady=(_px(root, 16), 0))
+    boxes.columnconfigure(1, weight=1)
     entries: dict[str, tk.Entry] = {}
     for row, label in enumerate(labels):
-        tk.Label(frame_entries, text=label, font=("Arial", 9), anchor="w").grid(
-            row=row, column=0, sticky="w", pady=3, padx=(0, 12)
-        )
-        entry = tk.Entry(frame_entries, font=("Arial", 10), width=box_width)
+        tk.Label(boxes, text=label, bg=BG, fg=TEXT, font=(BODY_FONT, 10), anchor="w").grid(
+            row=row, column=0, sticky="w", pady=_px(root, 5), padx=(0, _px(root, 16)))
+        box, entry = _entry(boxes, box_width)
         entry.insert(0, (defaults or {}).get(label, ""))
-        entry.grid(row=row, column=1, sticky="ew", pady=3)
+        box.grid(row=row, column=1, sticky="ew", pady=_px(root, 5))
         entries[label] = entry
 
-    tk.Button(
-        root,
-        text="OK / Confirm",
-        width=16,
-        height=1,
-        bg="#007ACC",
-        fg="white",
-        font=("Arial", 9, "bold"),
-        command=confirm,
-    ).pack(side=tk.BOTTOM, pady=(18, 15))
-
-    # Size the window to the labels and boxes, wrap the prompt to that width,
-    # then centre it on the screen.
+    # The prompt wraps to the width of the labels and boxes, never under 400.
     root.update_idletasks()
-    prompt_label.config(wraplength=max(frame_entries.winfo_reqwidth(), 360))
-    root.update_idletasks()
-    width, height = root.winfo_reqwidth(), root.winfo_reqheight()
-    x = (root.winfo_screenwidth() // 2) - (width // 2)
-    y = (root.winfo_screenheight() // 2) - (height // 2)
-    root.geometry(f"{width}x{height}+{x}+{y}")
-    root.deiconify()
+    _prompt(text, prompt, max(boxes.winfo_reqwidth(), _px(root, 400)))
+    _footer(root, confirm, close)
+    root.bind("<Return>", lambda _event: confirm())  # Enter confirms the values
+    root.bind("<Escape>", lambda _event: close())
+    _place(root)
 
     try:
         root.lift()
         root.focus_force()
-        entries[labels[0]].focus_set()
+        first = entries[labels[0]]
+        first.focus_set()
+        first.icursor(tk.END)          # ready to edit what is offered
         root.mainloop()
     except tk.TclError:
         pass
@@ -294,7 +481,8 @@ def enter_values(
 
 
 class DualListboxSelector:
-    """Creates a screen-centered dual listbox popup window with extended selection and select all capabilities."""
+    """A screen-centered window with two lists: what is available, and what is
+    chosen. Items move with the buttons between them or with a double click."""
 
     def __init__(self, title: str, available_items: list[str]):
         self.selected_items: list[str] = []
@@ -305,113 +493,86 @@ class DualListboxSelector:
         if self.scripted is not answers.ASK:
             return
 
-        self.root = tk.Tk()
-        self.root.title(title)
-
+        self.root = _window(title)
         # Handle early window close ('X' button) safely
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
-
-        # Screen Centering Logic
-        width, height = 620, 420
-        screen_w = self.root.winfo_screenwidth()
-        screen_h = self.root.winfo_screenheight()
-        x = (screen_w // 2) - (width // 2)
-        y = (screen_h // 2) - (height // 2)
-
-        self.root.geometry(f"{width}x{height}+{x}+{y}")
-        self.root.resizable(False, False)
-        self.root.attributes("-topmost", True)
-
         self._build_ui()
+        _place(self.root)
+
+    def _list(self, parent, heading: str) -> tuple[tk.Listbox, tk.Label]:
+        from tkinter import ttk
+
+        root = self.root
+        title = tk.Label(parent, text=heading, bg=BG, fg=MUTED, font=(BODY_FONT, 9, "bold"),
+                         anchor="w")
+        title.pack(fill=tk.X, pady=(0, _px(root, 6)))
+        frame = tk.Frame(parent, bg=LINE)
+        frame.pack(fill=tk.BOTH, expand=True)
+        inside = tk.Frame(frame, bg=FIELD)
+        inside.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
+        # tk.EXTENDED enables Shift+Click range select and Ctrl+Click toggle select
+        box = tk.Listbox(
+            inside, selectmode=tk.EXTENDED, exportselection=False, width=34, height=14,
+            bg=FIELD, fg=TEXT, font=(BODY_FONT, 10), selectbackground=AMBER,
+            selectforeground=ON_AMBER, relief=tk.FLAT, bd=0, highlightthickness=0,
+            activestyle="none")
+        box.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(_px(root, 8), 0),
+                 pady=_px(root, 6))
+        bar = ttk.Scrollbar(inside, orient=tk.VERTICAL, command=box.yview, style=self._bar)
+        box.configure(yscrollcommand=_scroll_when_needed(
+            bar, lambda: bar.pack(side=tk.RIGHT, fill=tk.Y), bar.pack_forget))
+        return box, title
 
     def _build_ui(self):
-        # Top Frame containing both listboxes and center action buttons
-        frame_top = tk.Frame(self.root)
-        frame_top.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=15, pady=10)
+        root = self.root
+        self._bar = _scrollbar_style(root)
+        _header(root, self.title)
+        body = tk.Frame(root, bg=BG)
+        body.pack(fill=tk.BOTH, expand=True, padx=_px(root, 24),
+                  pady=(_px(root, 18), _px(root, 8)))
 
-        # ------------------- Left Listbox (Available Items) -------------------
-        frame_left = tk.Frame(frame_top)
-        frame_left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        tk.Label(frame_left, text="Available Items", font=("Arial", 9, "bold")).pack(
-            pady=(0, 5)
-        )
-
-        # tk.EXTENDED enables Shift+Click range select and Ctrl+Click toggle select
-        self.lb_available = tk.Listbox(
-            frame_left, selectmode=tk.EXTENDED, exportselection=False
-        )
-        self.lb_available.pack(fill=tk.BOTH, expand=True)
+        left = tk.Frame(body, bg=BG)
+        left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.lb_available, self._available_title = self._list(left, "AVAILABLE")
         for item in self.available_items:
             self.lb_available.insert(tk.END, item)
+        buttons = tk.Frame(left, bg=BG)
+        buttons.pack(fill=tk.X, pady=(_px(root, 8), 0))
+        _button(buttons, "Select all", self._select_all_available).pack(side=tk.LEFT)
+        _button(buttons, "Clear", self._unselect_all_available).pack(
+            side=tk.LEFT, padx=(_px(root, 6), 0))
 
-        # Left Action Buttons (Select All / Unselect All)
-        frame_left_btns = tk.Frame(frame_left)
-        frame_left_btns.pack(fill=tk.X, pady=(5, 0))
-        btn_sel_all_avail = tk.Button(
-            frame_left_btns, text="Select All", command=self._select_all_available
-        )
-        btn_sel_all_avail.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 2))
-        btn_unsel_all_avail = tk.Button(
-            frame_left_btns, text="Unselect All", command=self._unselect_all_available
-        )
-        btn_unsel_all_avail.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(2, 0))
+        middle = tk.Frame(body, bg=BG)
+        middle.pack(side=tk.LEFT, fill=tk.Y, padx=_px(root, 14))
+        inner = tk.Frame(middle, bg=BG)
+        inner.pack(expand=True)   # the two buttons sit at mid-height
+        _button(inner, "Add  ›", self._add_items, primary=True, width=9).pack(
+            pady=_px(root, 5))
+        _button(inner, "‹  Remove", self._remove_items, width=9).pack(pady=_px(root, 5))
 
-        # ------------------- Center Action Buttons (>>> / <<<) -------------------
-        frame_mid = tk.Frame(frame_top)
-        frame_mid.pack(side=tk.LEFT, fill=tk.Y, padx=12)
+        right = tk.Frame(body, bg=BG)
+        right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.lb_selected, self._selected_title = self._list(right, "SELECTED")
+        buttons = tk.Frame(right, bg=BG)
+        buttons.pack(fill=tk.X, pady=(_px(root, 8), 0))
+        _button(buttons, "Select all", self._select_all_selected).pack(side=tk.LEFT)
+        _button(buttons, "Clear", self._unselect_all_selected).pack(
+            side=tk.LEFT, padx=(_px(root, 6), 0))
 
-        frame_mid_inner = tk.Frame(frame_mid)
-        frame_mid_inner.pack(expand=True)  # Vertically centers transfer buttons
+        self._message = tk.Label(root, text="Shift or Ctrl with a click selects several. "
+                                 "A double click moves an item.", bg=BG, fg=MUTED,
+                                 font=(BODY_FONT, 9), anchor="w")
+        self._message.pack(fill=tk.X, padx=_px(root, 24), pady=(0, _px(root, 12)))
+        _footer(root, self._confirm, self._on_close)
+        self.lb_available.bind("<Double-Button-1>", lambda _e: self._add_items())
+        self.lb_selected.bind("<Double-Button-1>", lambda _e: self._remove_items())
+        root.bind("<Return>", lambda _e: self._confirm())
+        root.bind("<Escape>", lambda _e: self._on_close())
+        self._count()
 
-        btn_add = tk.Button(
-            frame_mid_inner, text=">>>", width=8, command=self._add_items
-        )
-        btn_add.pack(pady=6)
-        btn_remove = tk.Button(
-            frame_mid_inner, text="<<<", width=8, command=self._remove_items
-        )
-        btn_remove.pack(pady=6)
-
-        # ------------------- Right Listbox (Selected Items) -------------------
-        frame_right = tk.Frame(frame_top)
-        frame_right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        tk.Label(frame_right, text="Selected Items", font=("Arial", 9, "bold")).pack(
-            pady=(0, 5)
-        )
-
-        # tk.EXTENDED enables Shift+Click range select and Ctrl+Click toggle select
-        self.lb_selected = tk.Listbox(
-            frame_right, selectmode=tk.EXTENDED, exportselection=False
-        )
-        self.lb_selected.pack(fill=tk.BOTH, expand=True)
-
-        # Right Action Buttons (Select All / Unselect All)
-        frame_right_btns = tk.Frame(frame_right)
-        frame_right_btns.pack(fill=tk.X, pady=(5, 0))
-        btn_sel_all_sel = tk.Button(
-            frame_right_btns, text="Select All", command=self._select_all_selected
-        )
-        btn_sel_all_sel.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 2))
-        btn_unsel_all_sel = tk.Button(
-            frame_right_btns, text="Unselect All", command=self._unselect_all_selected
-        )
-        btn_unsel_all_sel.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(2, 0))
-
-        # ------------------- Bottom Frame with Confirm Button -------------------
-        frame_bottom = tk.Frame(self.root)
-        frame_bottom.pack(side=tk.BOTTOM, fill=tk.X, pady=(0, 15))
-
-        btn_confirm = tk.Button(
-            frame_bottom,
-            text="OK / Confirm",
-            width=16,
-            height=1,
-            bg="#007ACC",
-            fg="white",
-            font=("Arial", 9, "bold"),
-            command=self._confirm,
-        )
-        btn_confirm.pack(anchor=tk.CENTER)
+    def _count(self):
+        self._available_title.configure(text=f"AVAILABLE  ({self.lb_available.size()})")
+        self._selected_title.configure(text=f"SELECTED  ({self.lb_selected.size()})")
 
     # --- Available Listbox Helpers ---
     def _select_all_available(self):
@@ -430,32 +591,31 @@ class DualListboxSelector:
     # --- Item Transfer Logic ---
     def _add_items(self):
         selected_indices = list(self.lb_available.curselection())
+        for idx in selected_indices:           # in the order they are listed
+            self.lb_selected.insert(tk.END, self.lb_available.get(idx))
         for idx in reversed(selected_indices):
-            item = self.lb_available.get(idx)
-            self.lb_selected.insert(tk.END, item)
             self.lb_available.delete(idx)
+        self._count()
 
     def _remove_items(self):
         selected_indices = list(self.lb_selected.curselection())
+        for idx in selected_indices:
+            self.lb_available.insert(tk.END, self.lb_selected.get(idx))
         for idx in reversed(selected_indices):
-            item = self.lb_selected.get(idx)
-            self.lb_available.insert(tk.END, item)
             self.lb_selected.delete(idx)
+        self._count()
 
     def _confirm(self):
         self.selected_items = list(self.lb_selected.get(0, tk.END))
         if not self.selected_items:
-            messagebox.showwarning("Warning", "Please select at least one item.")
+            self._message.configure(text="Select at least one item: add it to the list on "
+                                    "the right.", fg=RED)
             return
         self._on_close()
 
     def _on_close(self):
         """Safely tears down the Tkinter loop without causing Tcl errors."""
-        try:
-            self.root.quit()
-            self.root.destroy()
-        except tk.TclError:
-            pass
+        _close(self.root)
 
     def show(self) -> list[str]:
         """Displays dialog safely and blocks until user confirms or closes."""
@@ -481,27 +641,22 @@ def run_loading_window(message: str) -> None:
     import threading
     from tkinter import ttk
 
-    root = tk.Tk()
-    root.title("Background Processing")
-
-    width, height = 380, 130
-    x = (root.winfo_screenwidth() // 2) - (width // 2)
-    y = (root.winfo_screenheight() // 2) - (height // 2)
-
-    root.geometry(f"{width}x{height}+{x}+{y}")
-    root.resizable(False, False)
-    root.attributes("-topmost", True)
+    root = _window("Working")
     root.protocol("WM_DELETE_WINDOW", lambda: None)
-
-    label = tk.Label(root, text=message, font=("Arial", 9, "bold"), wraplength=340)
-    label.pack(pady=(22, 10))
-
-    progress = ttk.Progressbar(root, mode="indeterminate", length=300)
-    progress.pack(pady=5)
-    progress.start(10)
+    _scrollbar_style(root)
+    _header(root, message)
+    width = _px(root, 440)
+    wrap = width - _px(root, 48)
+    body = tk.Frame(root, bg=BG)
+    body.pack(fill=tk.BOTH, expand=True, padx=_px(root, 24), pady=_px(root, 20))
+    progress = ttk.Progressbar(body, mode="indeterminate", style="SDT.Horizontal.TProgressbar")
+    progress.pack(fill=tk.X)
+    progress.start(12)
 
     # Progress lines sent by LoadingWindow.update() arrive on stdin, one per line.
-    detail = tk.Label(root, text="", font=("Arial", 9), wraplength=340, justify="center")
+    detail = tk.Label(body, text="Please wait.", bg=BG, fg=MUTED, font=(BODY_FONT, 10),
+                      wraplength=wrap, justify="left", anchor="w")
+    detail.pack(fill=tk.X, pady=(_px(root, 14), 0))
     updates: queue.Queue = queue.Queue()
 
     def read_updates():
@@ -517,18 +672,16 @@ def run_loading_window(message: str) -> None:
         while not updates.empty():
             text = updates.get_nowait()
         if text is not None:
-            if not detail.winfo_ismapped():
-                detail.pack(pady=(6, 0))
             detail.config(text=text)
             root.update_idletasks()
-            needed = height + detail.winfo_reqheight() + 16
-            if needed > root.winfo_height():
-                root.geometry(f"{width}x{needed}+{x}+{y}")
+            needed = root.winfo_reqheight()
+            if needed > root.winfo_height():       # a longer line: the window grows down
+                root.geometry(f"{width}x{needed}")
         root.after(100, show_updates)
 
     threading.Thread(target=read_updates, daemon=True).start()
     root.after(100, show_updates)
-
+    _place(root, width)
     root.lift()
     root.focus_force()
     root.mainloop()
@@ -613,75 +766,120 @@ def show_summary(text: str, title: str = "Summary") -> None:
     """Show a command's closing summary in a window, until it is closed.
 
     The text is shown in a fixed-width font so its columns line up, and can be
-    selected and copied. Enter, Escape or OK closes it. With an answers file
-    it is printed instead, and nothing waits to be closed.
+    selected and copied. Enter, Escape or OK closes it; Copy puts the whole
+    text on the clipboard. With an answers file it is printed instead, and
+    nothing waits to be closed.
     """
     if answers.summary(text, title):
         return
+    from tkinter import ttk
+
     lines = text.strip("\n").split("\n")
-    root = tk.Tk()
-    root.title(title)
-    root.attributes("-topmost", True)
+    root = _window(title)
+    root.resizable(True, True)
 
     def close(_event=None):
-        try:
-            root.quit()
-            root.destroy()
-        except tk.TclError:
-            pass
+        _close(root)
+
+    def copy():
+        root.clipboard_clear()
+        root.clipboard_append(text.strip("\n") + "\n")
+        copied.configure(text="Copied")
+        root.after(1500, lambda: copied.configure(text=""))
 
     root.protocol("WM_DELETE_WINDOW", close)
-    frame = tk.Frame(root, padx=10, pady=10)
-    frame.pack(fill=tk.BOTH, expand=True)
+    bar = _scrollbar_style(root)
+    _header(root, title)
+    frame = tk.Frame(root, bg=BG)
+    frame.pack(fill=tk.BOTH, expand=True, padx=_px(root, 20), pady=_px(root, 16))
     columns = min(max(len(line) for line in lines) + 2, 150)
-    rows = min(len(lines) + 1, 38)
-    box = tk.Text(frame, width=columns, height=rows, wrap=tk.NONE, font=("Consolas", 10),
-                  relief=tk.FLAT, background=root.cget("background"))
-    vertical = tk.Scrollbar(frame, orient=tk.VERTICAL, command=box.yview)
-    horizontal = tk.Scrollbar(frame, orient=tk.HORIZONTAL, command=box.xview)
-    box.configure(yscrollcommand=vertical.set, xscrollcommand=horizontal.set)
-    box.tag_configure("attention", foreground="#C00000", font=("Consolas", 10, "bold"))
+    rows = min(len(lines) + 1, 36)
+    box = tk.Text(frame, width=columns, height=rows, wrap=tk.NONE, font=(MONO_FONT, 10),
+                  relief=tk.FLAT, bd=0, bg=BG, fg=TEXT, insertbackground=BG,
+                  selectbackground=AMBER, selectforeground=ON_AMBER, highlightthickness=0,
+                  padx=_px(root, 4), pady=_px(root, 4))
+    vertical = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=box.yview, style=bar)
+    horizontal = ttk.Scrollbar(frame, orient=tk.HORIZONTAL, command=box.xview,
+                               style="SDT.Horizontal.TScrollbar")
+    box.configure(
+        yscrollcommand=_scroll_when_needed(
+            vertical, lambda: vertical.grid(row=0, column=1, sticky="ns"), vertical.grid_remove),
+        xscrollcommand=_scroll_when_needed(
+            horizontal, lambda: horizontal.grid(row=1, column=0, sticky="ew"),
+            horizontal.grid_remove))
+    box.tag_configure("rule", foreground=LINE)
+    box.tag_configure("heading", foreground=AMBER, font=(MONO_FONT, 10, "bold"))
+    box.tag_configure("attention", foreground=RED, font=(MONO_FONT, 10, "bold"))
+    box.tag_configure("good", foreground=GREEN)
+    box.tag_configure("note", foreground=MUTED)
     attention = False
     for line in lines:
         if line.startswith("Needs attention"):
             attention = True
         elif not line.strip():
             attention = False
-        box.insert(tk.END, line + "\n", "attention" if attention else ())
+        if attention:
+            tag = "attention"
+        elif line.strip() and set(line.strip()) <= {"=", "-"}:
+            tag = "rule"
+        elif line.startswith("SUMMARY") or line.rstrip() == "Files:":
+            tag = "heading"
+        elif line.startswith("Nothing needs attention"):
+            tag = "good"
+        elif line.startswith("Note:"):
+            tag = "note"
+        else:
+            tag = ()
+        box.insert(tk.END, line + "\n", tag)
     box.configure(state=tk.DISABLED)  # read only; the text can still be selected and copied
     box.grid(row=0, column=0, sticky="nsew")
-    if len(lines) + 1 > rows:
-        vertical.grid(row=0, column=1, sticky="ns")
-    if max(len(line) for line in lines) + 2 > columns:
-        horizontal.grid(row=1, column=0, sticky="ew")
     frame.rowconfigure(0, weight=1)
     frame.columnconfigure(0, weight=1)
-    button = tk.Button(frame, text="OK", width=12, command=close)
-    button.grid(row=2, column=0, columnspan=2, pady=(10, 0))
+    footer = _footer(root, close, copy, confirm_text="OK", cancel_text="Copy")
+    copied = tk.Label(footer, text="", bg=PANEL, fg=MUTED, font=(BODY_FONT, 9))
+    copied.pack(side=tk.RIGHT, padx=(0, _px(root, 12)))
     root.bind("<Return>", close)
     root.bind("<Escape>", close)
-    root.update_idletasks()
-    width, height = root.winfo_reqwidth(), root.winfo_reqheight()
-    x = max((root.winfo_screenwidth() - width) // 2, 0)
-    y = max((root.winfo_screenheight() - height) // 3, 0)
-    root.geometry(f"+{x}+{y}")
-    button.focus_set()
+    _place(root, high=True)
     root.lift()
+    root.focus_force()
     root.mainloop()
 
 
 def show_warning(message: str, title: str = "Warning", topmost: bool = True) -> None:
-    """Displays a GUI warning popup box with a custom message and title.
+    """Show a warning in a window, until it is closed (Enter, Escape or OK).
 
     With an answers file it is printed instead.
     """
     if answers.warning(message, title):
         return
-    root = tk.Tk()
-    root.withdraw()  # Hide the main Tkinter root window
+    root = _window(title, topmost)   # topmost: over Excel and ETABS
 
-    if topmost:
-        root.attributes("-topmost", True)  # Forces dialog over Excel/ETABS
+    def close(_event=None):
+        _close(root)
 
-    messagebox.showwarning(title=title, message=message, parent=root)
-    root.destroy()
+    root.protocol("WM_DELETE_WINDOW", close)
+    _header(root, title)
+    longest = max(len(line) for line in str(message).split("\n"))
+    width = _px(root, 460 if longest < 70 and len(str(message)) < 260 else 620)
+    body = tk.Frame(root, bg=BG)
+    body.pack(fill=tk.BOTH, expand=True, padx=_px(root, 24), pady=_px(root, 20))
+    size = _px(root, 30)
+    sign = tk.Canvas(body, width=size, height=size, bg=BG, highlightthickness=0)
+    sign.create_polygon(size / 2, 2, size - 1, size - 3, 1, size - 3, fill=AMBER, outline=AMBER)
+    sign.create_text(size / 2, size * 0.60, text="!", fill=ON_AMBER,
+                     font=(BODY_FONT, 12, "bold"))
+    sign.pack(side=tk.LEFT, anchor="n", padx=(0, _px(root, 16)))
+    tk.Label(body, text=str(message), bg=BG, fg=TEXT, font=(BODY_FONT, 10), justify="left",
+             anchor="w", wraplength=width - _px(root, 48) - size - _px(root, 16)).pack(
+        side=tk.LEFT, fill=tk.X, expand=True)
+    _footer(root, close, confirm_text="OK")
+    root.bind("<Return>", close)
+    root.bind("<Escape>", close)
+    _place(root, width)
+    try:
+        root.lift()
+        root.focus_force()
+        root.mainloop()
+    except tk.TclError:
+        pass

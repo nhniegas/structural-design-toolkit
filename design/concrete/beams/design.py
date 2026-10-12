@@ -181,14 +181,13 @@ def _execute_beam_design(
             max_st = df_forces_beam["Station"].max()
             span_length = max_st - min_st
             # Clear span ln between the support faces, for the probable-moment
-            # shear Ve = (Mpr1 + Mpr2) / ln (ACI 18.6.5.1): the joint-to-joint
-            # length less half of each supporting column.
+            # shear Ve = (Mpr1 + Mpr2) / ln (ACI 18.6.5.1).
             support_half = sum(
                 0.5 * float(prop_row.get(key) or 0.0)
                 for key in ("SupportWidth_I", "SupportWidth_J")
                 if pd.notna(prop_row.get(key))
             )
-            clear_span = span_length - support_half if span_length > support_half else span_length
+            clear_span = clear_span_of(span_length, prop_row.get("JointLength"), support_half)
 
             # Moment design zones use the end quarter of the modeled span.
             m_left_boundary = min_st + detailing.moment_zone_fraction * span_length
@@ -841,6 +840,32 @@ def _execute_beam_design(
 BEAM_BAR_INPUTS = ("dm", "ds", "dw", "fyw", "cc")  # main, stirrup, web bar, web fy, cover
 
 
+def clear_span_of(station_span: float, joint_length, support_half: float) -> float:
+    """The clear span of a beam between the faces of its supports, mm.
+
+    It is the joint-to-joint length less half of each supporting column. ETABS
+    gives the forces of a member between its end length offsets, so on a model
+    with those offsets (the usual one) the stations already run from face to
+    face: taking half of each column off them again made the span too short by
+    that much, the seismic shear Ve = (Mpr1 + Mpr2) / ln too large, and a girder
+    could count as shorter than 4d when it was not. The span is never longer
+    than the stations of the member.
+
+    ``station_span``: the last station less the first. ``joint_length``: the
+    length between the joints, when it is known. ``support_half``: half of the
+    column at each end, added up.
+    """
+    try:
+        joint = float(joint_length)
+    except (TypeError, ValueError):
+        joint = float("nan")
+    if joint == joint and joint > 0:
+        clear = joint - support_half
+        return min(clear, station_span) if clear > 0 else station_span
+    # the joint length is not known: the stations are the joint-to-joint length
+    return station_span - support_half if station_span > support_half else station_span
+
+
 def _support_widths(frame_df: pd.DataFrame, conn_df: pd.DataFrame) -> pd.DataFrame:
     """The largest side of the column at each end of every beam (0 when none), mm.
 
@@ -852,7 +877,8 @@ def _support_widths(frame_df: pd.DataFrame, conn_df: pd.DataFrame) -> pd.DataFra
     conn = conn_df.copy()
     conn.columns = [str(c).strip() for c in conn.columns]
     if not {"UniqueName", "DesignType", "UniquePtI", "UniquePtJ"} <= set(conn.columns):
-        return pd.DataFrame(columns=["UniqueName", "SupportWidth_I", "SupportWidth_J"])
+        return pd.DataFrame(columns=["UniqueName", "SupportWidth_I", "SupportWidth_J",
+                                     "JointLength"])
     sizes = {}
     for row in frame.to_dict("records"):
         values = [pd.to_numeric(row.get(key), errors="coerce")
@@ -867,10 +893,13 @@ def _support_widths(frame_df: pd.DataFrame, conn_df: pd.DataFrame) -> pd.DataFra
         for point in (row["UniquePtI"], row["UniquePtJ"]):
             width_at[point] = max(width_at.get(point, 0.0), side)
     beams = conn[conn["DesignType"].astype(str).eq("Beam")]
+    lengths = pd.to_numeric(beams["Length"], errors="coerce").to_numpy() \
+        if "Length" in beams.columns else [float("nan")] * len(beams)
     return pd.DataFrame({
         "UniqueName": beams["UniqueName"].to_numpy(),
         "SupportWidth_I": [width_at.get(p, 0.0) for p in beams["UniquePtI"]],
         "SupportWidth_J": [width_at.get(p, 0.0) for p in beams["UniquePtJ"]],
+        "JointLength": lengths,      # joint to joint, for the clear span
     })
 
 

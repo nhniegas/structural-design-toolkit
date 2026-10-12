@@ -260,3 +260,39 @@ def test_the_model_is_named_by_its_edb_also_after_an_analysis():
     assert model_file(Model(r"C:\job\tower.$et")).endswith("tower.EDB")
     assert model_file(Model(r"C:\job\tower.EDB")).endswith("tower.EDB")
     assert model_file(Model("")) == "" and model_file(Model(None)) == ""
+
+
+# ----------------------------------------------------------------- the look of the dialogs
+def test_the_dialogs_have_the_colours_of_the_icon_and_find_its_file():
+    import importlib.util
+    import os
+
+    pytest.importorskip("PIL")
+    from utilities import _gui_helpers
+
+    spec = importlib.util.spec_from_file_location(
+        "make_icon", Path(__file__).resolve().parents[1] / "tools" / "make_icon.py")
+    make_icon = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(make_icon)
+    assert _gui_helpers.BG == "#%02X%02X%02X" % make_icon.DARK
+    assert _gui_helpers.AMBER == "#%02X%02X%02X" % make_icon.AMBER
+    assert os.path.isfile(_gui_helpers.icon_path())
+
+
+def test_a_scrollbar_is_shown_only_while_something_is_out_of_view():
+    from utilities import _gui_helpers
+
+    class Bar:
+        seen = None
+
+        def set(self, first, last):
+            self.seen = (first, last)
+
+    shown = []
+    bar = Bar()
+    update = _gui_helpers._scroll_when_needed(bar, lambda: shown.append("show"),
+                                              lambda: shown.append("hide"))
+    update("0.0", "1.0")
+    update("0.0", "0.4")
+    update("0.6", "1.0")
+    assert shown == ["hide", "show", "show"] and bar.seen == ("0.6", "1.0")

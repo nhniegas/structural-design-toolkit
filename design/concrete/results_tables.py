@@ -21,7 +21,7 @@ BEAM_EQUATIONS = [
     "Flexure:     φMₙ ≥ Mᵤ,  Mₙ = Aₛ fy (d − a/2) + A′ₛ f′ₛ (d − d′),  a = (Aₛ fy − A′ₛ f′ₛ) / (0.85 f′c b)   (ACI 22.2)",
     "Shear:       φVₙ = φ (Vc + Vₛ) ≥ Vᵤ,  Vc = 0.17 √f′c b d,  Vₛ = Aᵥ fyt d / s ≤ 0.66 √f′c b d   (ACI 22.5)",
     "Torsion:     Tᵤ ≤ φTₙ,  Tₙ = 2 Aₒ Aₜ fyt / s;  compatibility torsion: Tᵤ ≤ φTcr   (ACI 22.7)",
-    "SMRF shear:  Vₑ = (Mpr₁ + Mpr₂) / lₙ + V_gravity,  Mpr at 1.25 fy   (ACI 18.6.5.1)",
+    "SMRF shear:  Vₑ = (Mpr₁ + Mpr₂) / lₙ ± wᵤ lₙ / 2,  Mpr at 1.25 fy   (ACI 18.6.5.1)",
     "SMRF bars:   ρ ≤ 0.025;  M⁺ₙ ≥ ½ M⁻ₙ at a support face;  Mₙ ≥ ¼ Mₙ,max at every section   (ACI 18.6.3)",
     "Deflection:  Iₑ = (Mcr/Mₐ)³ Ig + [1 − (Mcr/Mₐ)³] Icr ≤ Ig,  λΔ = ξ / (1 + 50 ρ′)   (ACI 24.2)",
     "             Δ after partitions = λΔ Δ(D + 0.25 L) + Δ(D + L) − Δ(D + 0.25 L) ≤ L/480 or L/240",

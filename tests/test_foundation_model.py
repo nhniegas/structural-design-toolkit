@@ -291,3 +291,12 @@ def test_a_static_case_with_a_larger_base_shear_is_still_the_one_taken():
     base = pd.DataFrame({"Case": ["EQX", "EQX2", "RSAX"], "Kind": ["static", "static", fm.SPECTRUM],
                          "FX": [-500.0, -510.0, 480.0], "FY": [0.0, 0.0, 0.0]})
     assert fm.spectrum_partners(base, {"EQX": 5, "EQX2": 5}) == {"RSAX": "EQX2"}
+
+
+def test_a_pattern_listed_with_a_space_after_its_name_is_not_added_again():
+    """ETABS listed a pattern as "TEST LOAD " whose case and tables call it
+    "TEST LOAD". It takes the two for one name and refuses the second, which
+    was reported as "pattern TEST LOAD could not be added"."""
+    existing = ["SELFWEIGHT", "TEST LOAD ", "Sidl"]
+    assert fm.missing_patterns(["SELFWEIGHT", "TEST LOAD", "SIDL", "WX-1"], existing) == ["WX-1"]
+    assert fm.same_name(" Test Load ") == fm.same_name("TEST LOAD")
