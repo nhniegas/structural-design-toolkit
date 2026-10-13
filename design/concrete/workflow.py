@@ -815,10 +815,10 @@ def write_deflection_xlsx(table: pd.DataFrame, path: str) -> str:
         cell.fill = PatternFill("solid", fgColor="DEEBF7")
         sheet.column_dimensions[get_column_letter(index)].width = min(max(len(str(name)) + 2,
                                                                          10), 32)
-    check = table.columns.get_loc("Deflection check") + 1 if "Deflection check" in table else 0
-    for row in range(2, len(table) + 2):
-        if check and str(sheet.cell(row=row, column=check).value) == "FAIL":
-            sheet.cell(row=row, column=check).font = Font(color="C00000", bold=True)
+    if "UniqueName" in table.columns:
+        from utilities._xlsx_values import mark_failures
+
+        mark_failures(sheet, 2, table.columns.get_loc("UniqueName") + 1)
     sheet.freeze_panes = "C2"
     book.save(path)
     return path

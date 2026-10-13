@@ -56,6 +56,8 @@ Answers are remembered and offered again next time. Every named member (not a nu
 
 **Numbers and blanks in the workbooks.** Values are rounded to two decimals; the small steel ratios (ρ, the 18.7.5 confinement ratios, Ash/(s bc)) keep four, since two would round them to 0.01. No cell is left empty: a value that does not apply is written as `N/A` with the reason, for example `N/A - rectangular hoops: 18.7.5(a) to (c) apply`, `N/A - circular column` or `N/A - not a roof beam`. The beam workbook leaves out the ETABS column-section fields that are never filled for a beam.
 
+**Members that fail, in the workbooks.** In `Beam Design.xlsx`, `Column Design.xlsx` and `Deflection.xlsx` a member that fails is marked so it is seen while scrolling: every row of the member is filled light red, and its name and the results that fail (`FAIL`, `FAILED: ...`, `ERROR`, `BLOCKED`) are red and bold. A beam has two rows and a column one row for each end and combination; all of them are marked when any one fails. A member that passes is not coloured.
+
 **Between the two steps** everything is kept next to the model in `<model> - design data.pkl`: the extracted tables (forces, service loads, frame data, connectivity, live load reduction, column orientation), the inputs and the results. It is internal (binary, for speed). `sdt columns` finds it from the model open in ETABS and stops with "No beam design for <model>. Run sdt beams first." when there is none. When the model file was saved after the beam step, it warns that the stored forces may be out of date and lets you stop or continue.
 
 ## How the pieces fit

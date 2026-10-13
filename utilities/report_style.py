@@ -10,7 +10,7 @@ FAIL tag.
 ``new_document`` gives a PyLaTeX document set up this way; ``title_block``,
 ``tag`` and ``ratio`` give its pieces. A missing LaTeX package never stops a
 report: without the sans font, the header package or the table colours, the
-report is written plainer.
+report is written plainer. "Page x of y" needs no package.
 """
 
 from __future__ import annotations
@@ -109,9 +109,13 @@ def preamble(title: str, code: str = "", source: str = "", command: str = "",
 \renewcommand{\toprule}{\rowcolor{sdtband}}
 \renewcommand{\midrule}{\hline}
 \renewcommand{\bottomrule}{\hline}
-\newcommand{\sdtpages}{\thepage}
-\IfFileExists{lastpage.sty}{\usepackage{lastpage}%
-  \renewcommand{\sdtpages}{\thepage\ of \pageref{LastPage}}}{}
+% "Page x of y" with no package: the number of the last page is written to the
+% .aux file at the end, and read on the second pass
+\makeatletter
+\newcommand{\sdtpages}{\thepage\ of \@ifundefined{r@sdtlastpage}{\thepage}{\pageref{sdtlastpage}}}
+\AtEndDocument{\clearpage\addtocounter{page}{-1}%
+  \immediate\write\@auxout{\string\newlabel{sdtlastpage}{{}{\thepage}}}\addtocounter{page}{1}}
+\makeatother
 \IfFileExists{fancyhdr.sty}{\usepackage{fancyhdr}\pagestyle{fancy}\fancyhf{}%
   \renewcommand{\headrulewidth}{0pt}\renewcommand{\footrulewidth}{0pt}%
   \fancyhead[C]{\parbox{\textwidth}{%
