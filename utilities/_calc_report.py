@@ -294,8 +294,13 @@ def build_calc_report(
 
     try:
         # twice: the header says "Page x of y", which LaTeX knows after one pass
-        doc.generate_pdf(filepath, clean=False, clean_tex=False, compiler="pdflatex")
-        doc.generate_pdf(filepath, clean_tex=True, compiler="pdflatex")
+        from utilities.latex_help import compiler_args
+
+        latex_args = compiler_args()
+        doc.generate_pdf(filepath, clean=False, clean_tex=False, compiler="pdflatex",
+                         compiler_args=latex_args)
+        doc.generate_pdf(filepath, clean_tex=True, compiler="pdflatex",
+                         compiler_args=latex_args)
         return filepath + ".pdf"
     except Exception as error:
         print(f"PDF Error: {error}")

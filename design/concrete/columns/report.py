@@ -975,9 +975,10 @@ def write_column_results_xlsx(report: pd.DataFrame, groups: list[tuple[str, list
             cell = sheet.cell(row=excel_row, column=index, value=value)
             if shade:
                 cell.fill = grey
-            text = str(value).upper() if value is not None else ""
-            if text.startswith("FAIL"):
-                cell.font = Font(color="C00000", bold=True)
+    if names:
+        from utilities._xlsx_values import mark_failures
+
+        mark_failures(sheet, 4, clean.columns.get_loc("Unique Name") + 1)
     sheet.freeze_panes = "E4"
     book.save(path)
     return path

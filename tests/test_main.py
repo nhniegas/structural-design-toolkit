@@ -147,6 +147,7 @@ def test_doctor_reports_every_check_and_counts_the_problems(monkeypatch, capsys)
     monkeypatch.setattr(doctor, "check_running_etabs",
                         lambda: pytest.fail("not checked when the API did not load"))
     monkeypatch.setattr(doctor, "check_latex", lambda: (doctor.OK, "LaTeX", "found"))
+    monkeypatch.setattr(doctor, "check_latex_packages", lambda: None)
     monkeypatch.setattr(doctor, "check_3d_kernel", lambda: (doctor.OK, "3D model", "found"))
     checks = doctor.run_doctor("0.1.0")
     out = capsys.readouterr().out
@@ -296,3 +297,60 @@ def test_a_scrollbar_is_shown_only_while_something_is_out_of_view():
     update("0.0", "0.4")
     update("0.6", "1.0")
     assert shown == ["hide", "show", "show"] and bar.seen == ("0.6", "1.0")
+
+
+def _latex(monkeypatch, missing, miktex=True):
+    from utilities import latex_help
+
+    monkeypatch.setattr(latex_help, "latex_path", lambda: r"C:\miktex\pdflatex.exe")
+    monkeypatch.setattr(latex_help, "is_miktex", lambda: miktex)
+    monkeypatch.setattr(latex_help, "missing_packages", lambda: list(missing))
+    return latex_help
+
+
+def test_doctor_lists_the_latex_packages_the_reports_use(monkeypatch):
+    from utilities import doctor
+
+    _latex(monkeypatch, [])
+    assert doctor.check_latex_packages()[0] == doctor.OK
+    _latex(monkeypatch, ["fancyhdr", "tex-gyre"])
+    status, _, found = doctor.check_latex_packages()
+    assert status == doctor.WARN and "fancyhdr, tex-gyre" in found and "sdt doctor" in found
+    _latex(monkeypatch, ["fancyhdr"], miktex=False)
+    assert "tlmgr install fancyhdr" in doctor.check_latex_packages()[2]
+    monkeypatch.setattr("utilities.latex_help.latex_path", lambda: None)
+    assert doctor.check_latex_packages() is None          # no LaTeX: its own line says so
+
+
+def test_doctor_installs_the_missing_latex_packages_only_when_asked(monkeypatch):
+    from utilities import _gui_helpers, doctor
+
+    state = {"missing": ["fancyhdr", "sansmath"], "installed": []}
+    latex_help = _latex(monkeypatch, [])
+    monkeypatch.setattr(latex_help, "missing_packages", lambda: list(state["missing"]))
+
+    def install(packages):
+        state["installed"] += packages
+        state["missing"] = []
+        return []
+
+    monkeypatch.setattr(latex_help, "install_packages", install)
+    warned = doctor.check_latex_packages()
+    monkeypatch.setattr(_gui_helpers, "select_option", lambda *a, **k: "No - leave them")
+    assert doctor.offer_latex_packages(warned) == warned and not state["installed"]
+    monkeypatch.setattr(_gui_helpers, "select_option",
+                        lambda title, prompt, options, *a, **k: options[0])
+    assert doctor.offer_latex_packages(warned)[0] == doctor.OK
+    assert state["installed"] == ["fancyhdr", "sansmath"]
+
+
+def test_a_report_is_compiled_so_that_an_optional_package_cannot_stop_it(monkeypatch):
+    latex_help = _latex(monkeypatch, ["fancyhdr", "tex-gyre"])
+    assert latex_help.compiler_args() == ["--disable-installer"]      # written plainer
+    _latex(monkeypatch, [])
+    assert latex_help.compiler_args() == ["--disable-installer"]
+    _latex(monkeypatch, ["booktabs"])                 # needed: MiKTeX is left to install it
+    assert latex_help.compiler_args() == []
+    _latex(monkeypatch, ["fancyhdr"], miktex=False)
+    assert latex_help.compiler_args() == []
+    assert "lastpage" not in latex_help.REPORT_PACKAGES.values()

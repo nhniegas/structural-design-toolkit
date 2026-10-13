@@ -38,11 +38,13 @@ A sentence in a cell, such as the reason a check does not apply, is wrapped to s
 
 ## LaTeX packages
 
-The reports are compiled with `pdflatex`. Beyond the packages of the earlier format, the new one uses `fancyhdr` and `lastpage` (the header and "of y"), `colortbl` (the grey bands in tables), and `tgheros` and `sansmath` (the typeface).
+The reports are compiled with `pdflatex`. Beyond the packages of the earlier format, the new one uses `fancyhdr` (the header), `colortbl` (the grey bands in tables), and `tgheros` and `sansmath` (the typeface).
 
-- MiKTeX installs a missing package the first time it is needed. If yours is set to ask, it will ask once for each.
-- A package that cannot be had never stops a report. Without the typeface the report uses Helvetica; without `fancyhdr` it has plain page numbers; without `colortbl` its tables have no grey bands.
+- **`sdt doctor` installs them.** Its line `LaTeX packages` says whether every package the reports use is installed. When MiKTeX lacks some, it names them and asks whether to install them now; it needs the internet and takes about a minute, once for each machine. With TeX Live it gives the `tlmgr install` command to type.
+- **A package that can be done without never stops a report.** Without the typeface the report uses Helvetica; without `fancyhdr` it has plain page numbers; without `colortbl` its tables have no grey bands. When only such packages are missing, the report is compiled with MiKTeX told to install nothing, so no window opens and nothing can fail on it.
+- **"Page x of y" needs no package.** The report writes the number of its last page itself. Before version 0.5.2 it used `lastpage`, and on a machine where MiKTeX could not install that package the report was not written.
 - The header says "Page x of y", so a report is compiled twice.
+- A package the reports cannot do without (`booktabs`, `geometry`, `xcolor` and the like, which come with a basic MiKTeX) is still left to MiKTeX to install when it is missing.
 
 ## For the source code
 

@@ -52,7 +52,8 @@ the same commands.
     sdt wind        MWFRS wind pressures, ASCE 7 directional procedure
                     (design/loads/wind_directional_asce7.py)
     sdt doctor      check that this machine can run the toolkit: ETABS and its
-                    API, the dialogs, LaTeX     (utilities/doctor.py)
+                    API, the dialogs, LaTeX and its packages, which it can
+                    install                     (utilities/doctor.py)
     sdt --help      list the commands
     sdt --version   the version
 
@@ -77,7 +78,7 @@ import argparse
 import sys
 from pathlib import Path
 
-VERSION = "0.5.1"  # the same as in pyproject.toml (tests/test_main.py checks it)
+VERSION = "0.5.2"  # the same as in pyproject.toml (tests/test_main.py checks it)
 # Hidden first argument: this process is the progress window of another one
 # (utilities/_gui_helpers.LoadingWindow). It is how the packaged program,
 # which has no separate Python to start, opens that window.
