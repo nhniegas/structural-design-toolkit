@@ -950,6 +950,10 @@ def member_reports(beams, columns, smrf: bool, folder: str, figure_options: dict
                     member.figures.append((relative, "Design interaction surface of the final "
                                            "bar layout with every combination at both ends."
                                            + _bcc_caption(rows)))
+                    from design.concrete.columns.calculations import PLANES_CAPTION, planes_path
+
+                    if os.path.isfile(os.path.join(folder, planes_path(relative))):
+                        member.figures.append((planes_path(relative), PLANES_CAPTION))
                     member.beside_figure = BESIDE_FIGURE
             column_members.append(member)
     return beam_members, column_members

@@ -324,3 +324,30 @@ def test_ax_is_not_given_where_etabs_has_no_displacement_of_the_level():
     rows = {r[0]: r for r in item.rows}
     assert rows["2F"][6] == "1.17" and rows["LG"][6] == "-" and rows["LG"][-1] == ir.IRREGULAR
     assert any("no diaphragm" in note for note in item.notes)
+
+
+def test_diaphragm_stories_from_the_assignments():
+    rows = [{"Story": "L3", "Diaphragm": "D1"}, {"Story": "L2", "Diaphragm": "D1"},
+            {"Story": "TIE", "Diaphragm": "None"}, {"Story": "", "Diaphragm": "D1"},
+            {"Story": "GF", "Diaphragm": "From Shell Object"}]
+    assert ir.diaphragm_stories(rows) == {"L3", "L2"}
+
+
+def test_stories_without_a_diaphragm_are_listed_and_left_out():
+    order = ["ROOF", "L3", "L2", "TIE", "BASE"]
+    missing = ir.without_diaphragm(order, {"ROOF", "L3", "L2"})
+    assert missing == ["TIE", "BASE"]
+    # a model with no diaphragm at all is compared as before
+    assert ir.without_diaphragm(order, set()) == []
+    note = ir.levels_note([], [], ["TIE"])
+    assert "TIE (no diaphragm" in note
+
+
+def test_a_story_without_a_diaphragm_is_not_in_the_mass_comparison():
+    masses = [("ROOF", 300.0), ("L2", 400.0), ("TIE", 900.0)]
+    no_diaphragm = ir.without_diaphragm(["ROOF", "L2", "TIE"], {"ROOF", "L2"})
+    stories, _, _ = ir.compared_stories(masses, None)
+    stories = [story for story in stories if story not in no_diaphragm]
+    item = ir.mass_item([m for m in masses if m[0] in stories])
+    assert stories == ["ROOF", "L2"]
+    assert not item.irregular

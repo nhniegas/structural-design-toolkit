@@ -45,7 +45,7 @@ What you type is remembered for the next run. The loop then runs as usual; the r
 | B4 Concrete quantities | Volume by story, floor area, and the concrete ratio in m3/m2 |
 | B5 Files of the design | The other files the loop wrote |
 
-**Part C, Member calculations.** The calculation tables of each beam and each column, those of the beam and column reports. Each column starts on a new page, with its interaction surface.
+**Part C, Member calculations.** The calculation tables of each beam and each column, those of the beam and column reports. Each column starts on a new page, with its interaction surface and its P-M diagrams in the XZ and YZ planes.
 
 ## Notes on what is listed
 

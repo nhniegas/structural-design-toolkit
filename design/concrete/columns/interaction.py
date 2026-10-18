@@ -509,3 +509,56 @@ def plot_surface(surface: InteractionSurface, demands: np.ndarray, path: str, ti
         figure.savefig(path)
     plt.close(figure)
     return path
+
+
+def plane_curves(surface: InteractionSurface, points: int = 60) -> dict[str, tuple]:
+    """The sections of the design surface in the XZ plane (My = 0) and the YZ plane
+    (Mx = 0): {"XZ": (phi Pn, +phi Mnx, -phi Mnx), "YZ": (phi Pn, +phi Mny, -phi Mny)},
+    in kN and kN-m, compression positive."""
+    levels = np.linspace(-surface.p_tension * 0.999, surface.p_cap * 0.999, points)
+    out = {}
+    for plane, (ux, uy) in (("XZ", (1.0, 0.0)), ("YZ", (0.0, 1.0))):
+        plus, _ = surface.capacities(levels, np.full_like(levels, ux), np.full_like(levels, uy))
+        minus, _ = surface.capacities(levels, np.full_like(levels, -ux),
+                                      np.full_like(levels, -uy))
+        out[plane] = (levels / 1e3, plus / 1e6, -minus / 1e6)
+    return out
+
+
+def plot_planes(surface: InteractionSurface, demands: np.ndarray, path: str,
+                title: str = "") -> str:
+    """Save the P-M diagrams in the XZ plane (Pu, Mx) and the YZ plane (Pu, My) with every
+    demand (its Mx or its My) to ``path``. ``demands`` as in plot_surface."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    curves = plane_curves(surface)
+    figure, panels = plt.subplots(1, 2, figsize=(6.4, 3.0), dpi=150)
+    d = np.asarray(demands, dtype=float).reshape(-1, 3)
+    for panel, (plane, column, label) in zip(panels, (("XZ", 1, "x"), ("YZ", 2, "y"))):
+        p, plus, minus = curves[plane]
+        # one closed outline: up the positive side, along the axial cap, down the other
+        outline_m = np.concatenate([plus, minus[::-1], plus[:1]])
+        outline_p = np.concatenate([p, p[::-1], p[:1]])
+        panel.plot(outline_m, outline_p, color="tab:blue", lw=1.2, label="Design surface")
+        if len(d):
+            panel.scatter(d[:, column] / 1e6, d[:, 0] / 1e3, s=4, color="tab:red",
+                          label="Demands")
+        panel.axhline(0, color="0.6", lw=0.5)
+        panel.axvline(0, color="0.6", lw=0.5)
+        panel.set_xlabel(rf"$\phi M_{{n{label}}}$, $M_{{u{label}}}$ (kN-m)", fontsize=7)
+        panel.set_ylabel(r"$\phi P_n$, $P_u$ (kN)", fontsize=7)
+        panel.set_title(f"{plane} plane ({'My' if plane == 'XZ' else 'Mx'} = 0)", fontsize=8)
+        panel.tick_params(labelsize=6)
+    panels[0].legend(loc="upper left", fontsize=6)
+    if title:
+        figure.suptitle(title, fontsize=8)
+    figure.tight_layout()
+    if str(path).lower().endswith((".jpg", ".jpeg")):
+        figure.savefig(path, dpi=FIGURE_REPORT_DPI, pil_kwargs={"quality": FIGURE_JPEG_QUALITY})
+    else:
+        figure.savefig(path)
+    plt.close(figure)
+    return path

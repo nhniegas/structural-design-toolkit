@@ -328,7 +328,8 @@ def column_interaction_figure(rows: pd.DataFrame, path: str, dmain: float, dties
     compact JPEG when the path ends in .jpg, as the calculation report asks).
 
     The demands are every combination at both ends; the hull vertices and the
-    governing demand are marked. None when the layout has no surface.
+    governing demand are marked. The P-M diagrams in the XZ and YZ planes are saved
+    beside it (``planes_path``). None when the layout has no surface.
     """
     from design.concrete.columns.interaction import (
         demand_moments,
@@ -362,7 +363,20 @@ def column_interaction_figure(rows: pd.DataFrame, path: str, dmain: float, dties
     utilization = [surface.utilization(*point) for point in points]
     governing = int(np.argmax(utilization)) if utilization else None
     title = f"{first['UniqueName']} - {first.get('Section')} - {bars} bars"
+    from design.concrete.columns.interaction import plot_planes
+
+    plot_planes(surface, points, planes_path(path), title)
     return plot_surface(surface, points, path, title, hull, governing)
+
+
+def planes_path(path: str) -> str:
+    """The file of the XZ and YZ plane diagrams written beside the surface ``path``."""
+    stem, extension = os.path.splitext(path)
+    return f"{stem}_planes{extension}"
+
+
+PLANES_CAPTION = ("The P-M diagrams of the same surface in the XZ plane (My = 0) and the YZ "
+                  "plane (Mx = 0), with each demand's Mx and My.")
 
 
 # The table the interaction surface is set beside: it is narrow, and long enough to
@@ -375,7 +389,7 @@ def build_column_calc_report(report: pd.DataFrame, filepath: str, information: l
     """Write the column calculation PDF from the report (internal field names).
 
     ``figure_options`` (dmain, dties, cover, is_smrf) adds each column's 3D
-    interaction surface with its demands.
+    interaction surface with its demands, and its P-M diagrams in the XZ and YZ planes.
     """
     import shutil
 
@@ -397,6 +411,8 @@ def build_column_calc_report(report: pd.DataFrame, filepath: str, information: l
         member = _column_calc_member(rows)
         if name in figures:
             member.figures.append(figures[name])
+            if os.path.isfile(os.path.join(folder, planes_path(figures[name][0]))):
+                member.figures.append((planes_path(figures[name][0]), PLANES_CAPTION))
             member.beside_figure = BESIDE_FIGURE
         members.append(member)
     if not members:

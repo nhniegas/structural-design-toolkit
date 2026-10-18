@@ -58,7 +58,7 @@ Supporting code:
 - `design/criteria/dcr_targets.py`: target demand / capacity ratios by member type and check.
 - `design/concrete/beams/carriers.py`: which beam carries which, and the rule that a carrier is at least as deep.
 - `design/concrete/columns/slenderness.py`: slenderness of columns along their length (NSCP 406.2.5, 406.6.4.5; ACI 6.2.5, 6.6.4.5): unbraced lengths and k from the frame, the moment magnifier and the minimum moment. The sway effects come from the ETABS P-delta analysis.
-- `design/concrete/columns/interaction.py`: the biaxial P-Mx-My design interaction surface of a column layout, built once and cached. It also provides the demand convex hull and the 3D figure for the calculation report.
+- `design/concrete/columns/interaction.py`: the biaxial P-Mx-My design interaction surface of a column layout, built once and cached. It also provides the demand convex hull, the 3D figure and the P-M diagrams in the XZ and YZ planes for the calculation report.
 - `etabs_api/workflows/model_analysis.py`: analysis run, response spectrum scaling, period, modal mass and weight checks.
 - `etabs_api/workflows/model_setup.py`, `ubc97.py`, `load_combinations.py`: definition of materials, sections, loads and NSCP 2015 combinations in an ETABS model.
 - `utilities/design_cli.py`: the dialog workflow of the standalone checks (input dialogs, then printout, PDF or both); `utilities/design_window.py`: the window of the composite, steel and pile cap checks (inputs, live drawing, results).
