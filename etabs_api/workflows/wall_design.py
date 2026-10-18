@@ -148,14 +148,20 @@ def run_walls_cli():
     if kinds is None:
         return None
     labels = ["f'c (MPa)", "fy (MPa)", "Vertical bar (mm)", "Horizontal bar (mm)", "Cover (mm)",
-              "Boundary element length rounded up to (mm)"]
-    typed = enter_values(title, "Materials and bars of the walls.", labels,
+              "Boundary element length rounded up to (mm)",
+              "Coupling beam diagonal bar (mm)", "Degree of coupling: coupled from (%)",
+              "Wall schedule: sections at 1 :"]
+    typed = enter_values(title, "Materials and bars of the walls and coupling beams. Walls "
+                         "whose degree of coupling is under the limit act as separate "
+                         "cantilevers.", labels,
                          {labels[0]: "28", labels[1]: "414", labels[2]: "16", labels[3]: "12",
-                          labels[4]: "40", labels[5]: "50"})
+                          labels[4]: "40", labels[5]: "50", labels[6]: "20", labels[7]: "20",
+                          labels[8]: "50"})
     if typed is None:
         return None
     try:
-        fc, fy, bar_v, bar_h, cover, module = (float(typed[k]) for k in labels)
+        fc, fy, bar_v, bar_h, cover, module, bar_d, coupled_from, scale = (
+            float(typed[k]) for k in labels)
     except ValueError:
         show_warning("Every value must be a number.", title=title)
         return None
@@ -199,6 +205,7 @@ def run_walls_cli():
         elevations = dict(zip(names_s, (float(z) for z in as_list(levels[2]))))
         below = {names_s[i]: names_s[i - 1] for i in range(1, len(names_s))}
         designs = []
+        inputs_by: dict[int, WallInputs] = {}
         for wall, label in zip(walls, names):
             special = kinds[label] == SPECIAL
             hw = wall_height(wall, elevations, below)
@@ -207,6 +214,7 @@ def run_walls_cli():
             delta_u = _top_displacement(moved, model, corners, cases, r_factor)
             inputs = WallInputs(special, fc, fy, fy, cover, bar_v, bar_h, module,
                                 "displacement" if decides.startswith("Displacement") else "stress")
+            inputs_by[wall.number] = inputs
             for story in sorted(wall.legs, key=lambda s: elevations[s]):
                 window.update(f"Wall W{wall.number}, {story}")
                 legs = wall.legs[story]
@@ -216,9 +224,15 @@ def run_walls_cli():
                 result = design_story(story, leg_shapes(legs), story_forces, hw, delta_u,
                                       inputs)
                 designs.append((wall, special, legs, result))
+        window.update("Coupling beams")
+        beams, pairs = coupling(connector, model, walls, strength, cases, fc, fy, bar_d,
+                                coupled_from / 100.0)
     table = results_table(designs, bar_v, bar_h)
     workbook = beside(path, " - Wall Design.xlsx")
-    table.to_excel(workbook, index=False)
+    with pd.ExcelWriter(workbook) as writer:
+        table.to_excel(writer, sheet_name="Walls", index=False)
+        coupling_table(beams).to_excel(writer, sheet_name="Coupling beams", index=False)
+        pd.DataFrame(pairs).to_excel(writer, sheet_name="Degree of coupling", index=False)
     summary = RunSummary("sdt walls", path)
     summary.add("Walls", f"{len(walls)} ({sum(kinds[n] == SPECIAL for n in names)} special)")
     summary.add("Wall stories designed", len(designs))
@@ -232,7 +246,27 @@ def run_walls_cli():
                 if any(b["needed"] for b in d.boundary)]
     if elements:
         summary.add("Special boundary elements", ", ".join(elements))
+    schedule = write_schedule(path, designs, fc, fy, cover, bar_v, bar_h, scale)
+    from design.concrete.wall_report import export_wall_pdf
+
+    with LoadingWindow(title) as window:
+        window.update("The calculation report (.pdf, LaTeX)")
+        pdf = export_wall_pdf(designs, lambda w: inputs_by[w.number],
+                              beside(path, " - Wall Calculations.pdf"))
+    if beams:
+        summary.add("Coupling beams", len(beams))
+        for beam in beams:
+            if not beam.passed:
+                summary.fail(f"Coupling beam {beam.name} ({beam.story}): {beam.note}")
+    for pair in pairs:
+        summary.add(f"Degree of coupling {pair['Walls']} ({pair['Case']})",
+                    f"{pair['Degree of coupling']:.0%}: {pair['Acts as']}")
     summary.file("Workbook", workbook)
+    summary.file("Wall schedule", schedule)
+    if pdf:
+        summary.file("Calculation report", pdf)
+    else:
+        summary.fail("The calculation report was not written (LaTeX): run sdt doctor")
     summary.show(popup=True)
     return designs
 
@@ -259,6 +293,143 @@ def _top_displacement(moved: pd.DataFrame, model, panels: set[str], cases: dict[
         value = float(pd.to_numeric(mine[column], errors="coerce").abs().max())
         out[direction] = max(out[direction], NSCP.seismic.drift_amplification * r_factor * value)
     return out
+
+
+def coupling(connector, model, walls, strength: list[str], cases: dict[str, str], fc: float,
+             fy: float, bar: float, coupled_from: float):
+    """The coupling beams (designed by 418.10.7) and the degree of coupling of every
+    pair of walls they join, under the drift load cases."""
+    from design.concrete.coupling import degree_of_coupling, design_coupling_beam
+    from etabs_api.workflows.sections import parse_section
+
+    conn = connector._read_database_table("Beam Object Connectivity")
+    points = connector._read_database_table("Point Object Connectivity")
+    xy = {str(r["UniqueName"]): (float(r["X"]), float(r["Y"])) for _, r in points.iterrows()}
+    lines = []
+    for _, r in conn.iterrows():
+        i, j = xy.get(str(r["UniquePtI"])), xy.get(str(r["UniquePtJ"]))
+        if i and j:
+            lines.append(wp.BeamLine(str(r["UniqueName"]), str(r["Story"]), *i, *j))
+    found = wp.coupling_beams(lines, walls)
+    if not found:
+        return [], []
+    tables = model.DatabaseTables
+
+    def beam_shears(selection_cases, selection_combos):
+        tables.SetLoadCasesSelectedForDisplay(selection_cases)
+        tables.SetLoadCombinationsSelectedForDisplay(selection_combos)
+        forces = connector._read_database_table("Element Forces - Beams")
+        wanted = {beam.name for beam, *_ in found}
+        mine = forces[forces["UniqueName"].astype(str).isin(wanted)]
+        return mine
+
+    strength_forces = beam_shears([], strength)
+    results = []
+    for beam, a, b, ln in found:
+        section = str(model.FrameObj.GetSection(beam.name, "", "")[0])
+        parsed = parse_section(section)
+        if parsed is not None:
+            width, depth = float(parsed.width), float(parsed.depth)
+        else:
+            got = model.PropFrame.GetRectangle(section, "", "", 0.0, 0.0, 0, "", "")
+            depth, width = float(got[2]), float(got[3])
+        own = strength_forces[strength_forces["UniqueName"].astype(str) == beam.name]
+        vu = float(pd.to_numeric(own["V2"], errors="coerce").abs().max()) / 1e3 if len(own) else 0.0
+        results.append(design_coupling_beam(beam.name, (f"W{a.number}", f"W{b.number}"),
+                                            beam.story, ln, depth, width, vu, fc, fy, bar))
+    # the degree of coupling, by pair and drift case
+    pairs = []
+    case_forces = beam_shears(list(cases), [])
+    tables.SetLoadCasesSelectedForDisplay(list(cases))
+    tables.SetLoadCombinationsSelectedForDisplay([])
+    piers = connector._read_database_table("Pier Forces")
+    props = connector._read_database_table("Pier Section Properties")
+    by_pair: dict[tuple[int, int], list] = {}
+    for beam, a, b, _ in found:
+        key = tuple(sorted((a.number, b.number)))
+        by_pair.setdefault(key, []).append(beam.name)
+    lookup = {w.number: w for w in walls}
+    for (na, nb), names in by_pair.items():
+        wa, wb = lookup[na], lookup[nb]
+        base = min(set(wa.legs) & set(wb.legs), key=lambda s: list(wa.legs).index(s)
+                   if s in wa.legs else 0, default=None)
+        if base is None:
+            continue
+        ca, cb = _centroid(props, wa.legs[base], base), _centroid(props, wb.legs[base], base)
+        if ca is None or cb is None:
+            continue
+        dx, dy = cb[0] - ca[0], cb[1] - ca[1]
+        distance = math.hypot(dx, dy)
+        across = (-dy / distance, dx / distance)
+        for case in cases:
+            shear = case_forces[(case_forces["UniqueName"].astype(str).isin(names))
+                                & (case_forces["OutputCase"].astype(str) == case)]
+            per_beam = shear.groupby(shear["UniqueName"].astype(str))["V2"].apply(
+                lambda v: float(pd.to_numeric(v, errors="coerce").abs().max()) / 1e3)
+            moments = []
+            for wall in (wa, wb):
+                forces = [f for f in assemble(piers, props, wall.legs[base], base)
+                          if f.combo.startswith(case)]
+                moments.append(max((abs(f.mx * across[0] + f.my * across[1]) for f in forces),
+                                   default=0.0))
+            doc = degree_of_coupling(list(per_beam.values), distance / 1e3, *moments)
+            pairs.append({"Walls": f"W{na} - W{nb}", "Case": case, "Coupling beams": len(names),
+                          "Distance (m)": round(distance / 1e3, 3),
+                          "Sum of beam shears (kN)": round(float(per_beam.sum()), 1),
+                          "Wall base moments (kN-m)": f"{moments[0]:.0f}, {moments[1]:.0f}",
+                          "Degree of coupling": round(doc, 4),
+                          "Acts as": "coupled walls" if doc >= coupled_from else
+                          "separate cantilevers (the coupling is weak)"})
+    return results, pairs
+
+
+def _centroid(props: pd.DataFrame, legs, story: str):
+    rows = props[(props["Story"].astype(str) == story)
+                 & (props["Pier"].astype(str).isin({leg.label for leg in legs}))]
+    if rows.empty:
+        return None
+    area = (pd.to_numeric(rows["WidthBot"]) * pd.to_numeric(rows["ThickBot"]))
+    return (float((pd.to_numeric(rows["CGBotX"]) * area).sum() / area.sum()),
+            float((pd.to_numeric(rows["CGBotY"]) * area).sum() / area.sum()))
+
+
+def write_schedule(path: str, designs, fc: float, fy: float, cover: float, bar_v: float,
+                   bar_h: float, scale: float) -> str:
+    """The DXF wall schedule: one section detail per wall and story (the walls whose
+    legs meet as one section)."""
+    from design.concrete.wall_schedule import write_wall_schedule
+    from design.concrete.walls import WallSection
+    from utilities.output_folders import SCHEDULES, beside
+
+    by_wall: dict[int, dict] = {}
+    for wall, _, legs, d in designs:
+        shapes = leg_shapes(legs)
+        section = WallSection(shapes, fc, fy, cover, bar_v, d.vertical_spacing, d.curtains)
+        thick = sorted({round(leg.thickness) for leg in legs})
+        horizontal = sorted({(s, d.curtains) for _, s, _ in d.horizontal.values()})
+        elements = [b for b in d.boundary if b["needed"]]
+        entry = by_wall.setdefault(wall.number, {"name": f"W{wall.number}", "stories": []})
+        entry["stories"].append({
+            "story": d.story, "legs": shapes, "section": section, "boundary": d.boundary,
+            "thickness": ", ".join(f"{t}" for t in thick) + " mm",
+            "vertical": f"{d.curtains} x {bar_v:g}mm @ {d.vertical_spacing:g}",
+            "horizontal": "; ".join(f"{c} x {bar_h:g}mm @ {s:g}" for s, c in horizontal),
+            "elements": (", ".join(f"{b['length']:.0f} mm" for b in elements)
+                         if elements else "none")})
+    walls = [by_wall[n] for n in sorted(by_wall)]
+    for wall in walls:
+        wall["stories"].reverse()          # the top story first
+    return write_wall_schedule(beside(path, " - Wall Schedule.dxf", SCHEDULES), walls, scale)
+
+
+def coupling_table(beams) -> pd.DataFrame:
+    return pd.DataFrame([{
+        "Beam": b.name, "Walls": " - ".join(b.walls), "Story": b.story,
+        "ln (mm)": round(b.ln), "h (mm)": round(b.h), "b (mm)": round(b.b),
+        "ln / h": round(b.ln / b.h, 2) if b.h else None, "Vu (kN)": round(b.vu, 1),
+        "Rule": b.rule, "Clause": b.clause, "Avd per group (mm2)": round(b.avd),
+        "0.83 sqrt(f'c) Acw (kN)": round(b.vn_max, 1),
+        "Result": "PASS" if b.passed else "FAIL", "Note": b.note} for b in beams])
 
 
 def results_table(designs, bar_v: float, bar_h: float) -> pd.DataFrame:

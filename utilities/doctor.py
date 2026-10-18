@@ -78,6 +78,7 @@ COMMAND_MODULES = (
     "etabs_api.workflows.model_3d", "etabs_api.workflows.irregularity",
     "etabs_api.workflows.concrete_quantities", "etabs_api.workflows.compatibility",
     "etabs_api.workflows.wall_design", "etabs_api.workflows.wall_piers", "design.concrete.walls",
+    "design.concrete.coupling", "design.concrete.wall_schedule", "design.concrete.wall_report",
     "design.concrete.workflow",
     "design.concrete.beams.design", "design.concrete.beams.schedule",
     "design.concrete.beams.calculations", "design.concrete.columns.design",

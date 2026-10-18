@@ -413,6 +413,11 @@ class StoryDesign:
     governing: str = ""
     boundary: list[dict] = field(default_factory=list)
     problems: list[str] = field(default_factory=list)
+    # kept for the report: the forces, the designed section, Vu of each leg, hw
+    forces: list = field(default_factory=list)
+    section: object = None
+    leg_vu: dict[str, float] = field(default_factory=dict)
+    hw: float = 0.0
 
     @property
     def passed(self) -> bool:
@@ -424,7 +429,7 @@ def design_story(story: str, legs: list[LegShape], forces: list[StoryForces], hw
     """Design the vertical and horizontal bars of one story of a wall, and its
     boundary elements. ``hw`` is the height of the whole wall; ``delta_u`` the
     design displacement at its top in each direction (mm), for 418.10.6.2."""
-    out = StoryDesign(story)
+    out = StoryDesign(story, forces=list(forces), hw=hw)
     t_min = min(leg.thickness for leg in legs)
     # ---- shear, leg by leg ----
     rho_l_min = 0.0
@@ -432,6 +437,7 @@ def design_story(story: str, legs: list[LegShape], forces: list[StoryForces], hw
     shear_steel = False
     for leg in legs:
         vu = max((abs(f.leg_shear.get(leg.label, 0.0)) for f in forces), default=0.0)
+        out.leg_vu[leg.label] = vu
         hw_lw = hw / leg.length if leg.length else 99.0
         lmin, tmin = minimum_ratios(inputs.special, vu, leg.length, leg.thickness, inputs.fc,
                                     inputs.fy, inputs.bar_v, hw_lw)
@@ -476,6 +482,7 @@ def design_story(story: str, legs: list[LegShape], forces: list[StoryForces], hw
             break
         spacing -= 25.0
     out.vertical_spacing = spacing
+    out.section = section
     out.rho_l = section.steel / section.area
     out.pm_ratio, out.governing = worst, where
     if worst > 1.0:
@@ -491,6 +498,8 @@ def design_story(story: str, legs: list[LegShape], forces: list[StoryForces], hw
             inertia = float((section.a * across ** 2).sum())
             fibre = section._fibre_size(axis)
             lw = float(np.ptp(across)) + fibre          # to the faces, not the fibre centres
+            if lw <= 2.0 * max(leg.thickness for leg in legs):
+                continue        # bending out of the plane of every leg: no boundary element
             for sign in (1.0, -1.0):
                 worst_c, worst_s = None, None
                 for f in forces:

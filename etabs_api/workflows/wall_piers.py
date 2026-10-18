@@ -246,3 +246,56 @@ def apply_pier_labels(model, walls: list[Wall]) -> int:
                     if return_code(model.AreaObj.SetPier(panel.name, leg.label)) == 0:
                         done += 1
     return done
+
+
+# =============================================================================
+# COUPLING BEAMS: beams joining two separate walls
+# =============================================================================
+@dataclass(frozen=True)
+class BeamLine:
+    name: str
+    story: str
+    xi: float
+    yi: float
+    xj: float
+    yj: float
+
+
+def _on_leg(x: float, y: float, leg: Leg, tolerance: float) -> bool:
+    length = leg.length or 1.0
+    u = ((leg.x2 - leg.x1) / length, (leg.y2 - leg.y1) / length)
+    t = (x - leg.x1) * u[0] + (y - leg.y1) * u[1]
+    across = abs(-(x - leg.x1) * u[1] + (y - leg.y1) * u[0])
+    return -tolerance <= t <= length + tolerance and across <= leg.thickness / 2 + tolerance
+
+
+def _wall_at(x: float, y: float, story: str, walls: list[Wall], tolerance: float) -> Wall | None:
+    for wall in walls:
+        if any(_on_leg(x, y, leg, tolerance) for leg in wall.legs.get(story, [])):
+            return wall
+    return None
+
+
+def clear_span(beam: BeamLine, walls: tuple[Wall, Wall], samples: int = 400) -> float:
+    """The length of the beam outside the two walls (its clear span ln, mm)."""
+    length = math.hypot(beam.xj - beam.xi, beam.yj - beam.yi)
+    outside = 0
+    for k in range(samples):
+        t = (k + 0.5) / samples
+        x, y = beam.xi + t * (beam.xj - beam.xi), beam.yi + t * (beam.yj - beam.yi)
+        if not any(_on_leg(x, y, leg, 0.0) for wall in walls
+                   for leg in wall.legs.get(beam.story, [])):
+            outside += 1
+    return length * outside / samples
+
+
+def coupling_beams(beams: list[BeamLine], walls: list[Wall], tolerance: float = 50.0
+                   ) -> list[tuple[BeamLine, Wall, Wall, float]]:
+    """The beams whose two ends are on two separate walls, with their clear span."""
+    out = []
+    for beam in beams:
+        a = _wall_at(beam.xi, beam.yi, beam.story, walls, tolerance)
+        b = _wall_at(beam.xj, beam.yj, beam.story, walls, tolerance)
+        if a is not None and b is not None and a is not b:
+            out.append((beam, a, b, clear_span(beam, (a, b))))
+    return out

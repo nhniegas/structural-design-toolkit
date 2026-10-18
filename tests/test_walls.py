@@ -125,3 +125,26 @@ def test_leg_forces_are_summed_to_the_wall_centroid():
     assert f.mx == pytest.approx(-((0 - yc) * -100e3 + (2500 - yc) * -100e3) / 1e6)
     assert f.my == pytest.approx(((3000 - xc) * -100e3 + (0 - xc) * -100e3) / 1e6)
     assert f.leg_shear == {"A": 10.0, "B": 20.0}
+
+
+def test_coupling_beam_rules_by_hand():
+    from design.concrete.coupling import degree_of_coupling, design_coupling_beam
+
+    # ln/h = 1.67 and Vu over 0.33 sqrt(f'c) Acw = 314 kN: diagonal bars required
+    beam = design_coupling_beam("CB", ("W1", "W2"), "2F", 1000.0, 600.0, 300.0, 800.0,
+                                FC, FY, 20.0)
+    alpha = math.atan2(600 - 200, 1000)
+    avd = 800e3 / (0.85 * 2 * FY * math.sin(alpha))
+    assert beam.clause.startswith("NSCP 418.10.7.2") and beam.avd == pytest.approx(avd)
+    assert beam.bars == math.ceil(avd / (math.pi * 20 ** 2 / 4))
+    assert beam.vn_max == pytest.approx(0.83 * math.sqrt(FC) * 300 * 600 / 1e3)
+    assert not beam.passed                       # Vu / 0.85 = 941 kN over 790 kN
+    # ln/h = 6: a beam of a special moment frame
+    long = design_coupling_beam("CB2", ("W1", "W2"), "2F", 3000.0, 500.0, 300.0, 70.0,
+                                FC, FY, 20.0)
+    assert long.clause.startswith("NSCP 418.10.7.1")
+    # between: either
+    mid = design_coupling_beam("CB3", ("W1", "W2"), "2F", 1500.0, 500.0, 300.0, 100.0,
+                               FC, FY, 20.0)
+    assert mid.clause == "NSCP 418.10.7.3" and mid.bars >= 4
+    assert degree_of_coupling([60.0], 9.0, 6000.0, 1000.0) == pytest.approx(540 / 7540)

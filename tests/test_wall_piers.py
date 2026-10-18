@@ -8,6 +8,8 @@ core walls, labels kept from story to story. No ETABS.
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from etabs_api.workflows.wall_piers import Panel, legs_of_story, plan_walls  # noqa: E402
@@ -52,3 +54,16 @@ def test_a_core_is_one_wall_of_four_legs():
     box = [(0, 0, 4000, 0), (4000, 0, 4000, 3000), (0, 3000, 4000, 3000), (0, 0, 0, 3000)]
     walls = plan_walls(panels_for("GF", box), ["GF"])
     assert len(walls) == 1 and len(walls[0].legs["GF"]) == 4 and walls[0].shape == "core"
+
+
+def test_a_beam_joining_two_separate_walls_is_a_coupling_beam():
+    from etabs_api.workflows.wall_piers import BeamLine, coupling_beams
+
+    panels = panels_for("GF", [(0, 0, 3000, 0), (4500, 0, 8000, 0), (0, 0, 0, 3000)])
+    walls = plan_walls(panels, ["GF"])
+    beams = [BeamLine("CB1", "GF", 2000, 0, 6000, 0),     # runs into both walls
+             BeamLine("B2", "GF", 0, 3000, 0, 6000),      # one end only on a wall
+             BeamLine("B3", "GF", 1000, 0, 2500, 0)]      # both ends on the same wall
+    found = coupling_beams(beams, walls)
+    assert [beam.name for beam, *_ in found] == ["CB1"]
+    assert found[0][3] == pytest.approx(1500.0, abs=15.0)   # 3000 to 4500 between the walls

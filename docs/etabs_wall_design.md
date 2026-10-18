@@ -41,9 +41,30 @@ Walls are numbered in plan order, as the columns are (top to bottom, then left t
 - **Stress method (418.10.6.3):** needed where P/A + M c / I on the gross section exceeds 0.2 f'c.
 - The length is the larger of c − 0.1 lw and c/2 (418.10.6.4(a)), rounded up to your module.
 
+## Coupling beams and the degree of coupling
+
+A beam that joins two separate walls (not two legs of one wall) is a coupling beam. Its clear span ln is the part of the beam outside both walls. Each is designed by NSCP 418.10.7:
+
+| | Rule |
+|---|---|
+| ln/h ≥ 4 | A beam of a special moment frame, the wall boundary as its column (418.10.7.1): design it with `sdt beams`, SMRF on |
+| ln/h < 2 and Vu > 0.33 λ √f'c Acw | Two groups of diagonal bars (418.10.7.2): Avd = Vu / (φ 2 fy sin α), φ = 0.85 (421.2.4.3), at least 4 bars a group (418.10.7.4(b)); α from the diagonals' centroids 100 mm from the faces |
+| Otherwise | Diagonal bars or the beam rules of 418.6.3 to 418.6.5 (418.10.7.3) |
+| Any | Vn at most 0.83 √f'c Acw (Eq. 418.10.7.4) |
+
+For every pair of walls joined by coupling beams, the **degree of coupling** under each drift load case is the share of the overturning moment carried by the axial couple of the walls: T L / (T L + M1 + M2), with T the sum of the coupling beam shears over the height, L the distance between the walls' centroids, and M1, M2 the walls' own base moments about the axis across the line between them. Under the limit you give (20 % offered), the walls act as separate cantilevers; the summary and the workbook say which.
+
 ## What it writes
 
-`Results/<model> - Wall Design.xlsx` beside the model: one row per leg and story with the vertical bars and ρl, the P-M ratio and the combination and axis that govern, the horizontal bars, ρt and φ for shear, the boundary elements of the story, and the result. A summary lists what fails and where boundary elements are needed.
+Beside the model:
+
+- `Results/<model> - Wall Design.xlsx`: the sheet `Walls`, one row per leg and story with the vertical bars and ρl, the P-M ratio and the combination and axis that govern, the horizontal bars, ρt and φ for shear, the boundary elements of the story, and the result; the sheets `Coupling beams` and `Degree of coupling`.
+- `Calculations/<model> - Wall Calculations.pdf`, in the format of the column report: for every wall and story, the shear of each leg, the governing combination about each principal axis, the minimum steel, both boundary element checks with their numbers and clauses, and the P-M curves about the principal axes with every demand.
+- `Schedules/<model> - Wall Schedule.dxf`: one section detail per wall and story, the walls whose legs meet (an L, a U, a core) drawn as one section, at the scale you give (1 : 50 offered), with the vertical bars, the special boundary element zones, and rows for the thickness, the vertical and horizontal bars and the boundary elements.
+
+A summary lists what fails, where boundary elements are needed and the degree of coupling of each pair.
+
+Boundary elements are checked for bending in the plane of the wall: an axis about which the whole section is no deeper than twice its thickness (bending out of the plane of every leg) is left out.
 
 ## Tested
 
@@ -54,6 +75,4 @@ In ETABS, on the test model with an L wall (6 m and 5 m legs, 250 mm) and a 5 m 
 ## Not covered yet
 
 - Resizing the wall thickness in `sdt design` (your decision: each leg its own thickness).
-- Coupling beams (418.10.7), and the degree of coupling that decides whether coupled walls are designed as cantilevers.
-- The DXF wall schedule and the PDF calculation report.
 - Openings in a leg, and walls that change in plan from story to story beyond the overlap of their legs.
