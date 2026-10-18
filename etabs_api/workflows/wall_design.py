@@ -97,16 +97,132 @@ def wall_height(wall: wp.Wall, elevations: dict[str, float], below: dict[str, st
     return top - bottom
 
 
+
+WALL_FIELDS = {
+    "f'c (MPa)": ("fc", "28"), "fy (MPa)": ("fy", "414"), "Vertical bar (mm)": ("bar_v", "16"),
+    "Horizontal bar (mm)": ("bar_h", "12"), "Cover (mm)": ("cover", "40"),
+    "Boundary element length rounded up to (mm)": ("module", "50"),
+    "Coupling beam diagonal bar (mm)": ("bar_d", "20"),
+    "Degree of coupling: coupled from (%)": ("coupled_from", "20"),
+    "Wall schedule: sections at 1 :": ("scale", "50"),
+}
+
+
+def wall_names(walls) -> list[str]:
+    return [f"W{w.number} ({w.shape}, {len(next(iter(w.legs.values())))} legs)" for w in walls]
+
+
+def ask_wall_inputs(title: str, model, walls, extra: dict[str, tuple[str, str]] | None = None):
+    """Special or ordinary wall by wall, the materials and bars, which boundary element
+    method decides, and the strength combinations. Returns (kinds by wall name, the
+    values, the combinations), or None when cancelled. ``values`` also holds
+    ``decides`` ("displacement" or "stress") and the coupling degree as a share."""
+    from utilities._gui_helpers import (
+        DualListboxSelector,
+        choose_for_each,
+        enter_values,
+        select_option,
+        show_warning,
+    )
+
+    names = wall_names(walls)
+    kinds = choose_for_each(title, "Special structural walls follow 418.10 (zone 4 seismic "
+                            "systems); ordinary walls 411.", names, [SPECIAL, ORDINARY],
+                            {n: SPECIAL for n in names})
+    if kinds is None:
+        return None
+    fields = {**WALL_FIELDS, **(extra or {})}
+    typed = enter_values(title, "Materials and bars of the walls and coupling beams. Walls "
+                         "whose degree of coupling is under the limit act as separate "
+                         "cantilevers.", list(fields),
+                         {label: default for label, (_, default) in fields.items()})
+    if typed is None:
+        return None
+    try:
+        values = {key: float(typed[label]) for label, (key, _) in fields.items()}
+    except ValueError:
+        show_warning("Every value must be a number.", title=title)
+        return None
+    values["coupled_from"] /= 100.0
+    decides = select_option(title, "Special boundary elements: when the displacement method "
+                            "(418.10.6.2) and the stress method (418.10.6.3) both apply, which "
+                            "decides? Both results are shown either way.",
+                            ["Displacement method (418.10.6.2)", "Stress method (418.10.6.3)"])
+    if decides is None:
+        return None
+    values["decides"] = "displacement" if decides.startswith("Displacement") else "stress"
+    combos = [str(n) for n in as_list(model.RespCombo.GetNameList(0, [])[1])]
+    strength = [n for n in combos if n.upper().startswith("ULS")]
+    if not strength:
+        picked = DualListboxSelector("Strength combinations for the wall design",
+                                     combos).show()
+        if not picked:
+            return None
+        strength = picked
+    return kinds, values, strength
+
+
+def design_walls(connector, walls, kinds: dict[str, str], values: dict, strength: list[str],
+                 progress=None):
+    """Design every story of every wall on the current analysis (no dialog). Returns
+    the designs [(wall, special, legs, StoryDesign)] and the WallInputs of each wall."""
+    from etabs_api.workflows.analysis_forces import ensure_analysis
+    from etabs_api.workflows.compatibility import drift_cases
+
+    say = progress or (lambda text: None)
+    model = connector.sap_model
+    cases = drift_cases(connector)
+    r_factor = NSCP.seismic.smrf_r
+    say("Analysis and the pier forces")
+    ensure_analysis(connector, list(cases) or [])
+    tables = model.DatabaseTables
+    tables.SetLoadCasesSelectedForDisplay([])
+    tables.SetLoadCombinationsSelectedForDisplay(strength)
+    forces = connector._read_database_table("Pier Forces")
+    props = connector._read_database_table("Pier Section Properties")
+    try:
+        seismic = connector._read_database_table(
+            "Load Pattern Definitions - Auto Seismic - UBC 97")
+        r_values = pd.to_numeric(seismic["R"], errors="coerce").dropna()
+        r_factor = float(r_values.iloc[0]) if len(r_values) else r_factor
+    except Exception:
+        pass
+    tables.SetLoadCasesSelectedForDisplay(list(cases))
+    tables.SetLoadCombinationsSelectedForDisplay([])
+    moved = connector._read_database_table("Joint Displacements")
+    levels = model.Story.GetStories()
+    names_s = [str(n) for n in as_list(levels[1])]
+    elevations = dict(zip(names_s, (float(z) for z in as_list(levels[2]))))
+    below = {names_s[i]: names_s[i - 1] for i in range(1, len(names_s))}
+    designs = []
+    inputs_by: dict[int, WallInputs] = {}
+    for wall, label in zip(walls, wall_names(walls)):
+        special = kinds.get(label, SPECIAL) == SPECIAL
+        hw = wall_height(wall, elevations, below)
+        top_story = max(wall.legs, key=lambda s: elevations[s])
+        corners = {p.name for leg in wall.legs[top_story] for p in leg.panels}
+        delta_u = _top_displacement(moved, model, corners, cases, r_factor)
+        inputs = WallInputs(special, values["fc"], values["fy"], values["fy"], values["cover"],
+                            values["bar_v"], values["bar_h"], values["module"],
+                            values["decides"])
+        inputs_by[wall.number] = inputs
+        for story in sorted(wall.legs, key=lambda s: elevations[s]):
+            say(f"Wall W{wall.number}, {story}")
+            legs = wall.legs[story]
+            story_forces = assemble(forces, props, legs, story)
+            if not story_forces:
+                continue
+            result = design_story(story, leg_shapes(legs), story_forces, hw, delta_u, inputs)
+            designs.append((wall, special, legs, result))
+    return designs, inputs_by
+
+
 def run_walls_cli():
     from design.concrete.workflow import attach_etabs
     from etabs_api.core.connection import model_file, save_model
     from etabs_api.workflows.compatibility import drift_cases
-    from etabs_api.workflows.analysis_forces import ensure_analysis
     from utilities._gui_helpers import (
-        DualListboxSelector,
         LoadingWindow,
-        choose_for_each,
-        enter_values,
         select_option,
         show_warning,
     )
@@ -141,92 +257,21 @@ def run_walls_cli():
         wp.apply_pier_labels(model, walls)
         save_model(model)
     # ---- inputs ----
-    names = [f"W{w.number} ({w.shape}, {len(next(iter(w.legs.values())))} legs)" for w in walls]
-    kinds = choose_for_each(title, "Special structural walls follow 418.10 (zone 4 seismic "
-                            "systems); ordinary walls 411.", names, [SPECIAL, ORDINARY],
-                            {n: SPECIAL for n in names})
-    if kinds is None:
+    asked = ask_wall_inputs(title, model, walls)
+    if asked is None:
         return None
-    labels = ["f'c (MPa)", "fy (MPa)", "Vertical bar (mm)", "Horizontal bar (mm)", "Cover (mm)",
-              "Boundary element length rounded up to (mm)",
-              "Coupling beam diagonal bar (mm)", "Degree of coupling: coupled from (%)",
-              "Wall schedule: sections at 1 :"]
-    typed = enter_values(title, "Materials and bars of the walls and coupling beams. Walls "
-                         "whose degree of coupling is under the limit act as separate "
-                         "cantilevers.", labels,
-                         {labels[0]: "28", labels[1]: "414", labels[2]: "16", labels[3]: "12",
-                          labels[4]: "40", labels[5]: "50", labels[6]: "20", labels[7]: "20",
-                          labels[8]: "50"})
-    if typed is None:
-        return None
-    try:
-        fc, fy, bar_v, bar_h, cover, module, bar_d, coupled_from, scale = (
-            float(typed[k]) for k in labels)
-    except ValueError:
-        show_warning("Every value must be a number.", title=title)
-        return None
-    decides = select_option(title, "Special boundary elements: when the displacement method "
-                            "(418.10.6.2) and the stress method (418.10.6.3) both apply, which "
-                            "decides? Both results are shown either way.",
-                            ["Displacement method (418.10.6.2)", "Stress method (418.10.6.3)"])
-    if decides is None:
-        return None
-    combos = [str(n) for n in as_list(model.RespCombo.GetNameList(0, [])[1])]
-    strength = [n for n in combos if n.upper().startswith("ULS")]
-    if not strength:
-        picked = DualListboxSelector("Strength combinations for the wall design",
-                                     combos).show()
-        if not picked:
-            return None
-        strength = picked
+    kinds, values, strength = asked
+    names = list(kinds)
+    fc, fy, bar_v, bar_h, cover = (values[k] for k in ("fc", "fy", "bar_v", "bar_h", "cover"))
+    bar_d, coupled_from, scale = values["bar_d"], values["coupled_from"], values["scale"]
     # ---- forces ----
     cases = drift_cases(connector)
-    r_factor = NSCP.seismic.smrf_r
     with LoadingWindow(title) as window:
-        window.update("Analysis and the pier forces")
-        ensure_analysis(connector, list(cases) or [])
-        tables = model.DatabaseTables
-        tables.SetLoadCasesSelectedForDisplay([])
-        tables.SetLoadCombinationsSelectedForDisplay(strength)
-        forces = connector._read_database_table("Pier Forces")
-        props = connector._read_database_table("Pier Section Properties")
-        try:
-            seismic = connector._read_database_table(
-                "Load Pattern Definitions - Auto Seismic - UBC 97")
-            r_values = pd.to_numeric(seismic["R"], errors="coerce").dropna()
-            r_factor = float(r_values.iloc[0]) if len(r_values) else r_factor
-        except Exception:
-            pass
-        tables.SetLoadCasesSelectedForDisplay(list(cases))
-        tables.SetLoadCombinationsSelectedForDisplay([])
-        moved = connector._read_database_table("Joint Displacements")
-        levels = model.Story.GetStories()
-        names_s = [str(n) for n in as_list(levels[1])]
-        elevations = dict(zip(names_s, (float(z) for z in as_list(levels[2]))))
-        below = {names_s[i]: names_s[i - 1] for i in range(1, len(names_s))}
-        designs = []
-        inputs_by: dict[int, WallInputs] = {}
-        for wall, label in zip(walls, names):
-            special = kinds[label] == SPECIAL
-            hw = wall_height(wall, elevations, below)
-            top_story = max(wall.legs, key=lambda s: elevations[s])
-            corners = {p.name for leg in wall.legs[top_story] for p in leg.panels}
-            delta_u = _top_displacement(moved, model, corners, cases, r_factor)
-            inputs = WallInputs(special, fc, fy, fy, cover, bar_v, bar_h, module,
-                                "displacement" if decides.startswith("Displacement") else "stress")
-            inputs_by[wall.number] = inputs
-            for story in sorted(wall.legs, key=lambda s: elevations[s]):
-                window.update(f"Wall W{wall.number}, {story}")
-                legs = wall.legs[story]
-                story_forces = assemble(forces, props, legs, story)
-                if not story_forces:
-                    continue
-                result = design_story(story, leg_shapes(legs), story_forces, hw, delta_u,
-                                      inputs)
-                designs.append((wall, special, legs, result))
+        designs, inputs_by = design_walls(connector, walls, kinds, values, strength,
+                                          window.update)
         window.update("Coupling beams")
         beams, pairs = coupling(connector, model, walls, strength, cases, fc, fy, bar_d,
-                                coupled_from / 100.0)
+                                coupled_from)
     table = results_table(designs, bar_v, bar_h)
     workbook = beside(path, " - Wall Design.xlsx")
     with pd.ExcelWriter(workbook) as writer:

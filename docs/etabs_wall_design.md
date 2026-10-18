@@ -74,5 +74,4 @@ In ETABS, on the test model with an L wall (6 m and 5 m legs, 250 mm) and a 5 m 
 
 ## Not covered yet
 
-- Resizing the wall thickness in `sdt design` (your decision: each leg its own thickness).
 - Openings in a leg, and walls that change in plan from story to story beyond the overlap of their legs.

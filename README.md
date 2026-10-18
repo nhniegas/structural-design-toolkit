@@ -220,7 +220,7 @@ This defines the materials, frame sections, load patterns, UBC 97 response spect
 
 `sdt irregularity` reads the analysed model and reports each irregularity of UBC 97 Tables 16-L and 16-M (NSCP 2015 Tables 208-9 and 208-10): soft story, mass, vertical geometric, weak story (from the column design), torsional with the amplifier Ax, re-entrant corners and diaphragm openings. The types that need judgement are listed with what the model shows. It also gives the P-delta stability coefficient of each story, on first-order drifts from a copy of the model analysed with P-delta off. Nothing is changed in the model. See [Irregularity check](docs/etabs_irregularity.md).
 
-`sdt design` runs the analysis and the beam and column design again and again on a copy of the model, resizing the members until they pass (deflection included), and, if you choose, until every story passes drift. It can end with the [full project report](docs/project_report.md): one PDF with the analysis (3D view, framing plans, loads, combinations, seismic and wind criteria, drifts, irregularities), the design of every member, and the calculation tables. See [Design loop](docs/etabs_design_loop.md).
+`sdt design` runs the analysis and the beam and column design again and again on a copy of the model, resizing the members until they pass (deflection included), and, if you choose, until every story passes drift and every wall passes (a wall leg grows 50 mm at a time). It can end with the [full project report](docs/project_report.md): one PDF with the analysis (3D view, framing plans, loads, combinations, seismic and wind criteria, drifts, irregularities), the design of every member, and the calculation tables. See [Design loop](docs/etabs_design_loop.md).
 
 ## Foundation model
 
@@ -286,7 +286,6 @@ The tag starts `.github/workflows/release.yml`: it runs the tests, builds the pr
 
 Not in this version, and planned for later ones:
 
-- **Walls in the design loop, coupling beams and the wall schedule.** `sdt walls` designs the walls of a model; resizing their thickness in `sdt design`, coupling beams (418.10.7), the DXF wall schedule and the PDF report are not done yet.
 - **Drift by the most effective members.** The design loop grows the columns and girders of the stories that fail drift; choosing the members that remove the most drift per concrete added is not done yet.
 - **Steel and composite members from the ETABS model.** `sdt steel` and `sdt composite` are standalone checks with typed inputs.
 - **Flanged beams.** The design loop resizes rectangular beams and rectangular or circular columns only.

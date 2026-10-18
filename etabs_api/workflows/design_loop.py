@@ -41,6 +41,7 @@ Rules (agreed with the office):
 from __future__ import annotations
 
 import math
+import re
 import os
 import sys
 import time
@@ -114,6 +115,11 @@ class LoopSettings:
     exempt_short_spans: bool = False  # girders under 4d clear span without the SMRF rules
     deflection_stages: object = None  # deflection.DeflectionStages: when partitions are built
     resize_for_drift: bool = False  # grow columns and girders until every story passes drift
+    design_walls: bool = False      # design the walls and thicken their legs (sdt walls)
+    wall_kinds: dict = field(default_factory=dict)   # wall name: special or ordinary
+    wall_values: dict = field(default_factory=dict)  # materials and bars (wall_design)
+    wall_strength: list = field(default_factory=list)
+    wall_max_thickness: float = 400.0
     drift_options: object = None    # drift_check.DriftOptions of the run
 
 
@@ -871,6 +877,43 @@ class Workbench:
                            cases=options.cases)
         return drift_excess(report, options.drift_cases)
 
+    # ---- walls ----
+    def design_walls(self) -> list:
+        """Design every wall on the current analysis (sdt walls, without dialogs)."""
+        from etabs_api.workflows import wall_piers
+        from etabs_api.workflows.wall_design import design_walls
+
+        panels, stories = wall_piers.read_wall_panels(self.connector)
+        walls = wall_piers.plan_walls(panels, stories)
+        self.walls = walls
+        designs, self.wall_inputs = design_walls(
+            self.connector, walls, self.settings.wall_kinds, self.settings.wall_values,
+            self.settings.wall_strength, lambda text: self.show("Wall design", text))
+        return designs
+
+    def story_heights(self) -> dict[str, float]:
+        from etabs_api.core.helpers import as_list
+
+        got = self.model.Story.GetStories()
+        return dict(zip((str(n) for n in as_list(got[1])), (float(h) for h in as_list(got[3]))))
+
+    def apply_wall_thickness(self, actions: dict) -> list[Change]:
+        """Give the panels of each leg the wall section of its new thickness, made from
+        the one it has (same concrete and shell type) when it is not in the model."""
+        if self.model.GetModelIsLocked():
+            self.model.SetModelIsLocked(False)
+        changes = []
+        for (label, story), (thickness, reason, panels) in sorted(actions.items()):
+            for panel in panels:
+                old = str(self.model.AreaObj.GetProperty(panel, "")[0])
+                new = wall_section_name(old, thickness)
+                ensure_wall_section(self.model, old, new, thickness)
+                if self.model.AreaObj.SetProperty(panel, new) == 0:
+                    changes.append(Change(panel, old, new, reason))
+            self.log(f"  {label} {story}: {thickness:.0f} mm  ({reason})")
+        save_model(self.model)
+        return changes
+
     def angles(self, columns: list[str]) -> dict[str, float]:
         return {name: float(self.model.FrameObj.GetLocalAxes(name, 0.0, False)[0])
                 for name in columns}
@@ -1333,6 +1376,76 @@ def drift_actions(excess: dict, sections: dict[str, Section], column_story: dict
     return actions, sorted(set(at_largest))
 
 
+WALL_STEP = 50.0   # mm: a wall leg grows by this much
+_WALL_NAME = re.compile(r"^(SW)_(\d+)_(.+)$", re.IGNORECASE)
+
+
+def wall_section_name(old: str, thickness: float) -> str:
+    """The setup name of a wall section of ``thickness`` (SW_<t>_<concrete>_<rebar>),
+    from the name it replaces; another name gets the thickness added."""
+    match = _WALL_NAME.match(old)
+    if match:
+        return f"{match.group(1).upper()}_{thickness:.0f}_{match.group(3)}"
+    return f"{old}_T{thickness:.0f}"
+
+
+def ensure_wall_section(model, old: str, new: str, thickness: float) -> None:
+    """Create the wall section ``new`` as a copy of ``old`` with another thickness."""
+    from etabs_api.core.helpers import as_list
+
+    names = {str(n) for n in as_list(model.PropArea.GetNameList(0, [])[1])}
+    if new in names:
+        return
+    got = model.PropArea.GetWall(old, 0, 0, "", 0.0, 0, "", "")
+    wall_type, shell, material = int(got[0]), int(got[1]), str(got[2])
+    model.PropArea.SetWall(new, wall_type, shell, material, float(thickness))
+
+
+def wall_thickness_actions(designs, story_heights: dict[str, float], largest: float
+                           ) -> tuple[dict[tuple[str, str], tuple[float, str, list[str]]],
+                                      list[str]]:
+    """The legs to thicken, (leg label, story) -> (new thickness, reason, its panels),
+    and the legs that would go past ``largest``. Walls are never made thinner.
+
+    A leg grows WALL_STEP when its shear is over the limit of 418.10.4.4 / 411.5.4.3,
+    and every leg of the wall at that story when axial load and bending fail even
+    with the closest bars. Where special boundary elements are needed, the legs are
+    at least hu / 16 thick (418.10.6.4(b)), and at least 300 mm when c / lw ≥ 3/8
+    in a wall with hw / lw ≥ 2 (418.10.6.4(c)); rounded up to WALL_STEP.
+    """
+    actions: dict[tuple[str, str], tuple[float, str, list[str]]] = {}
+    at_largest: list[str] = []
+    for wall, special, legs, d in designs:
+        flexure = any(problem.startswith("axial load and bending") for problem in d.problems)
+        needed = [b for b in d.boundary if b.get("needed")]
+        least = 0.0
+        if special and needed:
+            least = story_heights.get(d.story, 0.0) / 16.0
+            if any(b["lw"] > 0 and b["c"] / b["lw"] >= 3.0 / 8.0 and d.hw / b["lw"] >= 2.0
+                   for b in needed):
+                least = max(least, 300.0)
+        for leg in legs:
+            reasons = []
+            target = leg.thickness
+            if flexure:
+                target, reasons = leg.thickness + WALL_STEP, ["axial load and bending"]
+            if any(problem.startswith(f"{leg.label}:") for problem in d.problems):
+                target = max(target, leg.thickness + WALL_STEP)
+                reasons.append("shear limit")
+            if least > target:
+                target = least
+                reasons.append(f"boundary element width {least:.0f} mm (418.10.6.4)")
+            target = math.ceil(target / WALL_STEP - 1e-9) * WALL_STEP
+            if target <= leg.thickness + 1e-6:
+                continue
+            if target > largest + 1e-6:
+                at_largest.append(f"{leg.label} {d.story}")
+                continue
+            actions[(leg.label, d.story)] = (target, "grow wall (" + ", ".join(reasons) + ")",
+                                             [p.name for p in leg.panels])
+    return actions, sorted(set(at_largest))
+
+
 def run_design_loop(bench: Workbench) -> dict:
     """The loop. Returns a summary: status, iterations, changes and what still fails."""
     settings = bench.settings
@@ -1417,6 +1530,72 @@ def run_design_loop(bench: Workbench) -> dict:
     drift_rounds = 0
     drift_stuck: list[str] = []
     drift_note = ""
+    wall_rounds = 0
+    wall_note = ""
+    wall_designs: list = []
+    wall_stuck: list[str] = []
+
+    def drift_step() -> str:
+        """Grow the columns and girders of the stories over the drift limit:
+        "pass", "resized" or "stop"."""
+        nonlocal drift_rounds, drift_stuck, drift_note, status
+        bench.stage = f"Drift check after round {round_number}"
+        excess = bench.drift_excess()
+        if not excess:
+            drift_note = ("drift passes" + (f" after {drift_rounds} resizing"
+                                            f"{'s' if drift_rounds != 1 else ''} for drift"
+                                            if drift_rounds else ""))
+            bench.log(f"Drift: every story passes ({drift_note}).")
+            return "pass"
+        if drift_rounds >= settings.max_rounds:
+            drift_note = f"drift still fails after {drift_rounds} resizings for drift"
+            bench.log(f"Drift: {drift_note} (the limit of rounds).")
+            status = "drift not met"
+            return "stop"
+        drift_rounds += 1
+        sections = bench.sections()
+        actions, at_largest = drift_actions(
+            excess, sections, *bench.member_stories(), bench.story_names(),
+            bench.angles(bench.members()[1]), bench.directions(), settings)
+        drift_stuck = sorted(set(drift_stuck) | set(at_largest))
+        bench.log("")
+        bench.log(f"=== Drift resizing {drift_rounds} ===")
+        for (story, direction), (over, combo, level) in sorted(excess.items()):
+            bench.log(f"  {story} {direction or ''}: {over:.2f} of the limit ({combo}, {level})")
+        if at_largest:
+            bench.log("  at their largest size: " + ", ".join(at_largest))
+        if not actions:
+            drift_note = "drift fails and no column or girder there can be made larger"
+            bench.log(f"Drift: {drift_note}.")
+            status = "drift not met"
+            return "stop"
+        all_changes.extend(bench.apply(actions, sections, grown))
+        return "resized"
+
+    def wall_step() -> str:
+        """Design the walls; thicken the legs that need it: "pass" or "resized"."""
+        nonlocal wall_rounds, wall_note, wall_designs, wall_stuck
+        bench.stage = f"Walls after round {round_number}"
+        wall_designs = bench.design_walls()
+        actions, at_largest = wall_thickness_actions(wall_designs, bench.story_heights(),
+                                                     settings.wall_max_thickness)
+        wall_stuck = sorted(set(wall_stuck) | set(at_largest))
+        failing = [f"W{w.number} {d.story}" for w, _, _, d in wall_designs if not d.passed]
+        if not actions:
+            wall_note = ("every wall passes" if not failing else
+                         "walls still failing: " + ", ".join(failing))
+            bench.log(f"Walls: {wall_note}.")
+            return "pass"
+        if wall_rounds >= settings.max_rounds:
+            wall_note = f"walls still need a thicker leg after {wall_rounds} resizings"
+            bench.log(f"Walls: {wall_note} (the limit of rounds).")
+            return "pass"
+        wall_rounds += 1
+        bench.log("")
+        bench.log(f"=== Wall resizing {wall_rounds} ===")
+        all_changes.extend(bench.apply_wall_thickness(actions))
+        return "resized"
+
     while True:
         status = "not converged"
         for _ in range(settings.max_rounds):
@@ -1436,41 +1615,21 @@ def run_design_loop(bench: Workbench) -> dict:
             if not changes:
                 status = "converged"
                 break
-        if not settings.resize_for_drift or status != "converged":
+        if status != "converged":
             break
-        # ---- drift: grow the columns and girders of the failing stories ----
-        bench.stage = f"Drift check after round {round_number}"
-        excess = bench.drift_excess()
-        if not excess:
-            drift_note = ("drift passes" + (f" after {drift_rounds} resizing"
-                                            f"{'s' if drift_rounds != 1 else ''} for drift"
-                                            if drift_rounds else ""))
-            bench.log(f"Drift: every story passes ({drift_note}).")
-            break
-        if drift_rounds >= settings.max_rounds:
-            drift_note = f"drift still fails after {drift_rounds} resizings for drift"
-            bench.log(f"Drift: {drift_note} (the limit of rounds).")
-            status = "drift not met"
-            break
-        drift_rounds += 1
-        sections = bench.sections()
-        actions, at_largest = drift_actions(
-            excess, sections, *bench.member_stories(), bench.story_names(),
-            bench.angles(bench.members()[1]), bench.directions(), settings)
-        drift_stuck = sorted(set(drift_stuck) | set(at_largest))
-        bench.log("")
-        bench.log(f"=== Drift resizing {drift_rounds} ===")
-        for (story, direction), (over, combo, level) in sorted(excess.items()):
-            bench.log(f"  {story} {direction or ''}: {over:.2f} of the limit ({combo}, {level})")
-        if at_largest:
-            bench.log("  at their largest size: " + ", ".join(at_largest))
-        if not actions:
-            drift_note = "drift fails and no column or girder there can be made larger"
-            bench.log(f"Drift: {drift_note}.")
-            status = "drift not met"
-            break
-        all_changes.extend(bench.apply(actions, sections, grown))
-        unchanged = None
+        if settings.resize_for_drift:
+            outcome = drift_step()
+            if outcome == "resized":
+                unchanged = None
+                continue
+            if outcome == "stop":
+                break
+        if settings.design_walls:
+            outcome = wall_step()
+            if outcome == "resized":
+                unchanged = None
+                continue
+        break
     still_failing = sorted(set(beams.loc[beams["Design_Status"].astype(str) != "OK",
                                          "UniqueName"].astype(str)))
     if report is not None:
@@ -1487,6 +1646,8 @@ def run_design_loop(bench: Workbench) -> dict:
     return {"status": status, "iterations": iteration, "changes": all_changes,
             "failing": still_failing, "beams": beams, "columns": report, "stuck": stuck,
             "drift_rounds": drift_rounds, "drift_note": drift_note,
+            "wall_rounds": wall_rounds, "wall_note": wall_note, "walls": wall_designs,
+            "wall_stuck": wall_stuck,
             "drift_stuck": drift_stuck}
 
 
@@ -1538,6 +1699,40 @@ def ask_drift_resizing(title: str, last: dict | None = None) -> bool | None:
         [DRIFT_RESIZE_YES, DRIFT_RESIZE_NO],
         default_index=1 if (last or {}).get("resize_for_drift") is False else 0)
     return None if chosen is None else chosen == DRIFT_RESIZE_YES
+
+
+WALLS_YES = "Yes - design the walls and thicken a leg (50 mm at a time) that needs it"
+WALLS_NO = "No - leave the walls as they are (sdt walls designs them on their own)"
+
+
+def ask_wall_design(connector, title: str) -> dict | bool | None:
+    """On a model with walls: whether the loop also designs the walls and thickens their
+    legs, and their inputs (as sdt walls asks them, with the largest thickness).
+    False for no walls or No, None when cancelled."""
+    from etabs_api.workflows import wall_piers
+    from etabs_api.workflows.wall_design import ask_wall_inputs
+    from utilities._gui_helpers import select_option
+
+    panels, stories = wall_piers.read_wall_panels(connector)
+    if not panels:
+        return False
+    chosen = select_option(
+        title, "The model has walls. Design them in the loop too?\n\nEach story of each wall is "
+        "designed as sdt walls does. A leg whose shear is over its limit, whose axial load and "
+        "bending fail with the closest bars, or that is thinner than its special boundary "
+        "elements need (418.10.6.4), grows 50 mm; walls are not made thinner.",
+        [WALLS_YES, WALLS_NO])
+    if chosen is None:
+        return None
+    if chosen == WALLS_NO:
+        return False
+    walls = wall_piers.plan_walls(panels, stories)
+    asked = ask_wall_inputs(title, connector.sap_model, walls,
+                            extra={"Largest wall thickness (mm)": ("largest", "400")})
+    if asked is None:
+        return None
+    kinds, values, strength = asked
+    return {"kinds": kinds, "values": values, "strength": strength}
 
 
 def line_sharing_text(settings: LoopSettings) -> str:
@@ -1875,6 +2070,9 @@ def run_design_cli() -> dict | None:
     resize_for_drift = ask_drift_resizing(title, last)
     if resize_for_drift is None:
         return None
+    walls = ask_wall_design(connector, title)
+    if walls is None:
+        return None
     folder = select_output_directory("Folder for the final results, calculations and schedules")
     if not folder:
         return None
@@ -1974,6 +2172,10 @@ def run_design_cli() -> dict | None:
         exempt_short_spans=exempt_short_spans,
         deflection_stages=deflection_stages,
         resize_for_drift=resize_for_drift, drift_options=drift_options,
+        design_walls=bool(walls), wall_kinds=(walls or {}).get("kinds", {}),
+        wall_values=(walls or {}).get("values", {}),
+        wall_strength=(walls or {}).get("strength", []),
+        wall_max_thickness=(walls or {}).get("values", {}).get("largest", 400.0),
     )
     _remember({"resize_for_drift": resize_for_drift, "section_scale": section_scale})
 
@@ -1981,6 +2183,15 @@ def run_design_cli() -> dict | None:
     stem = os.path.splitext(original)[0]
     working = f"{stem} - DESIGN.EDB"
     save_model(model, working)
+    if walls:
+        # the working copy gets the pier labels the wall design reads
+        from etabs_api.workflows import wall_piers
+
+        panels, stories = wall_piers.read_wall_panels(connector)
+        if model.GetModelIsLocked():
+            model.SetModelIsLocked(False)
+        wall_piers.apply_pier_labels(model, wall_piers.plan_walls(panels, stories))
+        save_model(model)
     log_path = beside(original, " - DESIGN log.txt")
     with open(log_path, "w", encoding="utf-8") as handle:
         handle.write(f"Design loop of {original}\nWorking copy: {working}\n"
@@ -2098,6 +2309,13 @@ def loop_summary(summary: dict, settings: LoopSettings, original: str, working: 
                  + ". Change the framing, the span or the support, not the section.")
     if settings.resize_for_drift:
         out.add("Resized for drift", summary.get("drift_note") or "-")
+    if settings.design_walls:
+        out.add("Walls", (summary.get("wall_note") or "-")
+                + (f"; {summary.get('wall_rounds')} thickness resizing(s)"
+                   if summary.get("wall_rounds") else ""))
+        if summary.get("wall_stuck"):
+            out.fail("Wall legs that would need more than the largest thickness: "
+                     + listed(summary["wall_stuck"]))
         if summary.get("drift_stuck"):
             out.fail("At their largest size, so drift could not grow them: "
                      + listed(summary["drift_stuck"]) + ". Raise the largest sizes in the loop "
@@ -2199,6 +2417,21 @@ def save_final_design(bench: Workbench, summary: dict, working: str, folder: str
                 columns, output_path(folder, f"{stem} - Column Calculations.pdf"),
                 settings.smrf, bars["dmain"], bars["dties"], bars["cover"]):
             bench.log("Column calculation report " + missing_pdf_reason())
+    designs = summary.get("walls") or []
+    if designs:
+        from design.concrete.wall_report import export_wall_pdf
+        from etabs_api.workflows.wall_design import results_table, write_schedule
+
+        values = settings.wall_values
+        say("Saving the walls: results, schedule, calculation report")
+        results_table(designs, values["bar_v"], values["bar_h"]).to_excel(
+            output_path(folder, f"{stem} - Wall Design.xlsx"), index=False)
+        write_schedule(os.path.join(folder, f"{stem}.EDB"), designs, values["fc"], values["fy"],
+                       values["cover"], values["bar_v"], values["bar_h"], values["scale"])
+        inputs = getattr(bench, "wall_inputs", {})
+        if not export_wall_pdf(designs, lambda w: inputs[w.number],
+                               output_path(folder, f"{stem} - Wall Calculations.pdf")):
+            bench.log("Wall calculation report " + missing_pdf_reason())
 
 
 if __name__ == "__main__":

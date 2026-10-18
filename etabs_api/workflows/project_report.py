@@ -28,7 +28,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from utilities.output_folders import CALCULATIONS, output_path
+from utilities.output_folders import CALCULATIONS, subfolder
 
 QUESTION = "Write the full project report?"
 YES, NO = "Yes, write the full report", "No"
@@ -1070,13 +1070,16 @@ def gather(connector, model_path: str, folder: str, summary: dict, settings, inf
 def write_project_report(connector, model_path: str, folder: str, summary: dict, settings,
                          info: ProjectInfo, analysis=None, drift=None, tables: dict | None = None,
                          wind_denominator: float = 400.0, progress=None) -> str | None:
-    """Gather the finished model and write ``<model> - Project Report.pdf`` in ``folder``."""
+    """Gather the finished model and write ``<model> - Project Report.pdf`` in the
+    Calculations subfolder of ``folder``, its figures beside it (LaTeX finds them by a
+    path relative to the report)."""
     say = progress or (lambda text: None)
-    data = gather(connector, model_path, folder, summary, settings, info, analysis, drift, tables,
-                  wind_denominator, say)
+    calculations = subfolder(folder, CALCULATIONS)
+    data = gather(connector, model_path, calculations, summary, settings, info, analysis, drift,
+                  tables, wind_denominator, say)
     say("Report: writing the PDF (LaTeX)")
     stem = os.path.splitext(os.path.basename(model_path))[0]
-    return build_report(data, output_path(folder, f"{stem} - Project Report", CALCULATIONS))
+    return build_report(data, os.path.join(calculations, f"{stem} - Project Report"))
 
 
 # =============================================================================

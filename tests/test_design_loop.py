@@ -809,3 +809,35 @@ def test_a_story_failing_both_ways_grows_its_columns_square():
                                {"C1": 0.0}, {}, SETTINGS)
     new = actions["C1"][0]
     assert new.width > 500 and new.depth > 500
+
+
+# --------------------------------------------------------------------------- #
+# v0.11.0: walls in the design loop
+# --------------------------------------------------------------------------- #
+def test_wall_legs_grow_for_shear_flexure_and_boundary_width():
+    from types import SimpleNamespace
+
+    from etabs_api.workflows.design_loop import wall_section_name, wall_thickness_actions
+
+    leg_a = SimpleNamespace(label="W1A", thickness=200.0, panels=[SimpleNamespace(name="P1")])
+    leg_b = SimpleNamespace(label="W1B", thickness=250.0, panels=[SimpleNamespace(name="P2")])
+    wall = SimpleNamespace(number=1)
+    shear = SimpleNamespace(story="2F", problems=["W1A: Vu 900 kN needs Vn ..."], boundary=[],
+                            hw=12000.0)
+    actions, _ = wall_thickness_actions([(wall, True, [leg_a, leg_b], shear)],
+                                        {"2F": 3500.0}, 400.0)
+    assert actions == {("W1A", "2F"): (250.0, "grow wall (shear limit)", ["P1"])}
+    # a boundary element on a 4 m story needs 4000 / 16 = 250 mm
+    boundary = SimpleNamespace(story="GF", problems=[], hw=12000.0,
+                               boundary=[{"needed": True, "c": 500.0, "lw": 5000.0}])
+    actions, _ = wall_thickness_actions([(wall, True, [leg_a, leg_b], boundary)],
+                                        {"GF": 4000.0}, 400.0)
+    assert set(actions) == {("W1A", "GF")} and actions[("W1A", "GF")][0] == 250.0
+    # c / lw at least 3/8 with hw / lw >= 2: at least 300 mm; past the largest is reported
+    deep = SimpleNamespace(story="GF", problems=[], hw=12000.0,
+                           boundary=[{"needed": True, "c": 2000.0, "lw": 5000.0}])
+    actions, largest = wall_thickness_actions([(wall, True, [leg_a, leg_b], deep)],
+                                              {"GF": 4000.0}, 280.0)
+    assert actions == {} and largest == ["W1A GF", "W1B GF"]
+    assert wall_section_name("SW_250_C04_G60", 300) == "SW_300_C04_G60"
+    assert wall_section_name("Wall1", 300) == "Wall1_T300"
