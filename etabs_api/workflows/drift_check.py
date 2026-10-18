@@ -288,7 +288,7 @@ def level_findings(drifts: dict[str, tuple[float, str]], seismic: pd.DataFrame,
 @dataclass
 class DriftReport:
     model_path: str = ""
-    reference: str = CENTER
+    reference: str = CORNERS
     seismic: str = BOTH
     wind_denominator: float = NSCP.wind.drift_limit_denominator
     levels: list[tuple[StiffnessLevel, list[mc.Finding], dict[str, float]]] = field(
@@ -469,7 +469,7 @@ def drift_load_cases(connector) -> dict[str, tuple[str, bool]]:
     return out
 
 
-def run_drift(connector, reference: str = CENTER,
+def run_drift(connector, reference: str = CORNERS,
               wind_denominator: float = NSCP.wind.drift_limit_denominator,
               levels: list[StiffnessLevel] | None = None, progress=None,
               seismic: str = BOTH, combos: list[str] | None = None,
@@ -637,7 +637,7 @@ def run_drift(connector, reference: str = CENTER,
 # =============================================================================
 @dataclass
 class DriftOptions:
-    reference: str = CENTER
+    reference: str = CORNERS
     seismic: str = BOTH
     wind_denominator: float = NSCP.wind.drift_limit_denominator
     # set by resolve_drift_combinations on a model without the DRIFT / WDRIFT names
@@ -714,9 +714,11 @@ def ask_drift_options(title: str, standard: bool = True) -> DriftOptions | None:
     """
     from utilities._gui_helpers import enter_values, select_option, show_warning
 
-    where = select_option(title, "Where should the drift be read?",
-                          ["Diaphragm centre of mass",
-                           "Outer four corners (extreme column joints of each story)"])
+    where = select_option(title, "Where should the drift be read?\n\nThe outer corners give the "
+                          "largest drift of each story, torsion included, and also read the "
+                          "stories that have no diaphragm. The centre of mass leaves both out.",
+                          ["Outer four corners (extreme column joints of each story)",
+                           "Diaphragm centre of mass"])
     if where is None:
         return None
     which = "Both"

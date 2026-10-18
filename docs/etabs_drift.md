@@ -9,7 +9,7 @@ ETABS keeps stiffness modifiers per member, not per load case. Drift with a diff
 ## What it does
 
 1. Asks:
-   - where to read the drift: the diaphragm centre of mass, or the four outer corners;
+   - where to read the drift: the four outer corners (the default since v0.7.0), or the diaphragm centre of mass. The corners give the largest drift of each story with its torsion, and read the stories that have no diaphragm; the centre of mass leaves both out (in the v0.1.1 test it was 18 % under ETABS Story Drifts in Y and missed the GF story, which governed the wind drift);
    - which seismic drift combinations to check: static (`EQXSD`, `EQYSD`), response spectrum (`RSAXD`, `RSAYD`), or both. With static only, the spectrum is not scaled, which saves one analysis per level. The wind drift combinations are always checked;
    - the wind drift limit, h / 400 by default;
    - a confirmation, since it changes the model while it runs;
@@ -38,8 +38,8 @@ ETABS keeps stiffness modifiers per member, not per load case. Drift with a diff
 
 | Reference | How |
 |---|---|
+| Outer four corners (default) | At each story, the column tops farthest along the two diagonals (largest x + y, x − y, −x + y, −x − y). Re-entrant corners of L or T plans are not picked. The drift is ETABS's `Joint Drifts` at those joints |
 | Diaphragm centre of mass | `Diaphragm Center Of Mass Displacements`: the change of the centre-of-mass displacement from the story below (the base below the lowest story), over the story height |
-| Outer four corners | At each story, the column tops farthest along the two diagonals (largest x + y, x − y, −x + y, −x − y). Re-entrant corners of L or T plans are not picked. The drift is ETABS's `Joint Drifts` at those joints |
 
 For the spectrum combinations, ETABS gives Max and Min envelopes. The centre-of-mass drift uses the difference of the envelope displacements, a close approximation; the joint drifts come from ETABS directly. Every story is included, those below the ground level too.
 

@@ -22,7 +22,7 @@ ETABS has no NSCP seismic code, so the model uses the UBC 97 auto-seismic patter
 
 - Figure 208-3 is the response spectrum.
 - Tables 208-4 to 208-8 hold Na, Nv, Ca and Cv. For Z 0.2 and 0.4 these are the same values as the UBC tables.
-- Table 208-11A gives R for concrete systems.
+- Table 208-11A gives R, Ω0 and the height limits for concrete systems.
 
 `sdt check` reads the UBC 97 inputs and holds them to the NSCP tables. It checks every pattern, including Ca, Cv, the period or coefficient typed in by hand. With results, it recomputes the NSCP base shear coefficient from the period and weight ETABS used, so an edited static pattern is checked too.
 
@@ -46,7 +46,7 @@ Every story is included, those below the ground level too. A model set up before
 | | Z is 0.20 or 0.40 (only zones 2 and 4) | Table 208-3 |
 | | Ca and Cv against soil, zone, source type and distance; Na above 1.1; within 2 km of a fault | Tables 208-5 to 208-8, 208.4.4.3 |
 | | I is 1.0, 1.25 or 1.5 | Table 208-1 |
-| | R is a concrete system and is permitted in zone 4 (IMRF 5.5 and OMRF 3.5 are not) | Table 208-11A |
+| | The seismic system: the one saved by `sdt setup`, or, when the model has none and the R of its patterns can be more than one system, the one you pick when the check asks (saved with the model). It must have the R of the patterns and be permitted in the zone (for example IMRF, OMRF, and dual systems with ordinary walls are not permitted in zone 4); the height hn must be within its limit (50 m for bearing walls of special walls, for shear wall-frame interaction and for dual systems with intermediate frames; 75 m for building frames with special walls; 10 m for precast walls and cantilevered columns). An R with more than one system and none named is a warning listing them | Table 208-11A |
 | | Ct is 0.035, 0.030 or 0.020 in ft units (0.0853, 0.0731, 0.0488 in m) | 208.5.2.2 Eq. 208-12 |
 | | Spectrum function Ca and Cv match the patterns | 208.5.3.2, Fig. 208-3 |
 | | Spectrum cases have accidental eccentricity | 208.5.3.5.6 |

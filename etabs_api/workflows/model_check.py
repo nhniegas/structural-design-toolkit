@@ -29,7 +29,8 @@ import pandas as pd
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from design.criteria.code_config import CODE, NSCP  # noqa: E402
+from design.criteria.code_config import (  # noqa: E402
+    CODE, NP, NSCP, SeismicSystem, seismic_system, systems_with_r)
 from etabs_api.core.helpers import as_list  # noqa: E402
 
 OK, INFO, WARN, FAIL, NA = "OK", "INFO", "WARN", "FAIL", "N/A"
@@ -117,6 +118,7 @@ class ModelData:
     # names: combination -> (its lateral load case, whether it is wind)
     drift_case_of: dict[str, tuple[str, bool]] = field(default_factory=dict)
     r_factor: float | None = None  # R for the drift when no UBC 97 pattern gives it
+    system: str | None = None  # the system of Table 208-11A saved for the model (its key)
     # scale factor of each static seismic pattern in its own load case (1 when not read)
     case_scales: dict[str, float] = field(default_factory=dict)
 
@@ -130,6 +132,101 @@ def _num(value, default=math.nan) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+# =============================================================================
+# THE SEISMIC SYSTEM (NSCP Table 208-11A)
+# =============================================================================
+SYSTEM_TABLE = "NSCP Table 208-11A"
+SMRF_SYSTEMS = ("C1", "D1")  # special moment frames, alone or in a dual system
+
+
+def system_findings(r: float, key: str | None, zone4: bool
+                    ) -> tuple[list[SeismicSystem], list[Finding]]:
+    """The system(s) an R of the seismic patterns can be, and what to say of them.
+
+    R alone does not name a system (5.5 is three of them, one permitted in zone 4
+    to 50 m and two not permitted), so the system saved for the model (``key``,
+    from sdt setup or chosen in sdt check) decides when there is one.
+    """
+    zone = "zone 4" if zone4 else "zone 2"
+    candidates = systems_with_r(r)
+    saved = seismic_system(key)
+    if saved is not None:
+        if abs(saved.r - r) > 1e-6:
+            return [saved], [Finding(
+                "Seismic", FAIL, f"R = {r:g} in the seismic patterns, but the system of the model "
+                f"is {saved.label()}: set R = {saved.r:g} in the patterns, or choose the system "
+                "again (sdt setup)", SYSTEM_TABLE)]
+        candidates = [saved]
+    if not candidates:
+        return [], [Finding("Seismic", WARN, f"R = {r:g} is not a concrete system of Table "
+                            "208-11A (steel and masonry: 208-11B, 208-11C)", SYSTEM_TABLE)]
+    if len(candidates) > 1:
+        allowed = [c for c in candidates if c.permitted(zone4)]
+        listed = "; ".join(c.label() for c in candidates)
+        if not allowed:
+            return candidates, [Finding("Seismic", FAIL, f"R = {r:g} is not permitted in {zone} "
+                                        f"for any system it can be: {listed}", SYSTEM_TABLE)]
+        return [], [Finding("Seismic", WARN, f"R = {r:g} can be more than one system: {listed}. "
+                            "Name the system (sdt setup, or when sdt check asks) to check it",
+                            SYSTEM_TABLE)]
+    system = candidates[0]
+    if not system.permitted(zone4):
+        return [system], [Finding("Seismic", FAIL, f"R = {r:g}: {system.label()} is not "
+                                  f"permitted in {zone}", SYSTEM_TABLE)]
+    smrf = system.key in SMRF_SYSTEMS
+    return [system], [Finding(
+        "Seismic", OK if smrf else INFO, f"R = {r:g}: {system.label()}"
+        + ("; the SMRF limits of 418 below apply" if smrf else ""), SYSTEM_TABLE)]
+
+
+def pattern_r_values(d: ModelData) -> list[float]:
+    """The R of the seismic strength patterns (UBC 97 auto lateral loads)."""
+    rows = d.table("Load Pattern Definitions - Auto Seismic - UBC 97")
+    if rows.empty or "R" not in rows:
+        return []
+    names = rows["Name"].map(lambda n: d.pattern_types.get(str(n)) == SEISMIC)
+    return sorted({_num(r) for r in rows[names]["R"] if not math.isnan(_num(r))})
+
+
+def ask_seismic_system(d: ModelData, title: str) -> str | None:
+    """When the R of the patterns can be more than one system of Table 208-11A and
+    none is saved, ask which; the answer is saved with the model. None otherwise."""
+    candidates = [s for r in pattern_r_values(d) for s in systems_with_r(r)]
+    if len(candidates) < 2:
+        return None
+    from etabs_api.workflows import model_inputs as mi
+    from utilities._gui_helpers import select_option
+
+    labels = [s.label() for s in candidates]
+    chosen = select_option(title, "R alone does not name the seismic system of NSCP Table "
+                           "208-11A: each of these has the R of the seismic patterns, with its "
+                           "own Omega0 and height limit. Which is the structure?", labels)
+    if chosen is None:
+        return None
+    key = candidates[labels.index(chosen)].key
+    try:
+        mi.save(d.path, seismic_system=key)
+    except OSError:
+        pass
+    return key
+
+
+def height_limit_findings(systems: list[SeismicSystem], height_m: float,
+                          zone4: bool) -> list[Finding]:
+    """The building height against the limit of each system named (Table 208-11A)."""
+    out = []
+    for system in systems:
+        limit = system.limit(zone4)
+        if limit is None or limit == NP:
+            continue
+        over = height_m > limit + 1e-6
+        out.append(Finding("Seismic", FAIL if over else OK,
+                           f"Height hn = {height_m:.1f} m {'over' if over else 'within'} the "
+                           f"{limit:g} m limit of {system.key} ({system.name}) in "
+                           f"{'zone 4' if zone4 else 'zone 2'}", SYSTEM_TABLE))
+    return out
 
 
 # =============================================================================
@@ -456,6 +553,8 @@ def check_seismic(d: ModelData, settings: dict | None = None) -> list[Finding]:
                        "pattern.", "NSCP 208.5.1.3"))
     strength = rows[rows["Name"].map(lambda n: d.pattern_types.get(str(n)) == SEISMIC)]
     expected = None
+    zone4 = True
+    systems: list[SeismicSystem] = []   # the system(s) of Table 208-11A the patterns' R names
     if not strength.empty:
         r = strength.iloc[0]
         # user-defined Ca, Cv: ETABS writes no zone, soil or source columns at all
@@ -567,20 +666,9 @@ def check_seismic(d: ModelData, settings: dict | None = None) -> list[Finding]:
                            "NSCP Table 208-1"))
         factors = {_num(x["R"]) for _, x in strength.iterrows()}
         for value in sorted(factors):
-            known = next((v for k, v in SEIS.concrete_r.items() if abs(k - value) < 1e-6), None)
-            if known is None:
-                out.append(Finding("Seismic", WARN, f"R = {value:g} is not a concrete system of "
-                                   "Table 208-11A (steel and masonry: 208-11B, 208-11C)",
-                                   "NSCP Table 208-11A"))
-            elif zone4 and not known[1]:
-                out.append(Finding("Seismic", FAIL, f"R = {value:g} ({known[0]}) is not "
-                                   "permitted in zone 4", "NSCP Table 208-11A"))
-            else:
-                smrf = value >= SEIS.smrf_r - 1e-6
-                out.append(Finding("Seismic", OK if smrf else INFO,
-                                   f"R = {value:g}: {known[0]} (Omega0 {LOADS.omega0:g})" +
-                                   ("; the SMRF limits of 418 below apply" if smrf else ""),
-                                   "NSCP Table 208-11A"))
+            found, findings = system_findings(value, d.system, zone4)
+            out += findings
+            systems += found
         cts = {round(_num(x["Ct"]), 4) for _, x in strength.iterrows() if "Ct" in x}
         for ct in sorted(cts):
             known = SEIS.ct.get(ct)
@@ -626,6 +714,7 @@ def check_seismic(d: ModelData, settings: dict | None = None) -> list[Finding]:
                             "required)" if tall else
                             " (static procedure allowed if regular; irregular over 5 stories or "
                             "20 m needs the dynamic procedure)"), "NSCP 208.4.8"))
+        out += height_limit_findings(systems, height / 1000, zone4)
     # results
     if not d.analysed:
         out.append(Finding("Seismic", NA, "Base shear coefficient, period cap, response "
@@ -1249,6 +1338,9 @@ def read_model_data(connector, progress=None) -> ModelData:
     from etabs_api.core.connection import model_file
 
     d = ModelData(path=model_file(model), analysed=_has_results(connector))
+    from etabs_api.workflows import model_inputs as mi
+
+    d.system = mi.seismic_system_key(d.path)
     d.pattern_types = {n: int(model.LoadPatterns.GetLoadType(n)[0]) for n in patterns}
     d.self_weight = {n: float(model.LoadPatterns.GetSelfWTMultiplier(n)[0]) for n in patterns}
     stories = model.Story.GetStories()
@@ -1386,6 +1478,9 @@ def run_model_check() -> list[Finding] | None:
     with LoadingWindow("Checking the model") as window:
         window.update("Reading the model (nothing is changed)")
         data = read_model_data(connector, progress=window.update)
+    if not data.system:
+        data.system = ask_seismic_system(data, "Model Check")
+    with LoadingWindow("Checking the model") as window:
         window.update("Running the checks")
         data.wind_drift_denominator = denominator
         findings = run_checks(data)

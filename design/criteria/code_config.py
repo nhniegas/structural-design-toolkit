@@ -442,7 +442,7 @@ class LoadFactorConfig:
     sustained_live: float = 0.25  # D + 0.25 L for long-term deflection (practice)
     vertical_effect: float = 0.5  # Ev = 0.5 Ca I D                    NSCP 208.6.1
     orthogonal: float = 0.3  # 100 % one direction + 30 % the other    NSCP 208.7.1
-    omega0: float = 2.8  # Em = Omega0 Eh, concrete systems            NSCP Table 208-11A
+    omega0: float = 2.8  # Em = Omega0 Eh; by system, CONCRETE_SYSTEMS  NSCP Table 208-11A
     rho: float = 1.0  # redundancy (1.0 <= rho <= 1.25 for SMRF)        NSCP 208.6.1
     drift_rho: float = 1.0  # rho when calculating drift              NSCP 208.6.1
 
@@ -479,6 +479,87 @@ class LiveLoadReductionConfig:
 # =============================================================================
 # NSCP 2015 SECTION 208 (UBC 97): EARTHQUAKE
 # =============================================================================
+NL, NP = None, 0.0  # height limit: no limit / not permitted
+
+
+@dataclass(frozen=True)
+class SeismicSystem:
+    """One row of NSCP Table 208-11A (earthquake-force-resisting systems of concrete).
+
+    ``zone2`` and ``zone4`` are the building height limits in m: ``NL`` (None)
+    for no limit, ``NP`` (0) where the system is not permitted.
+    """
+
+    key: str
+    family: str
+    name: str
+    r: float
+    omega0: float
+    zone2: float | None
+    zone4: float | None
+
+    def limit(self, zone4: bool) -> float | None:
+        return self.zone4 if zone4 else self.zone2
+
+    def permitted(self, zone4: bool) -> bool:
+        return self.limit(zone4) != NP
+
+    def label(self) -> str:
+        """For the lists: the family, the system, R, Omega0 and the zone 4 limit."""
+        z4 = self.zone4
+        limit = ("no height limit" if z4 is NL else "not permitted" if z4 == NP
+                 else f"up to {z4:g} m")
+        return (f"{self.key}. {self.family}: {self.name} (R {self.r:g}, Omega0 "
+                f"{self.omega0:g}; zone 4: {limit})")
+
+
+# NSCP 2015 Table 208-11A, read from the code (page 2-223), in its order
+CONCRETE_SYSTEMS: tuple[SeismicSystem, ...] = (
+    SeismicSystem("A1", "Bearing wall", "special reinforced concrete shear walls",
+                  4.5, 2.8, NL, 50.0),
+    SeismicSystem("A2", "Bearing wall", "ordinary reinforced concrete shear walls",
+                  4.5, 2.8, NL, NP),
+    SeismicSystem("B1", "Building frame", "special reinforced concrete shear walls or "
+                  "braced frames (shear walls)", 5.0, 2.8, NL, 75.0),
+    SeismicSystem("B2", "Building frame", "ordinary reinforced concrete shear walls or "
+                  "braced frames", 5.6, 2.2, NL, NP),
+    SeismicSystem("B3", "Building frame", "intermediate precast shear walls or braced frames",
+                  5.0, 2.5, NL, 10.0),
+    SeismicSystem("C1", "Moment-resisting frame", "special reinforced concrete moment frames",
+                  8.5, 2.8, NL, NL),
+    SeismicSystem("C2", "Moment-resisting frame", "intermediate reinforced concrete moment "
+                  "frames", 5.5, 2.8, NL, NP),
+    SeismicSystem("C3", "Moment-resisting frame", "ordinary reinforced concrete moment frames",
+                  3.5, 2.8, NL, NP),
+    SeismicSystem("D1", "Dual system", "special reinforced concrete shear walls",
+                  8.5, 2.8, NL, NL),
+    SeismicSystem("D2", "Dual system", "ordinary reinforced concrete shear walls",
+                  6.5, 2.8, NL, NP),
+    SeismicSystem("E1", "Dual system with intermediate moment frames", "special reinforced "
+                  "concrete shear walls", 6.5, 2.8, NL, 50.0),
+    SeismicSystem("E2", "Dual system with intermediate moment frames", "ordinary reinforced "
+                  "concrete shear walls", 5.5, 2.8, NL, NP),
+    SeismicSystem("E3", "Dual system with intermediate moment frames", "shear wall-frame "
+                  "interactive system with ordinary reinforced concrete moment frames and "
+                  "ordinary reinforced concrete shear walls", 4.2, 2.8, NP, NP),
+    SeismicSystem("F1", "Cantilevered column building", "cantilevered column elements",
+                  2.2, 2.0, NL, 10.0),
+    SeismicSystem("G1", "Shear wall-frame interaction", "shear wall-frame interaction systems",
+                  5.5, 2.8, NL, 50.0),
+)
+DEFAULT_SYSTEM = "C1"  # special reinforced concrete moment frames
+
+
+def seismic_system(key: str | None) -> SeismicSystem | None:
+    """The system of Table 208-11A with this key, or None."""
+    return next((s for s in CONCRETE_SYSTEMS if s.key == key), None)
+
+
+def systems_with_r(r: float) -> list[SeismicSystem]:
+    """Every concrete system of Table 208-11A with this R (R alone does not name one)."""
+    return [s for s in CONCRETE_SYSTEMS if abs(s.r - r) < 1e-6]
+
+
 @dataclass(frozen=True)
 class SeismicConfig:
     """Earthquake loads: NSCP 208, with the UBC 97 tables ETABS uses."""
@@ -508,18 +589,6 @@ class SeismicConfig:
     na_cap: float = 1.1  # Na may be capped when regular, SMRF, rho 1.0  NSCP 208.4.4.3
     near_fault_km: float = 2.0  # site-specific spectrum recommended   NSCP 208.4.4.3
     importance_factors: tuple = (1.0, 1.25, 1.5)  #                    NSCP Table 208-1
-    # R -> (system, permitted in zone 4), concrete                     NSCP Table 208-11A
-    concrete_r: dict = field(default_factory=lambda: {
-        8.5: ("special moment frame (or dual system with special walls)", True),
-        6.5: ("dual system: ordinary walls, or special walls with IMRF", True),
-        5.6: ("building frame: ordinary walls", False),
-        5.5: ("intermediate moment frame / shear wall-frame interaction", False),
-        5.0: ("building frame: special walls", True),
-        4.5: ("bearing wall: special walls", True),
-        4.2: ("shear wall-frame interactive with ordinary frames", False),
-        3.5: ("ordinary moment frame", False),
-        2.2: ("cantilevered column", True),
-    })
     smrf_r: float = 8.5  #                                             NSCP Table 208-11A
     # Method A, Ct in ft units (ETABS) -> (system, Ct in m units)      NSCP 208.5.2.2 Eq. 208-12
     ct: dict = field(default_factory=lambda: {

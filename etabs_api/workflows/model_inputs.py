@@ -69,6 +69,19 @@ def load(model_path: str) -> dict:
     return dict((load_settings(settings_path(model_path)) or {}).get(MODEL_KEY) or {})
 
 
+def seismic_system_key(model_path: str) -> str | None:
+    """The system of NSCP Table 208-11A saved for this model: chosen in sdt setup,
+    or in sdt check on a model the toolkit did not set up. None when neither."""
+    from etabs_api.workflows.model_setup import load_settings, settings_path
+
+    try:
+        data = load_settings(settings_path(model_path)) or {}
+    except Exception:
+        return None
+    return ((data.get("seismic") or {}).get("system")
+            or (data.get(MODEL_KEY) or {}).get("seismic_system") or None)
+
+
 def save(model_path: str, **values) -> None:
     """Add ``values`` to what is saved for this model; the setup inputs are kept."""
     from etabs_api.workflows.model_setup import load_settings, save_settings, settings_path

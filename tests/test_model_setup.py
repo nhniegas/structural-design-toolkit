@@ -113,7 +113,7 @@ def test_static_and_spectrum_sets_share_one_number_and_one_format():
         assert sum(n.startswith(f"ULS {number} ") and " EQ" in n for n in names) == 8
         assert sum(n.startswith(f"ULS {number} ") and " RSA" in n for n in names) == 8
     assert not any(" - " in n and not ("(0.9 - Ev)" in n or "(0.6 - " in n or "- 1.0 Em" in n
-                                       or n.startswith("DRIFT "))
+                                       or n.startswith("DRIFT ") or n.endswith((" WX", " WY")))
                    for n in names)
 
 
@@ -135,7 +135,7 @@ def test_combinations_only_use_what_was_created_before_them():
     for combo in lc.build_combinations(PATTERNS, 0.4):
         assert all(name in seen for name, _ in combo.combos), combo.name
         seen.add(combo.name)
-    assert len(seen) == 168
+    assert len(seen) == 188          # 168 before v0.7.0, plus 20 with the wind reversed
 
 
 def test_drift_combinations_follow_203_with_rho_one():
@@ -150,6 +150,21 @@ def test_drift_combinations_follow_203_with_rho_one():
     wind = combos["WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WX"]
     assert dict(wind.cases)["WX"] == 1.0
     assert combos["ENVE_DRIFT"].envelope and combos["ENVE_WDRIFT"].envelope
+
+
+def test_every_wind_combination_also_has_the_wind_reversed():
+    """The wind blows either way (v0.7.0): 0.9 D - 1.0 W governs the uplift."""
+    combos = _combos()
+    assert dict(combos["ULS 108 0.9 DL + 1.0 WX"].cases)["WX"] == 1.0
+    assert dict(combos["ULS 108 0.9 DL - 1.0 WX"].cases)["WX"] == -1.0
+    assert dict(combos["SLS 103 1.0 DL - 0.6 WY"].cases)["WY"] == -0.6
+    reversed_drift = combos["WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WX reversed"]
+    assert dict(reversed_drift.cases)["WX"] == -1.0
+    for kind in ("ULS", "SLS", "WDRIFT"):
+        plus = [n for n in combos if n.startswith(kind + " ") and " WX" in n and "reversed" not in n
+                and " - " not in n.split(" DL")[-1]]
+        minus = [n for n in combos if n.startswith(kind + " ") and " WX" in n and n not in plus]
+        assert len(plus) == len(minus) > 0, kind
 
 
 def test_deflection_combinations_are_unfactored_and_not_designed():
@@ -545,3 +560,26 @@ def test_the_wind_table_is_not_written_when_it_already_holds_the_values():
     blank = [{"Name": "WX", "Angle": ""}, {"Name": "WY", "Angle": 0.0}]
     assert ms.table_holds(model, ms.WIND_TABLE, blank) is False
     assert ms.table_holds(model, ms.WIND_TABLE, blank, ignore=("Angle",)) is True
+
+
+def test_the_system_gives_r_and_omega0():
+    """NSCP Table 208-11A: Omega0 follows the system chosen (v0.7.0), not one value for all."""
+    from etabs_api.workflows import model_setup as setup
+
+    settings = setup.merge_settings(None)
+    assert setup.system_of(settings).key == "C1" and setup.system_omega0(settings) == 2.8
+    settings["seismic"].update(system="B2", r_factor=5.6)   # ordinary walls, building frame
+    assert setup.system_omega0(settings) == 2.2
+    sslc = {c.name: c for c in setup.combinations(settings)}["SSLC 100 1.2 DL + f LL + 1.0 Em EQ"]
+    assert sslc.combos == [("ENVE_EQ", 2.2)]
+    # inputs saved before v0.7.0 have only R: the first system with it
+    settings["seismic"].pop("system")
+    settings["seismic"]["r_factor"] = 2.2
+    assert setup.system_of(settings).key == "F1" and setup.system_omega0(settings) == 2.0
+
+
+def test_inputs_saved_with_r_only_keep_their_r():
+    from etabs_api.workflows import model_setup as setup
+
+    merged = setup.merge_settings({"seismic": {"r_factor": 6.5}})
+    assert merged["seismic"]["system"] == "D2" and setup.system_of(merged).r == 6.5

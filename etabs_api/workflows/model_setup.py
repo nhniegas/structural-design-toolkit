@@ -37,7 +37,8 @@ if __package__ in (None, ""):
     sys.path.insert(
         0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from design.criteria.code_config import CODE, NSCP
+from design.criteria.code_config import (
+    CODE, CONCRETE_SYSTEMS, DEFAULT_SYSTEM, NSCP, seismic_system, systems_with_r)
 from etabs_api.core.helpers import as_list, return_code
 from etabs_api.workflows.load_combinations import DRIFT_SPECTRUM_CASES as lc_drift_cases
 from etabs_api.workflows.load_combinations import Combination, build_combinations
@@ -131,7 +132,7 @@ DEFAULT_SETTINGS = {
     "walls": {"thickness": [150, 200, 250, 300], "concrete_ksi": None},
     "seismic": {
         "zone_factor": 0.4, "soil_type": "SD", "source_type": "A", "distance_km": 10.0,
-        "importance": 1.0, "r_factor": NSCP.seismic.smrf_r, "ct": 0.03,
+        "importance": 1.0, "system": DEFAULT_SYSTEM, "r_factor": NSCP.seismic.smrf_r, "ct": 0.03,
         "eccentricity": NSCP.seismic.eccentricity,
     },
     "wind": {"speed": 150.0, "exposure": "B", "kzt": 1.0, "gust": 0.85, "kd": 0.85},
@@ -314,11 +315,28 @@ def seismic_values(settings: dict) -> dict:
     }
 
 
+def system_of(settings: dict):
+    """The system of NSCP Table 208-11A of the setup inputs. Inputs saved before
+    v0.7.0 have only R: the first system with that R is taken."""
+    s = settings["seismic"]
+    found = seismic_system(s.get("system"))
+    if found is None:
+        found = next(iter(systems_with_r(float(s.get("r_factor", 0)))), None)
+    return found
+
+
+def system_omega0(settings: dict) -> float:
+    """Omega0 of the system (NSCP Table 208-11A), for Em = Omega0 Eh."""
+    found = system_of(settings)
+    return found.omega0 if found else OMEGA0
+
+
 def combinations(settings: dict) -> list[Combination]:
     values = seismic_values(settings)
     return build_combinations(
         {name: kind for name, kind, _ in load_patterns(settings)},
-        values["ca"], settings["seismic"]["importance"], RHO, OMEGA0, LIVE_FACTOR,
+        values["ca"], settings["seismic"]["importance"], RHO, system_omega0(settings),
+        LIVE_FACTOR,
     )
 
 
@@ -338,6 +356,11 @@ def merge_settings(saved: dict | None) -> dict:
                     merged[key][inner] = inner_value
         else:
             merged[key] = value
+    seismic = (saved or {}).get("seismic") or {}
+    if "r_factor" in seismic and "system" not in seismic:
+        # saved before v0.7.0, with R only: the system follows R, not the default
+        match = systems_with_r(float(seismic["r_factor"]))
+        merged["seismic"]["system"] = match[0].key if match else None
     return merged
 
 
@@ -1046,7 +1069,10 @@ class SetupResult:
             ["Seismic source type", s["source_type"]],
             ["Distance to the source (km)", f"{s['distance_km']:g}"],
             ["Importance factor, I", f"{s['importance']:g}"],
+            ["System (Table 208-11A)", system_of(self.settings).label()
+             if system_of(self.settings) else "-"],
             ["R", f"{s['r_factor']:g}"],
+            ["Omega0", f"{system_omega0(self.settings):g}"],
             ["Ct", f"{s['ct']:g}"],
             ["Ca", f"{values['ca']:.4f}"],
             ["Cv", f"{values['cv']:.4f}"],
@@ -1297,7 +1323,7 @@ def ask_settings(settings: dict) -> dict | None:
         "Seismic zone factor Z": s["zone_factor"], "Soil profile type (SA to SE)": s["soil_type"],
         "Seismic source type (A, B, C)": s["source_type"],
         "Distance to the source (km)": s["distance_km"], "Importance factor I": s["importance"],
-        "R": s["r_factor"], "Ct (as typed in ETABS)": s["ct"],
+        "Ct (as typed in ETABS)": s["ct"],
         "Accidental eccentricity ratio": s["eccentricity"],
     }
     answers = ask("Seismic (UBC 97)", "One set of seismic inputs for the whole project. Ca and "
@@ -1305,12 +1331,22 @@ def ask_settings(settings: dict) -> dict | None:
     if answers is None:
         return None
     for key, label in zip(
-        ("zone_factor", "soil_type", "source_type", "distance_km", "importance", "r_factor",
+        ("zone_factor", "soil_type", "source_type", "distance_km", "importance",
          "ct", "eccentricity"), fields,
     ):
         text = answers[label].strip()
         s[key] = text.upper() if key in ("soil_type", "source_type") else float(text)
     seismic_values(settings)  # raises a clear error on an invalid zone, soil or source
+    current = system_of(settings) or seismic_system(DEFAULT_SYSTEM)
+    labels = [system.label() for system in CONCRETE_SYSTEMS]
+    chosen = select_option(
+        "Seismic (UBC 97)", "The earthquake-force-resisting system (NSCP Table 208-11A). R and "
+        "Omega0 follow from it, and sdt check compares the building height with its limit.",
+        labels, default_index=labels.index(current.label()))
+    if chosen is None:
+        return None
+    system = CONCRETE_SYSTEMS[labels.index(chosen)]
+    s["system"], s["r_factor"] = system.key, system.r
 
     # ---- wind ----
     w = settings["wind"]

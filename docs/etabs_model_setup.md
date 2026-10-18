@@ -51,7 +51,7 @@ Seven dialogs follow (eight with membrane slabs). Each box already holds the val
 | Materials | Concrete strengths (ksi); rebar grades (ksi) | `4, 5, 6` and `60` give C04, C05, C06 and G60 |
 | Frame Sections | Concrete and rebar of the sections; then for each kind of section a range as `min, max, step` in mm | Girders G: width `300, 600, 100`, depth `500, 1000, 100`. Leave a range blank to skip that kind |
 | Slab and Wall Sections | Slab thicknesses (mm); slab type (Membrane, Shell-Thin or Shell-Thick); concrete of the slabs (ksi); wall thicknesses (mm); concrete of the walls (ksi). When the type is Membrane, a second dialog asks whether to add a one-way counterpart of each slab | `100, 125, 150, 200`, `Membrane`, `4`, `150, 200, 250, 300`, `5`. Leave a list blank to skip it |
-| Seismic (UBC 97) | Zone factor Z, soil profile type, source type, distance (km), I, R, Ct, eccentricity ratio | `0.4`, `SD`, `A`, `8`, `1`, `8.5`, `0.03`, `0.05` |
+| Seismic (UBC 97) | Zone factor Z, soil profile type, source type, distance (km), I, Ct, eccentricity ratio; then the seismic system, picked from the list of NSCP Table 208-11A | `0.4`, `SD`, `A`, `8`, `1`, `0.03`, `0.05`; C1, special reinforced concrete moment frames |
 | Wind (ASCE 7-10) | Wind speed (as typed in ETABS, mph), exposure type, Kzt, gust factor, Kd | `150`, `B`, `1`, `0.85`, `0.85` |
 | Load Patterns | Extra super dead, live and reducible live patterns | `ELEVATOR DEAD, CONCRETE PAD` |
 | Mass Source | A choice: include 20 % of the reducible live load in the seismic mass, or not | |
@@ -123,7 +123,7 @@ A new blank model also has the default `Dead` and `Live` patterns of ETABS remov
 
 ## Seismic coefficients
 
-One set of seismic inputs is typed per project: zone factor, soil profile type, source type, distance, I, R and Ct. Ca and Cv are worked out from them with the UBC 97 tables (`ubc97.py`) and used for the six seismic patterns, the response spectrum function and the vertical effect, so they cannot disagree.
+One set of seismic inputs is typed per project: zone factor, soil profile type, source type, distance, I and Ct, and the system is picked from NSCP Table 208-11A. R and Ω0 come from the system (since v0.7.0; R alone does not name a system: 5.5 is three of them), and the system is saved with the inputs for `sdt check`. Inputs saved before v0.7.0 hold only R: the first system with that R is taken, and the dialog shows it to confirm. Ca and Cv are worked out from them with the UBC 97 tables (`ubc97.py`) and used for the six seismic patterns, the response spectrum function and the vertical effect, so they cannot disagree.
 
 How the seismic patterns hold these inputs depends on the model:
 
@@ -139,11 +139,11 @@ Names are `<set> <number> <expression>`, for example `ULS 107 (1.2 + Ev) DL + f 
 
 | Set | Use |
 |---|---|
-| `ULS` | Strength. These are the concrete design combinations |
-| `SLS` | Service checks |
-| `SSLC` | Special seismic combinations with Em = 2.8 Eh |
+| `ULS` | Strength. These are the concrete design combinations. Every wind combination is made twice, with `+ W` and `- W`, since the wind blows either way (`ULS 108 0.9 DL + 1.0 WX` and `ULS 108 0.9 DL - 1.0 WX`; since v0.7.0) |
+| `SLS` | Service checks, the wind with both signs as in `ULS` |
+| `SSLC` | Special seismic combinations with Em = Ω0 Eh, Ω0 of the system (2.8 for most; 2.2 for ordinary walls of a building frame, 2.5 for intermediate precast walls, 2.0 for cantilevered columns) |
 | `DRIFT` | Seismic drift, NSCP 208.6.4.1, using the 203.3 combinations 203-5 and 203-7, `(1.2 + Ev) DL + f LL ± 1.0 E` and `(0.9 - Ev) DL ± 1.0 E`, with ρ = 1.0 (208.6.1). E is a drift case: `EQXSD` / `EQYSD` (period not capped), or `RSAXD` / `RSAYD` (no sign: the spectrum is an envelope). The scaling by `sdt analyze` changes the cases, so the combinations follow it with no change. Envelope `ENVE_DRIFT` |
-| `WDRIFT` | Wind drift, 203-3, 203-4 and 203-6 on `WX` and `WY`. NSCP sets no limit; `sdt check` asks for one (h/400 by default). Envelope `ENVE_WDRIFT` |
+| `WDRIFT` | Wind drift, 203-3, 203-4 and 203-6 on `WX` and `WY`, each also with the wind reversed (the name ends in `reversed`). NSCP sets no limit; `sdt check` asks for one (h/400 by default). Envelope `ENVE_WDRIFT` |
 | `DEF` | Deflection checks, unfactored: `DEF 100 1.0 DL`, `DEF 101 1.0 DL + 1.0 LL`, `DEF 102 1.0 DL + 0.25 LL` (sustained) and `DEF 103 1.0 DL + 1.0 Lr` |
 | `EQ_COMBO_01` to `08`, `RSA_COMBO_01` to `08` | The eight directional combinations: 100 % in one direction with 30 % in the other |
 | `ENVE_...` | Envelopes |

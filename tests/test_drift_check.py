@@ -173,3 +173,15 @@ def test_a_drift_pattern_under_the_zone_4_minimum_is_reported():
     table["CoeffUsed"] = 0.8 * 0.4 * 1.36 / 8.5
     assert dc.typed_minimum_findings(table, types) == []
     assert dc.typed_minimum_findings(pd.DataFrame({"Name": []}), types) == []
+
+
+def test_the_outer_corners_are_the_default(monkeypatch):
+    # v0.7.0: the corners read torsion and the stories with no diaphragm
+    from utilities import _gui_helpers
+
+    monkeypatch.setattr(_gui_helpers, "select_option",
+                        lambda title, message, options, default_index=0, **_: options[default_index])
+    monkeypatch.setattr(_gui_helpers, "enter_values", lambda title, message, labels, defaults, **_: defaults)
+    options = dc.ask_drift_options("Drift")
+    assert options.reference == dc.CORNERS
+    assert dc.DriftReport(model_path="m.EDB").reference == dc.CORNERS
