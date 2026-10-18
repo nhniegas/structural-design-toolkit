@@ -83,7 +83,10 @@ COMMAND_MODULES = (
     "design.concrete.columns.schedule", "design.concrete.columns.calculations",
     "design.steel.composite_column_aiscDG06",
     "design.steel.wide_flange_aisc360",
-    "design.loads.wind_directional_asce7", "utilities._calc_report",
+    "design.loads.wind_directional_asce7", "design.concrete.pile_cap",
+    "design.concrete.pile_cap_report", "design.concrete.pile_cap_window",
+    "utilities.design_window",
+    "utilities._calc_report",
 )
 
 

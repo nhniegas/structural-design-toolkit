@@ -8,16 +8,18 @@ Structural design calculations and ETABS automation, run from the terminal with 
 |---|---|---|
 | `sdt beams` | `concrete/beams/` | ACI 318M-14 beam flexure, shear, torsion, deflection and SMRF checks from ETABS forces; girder and beam schedule DXF; PDF calculation report |
 | `sdt columns` | `concrete/columns/` | ACI 318M-14 column P-M with slenderness, shear, confinement, strong-column and joint-shear checks; column schedule DXF; PDF calculation report |
-| `sdt composite` | `steel/composite_column_aiscDG06.py` | AISC Design Guide 6 rectangular filled composite column; printout and/or PDF report |
-| `sdt steel` | `steel/wide_flange_aisc360.py` | AISC 360-22 wide-flange capacity checks; printout and/or PDF report |
+| `sdt composite` | `steel/composite_column_aiscDG06.py` | AISC Design Guide 6 rectangular filled composite column; one window with the section drawn and its interaction diagram; printout and/or PDF report |
+| `sdt steel` | `steel/wide_flange_aisc360.py` | AISC 360-22 wide-flange capacity checks; one window with the section drawn and the ratio of every check; printout and/or PDF report |
 | `sdt wind` | `loads/wind_directional_asce7.py` | ASCE 7 directional procedure (MWFRS) wind pressures; printout and/or PDF report |
+| `sdt pilecap` | `concrete/pile_cap.py` | NSCP 2015 pile cap under one column: pile reactions, bars, shear, strut-and-tie for deep caps, least thickness; one window with the cap and piles drawn; printout and/or PDF report |
 
 Where the code is:
 
 ```
 design/
   criteria/     the code values (code_config.py) and the target ratios (dcr_targets.py)
-  concrete/     workflow.py: the sdt beams, sdt deflection and sdt columns commands
+  concrete/     workflow.py: the sdt beams, sdt deflection and sdt columns commands;
+                pile_cap.py and pile_cap_report.py: sdt pilecap
     beams/      design, sections, supports, deflection, carriers, results, schedule, calculations, options
     columns/    design, sizing, section, layouts, flexure, interaction, slenderness, transverse,
                 shear, joints, tables, report, schedule, calculations, options
@@ -59,7 +61,7 @@ Supporting code:
 - `design/concrete/columns/interaction.py`: the biaxial P-Mx-My design interaction surface of a column layout, built once and cached. It also provides the demand convex hull and the 3D figure for the calculation report.
 - `etabs_api/workflows/model_analysis.py`: analysis run, response spectrum scaling, period, modal mass and weight checks.
 - `etabs_api/workflows/model_setup.py`, `ubc97.py`, `load_combinations.py`: definition of materials, sections, loads and NSCP 2015 combinations in an ETABS model.
-- `utilities/design_cli.py`: the terminal workflow shared by the composite, steel and wind checks (input dialog, then printout, PDF or both).
+- `utilities/design_cli.py`: the dialog workflow of the standalone checks (input dialogs, then printout, PDF or both); `utilities/design_window.py`: the window of the composite, steel and pile cap checks (inputs, live drawing, results).
 - `utilities/_gui_helpers.py`: file pickers, list pickers, choice and text-entry dialogs, and the loading window.
 - `utilities/_calc_report.py`: layout of the beam and column PDF calculation reports.
 - `utilities/terminal.py`: tables, colour and equations in the terminal; `design/concrete/results_tables.py`: the beam and column tables.
@@ -131,6 +133,7 @@ Each guide in `docs/` covers one tool: how to run it, its inputs, what it writes
 - [Concrete quantities](docs/etabs_concrete_quantities.md)
 - [Steel and composite modules](docs/steel_design_documentation.md)
 - [Wind load calculator](docs/wind_calculator_asce7_documentation.md)
+- [Pile cap design](docs/pile_cap_design.md)
 - [Results in the terminal](docs/terminal_output.md)
 - [The dialogs](docs/dialogs.md)
 - [The calculation reports](docs/calculation_reports.md)
@@ -162,6 +165,7 @@ sdt quantities  # concrete volume by story, floor area and the concrete ratio in
 sdt composite   # rectangular filled composite column, AISC DG6 (no ETABS)
 sdt steel       # wide-flange steel member, AISC 360-22 (no ETABS)
 sdt wind        # MWFRS wind pressures, ASCE 7 directional procedure (no ETABS)
+sdt pilecap     # pile cap under one column, NSCP 2015 (no ETABS)
 sdt doctor      # check that this machine can run the toolkit: ETABS, dialogs, LaTeX and its packages
 sdt             # the menu of commands (also what the packaged sdt.exe opens with)
 sdt --help      # list the commands
@@ -171,7 +175,7 @@ sdt beams --record beams.json    # any command: save what you answer in its dial
 sdt beams --answers beams.json   # any command: run it with no dialog, from that file
 ```
 
-Each command asks for its inputs in dialogs. The standalone checks (`composite`, `steel`, `wind`) then ask whether to print the results in the terminal, export a PDF calculation report, or both. The terminal shows the detailed results of a command as tables, with the equations of the checks and each status in colour (see [Results in the terminal](docs/terminal_output.md)). When it finishes, a separate window shows its summary: what was run, the counts, what needs attention and the files written.
+Each command asks for its inputs in dialogs. The standalone checks `composite`, `steel` and `pilecap` open one window instead: the inputs, a drawing that follows them as you type, and the results, with buttons to run again, print in the terminal or save the PDF report. `wind` asks whether to print the results in the terminal, export a PDF calculation report, or both. The terminal shows the detailed results of a command as tables, with the equations of the checks and each status in colour (see [Results in the terminal](docs/terminal_output.md)). When it finishes, a separate window shows its summary: what was run, the counts, what needs attention and the files written.
 
 The commands also run on a model that was not made with `sdt setup`: one with its own combination names, section names and untagged members. A command reads what the model holds and asks for what is missing (which combinations to design for, the deflection and drift combinations, what to do with untagged members), saves the answers beside the model, and says in its summary what was read, answered or assumed. See [Working on a model the toolkit did not set up](docs/existing_models.md).
 
@@ -227,6 +231,10 @@ This defines the materials, frame sections, load patterns, UBC 97 response spect
 ## Concrete quantities
 
 `sdt quantities` gives the volume of concrete of each story and of the building, the floor area, and the concrete ratio in m3/m2. Beams are measured below the slab and between the faces of their supports, slabs less their openings and the columns through them, so nothing is counted twice. The slab on grade, which is not modelled as a rule, is the footprint of the building by the thickness you type, and the footings and tie beams of the saved foundation plan can be added. See [Concrete quantities](docs/etabs_concrete_quantities.md).
+
+## Pile cap design
+
+`sdt pilecap` designs a pile cap under one column to NSCP 2015, with no ETABS: the pile reactions of a rigid cap from every combination (typed, or read from an Excel or CSV file), the pile capacity, the bottom and top bars with their anchorage, one-way and two-way shear at the column and around the piles, the column bearing on the cap, and the least thickness that passes. A cap with piles close to the column is checked with a strut-and-tie model (NSCP 423) or with the special checks of the CRSI Design Guide for Pile Caps. The PDF report cites NSCP 2015 for every check, and the CRSI guide, ACI 318M-14 commentary and FHWA GEC 12 (AASHTO LRFD) where NSCP leaves a point open. The results were checked against CRSI Design Examples #1 and #2, which the guide works step by step. See [Pile cap design](docs/pile_cap_design.md).
 
 ## Beam and column design
 

@@ -1,6 +1,6 @@
 # Steel and Composite Design Modules
 
-Two modules: the rectangular filled composite column designer (`sdt composite`) and the general steel section designer (`python main.py steel`). Both run from the terminal; neither needs Excel.
+Two modules: the rectangular filled composite column designer (`sdt composite`) and the general steel section designer (`sdt steel`). Each opens one window with its inputs, a drawing of the section and the results; neither needs ETABS or Excel.
 
 Every design module run from the terminal offers the same names:
 
@@ -10,7 +10,8 @@ Every design module run from the terminal offers the same names:
 | `calculate(values)` | runs the checks from a dict of the inputs, keyed as in `INPUTS` |
 | `summary_text(result)` | the results as plain text |
 | `export_pdf(result, path)` | writes the PDF report; returns its path, or `None` if LaTeX fails |
-| `run()` | the terminal workflow (`sdt composite`, `sdt steel`) |
+| `run()` | the window (`sdt composite`, `sdt steel`); `run(window=False)` or an answers file gives the input dialog instead |
+| `preview(figure, values, result)`, `result_parts(result)`, `window_summary(result)` | what the window draws and shows (see [The design window](#the-design-window)) |
 
 
 ## Composite column: `design/steel/composite_column_aiscDG06.py`
@@ -25,11 +26,13 @@ From the project folder, with the environment active:
 sdt composite
 ```
 
-1. A dialog asks for the inputs. Choices are listed in brackets beside the box (type one of them); boxes marked optional may be left blank. The values typed last time are filled in again.
-2. If a value is not valid, a message names it and the dialog opens again with your entries.
-3. A second dialog asks what to do with the results: **Print the results in the terminal**, **Export a PDF calculation report**, or **Both**. Exporting asks where to save the PDF.
+1. One window opens: the inputs at the left (choices are drop-down lists; a box that may be left blank says what a blank means, for example `blank: Ly`; the values typed last time are filled in), the drawing in the middle, the results at the right.
+2. The drawing follows the inputs as you type. **Run** (or Ctrl+Enter) runs the check; change a value and run again. A value that is not valid is named in a message.
+3. **Print in the terminal** prints every table and equation; **Save PDF report** writes the calculation report. **Close** ends the command and prints a short summary.
 
-Closing either dialog stops without printing or saving anything. Running the file directly (`python design/steel/composite_column_aiscDG06.py`) does the same.
+With an answers file (`--answers`) the window is not opened: the input dialog is used, and the file answers it.
+
+The drawing: the tube to scale with its concrete fill, and after a run the interaction diagrams of DG6 2.5.6 about each axis with the demand Pu with Mb and Mh as dots (a dot inside its line passes), and the ratios of the checks as bars.
 
 Inputs: Pu (kN); Mb, Mh (kN-m); Vb, Vh (kN); b, h, t (mm); f'c, Fy (MPa); Lb, Lh (m), the unbraced lengths. The printout lists the compactness checks, phi Pn, phi Mn and phi Vn about each axis, the shear ratios and the interaction ratios with OK / NOT OK.
 
@@ -77,11 +80,13 @@ From the project folder, with the environment active:
 sdt steel
 ```
 
-1. A dialog asks for the inputs. Choices are listed in brackets beside the box (type one of them); boxes marked optional may be left blank. The values typed last time are filled in again.
-2. If a value is not valid, a message names it and the dialog opens again with your entries.
-3. A second dialog asks what to do with the results: **Print the results in the terminal**, **Export a PDF calculation report**, or **Both**. Exporting asks where to save the PDF.
+1. One window opens: the inputs at the left (choices are drop-down lists; a box that may be left blank says what a blank means, for example `blank: Ly`; the values typed last time are filled in), the drawing in the middle, the results at the right.
+2. The drawing follows the inputs as you type. **Run** (or Ctrl+Enter) runs the check; change a value and run again. A value that is not valid is named in a message.
+3. **Print in the terminal** prints every table and equation; **Save PDF report** writes the calculation report. **Close** ends the command and prints a short summary.
 
-Closing either dialog stops without printing or saving anything. Running the file directly (`python design/steel/wide_flange_aisc360.py`) does the same.
+With an answers file (`--answers`) the window is not opened: the input dialog is used, and the file answers it.
+
+The drawing: the section to scale from the AISC table (d, bf, tf, tw), redrawn when the name changes, and after a run the ratio of every check as a bar (green up to 0.9, amber to 1.0, red above) with the limit state that governs each.
 
 Inputs: the section name (e.g. `W14X90`), Fy and Fu (MPa), LRFD or ASD, unbraced lengths Lx, Ly, Lz and Lb (m; a blank length takes Ly), K factors, Cb, compression or tension, the demands Pr (kN), Mrx, Mry (kN-m), Vrx, Vry (kN), Tr (kN-m), and optionally the stiffener spacing and plate size (mm) and tension-field action. The printout lists the section properties, every capacity table and the summary with the governing ratio, PASS or FAIL.
 
@@ -116,3 +121,16 @@ With the class, lengths are in mm; forces are in kN, moments in kN-m, stresses i
 
 - `tests/test_design_cli.py` checks the terminal workflow and the uniform names; the capacity equations themselves have no automated tests yet.
 - Required strengths must already include second-order effects (Chapter C). Warping torsion is checked only if the bimoment and warping shear stress are supplied.
+
+## The design window
+
+`sdt composite`, `sdt steel` and `sdt pilecap` share one window, `utilities/design_window.py`: the inputs in a form that scrolls, a drawing that follows them, and the results beside them. A module shown in it offers, beside the names above:
+
+| Name | What it is |
+|---|---|
+| `preview(figure, values, result)` | draws on a matplotlib figure; `result` is the last result while the inputs are unchanged, else `None`. Returns the text under the drawing |
+| `result_parts(result)` | the results panel: `(text, tag)` pairs, the tag `pass`, `fail`, `head`, `muted` or `None` |
+| `window_summary(result)` | the line and the failures printed when the window closes |
+| `PREVIEW_TITLE`, `PREVIEW_KEYS`, `INPUT_GROUPS`, `MULTILINE`, `FILE_INPUTS`, `SHOWN_WHEN` | optional: the title of the drawing, the inputs a result belongs to, sections of the form, boxes of several lines, inputs with a Browse button, inputs shown only for some values of a choice |
+
+The colours of the drawings are those of the windows (`PLOT`, `style_axes`, `ratio_colour`).

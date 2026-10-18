@@ -51,6 +51,9 @@ the same commands.
                     (design/steel/wide_flange_aisc360.py)
     sdt wind        MWFRS wind pressures, ASCE 7 directional procedure
                     (design/loads/wind_directional_asce7.py)
+    sdt pilecap     pile cap under one column, NSCP 2015: pile reactions,
+                    bars, shear, strut-and-tie, least thickness
+                    (design/concrete/pile_cap.py)
     sdt doctor      check that this machine can run the toolkit: ETABS and its
                     API, the dialogs, LaTeX and its packages, which it can
                     install                     (utilities/doctor.py)
@@ -66,7 +69,7 @@ a menu of the commands: type a number or a name, and the menu comes back when
 the command ends.
 
 Each command asks for its inputs in dialogs. The standalone checks
-(composite, steel, wind) then ask whether to print the results in the
+(composite, steel, wind, pilecap) then ask whether to print the results in the
 terminal, export a PDF report, or both. The terminal shows the detailed
 results; when a command finishes, a separate window shows its summary: what
 was run, the counts, what needs attention and the files.
@@ -78,7 +81,7 @@ import argparse
 import sys
 from pathlib import Path
 
-VERSION = "0.5.2"  # the same as in pyproject.toml (tests/test_main.py checks it)
+VERSION = "0.6.0"  # the same as in pyproject.toml (tests/test_main.py checks it)
 # Hidden first argument: this process is the progress window of another one
 # (utilities/_gui_helpers.LoadingWindow). It is how the packaged program,
 # which has no separate Python to start, opens that window.
@@ -216,6 +219,12 @@ def _wind():
     return run()
 
 
+def _pilecap():
+    from design.concrete.pile_cap import run
+
+    return run()
+
+
 def _doctor():
     from utilities.doctor import run_doctor
 
@@ -242,6 +251,7 @@ COMMANDS = {
     "composite": (_composite, "check a rectangular filled composite column (AISC DG6)"),
     "steel": (_steel, "check a wide-flange steel member (AISC 360-22)"),
     "wind": (_wind, "MWFRS wind pressures by the ASCE 7 directional procedure"),
+    "pilecap": (_pilecap, "design a pile cap under one column (NSCP 2015)"),
     "doctor": (_doctor, "check that this machine can run the toolkit (ETABS, dialogs, LaTeX)"),
 }
 

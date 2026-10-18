@@ -31,3 +31,4 @@ A command run with `--answers file.json` opens no window: each question is print
 - A window is made with `_window`, given its band with `_header` and its buttons with `_footer`, and shown with `_place`. A new dialog built from these has the look of the others.
 - The headings use Bahnschrift, the font of the icon's letters, and the text Segoe UI; both come with Windows. Without them Tk uses its default font.
 - The packaged program carries `assets/sdt.ico` for the window icons (`build_exe.ps1`).
+- `sdt composite`, `sdt steel` and `sdt pilecap` open one larger window instead of dialogs: the inputs, a drawing that follows them, and the results (`utilities/design_window.py`; see the [steel and composite guide](steel_design_documentation.md#the-design-window)).

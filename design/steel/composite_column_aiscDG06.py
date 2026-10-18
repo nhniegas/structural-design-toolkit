@@ -667,10 +667,131 @@ def summary_text(column: "RectangularFilledComposite") -> str:
     return "\n".join(lines)
 
 
-def run():
-    """Terminal workflow: input dialog, then printout, PDF report or both."""
+def run(window: bool | None = None):
+    """``sdt composite``: the window with the inputs, a drawing of the section and,
+    after a run, its interaction diagram, and the results.
+
+    With an answers file (or ``window=False``) the input dialog of
+    ``utilities/design_cli.py`` is used instead, which the file answers."""
+    from utilities import answers
+
+    if window is None:
+        window = not answers.replaying()
+    if window:
+        from utilities.design_window import open_window
+
+        return open_window(sys.modules[__name__], "composite_column",
+                           "Composite Column (AISC DG6)", "Composite_Capacity_Report",
+                           "composite")
     return run_design(sys.modules[__name__], "Composite Column (AISC DG6)",
                       "composite_column", "Composite_Capacity_Report")
+
+
+# ==========================================================================
+# THE WINDOW (utilities/design_window.py)
+# ==========================================================================
+PREVIEW_TITLE = "SECTION AND INTERACTION"
+
+
+def preview(figure, values: dict, column) -> str:
+    """The section to scale, the steel walls around the concrete fill; after a
+    run, the DG6 interaction diagrams (DG6 2.5.6) with the demand on each."""
+    from matplotlib.patches import Rectangle
+
+    from utilities.design_window import PLOT, ratio_colour, style_axes
+
+    b, h, t = values["b"], values["h"], values["t"]
+    if b <= 0 or h <= 0 or t <= 0 or 2 * t >= min(b, h):
+        raise ValueError("the width, height and wall thickness must make a tube")
+    ax = figure.add_axes([0.05, 0.36, 0.42, 0.6] if column is not None else [0.1, 0.1, 0.8, 0.82])
+    style_axes(ax, ticks=False)
+    ax.add_patch(Rectangle((-b / 2, -h / 2), b, h, facecolor="#8A8F99", edgecolor=PLOT["text"],
+                           lw=1.2))
+    ax.add_patch(Rectangle((-b / 2 + t, -h / 2 + t), b - 2 * t, h - 2 * t,
+                           facecolor="#C9C4B8", edgecolor="none"))
+    pad = 0.2 * max(b, h)
+    ax.annotate(f"b = {b:g}", (0, h / 2 + pad * 0.3), ha="center", color=PLOT["muted"], fontsize=8)
+    ax.annotate(f"h = {h:g}", (b / 2 + pad * 0.3, 0), ha="left", va="center", rotation=90,
+                color=PLOT["muted"], fontsize=8)
+    ax.annotate(f"t = {t:g}", (-b / 2 + t / 2, -h / 2 - pad * 0.3), ha="left",
+                color=PLOT["muted"], fontsize=8)
+    ax.set_aspect("equal")
+    ax.set_xlim(-b / 2 - pad, b / 2 + pad)
+    ax.set_ylim(-h / 2 - pad, h / 2 + pad)
+    steel_ratio = (b * h - (b - 2 * t) * (h - 2 * t)) / (b * h)
+    lines = [f"{b:g} x {h:g} x {t:g} mm tube filled with f'c {values['fc']:g} MPa concrete; "
+             f"steel {steel_ratio:.1%} of the section, Fy {values['fy']:g} MPa"]
+    if column is None:
+        return "\n".join(lines)
+    results = column.interaction_check()
+    if "Error" in results:
+        return "\n".join(lines + [str(results["Error"])])
+    phi_pn = _kips_to_kN(results["phi_Pn (kips)"])
+    pcc = _kips_to_kN(results.get("Pcc (kips)", 0.0))
+    chart = figure.add_axes([0.58, 0.36, 0.38, 0.58])
+    style_axes(chart)
+    for axis, moment, demand, style in (("b", "phi_Mnx (kip-in)", values["Mb"], "-"),
+                                        ("h", "phi_Mny (kip-in)", values["Mh"], "--")):
+        phi_mn = _kipin_to_kNm(results[moment])
+        chart.plot([0, phi_mn, phi_mn], [phi_pn, pcc, 0], color=PLOT["amber"], ls=style, lw=1.4,
+                   label=f"about the {axis}-axis")
+        chart.plot([abs(demand)], [values["Pu"]], "o", color=PLOT["text"], ms=5)
+        chart.annotate(axis, (abs(demand), values["Pu"]), xytext=(4, 4),
+                       textcoords="offset points", color=PLOT["text"], fontsize=8)
+    chart.set_xlabel("M (kN-m)")
+    chart.set_ylabel("P (kN)")
+    chart.set_xlim(left=0)
+    chart.set_ylim(bottom=0)
+    chart.grid(color=PLOT["line"], lw=0.4)
+    chart.legend(fontsize=7, facecolor=PLOT["bg"], edgecolor=PLOT["line"],
+                 labelcolor=PLOT["text"])
+    bars = figure.add_axes([0.32, 0.06, 0.62, 0.2])
+    style_axes(bars)
+    names, ratios = [], []
+    for label, value in result_rows(column):
+        if isinstance(value, float) and ("Ratio" in label):
+            names.append(label.replace("Interaction Ratio ", "Interaction ")
+                         .replace("Shear Ratio ", "Shear "))
+            ratios.append(value)
+    bars.barh(names, ratios, color=[ratio_colour(r) for r in ratios])
+    bars.axvline(1.0, color=PLOT["red"], lw=0.8, ls=":")
+    bars.tick_params(axis="y", labelsize=7, colors=PLOT["text"])
+    bars.set_xlim(0, max(1.1, max(ratios or [0]) * 1.1))
+    bars.invert_yaxis()
+    lines.append("Interaction diagrams of DG6 2.5.6: the dots are the demand Pu with Mb and Mh; "
+                 "a dot inside its line passes. The bars are the ratios of the checks.")
+    return "\n".join(lines)
+
+
+def result_parts(column) -> list[tuple[str, str | None]]:
+    """The results panel of the window: the result, then the rows of the printout
+    with the statuses coloured."""
+    line, failures = window_summary(column)
+    parts = [(f"RESULT: {line}\n", "fail" if failures else "pass")]
+    parts += [(f"Over 1.0: {failure}\n", "fail") for failure in failures]
+    parts.append(("\n", None))
+    for label, value in result_rows(column):
+        if not label:
+            parts.append(("\n", None))
+            continue
+        text = str(value)
+        tag = "fail" if ("NOT" in text.upper() or "ERROR" in label.upper()) else \
+            "pass" if text.upper().startswith("OK") or "OK" == text.upper()[-2:] else None
+        if isinstance(value, float) and "Ratio" in label:
+            tag = "pass" if value <= 1.0 else "fail"
+        parts.append((f"{label:<30} ", "muted"))
+        parts.append((f"{text}\n", tag))
+    return parts
+
+
+def window_summary(column) -> tuple[str, list[str]]:
+    results = column.interaction_check()
+    ratio = results.get("Interaction Ratio (Standard)")
+    if not isinstance(ratio, (int, float)):
+        return "The check could not be completed", [str(results.get("Error", ratio))]
+    failures = [label for label, value in result_rows(column)
+                if isinstance(value, float) and "Ratio" in label and value > 1.0]
+    return f"Interaction ratio {ratio:.3f}: {'PASS' if not failures else 'FAIL'}", failures
 
 
 def _kips_to_kN(kips):
