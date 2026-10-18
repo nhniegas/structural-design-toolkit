@@ -551,6 +551,13 @@ def auto_tag_frames(prefixes: dict[str, str] | None = None,
         if model.GetModelIsLocked():
             model.SetModelIsLocked(False)  # names cannot change in a locked model
         failed = apply_frame_tags(connector, tags, progress=window.update)
+        # the walls: one pier label per straight leg, the legs that meet one wall (sdt walls)
+        from etabs_api.workflows import wall_piers
+
+        window.update("Pier labels of the walls")
+        panels, stories = wall_piers.read_wall_panels(connector)
+        walls = wall_piers.plan_walls(panels, stories) if panels else []
+        piers = wall_piers.apply_pier_labels(model, walls) if walls else 0
         save_model(model, new_path)
         connector.refresh_view()
 
@@ -560,6 +567,9 @@ def auto_tag_frames(prefixes: dict[str, str] | None = None,
     summary.add("Beams", len(beams))
     summary.add("Columns", len(columns))
     summary.add("Tagged", len(tags) - len(failed))
+    if walls:
+        summary.add("Walls", f"{len(walls)}: {piers} wall panels labelled as piers "
+                             "(W1A, W1B, ...: one label per straight leg)")
     summary.add("Target", "the model itself" if in_place else
                 "a tagged copy (the original model was not changed)")
     if clashes:

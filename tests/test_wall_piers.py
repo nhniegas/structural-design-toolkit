@@ -1,0 +1,54 @@
+"""
+tests/test_wall_piers.py
+========================
+The walls as legs and walls (etabs_api/workflows/wall_piers.py): planar, L and
+core walls, labels kept from story to story. No ETABS.
+"""
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from etabs_api.workflows.wall_piers import Panel, legs_of_story, plan_walls  # noqa: E402
+
+STORIES = ["GF", "2F", "3F"]
+
+
+def panels_for(story, segments, start=0):
+    return [Panel(f"{story}-{start + i}", story, *seg, thickness=250.0)
+            for i, seg in enumerate(segments)]
+
+
+def test_panels_in_one_plane_touching_make_one_leg():
+    legs = legs_of_story(panels_for("GF", [(0, 0, 3000, 0), (3000, 0, 6000, 0),
+                                           (9000, 0, 12000, 0)]))
+    lengths = sorted(round(leg.length) for leg in legs)
+    assert lengths == [3000, 6000]          # the third panel is apart: its own leg
+
+
+def test_an_l_wall_and_a_planar_wall_are_labelled_on_every_story():
+    panels = []
+    for story in STORIES:
+        panels += panels_for(story, [(0, 0, 6000, 0), (0, 0, 0, 5000),
+                                     (18000, 5000, 18000, 10000)],
+                             start=10 * STORIES.index(story))
+    walls = plan_walls(panels, STORIES)
+    assert len(walls) == 2
+    planar = next(w for w in walls if len(w.legs["GF"]) == 1)
+    corner = next(w for w in walls if len(w.legs["GF"]) == 2)
+    assert corner.shape == "L or T" and planar.shape == "planar"
+    # one label per leg, the same on every story
+    for wall in walls:
+        for story in STORIES:
+            labels = sorted(leg.label for leg in wall.legs[story])
+            assert labels == sorted(leg.label for leg in wall.legs["GF"])
+    # the planar wall is higher in plan (y 5 to 10 m): it is wall 1
+    assert planar.number == 1 and [leg.label for leg in planar.legs["2F"]] == ["W1A"]
+    assert sorted(leg.label for leg in corner.legs["3F"]) == ["W2A", "W2B"]
+
+
+def test_a_core_is_one_wall_of_four_legs():
+    box = [(0, 0, 4000, 0), (4000, 0, 4000, 3000), (0, 3000, 4000, 3000), (0, 0, 0, 3000)]
+    walls = plan_walls(panels_for("GF", box), ["GF"])
+    assert len(walls) == 1 and len(walls[0].legs["GF"]) == 4 and walls[0].shape == "core"
