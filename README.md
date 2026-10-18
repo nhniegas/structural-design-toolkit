@@ -40,6 +40,7 @@ Supporting code:
 - `etabs_api/workflows/exporter.py`: the ETABS tables the beam and column design need.
 - `etabs_api/workflows/frame_tagger.py`: automatic unique names for beams and columns (`sdt tag`).
 - `etabs_api/workflows/grid_column_model.py`: stories, grids, columns and walls of an ETABS model from a DXF of framing plans.
+- `etabs_api/workflows/framing.py`: the framing of each floor (girders, beams, slabs) at rule sizes, the options ranked by concrete volume and frame action; `etabs_api/workflows/model_framing.py`: `sdt model`, which draws, analyses and builds them.
 - `etabs_api/workflows/analysis_forces.py`: factored forces from the analysis results (combinations, spectrum and wind permutations, NSCP live load reduction, pattern live load).
 - `etabs_api/workflows/design_loop.py`, `sections.py`: the analysis and design loop with member resizing.
 - `etabs_api/workflows/tributary.py`: geometric tributary areas for the live load reduction.
@@ -151,7 +152,8 @@ Every tool is a command of `sdt`, the ETABS workflows and the standalone checks 
 ```powershell
 .venv\Scripts\Activate.ps1
 sdt setup       # materials, sections, loads, spectrum, cases and combinations
-sdt grids       # stories, grids, columns and walls from a DXF of framing plans
+sdt model       # stories, grids, columns and walls from a DXF, then the framing of the floors
+sdt grids       # the old name of sdt model
 sdt tag         # unique names for every beam and column (a tagged copy or the model itself)
 sdt check       # check the open model against NSCP 2015 (read only)
 sdt analyze     # run, scale the response spectrum, check periods, modal mass and weight
@@ -208,7 +210,7 @@ This defines the materials, frame sections, load patterns, UBC 97 response spect
 
 ## Building grids, columns and walls from a DXF
 
-`sdt grids`. It reads framing plans drawn in one DXF file and creates the stories, grid lines, columns and walls in ETABS; run again on a revised drawing, it updates the model. See [Grids, columns and walls from a DXF](docs/etabs_grid_column_model.md).
+`sdt model` (old name `sdt grids`). It reads framing plans drawn in one DXF file and creates the stories, grid lines, columns and walls in ETABS; run again on a revised drawing, it updates the model. See [Grids, columns and walls from a DXF](docs/etabs_grid_column_model.md). It then frames the floors: the girders, beams and slabs of least concrete that keep frame action, drawn and ranked, the one you pick built with the loads of each occupancy zone. See [The model from a DXF, with its framing](docs/etabs_model.md).
 
 ## Running and checking the analysis
 

@@ -1,6 +1,6 @@
 # Grids, Columns and Walls from a DXF
 
-`sdt grids` (or `python main.py grids`) reads framing plans from one DXF file and builds the stories, grid lines, columns and walls of an ETABS model. Beams are drawn by hand in ETABS afterwards. When the plans are revised, running it again updates the model.
+`sdt model` (old name `sdt grids`) reads framing plans from one DXF file and builds the stories, grid lines, columns and walls of an ETABS model. When the plans are revised, running it again updates the model. It then offers to frame the floors (girders, beams, slabs and their loads): see [The model from a DXF, with its framing](etabs_model.md). Answer No to draw the beams by hand instead.
 
 Code: `etabs_api/workflows/grid_column_model.py`. Sample drawings: `edb/plan dxf/`.
 
@@ -33,7 +33,7 @@ Other rules:
 
 ```powershell
 .venv\Scripts\Activate.ps1
-sdt grids
+sdt model
 ```
 
 `python etabs_api/workflows/grid_column_model.py` does the same.

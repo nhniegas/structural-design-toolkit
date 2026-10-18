@@ -588,8 +588,12 @@ def run_drift(connector, reference: str = CORNERS,
                               cases)
                 drifts = center_drifts(moved, base_elevation)
                 by_story = center_story_drifts(moved, base_elevation)
-            # the pattern definitions read only with the patterns selected for display
-            model.DatabaseTables.SetLoadPatternsSelectedForDisplay(patterns)
+            # the pattern definitions read only with the patterns selected for display;
+            # the names are read again: the patterns ETABS makes at the analysis
+            # (EQXSD(1/2) and so on, which hold the period used) did not exist before
+            # it on a model that had no results
+            model.DatabaseTables.SetLoadPatternsSelectedForDisplay(
+                [str(n) for n in as_list(model.LoadPatterns.GetNameList(0, [])[1])])
             try:
                 pattern_table = connector._read_database_table(SEISMIC_TABLE)
             except Exception:  # no UBC 97 seismic pattern in this model
@@ -787,6 +791,13 @@ def drift_excess(report: DriftReport, drift_cases: dict[str, tuple[str, bool]] |
     Seismic: Delta_M = 0.7 R Delta_S against 0.025 or 0.020 h by the period of the
     drift patterns (NSCP 208.6.5.1). Wind: Delta / h against 1 / the typed limit.
     """
+    return {key: value for key, value in drift_ratios(report, drift_cases).items()
+            if value[0] > 1.0 + 1e-9}
+
+
+def drift_ratios(report: DriftReport, drift_cases: dict[str, tuple[str, bool]] | None = None
+                 ) -> dict[tuple[str, str | None], tuple[float, str, str]]:
+    """Every story's drift over its limit, as ``drift_excess``, those that pass too."""
     out: dict[tuple[str, str | None], tuple[float, str, str]] = {}
     for level, drifts in report.story_drifts.items():
         periods = report.level_periods.get(level, {})
@@ -799,8 +810,6 @@ def drift_excess(report: DriftReport, drift_cases: dict[str, tuple[str, bool]] |
                 period = periods.get(case) or (max(periods.values()) if periods else None)
                 limit = mc.drift_limit(period) if period else mc.SEIS.drift_limit_long
                 over = mc.SEIS.drift_amplification * r_factor * ratio / limit
-            if over <= 1.0 + 1e-9:
-                continue
             key = (story, combo_direction(combo, drift_cases))
             if key not in out or over > out[key][0]:
                 out[key] = (over, combo, level)

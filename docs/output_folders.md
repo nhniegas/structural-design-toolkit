@@ -1,6 +1,6 @@
 # Output folders
 
-Every command sorts the files it writes into subfolders by kind. A command that asks for an output folder writes into subfolders of that folder; a command that writes beside the model (drift, irregularity, quantities, the foundation reactions, the plan changes of `sdt grids`, the log of `sdt design`) writes into subfolders of the model's folder.
+Every command sorts the files it writes into subfolders by kind. A command that asks for an output folder writes into subfolders of that folder; a command that writes beside the model (drift, irregularity, quantities, the foundation reactions, the plan changes and framing options of `sdt model`, the log of `sdt design`) writes into subfolders of the model's folder.
 
 | Subfolder | Holds | Examples |
 |---|---|---|

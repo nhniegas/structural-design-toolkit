@@ -17,6 +17,13 @@ The drawing rules (see ``edb/plan dxf`` for samples), all in millimetres:
                 wall thickness (one polyline can trace a whole core), or
                 a closed rectangle around one wall (the short side is the thickness)
 
+For ``sdt model`` (read here, used by ``framing``), each plan may also have:
+
+* ``S-SLAB``    the outline of the floor slab, a closed polyline
+* ``S-OPENING`` each opening in the slab, a closed polyline
+* ``S-LOAD``    each occupancy zone, a closed polyline with its name as a text
+                inside it (the loads of each name are typed once)
+
 The columns of a plan are the ones below that level. Optionally a footing
 level is added: the base drops to minus the embedment depth, a ground story
 (``GF``) ends at elevation 0 below the lowest plan, and the columns and walls
@@ -48,6 +55,7 @@ from etabs_api.core.helpers import as_list, return_code
 
 DEFAULT_LAYERS = {"story": "S-STORY", "origin": "S-ORIGIN", "grid": "S-GRID",
                   "column": "S-COLUMN", "wall": "S-WALL"}
+FLOOR_LAYERS = {"slab": "S-SLAB", "opening": "S-OPENING", "load": "S-LOAD"}
 MIN_WALL_LENGTH = 100.0  # mm; shorter pieces of a wall polyline are ignored
 LABEL_REACH = 2500.0  # mm from a grid line end to its label
 SAME_PLACE = 5.0  # mm; a column this close to its old place has not moved
@@ -114,6 +122,8 @@ class Building:
     base_elevation: float = 0.0  # mm; negative with a footing level
     # (drawing story, model story) when the drawing's names were paired with the model's
     story_pairs: list[tuple[str, str]] = field(default_factory=list)
+    # story: {"slab": [outline], "opening": [outline], "load": [(name, outline)]}
+    floors: dict = field(default_factory=dict)
 
 
 def add_footing_level(building: Building, depth: float, ground: str = "GF") -> Building:
@@ -143,6 +153,7 @@ def add_footing_level(building: Building, depth: float, ground: str = "GF") -> B
         + list(building.walls),
         warnings=list(building.warnings),
         base_elevation=-float(depth),
+        floors=dict(building.floors),
     )
 
 
@@ -170,7 +181,7 @@ def read_framing_plans(path: str, layers: dict | None = None) -> Building:
     """Read every framing plan of a DXF file into stories, grids and columns."""
     import ezdxf
 
-    layers = {**DEFAULT_LAYERS, **(layers or {})}
+    layers = {**DEFAULT_LAYERS, **FLOOR_LAYERS, **(layers or {})}
     names = {key: value.strip().upper() for key, value in layers.items()}
     modelspace = ezdxf.readfile(path).modelspace()
 
@@ -192,7 +203,7 @@ def read_framing_plans(path: str, layers: dict | None = None) -> Building:
         return points
 
     texts = {key: [text_of(e) for e in modelspace.query("TEXT MTEXT") if on(e, key)]
-             for key in ("story", "grid")}
+             for key in ("story", "grid", "load")}
     frames = []
     for entity in modelspace.query("LWPOLYLINE"):
         if on(entity, "story"):
@@ -291,8 +302,43 @@ def read_framing_plans(path: str, layers: dict | None = None) -> Building:
             else:
                 building.warnings.append(
                     f"{story}: a wall polyline with no width and {len(local)} corners was skipped.")
+        _read_floor(building, story, modelspace, frame, (ox, oy), on, corners_of, inside,
+                    texts["load"])
     building.grids = list(grids.values())
     return building
+
+
+def _read_floor(building: Building, story: str, modelspace, frame, origin, on, corners_of,
+                inside, load_texts) -> None:
+    """The slab outline, openings and load zones of one plan (closed polylines)."""
+    from shapely.geometry import Point, Polygon
+
+    ox, oy = origin
+    shapes: dict = {}
+    for entity in modelspace.query("LWPOLYLINE"):
+        key = next((k for k in FLOOR_LAYERS if on(entity, k)), None)
+        if key is None:
+            continue
+        points = corners_of(entity)
+        if len(points) < 3 or not inside(frame, points[0][0], points[0][1]):
+            continue
+        if not entity.closed and math.dist(points[0], points[-1]) > 1e-6:
+            building.warnings.append(f"{story}: an open polyline on the {key} layer was "
+                                     "skipped (it must be closed).")
+            continue
+        local = [(x - ox, y - oy) for x, y in points]
+        if key == "load":
+            zone = Polygon([(x, y) for x, y in points])
+            names = [t for t, x, y in load_texts if zone.contains(Point(x, y))]
+            if not names:
+                building.warnings.append(f"{story}: a load zone has no name inside it; it "
+                                         "was skipped.")
+                continue
+            shapes.setdefault(key, []).append((names[0].strip(), local))
+        else:
+            shapes.setdefault(key, []).append(local)
+    if shapes:
+        building.floors[story] = shapes
 
 
 # =============================================================================
@@ -615,6 +661,7 @@ def rename_stories(building: Building, pairs: list[tuple[str, str]]) -> Building
     building.columns = [replace(c, story=to.get(c.story, c.story)) for c in building.columns]
     building.walls = [replace(w, story=to.get(w.story, w.story)) for w in building.walls]
     building.story_pairs = [(d, m) for d, m in pairs if d != m]
+    building.floors = {to.get(n, n): shapes for n, shapes in building.floors.items()}
     return building
 
 
@@ -974,10 +1021,11 @@ def _defaults_path() -> str:
     return user_settings_path("grid_column_model.json")
 
 
-def run_grid_column_model() -> str | None:
-    """Entry point: ask for the drawing and the inputs, confirm the changes, apply them."""
+def ask_grid_inputs(title: str, floor_layers: bool = False) -> dict | None:
+    """The drawing, its layers, the materials, the footing level and the model to
+    change, as ``sdt grids`` asks them; None when cancelled. ``floor_layers`` also
+    asks the slab, opening and load layers (``sdt model``)."""
     from utilities._gui_helpers import (
-        LoadingWindow,
         enter_values,
         select_open_path,
         select_option,
@@ -985,28 +1033,24 @@ def run_grid_column_model() -> str | None:
         show_warning,
     )
 
-    title = "Grids and Columns from DXF"
     dxf_path = select_open_path("Select the framing plan DXF", ".dxf", "DXF drawing")
     if not dxf_path:
         return None
     saved = ms.load_settings(_defaults_path()) or {}
-    fields = {
-        "Story layer": saved.get("story", DEFAULT_LAYERS["story"]),
-        "Origin layer": saved.get("origin", DEFAULT_LAYERS["origin"]),
-        "Grid layer": saved.get("grid", DEFAULT_LAYERS["grid"]),
-        "Column layer": saved.get("column", DEFAULT_LAYERS["column"]),
-        "Wall layer": saved.get("wall", DEFAULT_LAYERS["wall"]),
-        "Concrete of the columns and walls (ksi)": saved.get("concrete_ksi", 5),
-        "Rebar of the columns and walls (ksi)": saved.get("rebar_ksi", 60),
-    }
+    keys = ["story", "origin", "grid", "column", "wall"] + (
+        list(FLOOR_LAYERS) if floor_layers else [])
+    defaults = {**DEFAULT_LAYERS, **FLOOR_LAYERS}
+    fields = {f"{key.capitalize()} layer": saved.get(key, defaults[key]) for key in keys}
+    fields["Concrete of the columns and walls (ksi)"] = saved.get("concrete_ksi", 5)
+    fields["Rebar of the columns and walls (ksi)"] = saved.get("rebar_ksi", 60)
     answers = enter_values(title, "Layers of the drawing and the material of the columns "
                            "and walls.",
                            list(fields), {k: str(v) for k, v in fields.items()})
     if answers is None:
         return None
     values = [answers[label].strip() for label in fields]
-    layers = dict(zip(("story", "origin", "grid", "column", "wall"), values[:5]))
-    concrete_ksi, rebar_ksi = float(values[5]), float(values[6])
+    layers = dict(zip(keys, values[:len(keys)]))
+    concrete_ksi, rebar_ksi = float(values[len(keys)]), float(values[len(keys) + 1])
 
     footing = select_option(
         title, "Add a footing level below the lowest plan? The ground level becomes "
@@ -1061,6 +1105,15 @@ def run_grid_column_model() -> str | None:
                 "Save the copy as", f"{name} - REV", ".EDB", "ETABS model")
             if not copy_path:
                 return None
+    return {"dxf_path": dxf_path, "layers": layers, "concrete_ksi": concrete_ksi,
+            "rebar_ksi": rebar_ksi, "footing_depth": footing_depth,
+            "ground_story": ground_story, "path": path, "copy_path": copy_path}
+
+
+def apply_grid_inputs(title: str, inputs: dict):
+    """Confirm the changes and apply them (``build_grid_column_model``). Returns
+    (building, changes, log, model path), or None when cancelled or failed."""
+    from utilities._gui_helpers import LoadingWindow, select_option, show_warning
 
     def confirm(building, changes) -> bool:
         paired = ("Stories of the drawing paired with the model's: " + ", ".join(
@@ -1088,13 +1141,15 @@ def run_grid_column_model() -> str | None:
             window.update("Applying the changes")
         return apply
 
+    path = inputs["path"]
     window = LoadingWindow("Grids, columns and walls from the DXF")
     window.start()
     try:
         building, changes, log, path = build_grid_column_model(
-            dxf_path, concrete_ksi, rebar_ksi, "new" if path else "open", path, layers, confirm,
-            progress=window.update, footing_depth=footing_depth, ground_story=ground_story,
-            copy_path=copy_path)
+            inputs["dxf_path"], inputs["concrete_ksi"], inputs["rebar_ksi"],
+            "new" if path else "open", path, inputs["layers"], confirm,
+            progress=window.update, footing_depth=inputs["footing_depth"],
+            ground_story=inputs["ground_story"], copy_path=inputs["copy_path"])
     except (ValueError, RuntimeError) as error:
         window.stop()
         show_warning(str(error), title=title)
@@ -1103,12 +1158,19 @@ def run_grid_column_model() -> str | None:
         window.stop()
     if log is None:
         return None
-    ms.save_settings({**layers, "concrete_ksi": concrete_ksi, "rebar_ksi": rebar_ksi,
-                      "footing_depth": footing_depth, "ground_story": ground_story},
-                     _defaults_path())
+    ms.save_settings({**(ms.load_settings(_defaults_path()) or {}), **inputs["layers"],
+                      "concrete_ksi": inputs["concrete_ksi"], "rebar_ksi": inputs["rebar_ksi"],
+                      "footing_depth": inputs["footing_depth"],
+                      "ground_story": inputs["ground_story"]}, _defaults_path())
+    return building, changes, log, path
+
+
+def grids_summary(command: str, dxf_path: str, building, changes, log, path: str):
+    """The run summary of the stories, grids, columns and walls applied."""
+    from utilities.output_folders import beside
     from utilities.run_summary import RunSummary
 
-    summary = RunSummary("sdt grids", path)
+    summary = RunSummary(command, path)
     summary.add("Drawing", os.path.basename(dxf_path))
     summary.add("Stories", ", ".join(name for name, _ in building.stories))
     summary.add("Columns", f"unchanged {len(changes.unchanged)}, moved {len(changes.moved)}, "
@@ -1123,11 +1185,22 @@ def run_grid_column_model() -> str | None:
         summary.fail(problem)
     for warning in building.warnings:
         summary.note(warning)
-    from utilities.output_folders import beside
-
     summary.file("Model", path)
     summary.file("List of changes", beside(path, " - plan changes.txt"))
-    summary.show(popup=True)
+    return summary
+
+
+def run_grid_column_model() -> str | None:
+    """Entry point: ask for the drawing and the inputs, confirm the changes, apply them."""
+    title = "Grids and Columns from DXF"
+    inputs = ask_grid_inputs(title)
+    if inputs is None:
+        return None
+    applied = apply_grid_inputs(title, inputs)
+    if applied is None:
+        return None
+    building, changes, log, path = applied
+    grids_summary("sdt grids", inputs["dxf_path"], building, changes, log, path).show(popup=True)
     return path
 
 

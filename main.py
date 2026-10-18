@@ -7,8 +7,12 @@ the same commands.
     sdt setup       define materials, frame sections, load patterns, the UBC 97
                     response spectrum, load cases, mass source, P-delta and
                     load combinations       (etabs_api/workflows/model_setup.py)
-    sdt grids       build or update the stories, grids, columns and walls from
-                    a DXF of framing plans  (etabs_api/workflows/grid_column_model.py)
+    sdt model       build or update the stories, grids, columns and walls from
+                    a DXF of framing plans (etabs_api/workflows/grid_column_model.py),
+                    then frame the floors: girders, beams and slabs of least
+                    concrete with frame action, ranked and drawn, the one picked
+                    built with its loads (etabs_api/workflows/model_framing.py)
+    sdt grids       the old name of sdt model
     sdt tag         give every beam and column of the open model its unique
                     name, in a tagged copy  (etabs_api/workflows/frame_tagger.py)
     sdt check       check the open model for missing or inconsistent inputs
@@ -81,7 +85,7 @@ import argparse
 import sys
 from pathlib import Path
 
-VERSION = "0.11.1"  # the same as in pyproject.toml (tests/test_main.py checks it)
+VERSION = "0.12.0"  # the same as in pyproject.toml (tests/test_main.py checks it)
 # Hidden first argument: this process is the progress window of another one
 # (utilities/_gui_helpers.LoadingWindow). It is how the packaged program,
 # which has no separate Python to start, opens that window.
@@ -117,10 +121,10 @@ def _setup():
     return run_model_setup()
 
 
-def _grids():
-    from etabs_api.workflows.grid_column_model import run_grid_column_model
+def _model():
+    from etabs_api.workflows.model_framing import run_model
 
-    return run_grid_column_model()
+    return run_model()
 
 
 def _tag():
@@ -251,7 +255,9 @@ def _doctor():
 
 COMMANDS = {
     "setup": (_setup, "define materials, sections, loads, spectrum, cases and combinations"),
-    "grids": (_grids, "build or update stories, grids, columns and walls from a DXF"),
+    "model": (_model, "stories, grids, columns and walls from a DXF, then the framing of "
+                      "the floors (girders, beams, slabs, loads)"),
+    "grids": (_model, "the old name of sdt model"),
     "tag": (_tag, "give every beam and column of the open model its unique name"),
     "check": (_check, "check the open model for missing or inconsistent inputs (read only)"),
     "analyze": (_analyze, "run, scale the response spectrum, check periods, mass and weight"),
