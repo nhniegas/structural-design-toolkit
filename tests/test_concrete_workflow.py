@@ -150,3 +150,43 @@ def test_bar_spacing_defaults_to_the_code_spacing(monkeypatch):
     assert _default_of(monkeypatch, {"office_bar_spacing": False})[0] is False
     # the office rule stays the default for a user who chose it last time
     assert _default_of(monkeypatch, {"office_bar_spacing": True}) == (True, workflow.SPACING_OFFICE)
+
+
+# --------------------------------------------------------------------------- #
+# sdt schedules (v0.8.1): the schedules again from a stored design, no ETABS
+# --------------------------------------------------------------------------- #
+def test_schedules_are_drawn_again_from_the_design_data(monkeypatch, tmp_path):
+    import pickle
+
+    import pandas as pd
+
+    from design.concrete import workflow
+    from utilities import _gui_helpers
+
+    store = workflow.DesignStore("m.EDB", 0.0, {"CONNECTIVITY": pd.DataFrame()},
+                                 {"smrf": True, "column_bars": {"dmain": 25, "cover": 40}},
+                                 pd.DataFrame({"UniqueName": ["B1"]}),
+                                 pd.DataFrame({"UniqueName": ["C1"]}))
+    data = tmp_path / "m - design data.pkl"
+    data.write_bytes(pickle.dumps(store))
+    asked = []
+    monkeypatch.setattr(_gui_helpers, "select_open_path", lambda *a: str(data))
+    monkeypatch.setattr(_gui_helpers, "select_output_directory", lambda *a: str(tmp_path))
+
+    def option(title, message, options, default_index=0, **_):
+        asked.append(options)
+        return {"Which schedules should be drawn?": "Columns only"}.get(
+            message, options[default_index])
+
+    monkeypatch.setattr(_gui_helpers, "select_option", option)
+    monkeypatch.setattr(workflow, "_last", lambda: {"section_scale": 25.0})
+    monkeypatch.setattr(workflow, "_remember", lambda values: None)
+    calls = []
+    monkeypatch.setattr(workflow, "write_schedules",
+                        lambda *a: calls.append(a) or ["Column_Schedule.dxf"])
+    monkeypatch.setattr("utilities.run_summary.RunSummary.show", lambda *a, **k: "")
+    assert workflow.run_schedules() == ["Column_Schedule.dxf"]
+    _, folder, beams, columns, style, scale = calls[0]
+    assert (folder, beams, columns, style, scale) == (str(tmp_path), False, True,
+                                                      "crossties", 25.0)
+    assert asked[0] == ["Beams and columns", "Beams and girders only", "Columns only"]

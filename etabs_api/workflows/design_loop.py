@@ -103,6 +103,7 @@ class LoopSettings:
     check_top_level: bool = True  # BCC, joint shear and Ve at the topmost level
     check_foundation_level: bool = True  # BCC, joint shear and Ve at the bottom-most story
     inner_tie_style: str = "crossties"  # how the column schedule draws the interior ties
+    section_scale: float = 20.0  # the column schedule draws every section at 1 : this
     # {standard deflection combination: the model's combination for that role}
     deflection_roles: dict | None = None
     sources: object = None  # model_inputs.Sources: where the inputs of the run came from
@@ -1736,7 +1737,7 @@ def run_design_cli() -> dict | None:
         ask_capacity_check_levels,
         ask_column_design_options,
     )
-    from design.concrete.columns.schedule import ask_inner_tie_style
+    from design.concrete.columns.schedule import ask_inner_tie_style, ask_section_scale
     from etabs_api.core.connection import attach_running_etabs
     from etabs_api.workflows.analysis_forces import ask_force_options
     from etabs_api.workflows.model_setup import load_settings, merge_settings, save_settings
@@ -1821,6 +1822,9 @@ def run_design_cli() -> dict | None:
         return None
     tie_style = ask_inner_tie_style()  # for the column schedule of the final design
     if tie_style is None:
+        return None
+    section_scale = ask_section_scale(last.get("section_scale"))
+    if section_scale is None:
         return None
     long_limit = ask_deflection_limit()
     if long_limit is None:
@@ -1962,6 +1966,7 @@ def run_design_cli() -> dict | None:
         zone_factor=seismic_values["zone_factor"], ct=seismic_values["ct"],
         beam_earth_cover_stories=tuple(earth_stories), check_top_level=levels[0],
         check_foundation_level=levels[1], inner_tie_style=tie_style,
+        section_scale=section_scale,
         deflection_roles=ready.deflection_roles, sources=sources,
         targets=targets, carrier_depth=carrier_depth,
         compatibility_torsion=compatibility_torsion,
@@ -1970,7 +1975,7 @@ def run_design_cli() -> dict | None:
         deflection_stages=deflection_stages,
         resize_for_drift=resize_for_drift, drift_options=drift_options,
     )
-    _remember({"resize_for_drift": resize_for_drift})
+    _remember({"resize_for_drift": resize_for_drift, "section_scale": section_scale})
 
     # the working copy: the original model is not changed
     stem = os.path.splitext(original)[0]
@@ -2165,6 +2170,7 @@ def save_final_design(bench: Workbench, summary: dict, working: str, folder: str
         "check_top_level": settings.check_top_level,
         "check_foundation_level": settings.check_foundation_level,
         "inner_tie_style": settings.inner_tie_style,
+        "section_scale": settings.section_scale,
     })
     store.beam_results, store.column_report = beams, columns
     store.column_groups = getattr(bench, "column_groups", None)
@@ -2186,7 +2192,8 @@ def save_final_design(bench: Workbench, summary: dict, working: str, folder: str
                                   output_path(folder, f"{stem} - Column Design.xlsx"))
         say("Saving the columns 2 of 3: schedule (.dxf)")
         export_column_cad_drawings(columns, subfolder(folder, SCHEDULES), bars["dmain"], bars["cover"], settings.smrf,
-                                   settings.inner_tie_style, bench.tables["CONNECTIVITY"])
+                                   settings.inner_tie_style, bench.tables["CONNECTIVITY"],
+                                   settings.section_scale)
         say("Saving the columns 3 of 3: calculation report (.pdf, LaTeX)")
         if not export_column_pdf(
                 columns, output_path(folder, f"{stem} - Column Calculations.pdf"),

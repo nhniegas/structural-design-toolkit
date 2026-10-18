@@ -11,8 +11,8 @@ model's folder):
     Drawings       framing and foundation plans (.dxf) and the 3D model (.step)
     Summaries      summaries, logs and text reports (.txt)
 
-The design data file (" - design data.pkl") stays at the top of the output
-folder: later commands read it back from there.
+The design data file (" - design data.pkl") stays beside the model: later
+commands read it back from there.
 """
 
 import os

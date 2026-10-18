@@ -825,6 +825,95 @@ def write_deflection_xlsx(table: pd.DataFrame, path: str) -> str:
     return path
 
 
+SCHEDULE_CHOICES = {
+    "Beams and columns": (True, True),
+    "Beams and girders only": (True, False),
+    "Columns only": (False, True),
+}
+
+
+def write_schedules(store: DesignStore, folder: str, beams: bool, columns: bool,
+                    tie_style: str = "crossties", section_scale: float = 20.0) -> list[str]:
+    """The beam and girder schedules and the column schedule of a stored design, in
+    the Schedules subfolder of ``folder``. Returns the files written."""
+    from design.concrete.beams.schedule import export_beam_dxf
+    from design.concrete.columns.schedule import export_column_cad_drawings
+
+    target = subfolder(folder, SCHEDULES)
+    written: list[str] = []
+    if beams and store.beam_results is not None and not store.beam_results.empty:
+        written += export_beam_dxf(store.beam_results, target)
+    if columns and store.column_report is not None and not store.column_report.empty:
+        bars = store.inputs.get("column_bars") or {}
+        written += export_column_cad_drawings(
+            store.column_report, target, float(bars.get("dmain", 25)),
+            float(bars.get("cover", 40)), bool(store.inputs.get("smrf", True)), tie_style,
+            store.tables["CONNECTIVITY"], section_scale)
+    return written
+
+
+def run_schedules() -> list[str] | None:
+    """sdt schedules: draw the beam and column schedules (DXF) again from a stored
+    design (``<model> - design data.pkl`` of sdt beams, sdt columns or sdt design),
+    without designing again. No ETABS is needed."""
+    from design.concrete.columns.schedule import ask_inner_tie_style, ask_section_scale
+    from utilities._gui_helpers import (
+        select_open_path,
+        select_option,
+        select_output_directory,
+        show_warning,
+    )
+    from utilities.run_summary import RunSummary
+
+    title = "Schedules"
+    path = select_open_path("Select the design data (<model> - design data.pkl)", ".pkl",
+                            "Design data")
+    if not path:
+        return None
+    try:
+        with open(path, "rb") as handle:
+            store = StoreReader(handle).load()
+    except (OSError, pickle.UnpicklingError, EOFError, AttributeError, ImportError) as error:
+        show_warning(f"The design data could not be read ({error}).", title=title)
+        return None
+    has_beams = store.beam_results is not None and not store.beam_results.empty
+    has_columns = store.column_report is not None and not store.column_report.empty
+    if not (has_beams or has_columns):
+        show_warning("This design data holds no designed beams or columns: run sdt beams "
+                     "(and sdt columns) or sdt design first.", title=title)
+        return None
+    choices = [label for label, (b, c) in SCHEDULE_CHOICES.items()
+               if (not b or has_beams) and (not c or has_columns)]
+    chosen = select_option(title, "Which schedules should be drawn?", choices)
+    if chosen is None:
+        return None
+    beams, columns = SCHEDULE_CHOICES[chosen]
+    last = _last()
+    tie_style, section_scale = "crossties", 20.0
+    if columns:
+        tie_style = ask_inner_tie_style()
+        if tie_style is None:
+            return None
+        section_scale = ask_section_scale(last.get("section_scale"))
+        if section_scale is None:
+            return None
+        _remember({"section_scale": section_scale})
+    folder = select_output_directory("Folder for the schedules")
+    if not folder:
+        return None
+    written = write_schedules(store, folder, beams, columns, tie_style, section_scale)
+    summary = RunSummary("sdt schedules", store.model_path)
+    summary.add("Design data", os.path.basename(path))
+    if columns:
+        summary.add("Column sections", f"at 1 : {section_scale:g}, interior ties as "
+                                       f"{'crossties' if tie_style == 'crossties' else 'hoops'}")
+    summary.add("Schedules written", len(written))
+    for file in written:
+        summary.file("Schedule", file)
+    summary.show(popup=True)
+    return written
+
+
 def run_deflection() -> pd.DataFrame | None:
     """Deflection checks only, with the bars of the last beam design of the model."""
     from design.concrete.beams.deflection import DEFLECTION_COLUMNS, add_deflection_columns
@@ -922,7 +1011,11 @@ def run_columns() -> DesignStore | None:
         ask_column_design_options,
     )
     from design.concrete.columns.report import write_column_results_xlsx
-    from design.concrete.columns.schedule import ask_inner_tie_style, export_column_cad_drawings
+    from design.concrete.columns.schedule import (
+        ask_inner_tie_style,
+        ask_section_scale,
+        export_column_cad_drawings,
+    )
     from utilities._gui_helpers import (
         LoadingWindow,
         select_option,
@@ -965,13 +1058,17 @@ def run_columns() -> DesignStore | None:
     tie_style = ask_inner_tie_style()
     if tie_style is None:
         return None
+    section_scale = ask_section_scale(last.get("section_scale"))
+    if section_scale is None:
+        return None
     targets = ask_dcr_targets(model_path, title, (dcr_targets.COLUMN,))
     if targets is None:
         return None
     folder = select_output_directory("Folder for the column results, calculations and schedule")
     if not folder:
         return None
-    _remember({**bars, "check_top_level": levels[0], "check_foundation_level": levels[1]})
+    _remember({**bars, "check_top_level": levels[0], "check_foundation_level": levels[1],
+               "section_scale": section_scale})
 
     with dcr_targets.use(targets), LoadingWindow("Column design") as window:
         report, groups, joints = design_columns(
@@ -990,7 +1087,8 @@ def run_columns() -> DesignStore | None:
                                          output_path(folder, f"{stem} - Column Design.xlsx"))
         window.update("Saving 2 of 3: the column schedule (.dxf)")
         dxf = export_column_cad_drawings(report, subfolder(folder, SCHEDULES), bars["dmain"], bars["cover"], smrf,
-                                         tie_style, store.tables["CONNECTIVITY"])
+                                         tie_style, store.tables["CONNECTIVITY"],
+                                         section_scale)
         window.update("Saving 3 of 3: the calculation report (.pdf, LaTeX)")
         pdf = export_column_pdf(report, output_path(folder, f"{stem} - Column Calculations.pdf"),
                                 smrf, bars["dmain"], bars["dties"], bars["cover"])

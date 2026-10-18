@@ -579,7 +579,7 @@ def test_the_loop_draws_the_column_schedule_with_the_chosen_tie_style(tmp_path, 
     """sdt design asks the interior tie style, like sdt columns, and uses it."""
     drawn = []
     monkeypatch.setattr(col_schedule, "export_column_cad_drawings",
-                        lambda report, folder, dmain, cover, smrf, style, connectivity:
+                        lambda report, folder, dmain, cover, smrf, style, connectivity, scale=None:
                         drawn.append(style) or [])
     monkeypatch.setattr(col_report, "write_column_results_xlsx", lambda *a, **k: "x")
     monkeypatch.setattr(col_calculations, "export_column_pdf", lambda *a, **k: None)

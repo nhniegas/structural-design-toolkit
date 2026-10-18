@@ -10,7 +10,7 @@ Every command sorts the files it writes into subfolders by kind. A command that 
 | `Drawings` | Framing and foundation plans (`.dxf`), the 3D model (`.step`) | `<model> - Framing Plans.dxf`, `<model> - 3D Model.step` |
 | `Summaries` | Summaries, logs and text reports (`.txt`) | `<model> - Drift.txt`, `<model> - Irregularity.txt`, `<model> - DESIGN log.txt`, `<model> - Beam Design summary.txt`, `<model> - plan changes.txt` |
 
-Files that later commands read back stay where they always were: `<model> - design data.pkl` at the top of the output folder, and the inputs saved beside the model (`<model>.setup.json`, `<model> - FOUNDATION.plan.json`). Model copies made by a command (`- TAGGED.EDB`, `- DESIGN.EDB`, `- FOUNDATION.EDB`) are also saved beside the model.
+Files that later commands read back stay where they always were, beside the model: `<model> - design data.pkl` (and `<model> - DESIGN - design data.pkl` of `sdt design`), and the inputs saved (`<model>.setup.json`, `<model> - FOUNDATION.plan.json`). Model copies made by a command (`- TAGGED.EDB`, `- DESIGN.EDB`, `- FOUNDATION.EDB`) are also saved beside the model.
 
 The standalone checks (`sdt pilecap`, `sdt composite`, `sdt steel`, `sdt wind`) ask where to save their report, and save it there.
 

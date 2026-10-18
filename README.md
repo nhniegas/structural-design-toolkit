@@ -159,6 +159,7 @@ sdt beams       # extract the forces and design the beams; results, calcs and sc
 sdt deflection  # only the beam deflections (bars of the last beam design)
 sdt columns     # design the columns from the stored beam step
 sdt design      # analysis and beam/column design loop that resizes members until they pass
+sdt schedules   # the beam and column schedules (DXF) again from a stored design, no ETABS
 sdt foundation  # a second model for the foundation, from the support reactions; or update its forces
 sdt plans       # framing plans of every floor as one DXF: beams, columns, marks, grids; the foundation plan too
 sdt 3d          # the model as 3D solids in a STEP file, for AutoCAD; the foundation and the bars too
