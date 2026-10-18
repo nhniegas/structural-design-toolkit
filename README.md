@@ -134,6 +134,7 @@ Each guide in `docs/` covers one tool: how to run it, its inputs, what it writes
 - [Steel and composite modules](docs/steel_design_documentation.md)
 - [Wind load calculator](docs/wind_calculator_asce7_documentation.md)
 - [Pile cap design](docs/pile_cap_design.md)
+- [Deformation compatibility](docs/etabs_compatibility.md)
 - [Output folders: where each file is written](docs/output_folders.md)
 - [Results in the terminal](docs/terminal_output.md)
 - [The dialogs](docs/dialogs.md)
@@ -160,6 +161,7 @@ sdt deflection  # only the beam deflections (bars of the last beam design)
 sdt columns     # design the columns from the stored beam step
 sdt design      # analysis and beam/column design loop that resizes members until they pass
 sdt schedules   # the beam and column schedules (DXF) again from a stored design, no ETABS
+sdt compatibility  # members not in the lateral system (group GRAVITY ONLY): forces at the design displacement, NSCP 418.14
 sdt foundation  # a second model for the foundation, from the support reactions; or update its forces
 sdt plans       # framing plans of every floor as one DXF: beams, columns, marks, grids; the foundation plan too
 sdt 3d          # the model as 3D solids in a STEP file, for AutoCAD; the foundation and the bars too
@@ -233,6 +235,10 @@ This defines the materials, frame sections, load patterns, UBC 97 response spect
 ## Concrete quantities
 
 `sdt quantities` gives the volume of concrete of each story and of the building, the floor area, and the concrete ratio in m3/m2. Beams are measured below the slab and between the faces of their supports, slabs less their openings and the columns through them, so nothing is counted twice. The slab on grade, which is not modelled as a rule, is the footprint of the building by the thickness you type, and the footings and tie beams of the saved foundation plan can be added. See [Concrete quantities](docs/etabs_concrete_quantities.md).
+
+## Deformation compatibility
+
+`sdt compatibility` checks the members that are not part of the seismic-force-resisting system (NSCP 2015 208.7.2.3 and 418.14): the members of the ETABS group `GRAVITY ONLY`, which it can propose and create, and every gravity beam. It finds the design displacement δu with those members pinned (the frames alone), takes their forces at δu in the model as built, adds the gravity load, and says whether 418.14.3.2 or 418.14.3.3 applies and whether the detailing meets it. See [Deformation compatibility](docs/etabs_compatibility.md).
 
 ## Pile cap design
 

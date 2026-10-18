@@ -81,7 +81,7 @@ import argparse
 import sys
 from pathlib import Path
 
-VERSION = "0.8.1"  # the same as in pyproject.toml (tests/test_main.py checks it)
+VERSION = "0.9.0"  # the same as in pyproject.toml (tests/test_main.py checks it)
 # Hidden first argument: this process is the progress window of another one
 # (utilities/_gui_helpers.LoadingWindow). It is how the packaged program,
 # which has no separate Python to start, opens that window.
@@ -151,6 +151,12 @@ def _beams():
     from design.concrete.workflow import run_beams
 
     return run_beams()
+
+
+def _compatibility():
+    from etabs_api.workflows.compatibility import run_compatibility_cli
+
+    return run_compatibility_cli()
 
 
 def _schedules():
@@ -250,6 +256,8 @@ COMMANDS = {
     "deflection": (_deflection, "check only the beam deflections (bars of the last beam design)"),
     "columns": (_columns, "design the columns (with slenderness) from the stored beam step"),
     "design": (_design, "analysis and design loop that resizes beams and columns"),
+    "compatibility": (_compatibility, "members not in the lateral system (group GRAVITY ONLY): "
+                                      "forces at the design displacement, NSCP 418.14"),
     "foundation": (_foundation, "foundation model from the support reactions, or update its forces"),
     "schedules": (_schedules, "beam and column schedules (DXF) again from a stored design, "
                               "without designing (no ETABS)"),
