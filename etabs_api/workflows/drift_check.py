@@ -27,6 +27,7 @@ The values are in design/criteria/code_config.py.
 from __future__ import annotations
 
 import os
+import re
 import sys
 from dataclasses import dataclass, field
 
@@ -299,6 +300,12 @@ class DriftReport:
     picked: list[str] = field(default_factory=list)  # combinations the user picked, if any
     stories: dict[str, list[tuple]] = field(default_factory=dict)  # level name: story_table rows
     modifiers: list[mc.Finding] = field(default_factory=list)  # your modifiers, judged
+    # every story of every level, for resizing: level -> {(combination, story):
+    # (drift ratio, is wind)}; the drift pattern periods and R of each level
+    story_drifts: dict[str, dict[tuple[str, str], tuple[float, bool]]] = field(
+        default_factory=dict)
+    level_periods: dict[str, dict[str, float]] = field(default_factory=dict)
+    level_r: dict[str, float | None] = field(default_factory=dict)
     modelled: str = ""  # the effective I of your modifiers, as text
 
     def report(self):
@@ -617,6 +624,10 @@ def run_drift(connector, reference: str = CORNERS,
                 return str(combo).upper().startswith("WDRIFT")
 
             report.stories[level.name] = story_table(by_story, story_order, is_wind, used_r)
+            report.story_drifts[level.name] = {key: (ratio, is_wind(key[0]))
+                                               for key, ratio in by_story.items()}
+            report.level_periods[level.name] = dict(periods)
+            report.level_r[level.name] = used_r
     finally:
         say("Restoring the strength modifiers and spectrum scale factors")
         model.SetModelIsLocked(False)
@@ -754,6 +765,46 @@ def ask_drift_options(title: str, standard: bool = True) -> DriftOptions | None:
         CENTER if where.startswith("Diaphragm") else CORNERS,
         BOTH if which == "Both" else (STATIC if which.startswith("Static") else SPECTRUM),
         denominator, service_factor=None if factor == code_factor else factor)
+
+
+_DIRECTION = re.compile(r"(?:EQ|RSA|W)([XY])", re.IGNORECASE)
+
+
+def combo_direction(combo: str, drift_cases: dict[str, tuple[str, bool]] | None = None
+                    ) -> str | None:
+    """X or Y: the direction of the lateral load of a drift combination, from its load
+    case (EQXSD, RSAYD, WX, ...). None when the name does not say it."""
+    case = (drift_cases or {}).get(combo, (combo, False))[0]
+    found = _DIRECTION.search(str(case)) or _DIRECTION.search(str(combo))
+    return found.group(1).upper() if found else None
+
+
+def drift_excess(report: DriftReport, drift_cases: dict[str, tuple[str, bool]] | None = None
+                 ) -> dict[tuple[str, str | None], tuple[float, str, str]]:
+    """The stories over their drift limit, at any stiffness level checked:
+    (story, direction) -> (drift / limit, combination, level), the largest of each.
+
+    Seismic: Delta_M = 0.7 R Delta_S against 0.025 or 0.020 h by the period of the
+    drift patterns (NSCP 208.6.5.1). Wind: Delta / h against 1 / the typed limit.
+    """
+    out: dict[tuple[str, str | None], tuple[float, str, str]] = {}
+    for level, drifts in report.story_drifts.items():
+        periods = report.level_periods.get(level, {})
+        r_factor = report.level_r.get(level) or mc.SEIS.smrf_r
+        for (combo, story), (ratio, wind) in drifts.items():
+            if wind:
+                over = ratio * report.wind_denominator
+            else:
+                case = (drift_cases or {}).get(combo, (str(combo).split()[-1], False))[0]
+                period = periods.get(case) or (max(periods.values()) if periods else None)
+                limit = mc.drift_limit(period) if period else mc.SEIS.drift_limit_long
+                over = mc.SEIS.drift_amplification * r_factor * ratio / limit
+            if over <= 1.0 + 1e-9:
+                continue
+            key = (story, combo_direction(combo, drift_cases))
+            if key not in out or over > out[key][0]:
+                out[key] = (over, combo, level)
+    return out
 
 
 def failures(report: DriftReport) -> list[tuple[str, mc.Finding]]:

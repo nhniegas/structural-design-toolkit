@@ -112,6 +112,8 @@ class LoopSettings:
     office_bar_spacing: bool = False  # beam bars at most 150 mm clear (False: crack control)
     exempt_short_spans: bool = False  # girders under 4d clear span without the SMRF rules
     deflection_stages: object = None  # deflection.DeflectionStages: when partitions are built
+    resize_for_drift: bool = False  # grow columns and girders until every story passes drift
+    drift_options: object = None    # drift_check.DriftOptions of the run
 
 
 @dataclass
@@ -838,6 +840,36 @@ class Workbench:
         and joint coordinates. Empty when the coordinates are not there."""
         return beam_directions(self.tables.get("CONNECTIVITY"), self.tables.get("POINTS"))
 
+    def member_stories(self) -> tuple[dict[str, str], dict[str, str]]:
+        """The story of every column and of every beam."""
+        def stories(table: str) -> dict[str, str]:
+            rows = self._table(table)
+            return dict(zip(rows["UniqueName"].astype(str), rows["Story"].astype(str)))
+
+        return stories("Column Object Connectivity"), stories("Beam Object Connectivity")
+
+    def story_names(self) -> list[str]:
+        """The stories of the model, the lowest first (the base left out)."""
+        from etabs_api.core.helpers import as_list
+
+        return [str(n) for n in as_list(self.model.Story.GetStories()[1])][1:]
+
+    def drift_excess(self) -> dict:
+        """Run sdt drift on the current sizes (it restores the model) and return the
+        stories over their limit: (story, direction) -> (drift / limit, combination,
+        level)."""
+        from etabs_api.workflows.drift_check import drift_excess, run_drift, stiffness_levels
+
+        options = self.settings.drift_options
+        self.show("Drift check", "every stiffness level")
+        report = run_drift(self.connector, options.reference, options.wind_denominator,
+                           levels=stiffness_levels(options.service_factor),
+                           progress=lambda text: self.show("Drift check", text),
+                           seismic=options.seismic, combos=options.combos,
+                           drift_cases=options.drift_cases, r_factor=options.r_factor,
+                           cases=options.cases)
+        return drift_excess(report, options.drift_cases)
+
     def angles(self, columns: list[str]) -> dict[str, float]:
         return {name: float(self.model.FrameObj.GetLocalAxes(name, 0.0, False)[0])
                 for name in columns}
@@ -1230,6 +1262,76 @@ def stuck_by_kind(stuck: dict[str, str]) -> dict[str, list[str]]:
     return out
 
 
+DRIFT_REASON = "grow for drift"
+
+
+def along_depth_for(direction: str, angle: float) -> bool:
+    """Whether the depth of a column (along its local 2 axis, at ``angle`` degrees
+    from global X) is the side along the global ``direction`` X or Y."""
+    c, s = abs(math.cos(math.radians(angle))), abs(math.sin(math.radians(angle)))
+    return c >= s if direction == "X" else s > c
+
+
+def runs_along(vector: tuple[float, float] | None, direction: str | None) -> bool:
+    """Whether a beam of plan direction ``vector`` runs along global X or Y."""
+    if vector is None or direction is None:
+        return True
+    dx, dy = abs(vector[0]), abs(vector[1])
+    return dx >= dy if direction == "X" else dy > dx
+
+
+def drift_actions(excess: dict, sections: dict[str, Section], column_story: dict[str, str],
+                  beam_story: dict[str, str], stories: list[str], angles: dict[str, float],
+                  directions: dict[str, tuple[float, float]], settings: LoopSettings
+                  ) -> tuple[dict[str, tuple[Section, str]], list[str]]:
+    """One size step for the members that carry the drift of each failing story:
+
+    * the columns of the story, the side along the drift direction (both sides
+      where the story fails both ways, or the direction is not known);
+    * the girders along that direction at the floor above the story and at the
+      floor below it, one depth deeper.
+
+    ``excess`` is ``drift_check.drift_excess``: (story, direction) -> (drift /
+    limit, combination, level). ``stories`` are the story names, the lowest
+    first. Returns the actions and the members that are at their largest size.
+    """
+    actions: dict[str, tuple[Section, str]] = {}
+    at_largest: list[str] = []
+    below = {story: stories[i - 1] if i else None for i, story in enumerate(stories)}
+    for (story, direction), (over, combo, _) in sorted(excess.items(), key=lambda x: -x[1][0]):
+        # a story failing both ways (or a direction not known) grows its columns square
+        both = {d for (st, d) in excess if st == story} >= {"X", "Y"} or direction is None
+        reason = (f"{DRIFT_REASON} ({story}"
+                  + (f" {direction}" if direction else "") + f", {over:.2f} of the limit)")
+        column_reason = (f"{DRIFT_REASON} ({story} X and Y, {over:.2f} of the limit)"
+                         if both and direction else reason)
+        for name, at in column_story.items():
+            section = sections.get(name)
+            if at != story or section is None or section.is_beam or name in actions:
+                continue
+            if both or section.circular:
+                new = grow_column(section, "square", settings.ranges, settings.limits)
+            else:
+                new = grow_column(section, "side", settings.ranges, settings.limits,
+                                  along_depth_for(direction, angles.get(name, 0.0)))
+            if new is None:
+                at_largest.append(name)
+            else:
+                actions[name] = (new, column_reason)
+        floors = {story, below.get(story)} - {None}
+        for name, at in beam_story.items():
+            section = sections.get(name)
+            if (at not in floors or section is None or section.family != "G"
+                    or name in actions or not runs_along(directions.get(name), direction)):
+                continue
+            new = grow_beam(section, "depth", settings.ranges, settings.limits)
+            if new is None:
+                at_largest.append(name)
+            else:
+                actions[name] = (new, reason)
+    return actions, sorted(set(at_largest))
+
+
 def run_design_loop(bench: Workbench) -> dict:
     """The loop. Returns a summary: status, iterations, changes and what still fails."""
     settings = bench.settings
@@ -1311,21 +1413,63 @@ def run_design_loop(bench: Workbench) -> dict:
         return changes, beam_table, column_report
 
     round_number = 0
-    for round_number in range(1, settings.max_rounds + 1):
-        bench.log("")
-        bench.log(f"##### Round {round_number} #####")
-        for _ in range(settings.max_inner):  # beams and girders
-            changes, _, _ = step("beams", False, allow_shrink=True)
-            if not any(parse_section(c.new).is_beam for c in changes):
-                break
-        for _ in range(settings.max_inner_columns):  # columns
-            changes, _, _ = step("columns", True, allow_shrink=True)
+    drift_rounds = 0
+    drift_stuck: list[str] = []
+    drift_note = ""
+    while True:
+        status = "not converged"
+        for _ in range(settings.max_rounds):
+            round_number += 1
+            bench.log("")
+            bench.log(f"##### Round {round_number} #####")
+            for _ in range(settings.max_inner):  # beams and girders
+                changes, _, _ = step("beams", False, allow_shrink=True)
+                if not any(parse_section(c.new).is_beam for c in changes):
+                    break
+            for _ in range(settings.max_inner_columns):  # columns
+                changes, _, _ = step("columns", True, allow_shrink=True)
+                if not changes:
+                    break
+            changes, beams, report = step("final check of every member", True,
+                                          allow_shrink=False)
             if not changes:
+                status = "converged"
                 break
-        changes, beams, report = step("final check of every member", True, allow_shrink=False)
-        if not changes:
-            status = "converged"
+        if not settings.resize_for_drift or status != "converged":
             break
+        # ---- drift: grow the columns and girders of the failing stories ----
+        bench.stage = f"Drift check after round {round_number}"
+        excess = bench.drift_excess()
+        if not excess:
+            drift_note = ("drift passes" + (f" after {drift_rounds} resizing"
+                                            f"{'s' if drift_rounds != 1 else ''} for drift"
+                                            if drift_rounds else ""))
+            bench.log(f"Drift: every story passes ({drift_note}).")
+            break
+        if drift_rounds >= settings.max_rounds:
+            drift_note = f"drift still fails after {drift_rounds} resizings for drift"
+            bench.log(f"Drift: {drift_note} (the limit of rounds).")
+            status = "drift not met"
+            break
+        drift_rounds += 1
+        sections = bench.sections()
+        actions, at_largest = drift_actions(
+            excess, sections, *bench.member_stories(), bench.story_names(),
+            bench.angles(bench.members()[1]), bench.directions(), settings)
+        drift_stuck = sorted(set(drift_stuck) | set(at_largest))
+        bench.log("")
+        bench.log(f"=== Drift resizing {drift_rounds} ===")
+        for (story, direction), (over, combo, level) in sorted(excess.items()):
+            bench.log(f"  {story} {direction or ''}: {over:.2f} of the limit ({combo}, {level})")
+        if at_largest:
+            bench.log("  at their largest size: " + ", ".join(at_largest))
+        if not actions:
+            drift_note = "drift fails and no column or girder there can be made larger"
+            bench.log(f"Drift: {drift_note}.")
+            status = "drift not met"
+            break
+        all_changes.extend(bench.apply(actions, sections, grown))
+        unchanged = None
     still_failing = sorted(set(beams.loc[beams["Design_Status"].astype(str) != "OK",
                                          "UniqueName"].astype(str)))
     if report is not None:
@@ -1340,7 +1484,9 @@ def run_design_loop(bench: Workbench) -> dict:
     for kind, names in stuck_by_kind(stuck).items():
         bench.log(f"Not fixed by a larger size ({kind}): " + ", ".join(names))
     return {"status": status, "iterations": iteration, "changes": all_changes,
-            "failing": still_failing, "beams": beams, "columns": report, "stuck": stuck}
+            "failing": still_failing, "beams": beams, "columns": report, "stuck": stuck,
+            "drift_rounds": drift_rounds, "drift_note": drift_note,
+            "drift_stuck": drift_stuck}
 
 
 # =============================================================================
@@ -1370,6 +1516,27 @@ LINE_SHARING_OPTIONS = {
         True,
     "No - every beam and girder takes the size it needs by itself": False,
 }
+
+
+DRIFT_RESIZE_YES = ("Yes - grow the columns and girders of a story that fails drift, then "
+                    "size every member again")
+DRIFT_RESIZE_NO = "No - check the drift at the end and report it"
+
+
+def ask_drift_resizing(title: str, last: dict | None = None) -> bool | None:
+    """Whether the loop also sizes the members for drift. None when closed."""
+    from utilities._gui_helpers import select_option
+
+    chosen = select_option(
+        title, "Resize members for drift?\n\nWhen a story fails the seismic drift (NSCP "
+        "208.6.5) or the wind drift limit, its columns grow one size along the drift direction, "
+        "with the girders along that direction at the floors above and below it. Every member "
+        "is then sized again for strength, and the drift checked again, until every story "
+        "passes or the members reach their largest sizes. Each drift check takes about as "
+        "long as sdt drift.",
+        [DRIFT_RESIZE_YES, DRIFT_RESIZE_NO],
+        default_index=1 if (last or {}).get("resize_for_drift") is False else 0)
+    return None if chosen is None else chosen == DRIFT_RESIZE_YES
 
 
 def line_sharing_text(settings: LoopSettings) -> str:
@@ -1528,12 +1695,13 @@ def _ask_ranges(families: set[str], settings: dict, title: str,
 def final_drift_check(bench: Workbench, options, folder: str, stem: str) -> dict:
     """Drift of the final sizes (sdt drift), saved to ``<stem> - Drift.txt``.
 
-    The sections are not resized for drift: a failure is reported, and the
-    model is to be reconfigured (stiffer members, walls) and designed again.
+    Without the resizing for drift a failure is reported, and the model is to be
+    reconfigured (stiffer members, walls) and designed again. With it, a failure
+    here means the resizing stopped (largest sizes, or the limit of rounds).
     """
     from etabs_api.workflows.drift_check import failures, run_drift, save_report
 
-    bench.stage = "Final drift check (final sizes; no resizing for drift)"
+    bench.stage = "Final drift check (final sizes)"
     from etabs_api.workflows.drift_check import stiffness_levels
 
     report = run_drift(bench.connector, options.reference, options.wind_denominator,
@@ -1547,8 +1715,11 @@ def final_drift_check(bench: Workbench, options, folder: str, stem: str) -> dict
     bench.log("##### Drift of the final sizes #####")
     bench.log(report.text())
     if failed:
-        bench.log(f"DRIFT FAILS ({len(failed)} checks). The sections were not resized for drift: "
-                  "reconfigure the model (larger columns or beams, walls) and run sdt design "
+        bench.log(f"DRIFT FAILS ({len(failed)} checks). "
+                  + ("The resizing for drift stopped before every story passed: "
+                     if bench.settings.resize_for_drift
+                     else "The sections were not resized for drift: ")
+                  + "reconfigure the model (larger columns or beams, walls) and run sdt design "
                   "again.")
         for level, finding in failed:
             bench.log(f"  {level}: {finding.text}")
@@ -1697,6 +1868,9 @@ def run_design_cli() -> dict | None:
                                                drift_options)
     if drift_options is None:
         return None
+    resize_for_drift = ask_drift_resizing(title, last)
+    if resize_for_drift is None:
+        return None
     folder = select_output_directory("Folder for the final results, calculations and schedules")
     if not folder:
         return None
@@ -1794,7 +1968,9 @@ def run_design_cli() -> dict | None:
         office_bar_spacing=office_bar_spacing,
         exempt_short_spans=exempt_short_spans,
         deflection_stages=deflection_stages,
+        resize_for_drift=resize_for_drift, drift_options=drift_options,
     )
+    _remember({"resize_for_drift": resize_for_drift})
 
     # the working copy: the original model is not changed
     stem = os.path.splitext(original)[0]
@@ -1821,7 +1997,11 @@ def run_design_cli() -> dict | None:
         bench.log("Deflection stages: " + deflection_stages.describe() + ".")
         bench.log("Beam lines: " + line_sharing_text(settings) + ".")
         bench.log(f"Combinations: {len(combos)} ULS ({seismic})")
-        bench.log("The loop sizes the members for strength and deflection. Drift is checked at "
+        bench.log("The loop sizes the members for strength and deflection, then for drift: "
+                  "the columns and girders of a story that fails drift grow one size and the "
+                  "members are sized again, until every story passes."
+                  if resize_for_drift else
+                  "The loop sizes the members for strength and deflection. Drift is checked at "
                   "the end, on the final sizes: the members are not resized for it.")
         bench.log("Size ranges (from, to, step): " + "; ".join(
             f"{family} " + " x ".join(
@@ -1858,7 +2038,10 @@ def run_design_cli() -> dict | None:
     if summary.get("project_report"):
         print(f"Full project report: {summary['project_report']}")
     if summary["drift"]["failed"]:
-        print("DRIFT FAILS: the sections were not resized for drift. Reconfigure the model "
+        print("DRIFT FAILS" + (": the resizing for drift stopped before every story passed. "
+                               if settings.resize_for_drift
+                               else ": the sections were not resized for drift. ")
+              + "Reconfigure the model "
               f"for drift and run sdt design again. See {summary['drift']['path']}")
     loop_summary(summary, settings, original, working, log_path, folder).show(
         output_path(folder, f"{os.path.splitext(os.path.basename(working))[0]} summary.txt"),
@@ -1908,9 +2091,16 @@ def loop_summary(summary: dict, settings: LoopSettings, original: str, working: 
     for kind, names in stuck_by_kind(summary.get("stuck") or {}).items():
         out.fail(f"Not fixed by a larger size ({kind}): " + listed(names)
                  + ". Change the framing, the span or the support, not the section.")
+    if settings.resize_for_drift:
+        out.add("Resized for drift", summary.get("drift_note") or "-")
+        if summary.get("drift_stuck"):
+            out.fail("At their largest size, so drift could not grow them: "
+                     + listed(summary["drift_stuck"]) + ". Raise the largest sizes in the loop "
+                     "limits, or stiffen the model (walls, more frames).")
     if drift.get("failed"):
-        out.fail("Drift fails: the sections are not resized for drift. Reconfigure the model "
-                 "(stiffer members, walls) and run sdt design again.")
+        out.fail(("Drift fails after the resizing for drift. " if settings.resize_for_drift
+                  else "Drift fails: the sections are not resized for drift. ")
+                 + "Reconfigure the model (stiffer members, walls) and run sdt design again.")
     if settings.targets is not None:
         from design.criteria import dcr_targets
         from design.concrete.workflow import add_targets_to

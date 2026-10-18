@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -706,3 +707,105 @@ def test_a_beam_no_size_can_bring_under_its_deflection_limit_is_stopped_at_once(
     # without the limits the question is not asked (the older behaviour)
     plain = actions()
     assert stop_unhelped_deflection_growth(plain, sections, results(2.6, 1.3), {}) == []
+
+
+# --------------------------------------------------------------------------- #
+# v0.8.0: resizing for drift
+# --------------------------------------------------------------------------- #
+def test_drift_excess_by_story_and_direction():
+    from etabs_api.workflows import drift_check as dc
+
+    report = dc.DriftReport(wind_denominator=400.0)
+    report.story_drifts["Strength level"] = {
+        # 0.7 x 8.5 x 0.0045 = 0.0268 > 0.020 (T 0.9 s): 1.34 of the limit
+        ("DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 EQXSD", "2F"): (0.0045, False),
+        ("DRIFT 100 (1.2 + Ev) DL + f LL + 1.0 EQYSD", "2F"): (0.0020, False),  # 0.60
+        ("WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WY", "3F"): (0.0030, True),   # 1.20
+    }
+    report.level_periods["Strength level"] = {"EQXSD": 0.9, "EQYSD": 0.9}
+    report.level_r["Strength level"] = 8.5
+    excess = dc.drift_excess(report)
+    assert set(excess) == {("2F", "X"), ("3F", "Y")}
+    assert excess[("2F", "X")][0] == pytest.approx(0.7 * 8.5 * 0.0045 / 0.020)
+    assert excess[("3F", "Y")][0] == pytest.approx(1.2)
+    assert dc.combo_direction("WDRIFT 101 1.2 DL + 1.0 WX reversed") == "X"
+    assert dc.combo_direction("MY DRIFT", {"MY DRIFT": ("RSAYD", False)}) == "Y"
+
+
+def test_drift_grows_the_story_columns_and_the_girders_along_it():
+    from etabs_api.workflows.design_loop import drift_actions
+
+    sections = {"C1": cr(500, 500), "C2": cr(500, 500), "C3": cr(500, 500),
+                "GX1": g(300, 500), "GY1": g(300, 500), "GX9": g(300, 500), "B1":
+                Section("B", 250, 400, "C05", "G60")}
+    column_story = {"C1": "2F", "C2": "2F", "C3": "3F"}
+    beam_story = {"GX1": "2F", "GY1": "2F", "GX9": "RD", "B1": "2F"}
+    directions = {"GX1": (1.0, 0.0), "GY1": (0.0, 1.0), "GX9": (1.0, 0.0), "B1": (1.0, 0.0)}
+    angles = {"C1": 0.0, "C2": 90.0}
+    excess = {("2F", "X"): (1.3, "DRIFT ... EQXSD", "Strength level")}
+    actions, largest = drift_actions(excess, sections, column_story, beam_story,
+                                     ["GF", "2F", "3F", "RD"], angles, directions, SETTINGS)
+    # C1 at 0 degrees: its depth (local 2) is along X; C2 turned 90: its width is
+    assert actions["C1"][0].depth > 500 and actions["C1"][0].width == 500
+    assert actions["C2"][0].width > 500 and actions["C2"][0].depth == 500
+    assert "C3" not in actions                      # another story
+    assert actions["GX1"][0].depth > 500            # girder along X at the floor of 2F
+    assert "GY1" not in actions and "B1" not in actions and "GX9" not in actions
+    assert "grow for drift (2F X, 1.30 of the limit)" in actions["C1"][1]
+    assert largest == []
+
+
+def test_the_loop_resizes_for_drift_until_every_story_passes(monkeypatch):
+    from etabs_api.workflows import design_loop as dl
+    from etabs_api.workflows.design_loop import Change
+
+    checks = [{("2F", "X"): (1.2, "DRIFT EQXSD", "Strength level")}, {}]
+    grew = [Change("C1", "CR_500X500_C05_G60", "CR_500X600_C05_G60", "grow for drift")]
+    monkeypatch.setattr(dl, "beam_actions", lambda *a, **k: {})
+    monkeypatch.setattr(dl, "column_actions", lambda *a, **k: {})
+    monkeypatch.setattr(dl, "drift_actions",
+                        lambda *a, **k: ({"C1": (cr(500, 600), "grow for drift")}, []))
+    bench = _CountingBench([], resize_for_drift=True)
+    bench.script = []
+    applied = []
+
+    def apply(actions, current, grown):
+        applied.append(actions)
+        return grew if len(applied) == 1 else []
+
+    bench.apply = apply
+    bench.drift_excess = lambda: checks.pop(0)
+    bench.member_stories = lambda: ({"C1": "2F"}, {})
+    bench.story_names = lambda: ["GF", "2F"]
+    summary = dl.run_design_loop(bench)
+    assert summary["status"] == "converged" and summary["drift_rounds"] == 1
+    assert "drift passes after 1 resizing for drift" == summary["drift_note"]
+    assert any("C1" in a for a in applied) and checks == []
+    # without the resizing, the drift is not checked in the loop
+    bench2 = _CountingBench([])
+    bench2.drift_excess = lambda: (_ for _ in ()).throw(AssertionError("not called"))
+    assert dl.run_design_loop(bench2)["drift_rounds"] == 0
+
+
+def test_the_loop_stops_when_nothing_can_grow_for_drift(monkeypatch):
+    from etabs_api.workflows import design_loop as dl
+
+    monkeypatch.setattr(dl, "beam_actions", lambda *a, **k: {})
+    monkeypatch.setattr(dl, "column_actions", lambda *a, **k: {})
+    monkeypatch.setattr(dl, "drift_actions", lambda *a, **k: ({}, ["C1"]))
+    bench = _CountingBench([], resize_for_drift=True)
+    bench.drift_excess = lambda: {("2F", "X"): (1.2, "DRIFT EQXSD", "Strength level")}
+    bench.member_stories = lambda: ({"C1": "2F"}, {})
+    bench.story_names = lambda: ["GF", "2F"]
+    summary = dl.run_design_loop(bench)
+    assert summary["status"] == "drift not met" and summary["drift_stuck"] == ["C1"]
+
+
+def test_a_story_failing_both_ways_grows_its_columns_square():
+    from etabs_api.workflows.design_loop import drift_actions
+
+    excess = {("2F", "X"): (1.4, "WX", "As modelled"), ("2F", "Y"): (1.4, "WY", "As modelled")}
+    actions, _ = drift_actions(excess, {"C1": cr(500, 500)}, {"C1": "2F"}, {}, ["GF", "2F"],
+                               {"C1": 0.0}, {}, SETTINGS)
+    new = actions["C1"][0]
+    assert new.width > 500 and new.depth > 500

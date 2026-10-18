@@ -215,7 +215,7 @@ This defines the materials, frame sections, load patterns, UBC 97 response spect
 
 `sdt irregularity` reads the analysed model and reports each irregularity of UBC 97 Tables 16-L and 16-M (NSCP 2015 Tables 208-9 and 208-10): soft story, mass, vertical geometric, weak story (from the column design), torsional with the amplifier Ax, re-entrant corners and diaphragm openings. The types that need judgement are listed with what the model shows. It also gives the P-delta stability coefficient of each story, on first-order drifts from a copy of the model analysed with P-delta off. Nothing is changed in the model. See [Irregularity check](docs/etabs_irregularity.md).
 
-`sdt design` runs the analysis and the beam and column design again and again on a copy of the model, resizing the members until they pass (deflection included). It can end with the [full project report](docs/project_report.md): one PDF with the analysis (3D view, framing plans, loads, combinations, seismic and wind criteria, drifts, irregularities), the design of every member, and the calculation tables. See [Design loop](docs/etabs_design_loop.md).
+`sdt design` runs the analysis and the beam and column design again and again on a copy of the model, resizing the members until they pass (deflection included), and, if you choose, until every story passes drift. It can end with the [full project report](docs/project_report.md): one PDF with the analysis (3D view, framing plans, loads, combinations, seismic and wind criteria, drifts, irregularities), the design of every member, and the calculation tables. See [Design loop](docs/etabs_design_loop.md).
 
 ## Foundation model
 
@@ -274,12 +274,12 @@ The tag starts `.github/workflows/release.yml`: it runs the tests, builds the pr
 Not in this version, and planned for later ones:
 
 - **Shear wall design.** Walls are counted and reported as not designed.
-- **Drift in the design loop.** Drift is checked on the final sizes and reported; members are not resized for it.
+- **Drift by the most effective members.** The design loop grows the columns and girders of the stories that fail drift; choosing the members that remove the most drift per concrete added is not done yet.
 - **Steel and composite members from the ETABS model.** `sdt steel` and `sdt composite` are standalone checks with typed inputs.
 - **Flanged beams.** The design loop resizes rectangular beams and rectangular or circular columns only.
 - **Applying Ax to the model.** `sdt irregularity` reports the accidental torsion amplifier of each level; it does not yet write it into the seismic patterns.
 - **The irregularities left to judgement**: in-plane discontinuity, out-of-plane offsets, non-parallel systems, and the change of diaphragm stiffness from story to story.
-- **Redundancy factor ρ and the system factors.** ρ is a fixed value, and R and Ω0 are not checked against Table 208-11A by system.
+- **Redundancy factor ρ.** ρ is a fixed value (R and Ω0 come from the system of Table 208-11A since v0.7.0).
 - **Slabs on the framing plans.** `sdt plans` draws beams, columns, walls and grids; slab marks and span arrows are not drawn yet.
 - **Equations in the batch reports.** The beam and column reports, and Part C of the full project report, hold tables of values for each member. Writing out the equations of every member with their numbers is planned as a choice.
 - **The full project report for a model designed earlier.** Today it is written at the end of `sdt design` only.
