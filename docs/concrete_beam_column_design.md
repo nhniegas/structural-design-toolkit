@@ -1,6 +1,6 @@
 # Concrete Beam and Column Design
 
-Beam and column design of an ETABS model from the terminal, ACI 318M-14. No spreadsheet is used: the commands ask their inputs in dialogs and save the results (`.xlsx`), the calculation reports (`.pdf`) and the schedules (`.dxf`) in the folder you choose.
+Beam and column design of an ETABS model from the terminal, NSCP 2015 chapter 4 (which follows ACI 318M-14 clause for clause: ACI clause X is NSCP clause 4X). Every check cites both, NSCP first: "NSCP 418.6.2.1 (ACI 18.6.2.1)". No spreadsheet is used: the commands ask their inputs in dialogs and save the results (`.xlsx`), the calculation reports (`.pdf`) and the schedules (`.dxf`) in the folder you choose.
 
 ## How to use it
 
@@ -21,14 +21,14 @@ sdt columns    # design the columns from the stored beam step, save the column o
 | Seismic combinations | Static (EQ), response spectrum (RSA) or both. Gravity and wind `ULS` combinations are always included |
 | Live load reduction, tributary method, pattern live load | See [Extraction](#extraction) |
 | SMRF (seismic) design | One setting for the beams and the columns. Gravity beams (on other beams only) are designed for gravity in any case |
-| Gravity combination for the beam seismic shear | Only with SMRF; the combinations without seismic or wind terms are offered. The shear Ve uses the factored gravity load 1.2 D + f1 L (ACI 318-14 18.6.5.1, NSCP 2015 203.3), so the combination closest to it is selected; a combination without live load, such as 1.4 D, leaves the live load out |
+| Gravity combination for the beam seismic shear | Only with SMRF; the combinations without seismic or wind terms are offered. The shear Ve uses the factored gravity load 1.2 D + f1 L (NSCP 418.6.5.1; ACI 18.6.5.1, NSCP 2015 203.3), so the combination closest to it is selected; a combination without live load, such as 1.4 D, leaves the live load out |
 | Beam bars and cover | Main bar, stirrup and web bar (mm), web bar fy (MPa), cover (mm) |
 | Cover against earth | Whether the beams of any floor level need 75 mm cover (cast against or exposed to earth: footing tie beams, ground beams). If yes, pick the levels; the other beams keep the typed cover. Not asked when the typed cover is 75 mm or more. The levels are remembered and offered again |
 | Deflection limit | Partitions likely to be damaged (L/480) or not (L/240) |
 | When the partitions are built | Not known (all the long-term deflection is counted after them), or the months from when the beams first carry their dead load and the share of the dead load in place by then. See [Deflection stages](#deflection-stages) |
 | Target ratios | Use the code limits (every ratio 1.00), the targets saved for this model, or set them: one dialog for girders and one for beams, with a box for each check. See [Target ratios](#target-ratios) |
-| Beam torsion | Design for the analysis torsion, or take it as at most φTcr (compatibility torsion, ACI 22.7.3.2). See [Beam torsion](#beam-torsion) |
-| Beam bar spacing | The office rule (at most 150 mm clear between the bars of a face), or the code only (crack control, ACI 24.3.2). See [Beam bar spacing](#beam-bar-spacing) |
+| Beam torsion | Design for the analysis torsion, or take it as at most φTcr (compatibility torsion, NSCP 422.7.3.2; ACI 22.7.3.2). See [Beam torsion](#beam-torsion) |
+| Beam bar spacing | The code only (crack control, NSCP 424.3.2; ACI 24.3.2; the default), or the office rule (at most 150 mm clear between the bars of a face). See [Beam bar spacing](#beam-bar-spacing) |
 | Girders under 4d | Only with SMRF: apply the SMRF rules to girders with a clear span under 4d, as to every girder, or design them without. See [Girders with a clear span under 4d](#girders-with-a-clear-span-under-4d) |
 | Depth of a beam that carries others | Whether a girder or beam must be at least as deep as the beams that frame into it. See [Carrier depth](#carrier-depth) |
 | Output folder | For the results, the calculations and the schedules |
@@ -39,18 +39,19 @@ sdt columns    # design the columns from the stored beam step, save the column o
 
 Answers are remembered and offered again next time. Every named member (not a number) is designed.
 
-**Files in the output folder:**
+**Files in the output folder,** sorted into subfolders by kind (the same for every command; see [Output folders](output_folders.md)):
 
-| File | From |
-|---|---|
-| `<model> - Beam Design.xlsx` | The beam results, two rows (top, bottom) per beam |
-| `<model> - Beam Calculations.pdf` | Beam calculation report |
-| `<model> - Deflection.xlsx` | `sdt deflection`: the deflection checks, one row per beam |
-| `<Story>_Girder_Schedule.dxf`, `<Story>_Beam_Schedule.dxf` | Beam schedules |
-| `<model> - Column Design.xlsx` | The column report, one row per column, end and combination |
-| `<model> - Column Calculations.pdf` | Column calculation report |
-| `Column_Schedule.dxf` | Column schedule with the reinforced sections |
-| `<model> - Beam Design summary.txt`, `<model> - Column Design summary.txt` | The closing summary of the run, as shown in its window |
+| Subfolder | File | From |
+|---|---|---|
+| `Results` | `<model> - Beam Design.xlsx` | The beam results, two rows (top, bottom) per beam |
+| `Results` | `<model> - Deflection.xlsx` | `sdt deflection`: the deflection checks, one row per beam |
+| `Results` | `<model> - Column Design.xlsx` | The column report, one row per column, end and combination |
+| `Calculations` | `<model> - Beam Calculations.pdf` | Beam calculation report |
+| `Calculations` | `<model> - Column Calculations.pdf` | Column calculation report |
+| `Schedules` | `<Story>_Girder_Schedule.dxf`, `<Story>_Beam_Schedule.dxf` | Beam schedules |
+| `Schedules` | `Column_Schedule.dxf` | Column schedule with the reinforced sections |
+| `Summaries` | `<model> - Beam Design summary.txt`, `<model> - Column Design summary.txt` | The closing summary of the run, as shown in its window |
+| (top) | `<model> - design data.pkl` | The data kept between the commands (below) |
 
 **Closing summary.** When a command finishes, a window opens with its summary and stays until you close it (OK, Enter or Escape): the model, the counts, what needs attention grouped by reason and shown in red (for example `Column shear: GF-C1, GF-C2`), any choice that left a check out, and the files written. The text can be selected and copied. The terminal is for the detailed results; `sdt beams` and `sdt columns`, whose detail is in their result files, print the same summary there.
 
@@ -78,7 +79,7 @@ Answers are remembered and offered again next time. Every named member (not a nu
   - `tables.py`: the tables, names, local axes and permutations;
   - `report.py`: the column report and the results workbook; `schedule.py`: the schedule drawing; `calculations.py`: the calculation report;
   - `options.py`: the questions of the column design.
-- `design/criteria/`: the design criteria. `code_config.py` has every code value, each with its clause: ACI 318M-14 (`CODE`, used by both designers) and NSCP 2015 chapter 2 (`NSCP`: loads, live load reduction, earthquake).
+- `design/criteria/`: the design criteria. `code_config.py` has every code value, each with its clause: NSCP 2015 chapter 4 = ACI 318M-14 (`CODE`, used by both designers) and NSCP 2015 chapter 2 (`NSCP`: loads, live load reduction, earthquake).
 - `etabs_api/workflows/exporter.py`, `analysis_forces.py`, `tributary.py`: the extraction and the factored forces from the analysis results.
 - `utilities/_gui_helpers.py`: dialogs and the loading window; `utilities/_calc_report.py`: the PDF layout.
 
@@ -112,7 +113,7 @@ The two questions:
 | Question | Yes means |
 |---|---|
 | Reduce the reducible live load? | Each member's reducible live load (patterns of type Reducible Live) is multiplied by its own factor. Further questions choose the rule (NSCP 2015 205.5 or ASCE 7-10 4.7) and the tributary area method. See below |
-| Include pattern live load on the beams (ACI 318-14 6.4.2)? | Each beam span is also designed with its live load as a simple span (the largest sagging moment) and with fixed ends (the largest hogging moment), times the factor you type (default 0.75). A released end stays pinned. Cantilevers are left as analysed. Columns are not patterned |
+| Include pattern live load on the beams (NSCP 406.4.2; ACI 6.4.2)? | Each beam span is also designed with its live load as a simple span (the largest sagging moment) and with fixed ends (the largest hogging moment), times the factor you type (default 0.75). A released end stays pinned. Cantilevers are left as analysed. Columns are not patterned |
 
 What is read:
 
@@ -183,11 +184,11 @@ Each beam is designed at the left support, midspan and right support:
 - SMRF checks when SMRF is on: reinforcement ratio, moment-strength ratios, probable-moment design shear, hoop spacing
 - bar layering (up to three layers), stirrup legs and anchorage of the legs
 
-With SMRF on, the moment-strength ratios of ACI 18.6.3.2 are enforced, not only checked: bars are added until the positive strength at each support face is at least half the negative strength there, and every section has at least a quarter of the largest support strength, top and bottom. The result is in `SMRF moment strength ratio check`; `SMRF steel ratio check` reports the 2.5 % limit. Cantilevers are left out of this step.
+With SMRF on, the moment-strength ratios of NSCP 418.6.3.2 (ACI 18.6.3.2) are enforced, not only checked: bars are added until the positive strength at each support face is at least half the negative strength there, and every section has at least a quarter of the largest support strength, top and bottom. The result is in `SMRF moment strength ratio check`; `SMRF steel ratio check` reports the 2.5 % limit. Cantilevers are left out of this step.
 
 The seismic design shear is reported at each end as `Vₑ, left` and `Vₑ, right`: the gravity shear from the gravity combination you chose plus the sway shear from the probable moments (`Vₛway,max`), over the clear span between the column faces (the joint-to-joint length less half of the larger side of the column at each end). The sway shear acts along the whole span, so the stirrups beyond 2h carry it too, with the gravity shear there and Vc.
 
-A shear larger than phi (Vc + 0.66 √f'c bw d) (ACI 22.5.1.2), or a combined shear and torsion stress above ACI 22.7.7.1, fails the beam with `FAILED: SHEAR STRENGTH`: the section is too small, and more stirrup legs cannot fix it. Torsion steel uses fy and fyt of at most 420 MPa (ACI 20.2.2.4).
+A shear larger than phi (Vc + 0.66 √f'c bw d) (NSCP 422.5.1.2; ACI 22.5.1.2), or a combined shear and torsion stress above NSCP 422.7.7.1 (ACI 22.7.7.1), fails the beam with `FAILED: SHEAR STRENGTH`: the section is too small, and more stirrup legs cannot fix it. Torsion steel uses fy and fyt of at most 420 MPa (NSCP 420.2.2.4; ACI 20.2.2.4).
 
 **Support status.** Each beam is classified by what holds its two ends:
 
@@ -215,7 +216,7 @@ Because the diagrams come from the analysis, the reading can change when the siz
 A gravity beam, one with neither end on a column or wall (`Beam-Framed / Floating` in `SupportStatus`), is not part of the moment frame. It is designed for gravity only even when SMRF is on: no probable-moment shear, no seismic hoop spacing, no strength-ratio or 2.5 % checks.
 
 
-### Deflection (ACI 318M-14 24.2)
+### Deflection (NSCP 424.2; ACI 24.2)
 
 The beam design also checks deflection; `sdt beams` asks once whether the beams support partitions or finishes likely to be damaged (L/480, or L/240 when not; remembered for next time).
 
@@ -234,7 +235,7 @@ For each beam, after its bars are chosen:
 | Immediate roof live load (roof level) | Δ(DL + Lr) - Δ(DL) | L/180 |
 | After attachment of the partitions | λΔ Δ(DL + 0.25 LL) + Δ(DL + LL) - Δ(DL + 0.25 LL) | L/480 or L/240 |
 
-**What the after-attachment deflection is.** It is the part of the deflection that can damage partitions (ACI Table 24.2.2): the long-term deflection of the sustained load, plus the immediate deflection of the live load that is not sustained. It is not the total. The live load deflection above has no long-term effect in it. Two more values are in the results for information; the code sets no limit on them:
+**What the after-attachment deflection is.** It is the part of the deflection that can damage partitions (NSCP Table 424.2.2; ACI Table 24.2.2): the long-term deflection of the sustained load, plus the immediate deflection of the live load that is not sustained. It is not the total. The live load deflection above has no long-term effect in it. Two more values are in the results for information; the code sets no limit on them:
 
 | Value | Deflection |
 |---|---|
@@ -250,7 +251,7 @@ By default all the long-term deflection is counted after the partitions, with ξ
 - **Not known** (the default): nothing is deducted.
 - **Enter when they are built**: the months from when the beams first carry their dead load (the forms are removed) to when the partitions are built, and the share of the dead load in place before the partitions (self weight, slab and what else is there by then; not the partitions and what follows them).
 
-The deduction is λ(t) × share × Δ(DL), where λ(t) = ξ(t) / (1 + 50 ρ') and ξ(t) follows ACI Table 24.2.4.1.3, with straight lines between its values:
+The deduction is λ(t) × share × Δ(DL), where λ(t) = ξ(t) / (1 + 50 ρ') and ξ(t) follows NSCP Table 424.2.4.1.3 (ACI Table 24.2.4.1.3), with straight lines between its values:
 
 | Months under load | 0 | 3 | 6 | 12 | 60 or more |
 |---|---|---|---|---|---|
@@ -281,7 +282,7 @@ The "Span checked" and "Span length checked" columns say which members were chec
 Two things the check does not do. It measures a span from its own supports, so the movement of a girder is not added to the beam it carries. And where a cantilever is cut inside a member, away from a joint, the rotation of its support is not known and is taken as zero.
 
 
-The results file has Ie of each zone, λΔ, the three deflections, their limits, the long-term part, the total, the stage values when the stages are given, the governing ratio and `Deflection check`. A beam that fails the deflection and nothing else gets `FAILED: DEFLECTION (ACI 24.2.2)`. The calculation report has the same values in a Deflection table for each beam.
+The results file has Ie of each zone, λΔ, the three deflections, their limits, the long-term part, the total, the stage values when the stages are given, the governing ratio and `Deflection check`. A beam that fails the deflection and nothing else gets `FAILED: DEFLECTION (NSCP 424.2.2; ACI 24.2.2)`. The calculation report has the same values in a Deflection table for each beam.
 
 ### Target ratios
 
@@ -307,10 +308,10 @@ A flexure target below 1 on girders adds beam bars. More beam steel raises the p
 
 ### Beam torsion
 
-ETABS gives the torsion the elastic model attracts. With the full torsional stiffness of the beams (J modifier 1), beams that frame into each other pick up compatibility torsion several times their cracking torsion, and the section check of ACI 22.7.7.1 fails on beams that a real design would accept. There are two ways to deal with it:
+ETABS gives the torsion the elastic model attracts. With the full torsional stiffness of the beams (J modifier 1), beams that frame into each other pick up compatibility torsion several times their cracking torsion, and the section check of NSCP 422.7.7.1 (ACI 22.7.7.1) fails on beams that a real design would accept. There are two ways to deal with it:
 
 - **In the model:** reduce the torsional stiffness of the beams (a J modifier such as 0.01, as `sdt setup` assigns). The analysis then redistributes the torsion into bending of the slab and the adjoining beams. `sdt check` warns when beams keep the full J.
-- **In the design:** answer "At most φTcr" to the torsion question. ACI 22.7.3.2 allows it where the torsion can redistribute after cracking. The torsion in the results stays the analysis value; the "Torsion designed for" column and the calculation report say which was used. ACI 22.7.3.3 then requires the adjoining members to be designed for the redistributed moments and shears, which this option does not give you: only a model with reduced J does.
+- **In the design:** answer "At most φTcr" to the torsion question. NSCP 422.7.3.2 (ACI 22.7.3.2) allows it where the torsion can redistribute after cracking. The torsion in the results stays the analysis value; the "Torsion designed for" column and the calculation report say which was used. NSCP 422.7.3.3 (ACI 22.7.3.3) then requires the adjoining members to be designed for the redistributed moments and shears, which this option does not give you: only a model with reduced J does.
 
 A cantilever keeps its analysis torsion with either choice, since nothing else can take it. The default is the analysis torsion.
 
@@ -318,24 +319,26 @@ A cantilever keeps its analysis torsion with either choice, since nothing else c
 
 A beam face needs enough bars to keep them close together. There are two rules for how close:
 
-- **Office rule (the default):** at most 150 mm clear between the bars of a face. A wide beam then gets more bars than its strength needs.
-- **Code only:** the crack control spacing of ACI 24.3.2, about 250 mm centre to centre for Grade 414 bars with 40 mm cover.
+- **Code only (the default since v0.7.0):** the crack control spacing of NSCP 424.3.2 (ACI 24.3.2), about 250 mm centre to centre for Grade 414 bars with 40 mm cover.
+- **Office rule (an option):** at most 150 mm clear between the bars of a face. A wide beam then gets more bars than its strength needs.
+
+The dialog offers your last choice first; the first time, it offers the code spacing.
 
 The choice matters for seismic design. The extra bars of the office rule raise the probable moments of the beam, and with them the capacity shear Ve of the beam and the joint shear and capacity shear of the columns. On a wide beam with a short span this can be the whole reason the shear check fails. The summary and the calculation report say which rule was used.
 
 ### Girders with a clear span under 4d
 
-A beam of a special moment frame must have a clear span of at least 4 times its effective depth (ACI 18.6.2.1(a), NSCP 418.6.2.1(a)). A shorter girder does not qualify. Designed with the SMRF rules anyway, it gets a very large capacity shear, because Ve = (Mpr1 + Mpr2) / ln divides by a short span, and a larger section makes it worse: this is the usual cause of a girder that fails in shear at every size.
+A beam of a special moment frame must have a clear span of at least 4 times its effective depth (NSCP 418.6.2.1(a); ACI 18.6.2.1(a)). A shorter girder does not qualify. Designed with the SMRF rules anyway, it gets a very large capacity shear, because Ve = (Mpr1 + Mpr2) / ln divides by a short span, and a larger section makes it worse: this is the usual cause of a girder that fails in shear at every size.
 
 With SMRF on, `sdt beams` and `sdt design` ask what to do with these girders:
 
 - **Apply the SMRF rules to them, as to every girder** (the default, and what earlier versions did).
-- **Design them without the SMRF rules.** They are designed for the forces of the analysis only: no strength ratios along the span (ACI 18.6.3.2), no 2.5 % steel limit (18.6.3.1), no probable-moment shear (18.6.5.1) and no hoop spacing of 18.6.4.
+- **Design them without the SMRF rules.** They are designed for the forces of the analysis only: no strength ratios along the span (NSCP 418.6.3.2; ACI 18.6.3.2), no 2.5 % steel limit (18.6.3.1), no probable-moment shear (18.6.5.1) and no hoop spacing of 18.6.4.
 
 What to know before choosing the second:
 
 - **It is your judgement, not a code exemption.** The code does not say such a girder may be designed as an ordinary beam; it says it is not a beam of a special moment frame. Confirm how each one is meant to resist the earthquake.
-- **Each is also a deep beam.** A clear span under 4d is under 4h, so ACI 9.9.1.1 applies: design by strut-and-tie or by a nonlinear strain distribution, with distributed steel on both faces (ACI 9.9.3 and 9.9.4). This toolkit does not do that. It designs the girder as an ordinary beam.
+- **Each is also a deep beam.** A clear span under 4d is under 4h, so NSCP 409.9.1.1 (ACI 9.9.1.1) applies: design by strut-and-tie or by a nonlinear strain distribution, with distributed steel on both faces (NSCP 409.9.3 and 409.9.4; ACI 9.9.3 and 9.9.4). This toolkit does not do that. It designs the girder as an ordinary beam.
 - **The columns are not relieved.** Joint shear, strong column - weak beam and the column capacity shear still count the strength of these girders, since the columns remain part of the special moment frame.
 - **Cantilevers and gravity beams are not affected.** A cantilever keeps its treatment; a gravity beam never had the SMRF rules.
 
@@ -352,7 +355,7 @@ Where a girder is shallower than a beam it carries, the bottom bars of that beam
 
 ### Cover against earth
 
-Beams cast against or permanently exposed to earth need 75 mm cover (ACI Table 20.6.1.3.1; `earth_contact_cover` in `BeamDetailingConfig`). `sdt beams` asks which floor levels have such beams and designs them with 75 mm, the others with the typed cover. The cover of each beam is in its `cc` value and in the report. `sdt design` asks the same question once and uses the answer in every iteration.
+Beams cast against or permanently exposed to earth need 75 mm cover (NSCP Table 420.6.1.3.1; ACI Table 20.6.1.3.1; `earth_contact_cover` in `BeamDetailingConfig`). `sdt beams` asks which floor levels have such beams and designs them with 75 mm, the others with the typed cover. The cover of each beam is in its `cc` value and in the report. `sdt design` asks the same question once and uses the answer in every iteration.
 
 The beam schedules are two files per story: `<Story>_Girder_Schedule.dxf` for the members on columns (including cantilevers) and `<Story>_Beam_Schedule.dxf` for the gravity beams. A file is left out when a story has no member of that kind.
 
@@ -362,8 +365,8 @@ For each column the designer:
 
 1. lists the bar layouts that fit the section, including bundled bars, in increasing order of steel. Bars keep a clear spacing of at least 40 mm, 1.5 db and 4/3 of the aggregate (NSCP 425.2.3; a bundle counts as one bar of the same area). A square column only gets layouts with the same bars on all four faces
 2. picks the first layout that passes axial and flexure for every load set and both ends, and the transverse detailing rules. The moments are first magnified for slenderness along the column (see [Slenderness](#slenderness))
-3. with SMRF on, checks strong column-weak beam and joint shear at each joint, and moves a column to a heavier layout if the 6/5 ratio is not met. The 6/5 rule is waived where the column stops at the joint and Pu < 0.1 Ag f'c (ACI 18.7.3.1). The joint also needs a column side of at least 20 db of the beam bars passing through it (18.8.2.3) and a depth of at least half the deepest beam (18.8.2.4); a violation fails the joint shear check and shows in its utilization
-4. checks column shear in both directions. Ordinary columns use the analysis shear and Vc of ACI 22.5.6 / 22.5.7 with the axial load of each end (tension lowers it). SMRF columns use the larger of the analysis shear and the capacity-design shear Ve = (Mpr,top + Mpr,bottom) / lu, with lu the clear height: the joint-to-joint length less the deepest beam at the top joint (never more than the span of the ETABS force stations, which stop at the rigid end zones), and each Mpr no more than the beams' Mpr at that joint shared among its columns (ACI 18.7.6.1.1). Vs is limited to 0.66 √f'c b d: beyond it the column fails shear instead of getting more legs. **A circular column has a spiral, not ties:** it has two legs across any shear plane and none can be added (ACI 22.5.10.5.3), with bw = D and d = 0.8 D (ACI 22.5.2.2). The shear two legs cannot carry is answered with a closer pitch, down to 25 mm clear between the turns (ACI 25.7.3.1); under that the column fails shear, and needs a larger spiral bar or section. A pitch is taken down to 5 mm, never up. Ties are at most d/2 apart (d/4 for a large Vs) once shear steel is needed, with at least Av,min
+3. with SMRF on, checks strong column-weak beam and joint shear at each joint, and moves a column to a heavier layout if the 6/5 ratio is not met. The 6/5 rule is waived where the column stops at the joint and Pu < 0.1 Ag f'c (NSCP 418.7.3.1; ACI 18.7.3.1). The joint also needs a column side of at least 20 db of the beam bars passing through it (18.8.2.3) and a depth of at least half the deepest beam (18.8.2.4); a violation fails the joint shear check and shows in its utilization
+4. checks column shear in both directions. Ordinary columns use the analysis shear and Vc of NSCP 422.5.6 / 422.5.7 (ACI 22.5.6 / 22.5.7) with the axial load of each end (tension lowers it). SMRF columns use the larger of the analysis shear and the capacity-design shear Ve = (Mpr,top + Mpr,bottom) / lu, with lu the clear height: the joint-to-joint length less the deepest beam at the top joint (never more than the span of the ETABS force stations, which stop at the rigid end zones), and each Mpr no more than the beams' Mpr at that joint shared among its columns (NSCP 418.7.6.1.1; ACI 18.7.6.1.1). Vs is limited to 0.66 √f'c b d: beyond it the column fails shear instead of getting more legs. **A circular column has a spiral, not ties:** it has two legs across any shear plane and none can be added (NSCP 422.5.10.5.3; ACI 22.5.10.5.3), with bw = D and d = 0.8 D (NSCP 422.5.2.2; ACI 22.5.2.2). The shear two legs cannot carry is answered with a closer pitch, down to 25 mm clear between the turns (NSCP 425.7.3.1; ACI 25.7.3.1); under that the column fails shear, and needs a larger spiral bar or section. A pitch is taken down to 5 mm, never up. Ties are at most d/2 apart (d/4 for a large Vs) once shear steel is needed, with at least Av,min
 
 ### Slenderness
 
@@ -371,15 +374,15 @@ Second-order effects have two parts, and both are covered:
 
 | Effect | Where it comes from |
 |---|---|
-| Sway of the storeys (P-Δ) | The ETABS analysis. `sdt setup` defines iterative P-delta on the gravity loads and the frames carry cracked stiffness, which is an elastic second-order analysis (ACI 6.7). The forces read from ETABS already hold it, so no sway magnifier is added. `sdt check` reports when P-delta is off |
-| Bow of the column between its ends (P-δ) | Added by `sdt columns`, by the moment magnification of ACI 6.6.4.5 (`design/concrete/columns/slenderness.py`). ETABS does not capture it unless every column is subdivided |
+| Sway of the storeys (P-Δ) | The ETABS analysis. `sdt setup` defines iterative P-delta on the gravity loads and the frames carry cracked stiffness, which is an elastic second-order analysis (NSCP 406.7; ACI 6.7). The forces read from ETABS already hold it, so no sway magnifier is added. `sdt check` reports when P-delta is off |
+| Bow of the column between its ends (P-δ) | Added by `sdt columns`, by the moment magnification of NSCP 406.6.4.5 (ACI 6.6.4.5) (`design/concrete/columns/slenderness.py`). ETABS does not capture it unless every column is subdivided |
 
 For each column, each bending axis and each combination:
 
 1. **k lu / r.** `lu` is the clear height in that direction: from brace to brace less the beam at the top. A joint braces a direction when a beam frames in along it; a joint with no beam that way is passed over, so a footing stub, a double-height space or a level with beams one way only gets the longer length. `r` is 0.30 h (0.25 D for a circular column). `k` comes from the alignment chart of a braced column in the form of ACI R6.2.5, the smaller of 0.7 + 0.05 (ψA + ψB) and 0.85 + 0.05 ψmin, at most 1.0, with ψ = Σ(EI/l) of the columns over Σ(EI/l) of the beams along that direction, on cracked stiffness (0.70 Ig columns, 0.35 Ig beams). A beam that ETABS split at a secondary beam counts as one span up to the next column. A footing takes the support of the ETABS model at that joint: ψ = 1.0 when the rotation in the bending direction is restrained (fixed base), ψ = 10 when it is not (pinned base, ACI R6.2.5), read for each axis from the joint restraints. A footing joint with no support in the model is taken as pinned. The results and the calculation report state the base of each column that stands on a support. Without joint coordinates, `lu` is the joint to joint length less the top beam and k = 1.0.
 2. **Neglected** when k lu / r ≤ 34 + 12 (M1/M2), at most 40. M1/M2 is negative in single curvature; end moments of the same sign in the ETABS moment diagram are single curvature.
 3. **Otherwise** Pc = π² (EI)eff / (k lu)², with (EI)eff = 0.4 Ec Ig / (1 + βdns), Cm = 0.6 − 0.4 (M1/M2), δns = Cm / (1 − Pu / 0.75 Pc) ≥ 1 and Mc = δns M2, with M2 at least Pu (15 + 0.03 h). The larger end moment of the combination is replaced by Mc before the layout is checked on the interaction surface.
-4. **Fails** when Pu ≥ 0.75 Pc or δns > 1.4 (ACI 6.2.6): the column is too slender for its load, which bars cannot fix. `sdt design` then enlarges it.
+4. **Fails** when Pu ≥ 0.75 Pc or δns > 1.4 (NSCP 406.2.6; ACI 6.2.6): the column is too slender for its load, which bars cannot fix. `sdt design` then enlarges it.
 
 - **βdns** is the dead-load share of Pu in each combination, taken from the load cases when the forces are extracted. Forces extracted before this was added use 0.6, and the report says `assumed`.
 - **Response spectrum combinations** have end moments without sign, so single curvature is taken (Cm = 1.0, limit 22).
@@ -393,7 +396,7 @@ With SMRF on, `sdt columns` asks two questions. Both default to running every ch
 
 | Level | What may be left out | Why it tends to fail |
 |---|---|---|
-| Topmost level (joints with no column above, and the columns under them) | Strong column-weak beam (BCC) and joint shear at those joints, and the probable-moment shear Ve of those columns, which are then designed for the analysis shear (Vc still taken as zero) | One column alone must be 1.2 times stronger than the beams. The code already waives the 6/5 rule where the column stops at the joint and Pu < 0.1 Ag f'c (ACI 18.7.3.1); this choice also leaves out the joint shear there, and Ve, which the column's own probable moment drives where no column above shares the joint |
+| Topmost level (joints with no column above, and the columns under them) | Strong column-weak beam (BCC) and joint shear at those joints, and the probable-moment shear Ve of those columns, which are then designed for the analysis shear (Vc still taken as zero) | One column alone must be 1.2 times stronger than the beams. The code already waives the 6/5 rule where the column stops at the joint and Pu < 0.1 Ag f'c (NSCP 418.7.3.1; ACI 18.7.3.1); this choice also leaves out the joint shear there, and Ve, which the column's own probable moment drives where no column above shares the joint |
 | Foundation level (the bottom-most story columns) | BCC and joint shear at their joints, and the probable-moment shear Ve of those columns, which are then designed for the analysis shear (Vc still taken as zero) | The columns are short. Ve = ΣMpr / lu, and with a clear height of a few hundred millimetres it is several times what the section can carry. A larger section does not help: Mpr grows with the section about as fast as the shear strength does, so the utilization stays the same |
 
 What is left out is written in the cells (`Not checked - topmost level (user choice)`, `Not used - topmost level (user choice): analysis shear`, `Not used - foundation level (user choice): analysis shear`), in the closing summary, and is never counted as a failure. Leaving a check out is an engineering decision: the short column between a footing and a tie beam is closer to a pedestal than to a flexural column, and its shear should then be judged on the forces it really takes. `sdt design` asks the same two questions and applies them in every iteration, so those levels stop driving the column sizes.
@@ -473,7 +476,7 @@ The design calculation places each bundle as one equivalent bar at the layout po
 
 ## Column strength: the biaxial interaction surface
 
-Axial load and biaxial bending are checked on the ACI 318M-14 design interaction surface (phi Pn, phi Mnx, phi Mny) of each layout, in `design/concrete/columns/interaction.py`:
+Axial load and biaxial bending are checked on the design interaction surface of NSCP 422.4 (ACI 22.4) (phi Pn, phi Mnx, phi Mny) of each layout, in `design/concrete/columns/interaction.py`:
 
 - **The surface.** It is computed once per layout (shape, size, bars, cover, materials) and reused by every column, combination and iteration with that layout. The grid is 72 neutral-axis angles × 120 depths, using strain compatibility, the Whitney block and elastic-plastic bars (the same model as the exact solver it replaced). phi at each point comes from that point's steel strain, and the axial cap is phi 0.80 Po (tied) or phi 0.85 Po (spiral). The values match the exact solver; where they differ (at most about 0.1 %), the surface is on the safe side.
 - **A demand (Pu, Mu2, Mu3).** The surface is cut where phi Pn = Pu, and the capacity is read along the demand's moment direction. Utilization is |Mu| / phi Mn. Before October 2026, phi was applied to Mn at Pn = Pu, which overstated the capacity above the balance point.
@@ -483,7 +486,7 @@ Axial load and biaxial bending are checked on the ACI 318M-14 design interaction
 - **Capacity-design shear.** Mpr (1.25 fy) is read from the probable-strength surface along the principal axis, through a (P, Mn) table built once per direction.
 - **Speed.** The compression zone of every grid point is the section clipped by a half-plane; it is computed in closed form for all 8,640 points at once (Green's theorem over the kept edges of the outline and of each bar hole), with the same result as polygon clipping. The surface is built from the bar layout directly, without meshing a concreteproperties section, and every demand of a column is looked up in one vectorized call. A surface takes about 40 ms instead of 0.65 s; a 48-column SMRF model with 20 combinations is designed in about 5 s.
 
-A provided confinement ratio meets the required one within a relative 1e-9: the tie spacing is often the very spacing at which the two are equal, and the last digit of the arithmetic must not decide. SMRF confinement (ACI 18.7.5.4) uses bc and Ach measured to the outside of the hoops (Dc to the outside of the spiral, rho_s = 4 Asp / (Dc s)), and kn counts bar positions, a bundle once. Ties are at least 10 mm, and 12 mm for bars over 32 mm or bundled bars (NSCP 425.7.2.2).
+A provided confinement ratio meets the required one within a relative 1e-9: the tie spacing is often the very spacing at which the two are equal, and the last digit of the arithmetic must not decide. SMRF confinement (NSCP 418.7.5.4; ACI 18.7.5.4) uses bc and Ach measured to the outside of the hoops (Dc to the outside of the spiral, rho_s = 4 Asp / (Dc s)), and kn counts bar positions, a bundle once. Ties are at least 10 mm, and 12 mm for bars over 32 mm or bundled bars (NSCP 425.7.2.2).
 
 ## Calculation reports (PDF)
 
@@ -495,7 +498,7 @@ Beam report, per beam:
 - flexure at the left support, midspan and right support, top and bottom: Mu, bars per layer, As, d, a, strain, phi, Mn, phi Mn and Mu / phi Mn
 - shear and torsion per zone: Vu, Ve, design Vu, Tu, d, Vc, legs, spacing, Vs, phi Vn, Vu / phi Vn, At/s and Al
 - with SMRF on: nominal moment strengths at each location and the seismic design shear
-- deflection (ACI 24.2): the live, roof live and after-attachment deflections with their limits and ratios, the long-term part and the total for information, the stage values when given, Ie at the three zones, the long-term factor and the check
+- deflection (NSCP 424.2; ACI 24.2): the live, roof live and after-attachment deflections with their limits and ratios, the long-term part and the total for information, the stage values when given, Ie at the three zones, the long-term factor and the check
 - detailing and design status
 
 The design results hold the bars, legs and spacings; depths, strengths and ratios in the report are worked out again from them with the same design classes.
@@ -522,11 +525,11 @@ In the report, X is the width direction (local 3) and Y the depth direction (loc
 ## Limitations
 
 - Sections other than rectangles and circles with the rectangular stress block and lumped bars (L, T, walls) fall back to the per-demand exact solver.
-- Slenderness: the member effect is calculated (ACI 6.6.4.5); the sway effect must be in the ETABS forces (the P-delta analysis that `sdt setup` defines). A footing is fixed (ψ = 1.0) or pinned (ψ = 10) as the support in the ETABS model has it; a spring support is not read and counts as pinned unless the rotation is also restrained. Design data stored by a version before 0.1.1 has no supports: the base is then assumed fixed and the report says so, until `sdt beams` is run again. A slab without beams is not counted as a brace or as a restraint, which is on the safe side. The minimum moment acts about both axes at once.
+- Slenderness: the member effect is calculated (NSCP 406.6.4.5; ACI 6.6.4.5); the sway effect must be in the ETABS forces (the P-delta analysis that `sdt setup` defines). A footing is fixed (ψ = 1.0) or pinned (ψ = 10) as the support in the ETABS model has it; a spring support is not read and counts as pinned unless the rotation is also restrained. Design data stored by a version before 0.1.1 has no supports: the base is then assumed fixed and the report says so, until `sdt beams` is run again. A slab without beams is not counted as a brace or as a restraint, which is on the safe side. The minimum moment acts about both axes at once.
 - Joint checks ignore slab reinforcement. Beams use local-axis angle 0 unless ETABS supplies one.
 - Crosstie spacing uses an assumed `hx` from the configuration, not the drawn layout.
 - Beam design assumes rectangular sections and uses one bar diameter per beam.
-- SMRF confinement, joint classification and anchorage details need an independent check against ACI 318M-14 Chapter 18 before use.
+- SMRF confinement, joint classification and anchorage details need an independent check against NSCP Section 418 (ACI Chapter 18) before use.
 
 ## Tests
 

@@ -29,6 +29,8 @@ from dataclasses import dataclass, field
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from utilities.output_folders import DRAWINGS, output_path  # noqa: E402
+
 LAYER_GIRDER, LAYER_BEAM, LAYER_COLUMN = "S-GIRDER", "S-BEAM", "S-COLUMN"
 LAYER_WALL, LAYER_GRID, LAYER_TEXT, LAYER_DIM = "S-WALL", "S-GRID", "S-TEXT", "S-DIM"
 LAYER_FOOTING, LAYER_TIE_BEAM = "S-FOOTING", "S-TIEBEAM"
@@ -847,7 +849,7 @@ def run_framing_plans() -> str | None:
     folder = select_output_directory("Folder for the framing plans (.dxf)")
     if not folder:
         return None
-    path = os.path.join(folder, f"{stem} - Framing Plans.dxf")
+    path = output_path(folder, f"{stem} - Framing Plans.dxf", DRAWINGS)
 
     try:
         with LoadingWindow("Framing plans") as window:

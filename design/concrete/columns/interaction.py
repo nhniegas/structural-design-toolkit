@@ -110,7 +110,7 @@ class InteractionSurface:
 
     def nominal_capacity(self, pn: float, mx: float, my: float) -> float:
         """Nominal Mn (phi = 1) along the direction of (mx, my) at the axial load pn,
-        as the strong column - weak beam check uses it (ACI 18.7.3.2); 0 when pn is
+        as the strong column - weak beam check uses it (NSCP 418.7.3.2; ACI 18.7.3.2); 0 when pn is
         outside the nominal axial range."""
         return float(self.nominal_capacities(pn, mx, my)[0])
 

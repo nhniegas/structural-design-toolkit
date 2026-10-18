@@ -8,7 +8,7 @@ from the results of each load case, so every step can be checked.
 * ``combine``            the factored forces of the chosen combinations, in the
                          layout of the ``FACTORED LOADS`` sheet
 * ``live_load_reduction``  NSCP 2015 Section 205 reduction factors per member
-* pattern live load      ACI 318-14 6.4.2, two extra permutations per beam
+* pattern live load      NSCP 406.4.2 (ACI 6.4.2), two extra permutations per beam
 
 Response spectrum results have no sign, so a combination with a spectrum case
 is the static part plus or minus the spectrum part. Columns get the eight
@@ -454,7 +454,7 @@ def combine(
     cases of each member. ``pattern_factor`` (beams only) adds the pattern
     live load arrangements, with the live load multiplied by it.
 
-    Columns get two more columns for the slenderness check (ACI 6.6.4.4.4):
+    Columns get two more columns for the slenderness check (NSCP 406.6.4.4.4; ACI 6.6.4.4.4):
     ``P_sustained``, the factored axial force of the ``sustained_cases`` (the
     dead loads) in the combination, and ``Spectral``, whether the combination
     holds a response spectrum case (its end moments then have no sign).
@@ -550,7 +550,7 @@ class ForceOptions:
 
     ``reduce_live``: live load reduction of the reducible live patterns, by
     ``code``: "NSCP" (NSCP 2015 205.5) or "ASCE" (ASCE 7-10 4.7). ``pattern_factor``: pattern live load on the beams with this
-    factor on the live load (ACI 318-14 6.4.2), or None for no pattern.
+    factor on the live load (NSCP 406.4.2; ACI 6.4.2), or None for no pattern.
     """
 
     reduce_live: bool = False
@@ -842,7 +842,7 @@ def ask_force_options() -> ForceOptions | None:
         method = "geometric" if chosen.startswith("Geometric") else "load share"
     pattern = select_option(
         title,
-        "Include pattern live load on the beams (ACI 318-14 6.4.2)?\n\n"
+        "Include pattern live load on the beams (NSCP 406.4.2; ACI 6.4.2)?\n\n"
         "Each span is also designed for its live load as a simple span (largest "
         "sagging) and with fixed ends (largest hogging), times the factor.",
         ["Yes", "No"],

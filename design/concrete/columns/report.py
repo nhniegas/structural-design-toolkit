@@ -7,7 +7,7 @@ from design.concrete.columns.slenderness import SLENDERNESS_REPORT_FIELDS
 from utilities._calc_report import is_blank, number
 
 
-BCC_EXEMPT_TEXT = ("N/A - ACI 18.7.3.1: the column stops at this joint and "
+BCC_EXEMPT_TEXT = ("N/A - NSCP 418.7.3.1; ACI 18.7.3.1: the column stops at this joint and "
                    "Pu < 0.1 Ag fc'")
 
 
@@ -823,7 +823,7 @@ COLUMN_REPORT_LABELS = {
     "Transverse_Spacing_mm": "Tie / Spiral Spacing (mm)",
     "Transverse_Legs_X": "Tie Legs along X Edge",
     "Transverse_Legs_Y": "Tie Legs along Y Edge",
-    "Confinement_Criteria_Governing": "Governing ACI 18.7.5 Expression",
+    "Confinement_Criteria_Governing": "Governing NSCP 418.7.5 (ACI 18.7.5) Expression",
     "High_Axial_or_High_fc_Check": "High Pᵤ / f′c Condition",
     "Confinement_18_7_5_a": "ρₛ,req from 18.7.5(a)",
     "Confinement_18_7_5_b": "ρₛ,req from 18.7.5(b)",

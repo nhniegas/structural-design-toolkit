@@ -161,7 +161,7 @@ def _rotate_dxf_vector(
 
 
 def _hook_tail_length_dxf(tie_bar_diameter: float) -> float:
-    """Return the ACI 25.3.2 hook extension in millimetres (6 db, at least 75 mm)."""
+    """Return the NSCP 425.3.2 (ACI 25.3.2) hook extension in millimetres (6 db, at least 75 mm)."""
     cfg = CODE.drawing
     return max(cfg.hook_tail_bar_multiple * tie_bar_diameter, cfg.hook_tail_min)
 

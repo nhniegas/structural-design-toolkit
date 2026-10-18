@@ -35,7 +35,7 @@ _BEAM_LOCATIONS = (("left", "Left support"), ("mid", "Midspan"), ("right", "Righ
 
 
 def _beam_deflection_table(top: pd.Series) -> ReportTable | None:
-    """The deflection checks of one beam (ACI 318M-14 24.2), from its result row.
+    """The deflection checks of one beam (NSCP 424.2; ACI 24.2), from its result row.
 
     None when the results were made without the deflection check. A beam with
     no deflection data gets a table that says why.
@@ -45,7 +45,7 @@ def _beam_deflection_table(top: pd.Series) -> ReportTable | None:
     check = str(top.get("Deflection_Check"))
     if is_blank(top.get("Defl_ratio")):
         return ReportTable(
-            "Deflection (ACI 24.2)", ["Parameter", "Value"],
+            "Deflection (NSCP 424.2; ACI 24.2)", ["Parameter", "Value"],
             [["Deflection check", check if check not in ("None", "nan", "") else
               "Not checked - no service moments for this beam"]], "lr")
 
@@ -77,10 +77,10 @@ def _beam_deflection_table(top: pd.Series) -> ReportTable | None:
                 "Defl_deducted_mm")
     stages_text = str(top.get("Defl_stages", "") or "")
     stages_note = (f" Stages: {stages_text}; the long-term deflection before the partitions "
-                   "is deducted (ACI Table 24.2.2)." if stages_text not in ("", "None", "nan")
+                   "is deducted (NSCP Table 424.2.2; ACI Table 24.2.2)." if stages_text not in ("", "None", "nan")
                    else " All the long-term deflection is counted after the partitions.")
     return ReportTable(
-        "Deflection (ACI 24.2)",
+        "Deflection (NSCP 424.2; ACI 24.2)",
         ["Check", Tex(r"$\Delta$ (mm)"), "Limit (mm)", Tex(r"$\Delta$ / limit")],
         body, "lrrr",
         "Effective moment of inertia Ie (mm4): left "
@@ -277,8 +277,8 @@ def _beam_calc_member(
                 [Tex("Design shear, right, $V_e$ (kN)"), number(top.get("Ve_right_kN"))],
                 ["Concrete shear taken as zero, left", top.get("Vc_zero_left") in (True, "True", 1)],
                 ["Concrete shear taken as zero, right", top.get("Vc_zero_right") in (True, "True", 1)],
-                ["Moment strength ratio check (ACI 18.6.3.2)", top.get("SMRF_Flexure_Ratio_Check")],
-                ["Steel ratio check (ACI 18.6.3.1)", top.get("SMRF_Rho_Check")],
+                ["Moment strength ratio check (NSCP 418.6.3.2; ACI 18.6.3.2)", top.get("SMRF_Flexure_Ratio_Check")],
+                ["Steel ratio check (NSCP 418.6.3.1; ACI 18.6.3.1)", top.get("SMRF_Rho_Check")],
             ],
             "lr",
         ))
@@ -325,14 +325,14 @@ def build_beam_calc_report(
     if not members:
         raise ValueError("BEAM DESIGN contains no designed beams to report.")
     information = [
-        ("Design code", "ACI 318M-14"),
+        ("Design code", "NSCP 2015 chapter 4 (ACI 318M-14)"),
         ("Seismic design (SMRF)", "Yes" if seismic else "No"),
         ("Factored gravity combination", gravity_combo if seismic else "Not used"),
         ("Design forces", "Envelope of all extracted load combinations"),
         ("Beams reported", len(members)),
     ]
     return build_calc_report(
-        "Concrete Beam Design Calculations (ACI 318M-14)",
+        "Concrete Beam Design Calculations (NSCP 2015, ACI 318M-14)",
         information,
         ["Beam", "Story", "Section", "Flexure", "Design status"],
         members,

@@ -133,13 +133,13 @@ def ask_column_design_options(
 
 
 TOP_LEVEL_OPTIONS = {
-    "Yes - check them (ACI 18.7.3, 18.8)": True,
+    "Yes - check them (NSCP 418.7.3, 418.8; ACI 18.7.3, 18.8)": True,
     "No - leave them out; design the topmost columns for the analysis shear": False,
 }
 
 
 FOUNDATION_LEVEL_OPTIONS = {
-    "Yes - check them (ACI 18.7.3, 18.7.6, 18.8)": True,
+    "Yes - check them (NSCP 418.7.3, 418.7.6, 418.8; ACI 18.7.3, 18.7.6, 18.8)": True,
     "No - leave them out; design these columns for the analysis shear": False,
 }
 

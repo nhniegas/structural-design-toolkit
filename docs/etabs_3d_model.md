@@ -20,7 +20,7 @@ sdt 3d
 | Floor slabs | Yes or no. Columns, beams and walls are always included |
 | Foundation | Yes or no. Asked only when a plan of the foundation model of this model was saved (see [The foundation](#the-foundation)) |
 | Reinforcing bars | No; the main bars only; or the main bars with the stirrups and ties. Asked only when a beam or column design is saved for the model (see [Reinforcing bars](#reinforcing-bars)) |
-| Folder | Where `<model> - 3D Model.step` is saved |
+| Folder | The output folder: `<model> - 3D Model.step` is saved in its `Drawings` subfolder |
 
 A window then shows the summary: the count of each kind of member, the number of solids and of different shapes, the size of the file, and what was left out.
 

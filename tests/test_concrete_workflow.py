@@ -124,3 +124,29 @@ def test_a_design_stored_before_the_folders_is_still_read(tmp_path):
     assert loaded is not None and loaded.inputs == {"smrf": True}
     geometry = loaded.column_report.attrs["slenderness_geometry"]["GF-C1"]["2"]
     assert isinstance(geometry, AxisGeometry) and geometry.lu == 3000.0
+
+
+# --------------------------------------------------------------------------- #
+# The beam bar spacing question (v0.7.0: the code spacing is the default)
+# --------------------------------------------------------------------------- #
+def _default_of(monkeypatch, last):
+    from design.concrete import workflow
+    from utilities import _gui_helpers
+
+    seen = {}
+
+    def fake(title, message, options, default_index=0, **_):
+        seen["default"] = options[default_index]
+        return options[default_index]
+
+    monkeypatch.setattr(_gui_helpers, "select_option", fake)
+    return workflow.ask_bar_spacing("Beam Design", last), seen["default"]
+
+
+def test_bar_spacing_defaults_to_the_code_spacing(monkeypatch):
+    from design.concrete import workflow
+
+    assert _default_of(monkeypatch, None) == (False, workflow.SPACING_CODE)
+    assert _default_of(monkeypatch, {"office_bar_spacing": False})[0] is False
+    # the office rule stays the default for a user who chose it last time
+    assert _default_of(monkeypatch, {"office_bar_spacing": True}) == (True, workflow.SPACING_OFFICE)

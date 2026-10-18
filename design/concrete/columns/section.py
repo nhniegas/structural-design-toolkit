@@ -46,7 +46,7 @@ class ColumnFlexureDesign:
             m_x, m_y: Optional applied moments in N-mm.
             axial_load: Optional applied axial force in N; compression is positive.
             shape: Either ``"rectangular"`` or ``"circular"``.
-            is_smrf: Whether ACI Chapter 18 SMRF column detailing applies.
+            is_smrf: Whether NSCP Section 418 (ACI Chapter 18) SMRF column detailing applies.
             code: ACI constants (see criteria/code_config.py).
         """
         self.code = code
@@ -324,7 +324,7 @@ class ColumnFlexureDesign:
         """Calculate the nominal and design moment capacities (Mn, phi*Mn).
 
         Evaluates the capacity reduction factor based on strain conditions and
-        cross-section shape per ACI 318M-14 Table 21.2.2. The bending angle is
+        cross-section shape per NSCP Table 421.2.2 (ACI Table 21.2.2). The bending angle is
         derived from the arctan of the applied biaxial moments if not specified.
 
         Args:
@@ -368,7 +368,7 @@ class ColumnFlexureDesign:
 
         if axial_load > nominal_axial_capacity or axial_load < -nominal_tensile_capacity:
             raise ValueError(
-                "Applied axial load exceeds the ACI 318M-14 maximum nominal "
+                "Applied axial load exceeds the NSCP 2015 (ACI 318M-14) maximum nominal "
                 "compression or tension strength for this reinforcement layout."
             )
 

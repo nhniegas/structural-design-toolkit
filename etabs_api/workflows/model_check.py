@@ -1059,7 +1059,7 @@ def modifier_findings(effective: dict[str, tuple], columns: set[str],
         out.append(Finding(group, WARN, f"{len(stiff)} of {beams} beams have the full torsional "
                            "stiffness (J modifier near 1): compatibility torsion will be large. "
                            "Reduce J on the beams, or let sdt beams take the torsion as at most "
-                           "phi Tcr (ACI 22.7.3.2).", "NSCP 422.7.3.2 (ACI 22.7.3.2)"))
+                           "phi Tcr (NSCP 422.7.3.2; ACI 22.7.3.2).", "NSCP 422.7.3.2 (ACI 22.7.3.2)"))
     if mass:
         out.append(Finding(group, FAIL, f"{len(mass)} frames with a mass or weight "
                            f"modifier other than 1 (the seismic weight W is reduced): "
@@ -1071,7 +1071,7 @@ def clear_spans(beams: pd.DataFrame, columns: pd.DataFrame, section_of: dict[str
                 ) -> dict[str, float]:
     """The clear span of each beam, mm: its joint-to-joint length less half of the
     column at each end (the larger side of the column, as the beam design takes
-    it). ACI 18.6.2.1(a) sets the 4d rule on the clear span, so sdt check and
+    it). NSCP 418.6.2.1(a) (ACI 18.6.2.1(a)) sets the 4d rule on the clear span, so sdt check and
     sdt beams measure a girder the same way."""
     from etabs_api.workflows.sections import parse_section
 

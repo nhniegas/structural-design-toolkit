@@ -749,7 +749,7 @@ class BeamSeismicDesign:
         }
 
     def enforce_flexural_capacity_ratios(self, max_rounds: int = 60) -> bool:
-        """Add bars until the ACI 18.6.3.2 strength ratios are met.
+        """Add bars until the NSCP 418.6.3.2 (ACI 18.6.3.2) strength ratios are met.
 
         At a support face the positive moment strength must be at least half the
         negative strength, and every section must have at least a quarter of the

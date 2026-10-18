@@ -24,6 +24,7 @@ from __future__ import annotations
 import math
 import os
 from dataclasses import dataclass, field
+from utilities.output_folders import output_path
 
 Point = tuple[float, float, float]
 
@@ -552,7 +553,7 @@ def run_model_3d() -> str | None:
     folder = select_output_directory("Folder for the 3D model (.step)")
     if not folder:
         return None
-    path = os.path.join(folder, f"{stem} - 3D Model.step")
+    path = output_path(folder, f"{stem} - 3D Model.step")
 
     try:
         with LoadingWindow("3D model") as window:

@@ -20,7 +20,7 @@ sdt irregularity
 |---|---|
 | P-delta stability coefficient | Analyse a copy of the model with P-delta off, for first-order drifts; or use the drifts of the model as analysed, which include P-delta |
 
-The report is printed and saved beside the model as `<model> - Irregularity.txt`, and a window shows the summary.
+The report is printed and saved in the model's folder as `Summaries/<model> - Irregularity.txt`, and a window shows the summary.
 
 ## What is checked
 

@@ -353,4 +353,4 @@ def test_changes_go_into_a_copy_that_keeps_the_setup_inputs(tmp_path, monkeypatc
     assert log is not None and path == copy and opened == [copy]
     assert saved and set(saved) == {copy}          # the open model's own file is never saved
     assert setup.load_settings(setup.settings_path(copy)) == {"seismic": {"ct": 0.03}}
-    assert (tmp_path / "rev02 - plan changes.txt").is_file()
+    assert (tmp_path / "Summaries" / "rev02 - plan changes.txt").is_file()

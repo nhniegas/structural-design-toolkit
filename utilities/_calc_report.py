@@ -201,7 +201,7 @@ def _beside_latex(table: ReportTable, image: str, caption: str) -> str:
 
 
 def split_title(title: str) -> tuple[str, str]:
-    """``Concrete Beam Design Calculations (ACI 318M-14)`` as its title and its code."""
+    """``Concrete Beam Design Calculations (NSCP 2015, ACI 318M-14)`` as its title and its code."""
     text = str(title).strip()
     if text.endswith(")") and " (" in text:
         head, _, code = text.rpartition(" (")

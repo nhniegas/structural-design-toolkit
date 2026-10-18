@@ -1,4 +1,4 @@
-"""Beam-column joints of a special moment frame: strong column - weak beam and joint shear (ACI 18.7.3, 18.8)."""
+"""Beam-column joints of a special moment frame: strong column - weak beam and joint shear (NSCP 418.7.3, 418.8; ACI 18.7.3, 18.8)."""
 
 import math
 import numpy as np
@@ -269,7 +269,7 @@ def _evaluate_smrf_joints(
     low_axial_cache: dict[str, bool] = {}
 
     def column_low_axial(column: str) -> bool:
-        """Pu < 0.1 Ag fc' in every combination (ACI 18.7.3.1)."""
+        """Pu < 0.1 Ag fc' in every combination (NSCP 418.7.3.1; ACI 18.7.3.1)."""
         if column not in low_axial_cache:
             row = frame_data_row(column)
             diameter = pd.to_numeric(pd.Series([row.get("Diameter")]), errors="coerce").iloc[0]
@@ -708,7 +708,7 @@ def _evaluate_smrf_joints(
                                                      dcr_targets.JOINT_SHEAR)
                     joint_shear_check = (
                         "PASS" if joint_shear_demand <= phi_vn_kN * joint_target
-                        else "FAIL: joint shear above its strength (ACI 18.8.4)"
+                        else "FAIL: joint shear above its strength (NSCP 418.8.4; ACI 18.8.4)"
                         if joint_shear_demand > phi_vn_kN
                         else f"FAIL: joint shear above the target ratio {joint_target:g}"
                     )
@@ -730,11 +730,11 @@ def _evaluate_smrf_joints(
                     if through_bars and joint_depth < (
                             CODE.column_seismic.joint_bar_diameter_multiple * largest_bar - 1e-6):
                         dimension_problems.append(
-                            f"ACI 18.8.2.3: column side {joint_depth:.0f} mm < 20 x "
+                            f"NSCP 418.8.2.3 (ACI 18.8.2.3): column side {joint_depth:.0f} mm < 20 x "
                             f"{largest_bar:g} mm beam bar")
                     if deepest_beam > CODE.column_seismic.joint_beam_depth_limit * joint_depth + 1e-6:
                         dimension_problems.append(
-                            f"ACI 18.8.2.4: joint depth {joint_depth:.0f} mm < half of the "
+                            f"NSCP 418.8.2.4 (ACI 18.8.2.4): joint depth {joint_depth:.0f} mm < half of the "
                             f"{deepest_beam:.0f} mm beam")
                     if dimension_problems:
                         joint_shear_check = "FAIL: " + "; ".join(dimension_problems)

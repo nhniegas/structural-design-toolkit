@@ -939,7 +939,9 @@ def run_irregularity() -> IrregularityReport | None:
         report.report().show()
     else:
         print(report.text())
-    saved = os.path.splitext(path)[0] + " - Irregularity.txt"
+    from utilities.output_folders import beside
+
+    saved = beside(path, " - Irregularity.txt")
     with open(saved, "w", encoding="utf-8") as handle:
         handle.write(report.text().lstrip("\n") + "\n")
     print(f"Saved: {saved}")

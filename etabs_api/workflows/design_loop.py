@@ -51,6 +51,7 @@ import pandas as pd
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from utilities.output_folders import SCHEDULES, beside, output_path, subfolder  # noqa: E402
 from etabs_api.workflows.sections import (  # noqa: E402
     Limits,
     Section,
@@ -107,7 +108,7 @@ class LoopSettings:
     targets: object = None  # dcr_targets.Targets: target ratios by member type and check
     carrier_depth: bool = False  # a beam is at least as deep as the beams it carries
     compatibility_torsion: bool = False  # beam torsion at most phi Tcr (ACI 22.7.3.2)
-    office_bar_spacing: bool = True  # beam bars at most 150 mm clear (False: crack control)
+    office_bar_spacing: bool = False  # beam bars at most 150 mm clear (False: crack control)
     exempt_short_spans: bool = False  # girders under 4d clear span without the SMRF rules
     deflection_stages: object = None  # deflection.DeflectionStages: when partitions are built
 
@@ -304,7 +305,7 @@ def _beam_rho(row: pd.Series, zone: str) -> float:
 
 
 def _tension_controlled_rho(fc: float, fy: float) -> float:
-    """Steel ratio at a net tensile strain of 0.005 (ACI 21.2.2): 0.85 b1 fc/fy * 3/8."""
+    """Steel ratio at a net tensile strain of 0.005 (NSCP 421.2.2; ACI 21.2.2): 0.85 b1 fc/fy * 3/8."""
     from design.criteria.code_config import CODE
 
     ecu = CODE.material.concrete_ultimate_strain
@@ -655,7 +656,7 @@ def confirm_sections(found: ModelSections, title: str) -> bool:
 
 def joint_min_side(settings: LoopSettings) -> float:
     """The smallest column side the beam bars through a joint allow: 20 bar
-    diameters (ACI 18.8.2.3). Zero without seismic design."""
+    diameters (NSCP 418.8.2.3; ACI 18.8.2.3). Zero without seismic design."""
     from design.criteria.code_config import CODE
 
     if not settings.smrf:
@@ -1539,7 +1540,7 @@ def final_drift_check(bench: Workbench, options, folder: str, stem: str) -> dict
                        progress=lambda text: bench.show(text), seismic=options.seismic,
                        combos=options.combos, drift_cases=options.drift_cases,
                        r_factor=options.r_factor, cases=options.cases)
-    path = save_report(report, os.path.join(folder, f"{stem} - Drift.txt"))
+    path = save_report(report, output_path(folder, f"{stem} - Drift.txt"))
     failed = failures(report)
     bench.log("")
     bench.log("##### Drift of the final sizes #####")
@@ -1733,7 +1734,7 @@ def run_design_cli() -> dict | None:
                      "iterations and rounds at least 1, the bend from 0 to 90 degrees, the "
                      "share of the moment and shear from 0 to 100 % and the beam width from "
                      "30 to 100 % of the depth (30 % is the least for a special moment frame, "
-                     "ACI 18.6.2.1).", title=title)
+                     "NSCP 418.6.2.1 (ACI 18.6.2.1)).", title=title)
         return None
     _save("design_loop", {**values, "share_line_sizes": share_lines})
 
@@ -1798,7 +1799,7 @@ def run_design_cli() -> dict | None:
     stem = os.path.splitext(original)[0]
     working = f"{stem} - DESIGN.EDB"
     model.File.Save(working)
-    log_path = f"{stem} - DESIGN log.txt"
+    log_path = beside(original, " - DESIGN log.txt")
     with open(log_path, "w", encoding="utf-8") as handle:
         handle.write(f"Design loop of {original}\nWorking copy: {working}\n"
                      f"Started {time.strftime('%Y-%m-%d %H:%M')}\n")
@@ -1810,12 +1811,12 @@ def run_design_cli() -> dict | None:
         if carrier_depth:
             bench.log("A beam is at least as deep as the beams it carries.")
         if compatibility_torsion:
-            bench.log("Beam torsion at most phi Tcr (compatibility torsion, ACI 22.7.3.2).")
+            bench.log("Beam torsion at most phi Tcr (compatibility torsion, NSCP 422.7.3.2; ACI 22.7.3.2).")
         bench.log("Beam bar spacing: " + ("office rule, 150 mm clear." if office_bar_spacing
-                                          else "crack control only (ACI 24.3.2)."))
+                                          else "crack control only (NSCP 424.3.2; ACI 24.3.2)."))
         if exempt_short_spans:
             bench.log("Girders with a clear span under 4d are designed without the SMRF rules "
-                      "(ACI 18.6.2.1(a)).")
+                      "(NSCP 418.6.2.1(a); ACI 18.6.2.1(a)).")
         bench.log("Deflection stages: " + deflection_stages.describe() + ".")
         bench.log("Beam lines: " + line_sharing_text(settings) + ".")
         bench.log(f"Combinations: {len(combos)} ULS ({seismic})")
@@ -1828,7 +1829,7 @@ def run_design_cli() -> dict | None:
         bench.log(f"Limits: beams {settings.limits.beam_max_width} x "
                   f"{settings.limits.beam_max_depth}, column side {settings.limits.column_max}, "
                   f"side ratio {settings.limits.column_max_ratio:g}, smallest column side "
-                  f"{joint_min_side(settings):g} (20 beam bar diameters, ACI 18.8.2.3)")
+                  f"{joint_min_side(settings):g} (20 beam bar diameters, NSCP 418.8.2.3; ACI 18.8.2.3)")
         summary = run_design_loop(bench)
         window.update("Saving the final results, calculations and schedules")
         model.File.Save()  # the working copy; Save(path) would drop the analysis results
@@ -1859,7 +1860,7 @@ def run_design_cli() -> dict | None:
         print("DRIFT FAILS: the sections were not resized for drift. Reconfigure the model "
               f"for drift and run sdt design again. See {summary['drift']['path']}")
     loop_summary(summary, settings, original, working, log_path, folder).show(
-        os.path.join(folder, f"{os.path.splitext(os.path.basename(working))[0]} summary.txt"),
+        output_path(folder, f"{os.path.splitext(os.path.basename(working))[0]} summary.txt"),
         popup=True, echo=False)
     return summary
 
@@ -1920,10 +1921,10 @@ def loop_summary(summary: dict, settings: LoopSettings, original: str, working: 
     if settings.compatibility_torsion:
         from design.concrete.workflow import TORSION_NOTE
 
-        out.add("Beam torsion", "at most phi Tcr (compatibility torsion, ACI 22.7.3.2)")
+        out.add("Beam torsion", "at most phi Tcr (compatibility torsion, NSCP 422.7.3.2; ACI 22.7.3.2)")
         out.note(TORSION_NOTE)
     out.add("Beam bar spacing", "office rule, 150 mm clear" if settings.office_bar_spacing
-            else "crack control only (ACI 24.3.2)")
+            else "crack control only (NSCP 424.3.2; ACI 24.3.2)")
     from design.concrete.workflow import add_short_spans_to
 
     add_short_spans_to(out, beams, settings.exempt_short_spans)
@@ -1980,24 +1981,24 @@ def save_final_design(bench: Workbench, summary: dict, working: str, folder: str
     store.save()
     if beams is not None and len(beams):
         say("Saving the beams 1 of 3: results workbook (.xlsx)")
-        write_beam_results_xlsx(beams, os.path.join(folder, f"{stem} - Beam Design.xlsx"))
+        write_beam_results_xlsx(beams, output_path(folder, f"{stem} - Beam Design.xlsx"))
         say("Saving the beams 2 of 3: schedules (.dxf)")
-        export_beam_dxf(beams, folder)
+        export_beam_dxf(beams, subfolder(folder, SCHEDULES))
         say("Saving the beams 3 of 3: calculation report (.pdf, LaTeX)")
-        if not export_beam_pdf(beams, os.path.join(folder, f"{stem} - Beam Calculations.pdf"),
+        if not export_beam_pdf(beams, output_path(folder, f"{stem} - Beam Calculations.pdf"),
                                settings.smrf, settings.gravity_combo):
             bench.log("Beam calculation report " + missing_pdf_reason())
     if columns is not None and len(columns) and store.column_groups:
         bars = settings.column_bars
         say("Saving the columns 1 of 3: results workbook (.xlsx)")
         write_column_results_xlsx(columns, store.column_groups,
-                                  os.path.join(folder, f"{stem} - Column Design.xlsx"))
+                                  output_path(folder, f"{stem} - Column Design.xlsx"))
         say("Saving the columns 2 of 3: schedule (.dxf)")
-        export_column_cad_drawings(columns, folder, bars["dmain"], bars["cover"], settings.smrf,
+        export_column_cad_drawings(columns, subfolder(folder, SCHEDULES), bars["dmain"], bars["cover"], settings.smrf,
                                    settings.inner_tie_style, bench.tables["CONNECTIVITY"])
         say("Saving the columns 3 of 3: calculation report (.pdf, LaTeX)")
         if not export_column_pdf(
-                columns, os.path.join(folder, f"{stem} - Column Calculations.pdf"),
+                columns, output_path(folder, f"{stem} - Column Calculations.pdf"),
                 settings.smrf, bars["dmain"], bars["dties"], bars["cover"]):
             bench.log("Column calculation report " + missing_pdf_reason())
 

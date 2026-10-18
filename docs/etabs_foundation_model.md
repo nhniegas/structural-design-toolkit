@@ -107,7 +107,7 @@ A table lists them, and the summary names the columns with no footing under them
 | `<model> - FOUNDATION.EDB` | The foundation model |
 | `<model> - FOUNDATION.foundation.json` | The supports (joint, coordinates, restraint, the column or wall on it and its size), the choices, and the loads of every pattern. The update, the framing plans and the 3D model read it |
 | `<model> - FOUNDATION.plan.json` | The footings, tie beams and columns of the foundation model, as saved for the framing plans and the 3D model |
-| `<model> - FOUNDATION - Reactions.xlsx` | Supports, the equilibrium check, the changes of the last update, the loads applied, the reactions of every load case and of every combination at every support (kN, kN-m) |
+| `Results/<model> - FOUNDATION - Reactions.xlsx` | Supports, the equilibrium check, the changes of the last update, the loads applied, the reactions of every load case and of every combination at every support (kN, kN-m) |
 
 ## Limits
 

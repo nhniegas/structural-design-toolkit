@@ -6,8 +6,8 @@ Structural design calculations and ETABS automation, run from the terminal with 
 
 | Run from | Design module (`design/`) | What it does |
 |---|---|---|
-| `sdt beams` | `concrete/beams/` | ACI 318M-14 beam flexure, shear, torsion, deflection and SMRF checks from ETABS forces; girder and beam schedule DXF; PDF calculation report |
-| `sdt columns` | `concrete/columns/` | ACI 318M-14 column P-M with slenderness, shear, confinement, strong-column and joint-shear checks; column schedule DXF; PDF calculation report |
+| `sdt beams` | `concrete/beams/` | NSCP 2015 (ACI 318M-14) beam flexure, shear, torsion, deflection and SMRF checks from ETABS forces; girder and beam schedule DXF; PDF calculation report |
+| `sdt columns` | `concrete/columns/` | NSCP 2015 (ACI 318M-14) column P-M with slenderness, shear, confinement, strong-column and joint-shear checks; column schedule DXF; PDF calculation report |
 | `sdt composite` | `steel/composite_column_aiscDG06.py` | AISC Design Guide 6 rectangular filled composite column; one window with the section drawn and its interaction diagram; printout and/or PDF report |
 | `sdt steel` | `steel/wide_flange_aisc360.py` | AISC 360-22 wide-flange capacity checks; one window with the section drawn and the ratio of every check; printout and/or PDF report |
 | `sdt wind` | `loads/wind_directional_asce7.py` | ASCE 7 directional procedure (MWFRS) wind pressures; printout and/or PDF report |
@@ -33,7 +33,7 @@ tools/          the ETABS test runner and the icon
 
 Supporting code:
 
-- `design/criteria/code_config.py`: every structural code value, each with its clause. `CODE` holds ACI 318M-14 (NSCP chapter 4), used by the beam and column designers. `NSCP` holds NSCP 2015 chapter 2: load factors, live load reduction (with the ASCE 7 alternate), and the earthquake values with the UBC 97 tables that ETABS uses. NSCP 2015 governs; the other codes are guides.
+- `design/criteria/code_config.py`: every structural code value, each with its clause. `CODE` holds NSCP 2015 chapter 4 (ACI 318M-14), used by the beam and column designers; the program cites both, NSCP first. `NSCP` holds NSCP 2015 chapter 2: load factors, live load reduction (with the ASCE 7 alternate), and the earthquake values with the UBC 97 tables that ETABS uses. NSCP 2015 governs; the other codes are guides.
 - `etabs_api/core/`: the ETABS connection and thin wrappers for tables, geometry, assignments, loads, properties, results and stories.
 - `etabs_api/workflows/`: automation built on the office conventions, listed below.
 - `design/concrete/workflow.py`: the `sdt beams`, `sdt deflection` and `sdt columns` commands and the design data stored between them.
@@ -54,10 +54,10 @@ Supporting code:
 - `etabs_api/workflows/concrete_quantities.py`: the concrete volume, the floor area and the ratio in m3/m2 (`sdt quantities`).
 - `design/concrete/beams/`: the beam design in files by job (design, sections, supports, results, schedule, calculations, options).
 - `design/concrete/columns/`: the column design in files by job (design, sizing, section, layouts, flexure, transverse, shear, joints, tables, report, schedule, calculations, options).
-- `design/concrete/beams/deflection.py`: beam deflection checks (ACI 318M-14 24.2).
+- `design/concrete/beams/deflection.py`: beam deflection checks (NSCP 424.2; ACI 24.2).
 - `design/criteria/dcr_targets.py`: target demand / capacity ratios by member type and check.
 - `design/concrete/beams/carriers.py`: which beam carries which, and the rule that a carrier is at least as deep.
-- `design/concrete/columns/slenderness.py`: slenderness of columns along their length (ACI 6.2.5, 6.6.4.5): unbraced lengths and k from the frame, the moment magnifier and the minimum moment. The sway effects come from the ETABS P-delta analysis.
+- `design/concrete/columns/slenderness.py`: slenderness of columns along their length (NSCP 406.2.5, 406.6.4.5; ACI 6.2.5, 6.6.4.5): unbraced lengths and k from the frame, the moment magnifier and the minimum moment. The sway effects come from the ETABS P-delta analysis.
 - `design/concrete/columns/interaction.py`: the biaxial P-Mx-My design interaction surface of a column layout, built once and cached. It also provides the demand convex hull and the 3D figure for the calculation report.
 - `etabs_api/workflows/model_analysis.py`: analysis run, response spectrum scaling, period, modal mass and weight checks.
 - `etabs_api/workflows/model_setup.py`, `ubc97.py`, `load_combinations.py`: definition of materials, sections, loads and NSCP 2015 combinations in an ETABS model.
@@ -134,6 +134,7 @@ Each guide in `docs/` covers one tool: how to run it, its inputs, what it writes
 - [Steel and composite modules](docs/steel_design_documentation.md)
 - [Wind load calculator](docs/wind_calculator_asce7_documentation.md)
 - [Pile cap design](docs/pile_cap_design.md)
+- [Output folders: where each file is written](docs/output_folders.md)
 - [Results in the terminal](docs/terminal_output.md)
 - [The dialogs](docs/dialogs.md)
 - [The calculation reports](docs/calculation_reports.md)

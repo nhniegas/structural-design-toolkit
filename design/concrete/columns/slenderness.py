@@ -1,13 +1,13 @@
-"""Slenderness of columns along their length (ACI 318M-14 6.2.5 and 6.6.4.5).
+"""Slenderness of columns along their length (NSCP 406.2.5 and 406.6.4.5; ACI 6.2.5 and 6.6.4.5).
 
 Second-order effects have two parts:
 
 * **Sway (P-Delta).** The storey drifts. It is in the forces already: the
   ETABS analysis runs with iterative P-delta on cracked stiffness, an elastic
-  second-order analysis (ACI 6.7). No sway magnifier is computed here.
+  second-order analysis (NSCP 406.7; ACI 6.7). No sway magnifier is computed here.
 * **Member (P-delta).** The bow of the column between its ends. ETABS does not
   capture it unless every column is subdivided. It is added here by the
-  moment magnification of ACI 6.6.4.5, on the forces of the analysis.
+  moment magnification of NSCP 406.6.4.5 (ACI 6.6.4.5), on the forces of the analysis.
 
 For each column, each bending axis and each load combination:
 
@@ -18,7 +18,7 @@ For each column, each bending axis and each load combination:
 3. otherwise ``Pc = pi^2 (EI)eff / (k lu)^2`` with ``(EI)eff = 0.4 Ec Ig /
    (1 + beta_dns)``, ``Cm = 0.6 - 0.4 (M1/M2)``, ``delta = Cm / (1 - Pu /
    0.75 Pc) >= 1`` and ``Mc = delta M2`` with ``M2 >= Pu (15 + 0.03 h)``;
-4. ``Pu >= 0.75 Pc`` or ``delta > 1.4`` (ACI 6.2.6) fails: the column is too
+4. ``Pu >= 0.75 Pc`` or ``delta > 1.4`` (NSCP 406.2.6; ACI 6.2.6) fails: the column is too
    slender for its load, which bars cannot fix.
 
 M1/M2 is negative for single curvature (ACI sign). ETABS gives the moment
@@ -195,12 +195,12 @@ def axis_result(end_i: float, end_j: float, pu: float, geometry: AxisGeometry,
     if pu >= capacity:
         return AxisResult(ratio_klr, limit, True, cm, pc, math.inf, minimum,
                           cfg.max_magnifier * design, governing_end,
-                          f"FAIL: Pu {pu:.0f} kN >= 0.75 Pc {capacity:.0f} kN (ACI 6.6.4.5.2)")
+                          f"FAIL: Pu {pu:.0f} kN >= 0.75 Pc {capacity:.0f} kN (NSCP 406.6.4.5.2; ACI 6.6.4.5.2)")
     delta = max(1.0, cm / (1.0 - pu / capacity))
     if delta > cfg.max_magnifier + 1e-9:
         return AxisResult(ratio_klr, limit, True, cm, pc, delta, minimum,
                           cfg.max_magnifier * design, governing_end,
-                          f"FAIL: magnifier {delta:.2f} > {cfg.max_magnifier:g} (ACI 6.2.6)")
+                          f"FAIL: magnifier {delta:.2f} > {cfg.max_magnifier:g} (NSCP 406.2.6; ACI 6.2.6)")
     return AxisResult(ratio_klr, limit, True, cm, pc, delta, minimum, delta * design,
                       governing_end, "Slender: moment magnified")
 
@@ -432,7 +432,7 @@ class FrameModel:
 
     def beam_stiffness(self, joint: str, direction: tuple[float, float]) -> float:
         """Sum of E I / l of the beams at a joint that restrain bending in the
-        vertical plane along ``direction`` (cracked I, ACI Table 6.6.3.1.1(a))."""
+        vertical plane along ``direction`` (cracked I, NSCP Table 406.6.3.1.1(a); ACI Table 6.6.3.1.1(a))."""
         cfg = self.code.column_slenderness
         total = 0.0
         for name in self.beams_at.get(joint, []):

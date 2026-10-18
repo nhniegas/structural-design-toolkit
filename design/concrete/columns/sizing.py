@@ -73,14 +73,14 @@ def column_size_passes(
     if slenderness_geometry:
         magnified = magnify_member(forces, _slenderness_section(engine), slenderness_geometry)
         if magnified.failed:
-            return False, "slenderness (ACI 6.2.6)"
+            return False, "slenderness (NSCP 406.2.6; ACI 6.2.6)"
         forces = magnified.forces
     if is_smrf:
         seismic = engine.code.column_seismic
         sides = ((engine.diameter, engine.diameter) if engine.shape == "circular"
                  else (min(engine.width, engine.height), max(engine.width, engine.height)))
         if sides[0] < seismic.min_dimension or sides[0] / sides[1] < seismic.min_aspect_ratio:
-            return False, "SMRF dimensions (ACI 18.7.2.1)"
+            return False, "SMRF dimensions (NSCP 418.7.2.1; ACI 18.7.2.1)"
     strength = engine.code.column_strength
     ratio_limit = strength.rho_max_smrf if is_smrf else strength.rho_max
     gross = (engine.width * engine.height if engine.shape == "rectangular"

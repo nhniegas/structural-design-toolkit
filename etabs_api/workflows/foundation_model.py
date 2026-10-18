@@ -1039,7 +1039,9 @@ def _write_files(sup: Superstructure, options: Options, joints: dict[str, str],
     outcome.files["Foundation model"] = path
     outcome.files["Supports and exported loads"] = save_manifest(
         path, _manifest(sup, options, joints, path, [c.name for c in sup.combos]))
-    workbook = os.path.splitext(path)[0] + " - Reactions.xlsx"
+    from utilities.output_folders import beside
+
+    workbook = beside(path, " - Reactions.xlsx")
     try:
         outcome.files["Reactions and check"] = reactions_workbook(sup, outcome, workbook)
     except OSError as error:

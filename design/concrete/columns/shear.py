@@ -1,4 +1,4 @@
-"""Column shear: the analysis shear and the probable-moment shear Ve (ACI 22.5, 18.7.6)."""
+"""Column shear: the analysis shear and the probable-moment shear Ve (NSCP 422.5, 418.7.6; ACI 22.5, 18.7.6)."""
 
 import math
 import pandas as pd
@@ -130,7 +130,7 @@ SPIRAL_SHEAR_FAIL = ("FAIL: the spiral cannot carry the shear at its closest pit
 def spiral_pitch(pitch: float, least: float) -> float:
     """The pitch a spiral is built at, mm: ``pitch`` taken down to 5 mm, or to
     1 mm where 5 would bring it under ``least`` (the bar and the least clear
-    spacing, ACI 25.7.3.1). Never taken up: a pitch rounded up gives less
+    spacing, NSCP 425.7.3.1 (ACI 25.7.3.1)). Never taken up: a pitch rounded up gives less
     spiral than was counted."""
     for step in (5.0, 1.0):
         rounded = math.floor(pitch / step + 1e-9) * step
@@ -165,12 +165,12 @@ def _column_shear_checks(
     ``clear_height`` is the clear height lu between the beams (mm) for the
     capacity shear Ve of a special moment frame column. ``beam_moment_limits``
     maps (shear direction "V2"/"V3", end "I"/"J") to the end moment the beams can
-    deliver to this column, kN-m: ACI 18.7.6.1.1 lets Ve stop at the shear that
+    deliver to this column, kN-m: NSCP 418.7.6.1.1 (ACI 18.7.6.1.1) lets Ve stop at the shear that
     the joint strengths (beam Mpr) can develop.
 
     A circular column has a spiral, not ties: it has two legs across any
-    shear plane and no more can be added (ACI 22.5.10.5.3), and its d is 0.8 of
-    the diameter (ACI 22.5.2.2). The shear it cannot carry at the given pitch
+    shear plane and no more can be added (NSCP 422.5.10.5.3; ACI 22.5.10.5.3), and its d is 0.8 of
+    the diameter (NSCP 422.5.2.2; ACI 22.5.2.2). The shear it cannot carry at the given pitch
     is answered with a closer pitch: ``Shear_Spacing_Limit_mm`` then holds the
     pitch the shear needs.
 
@@ -387,7 +387,7 @@ def _column_shear_checks(
                         "Vc_Assumption": (
                             "0 used conservatively for all SMRF checks"
                             if is_smrf
-                            else "ACI 22.5.6 / 22.5.7 with the axial load of the end"
+                            else "NSCP 422.5.6 / 422.5.7 (ACI 22.5.6 / 22.5.7) with the axial load of the end"
                         ),
                     }
                 )
@@ -409,7 +409,7 @@ def _column_shear_checks(
         item["Shear_Check"] = (
             "PASS" if item["Design_Shear_kN"] <= shear_capacity * shear_target + 1e-9
             else SPIRAL_SHEAR_FAIL if spiral and not at_vs_max
-            else "FAIL: Vs above 0.66 sqrt(fc') b d (ACI 22.5.1.2) - enlarge the section"
+            else "FAIL: Vs above 0.66 sqrt(fc') b d (NSCP 422.5.1.2; ACI 22.5.1.2) - enlarge the section"
             if item["Design_Shear_kN"] > shear_capacity + 1e-9
             else f"FAIL: above the target ratio {shear_target:g} at the largest Vs "
                  "- enlarge the section"

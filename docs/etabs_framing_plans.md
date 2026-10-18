@@ -19,7 +19,7 @@ sdt plans
 | Column marks | On every floor, or only where each column starts (the bottom-most level) |
 | Plot scale | 1 : 100, 1 : 50 or 1 : 200. It sets the text height (2.5 mm on paper, so 250 mm at 1 : 100) and the length of the dashes. The plan itself is always drawn at 1 : 1 in mm |
 | Foundation plan | Yes or no. Asked only when a plan of the foundation model of this model was saved (see [The foundation plan](#the-foundation-plan)) |
-| Folder | Where `<model> - Framing Plans.dxf` is saved |
+| Folder | The output folder: `<model> - Framing Plans.dxf` is saved in its `Drawings` subfolder |
 
 A window then shows the summary: the floors, the counts of what was drawn and the file.
 

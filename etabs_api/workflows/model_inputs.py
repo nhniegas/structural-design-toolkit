@@ -236,7 +236,7 @@ def factors_text(combinations: Combinations, name: str) -> str:
 
 def ve_gravity_default(combinations: Combinations, choices: list[str]) -> str | None:
     """The choice closest to 1.2 D + f1 L, the factored gravity load of the beam
-    seismic shear Ve (ACI 318-14 18.6.5.1; NSCP 2015 203.3 with f1 = 0.5 or 1.0).
+    seismic shear Ve (NSCP 418.6.5.1; ACI 18.6.5.1; NSCP 2015 203.3 with f1 = 0.5 or 1.0).
 
     A combination without live load, such as 1.4 D, leaves the live load out
     of Ve and is ranked last.

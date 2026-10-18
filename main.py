@@ -240,7 +240,7 @@ COMMANDS = {
     "drift": (_drift, "story drift with the drift stiffness (strength, service), then restore"),
     "irregularity": (_irregularity, "vertical and plan irregularities, Ax and the P-delta "
                                     "stability coefficient (read only)"),
-    "beams": (_beams, "extract the forces and design the beams (ACI 318M-14)"),
+    "beams": (_beams, "extract the forces and design the beams (NSCP 2015)"),
     "deflection": (_deflection, "check only the beam deflections (bars of the last beam design)"),
     "columns": (_columns, "design the columns (with slenderness) from the stored beam step"),
     "design": (_design, "analysis and design loop that resizes beams and columns"),

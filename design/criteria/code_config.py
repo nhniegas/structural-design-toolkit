@@ -1,7 +1,10 @@
 """Structural code constants: ACI 318M-14, NSCP 2015, ASCE 7-10 and UBC 97.
 
-* ``CODE`` (``AciCode``): ACI 318M-14, used by the beam and column designers
-  (NSCP 2015 chapter 4 follows it: ACI clause X is NSCP clause 4X).
+* ``CODE`` (``AciCode``): NSCP 2015 chapter 4, used by the beam and column
+  designers. It follows ACI 318M-14 clause for clause: ACI clause X is NSCP
+  clause 4X (checked for every clause the program cites). The comments below
+  give the ACI number; what the user sees cites both, "NSCP 418.6.2.1 (ACI
+  18.6.2.1)".
 * ``NSCP`` (``NscpCode``): NSCP 2015 chapter 2, the loads, load combinations,
   live load reduction (with the ASCE 7-10 alternate) and earthquake provisions
   (with the UBC 97 tables that ETABS uses, which NSCP 208 follows).
@@ -80,7 +83,7 @@ class StrengthReductionConfig:
         """phi for flexure / combined P-M from the extreme tension strain.
 
         Compression-controlled up to the yield strain, tension-controlled from
-        0.005, straight-line transition in between (ACI Table 21.2.2).
+        0.005, straight-line transition in between (NSCP Table 421.2.2; ACI Table 21.2.2).
         """
         low = self.compression_spiral if spiral else self.compression_tied
         yield_strain = fy / es
@@ -129,7 +132,7 @@ class BeamShearConfig:
 
 @dataclass(frozen=True)
 class BeamTorsionConfig:
-    """Torsion thresholds, capacity and detailing limits (ACI 22.7, 9.6.4, 9.7.5)."""
+    """Torsion thresholds, capacity and detailing limits (NSCP 422.7, 409.6.4, 409.7.5; ACI 22.7, 9.6.4, 9.7.5)."""
 
     threshold_coeff: float = 0.083  # Tth = 0.083*sqrt(fc')*Acp^2/pcp          ACI Table 22.7.4.1(a)
     cracking_coeff: float = 0.33  # Tcr = 0.33*sqrt(fc')*Acp^2/pcp             ACI Table 22.7.5.1(a)
@@ -174,7 +177,7 @@ class BeamDetailingConfig:
 
 @dataclass(frozen=True)
 class BeamSeismicConfig:
-    """Special moment frame beam requirements (ACI 18.6)."""
+    """Special moment frame beam requirements (NSCP 418.6; ACI 18.6)."""
 
     max_reinforcement_ratio: float = 0.025  #                                 ACI 18.6.3.1
     positive_to_negative_at_face: float = 0.50  #                             ACI 18.6.3.2
@@ -227,7 +230,7 @@ class ColumnStrengthConfig:
 
 @dataclass(frozen=True)
 class ColumnTransverseConfig:
-    """Tie, hoop and spiral limits (ACI 25.7.2, 25.7.3, 18.7.5)."""
+    """Tie, hoop and spiral limits (NSCP 425.7.2, 425.7.3, 418.7.5; ACI 25.7.2, 25.7.3, 18.7.5)."""
 
     tie_spacing_bar_multiple: float = 16.0  # s <= 16 db                         ACI 25.7.2.1
     tie_spacing_tie_multiple: float = 48.0  # s <= 48 dtie                       ACI 25.7.2.1
@@ -244,7 +247,7 @@ class ColumnTransverseConfig:
 
 @dataclass(frozen=True)
 class ColumnSeismicConfig:
-    """Special moment frame column and joint requirements (ACI 18.7, 18.8)."""
+    """Special moment frame column and joint requirements (NSCP 418.7, 418.8; ACI 18.7, 18.8)."""
 
     min_dimension: float = 300.0  # mm                                           ACI 18.7.2.1(a)
     min_aspect_ratio: float = 0.40  #                                            ACI 18.7.2.1(b)
@@ -283,7 +286,7 @@ class ColumnSeismicConfig:
 
 @dataclass(frozen=True)
 class ColumnShearConfig:
-    """Non-seismic column shear strength (ACI 22.5.6)."""
+    """Non-seismic column shear strength (NSCP 422.5.6; ACI 22.5.6)."""
 
     vc_coeff: float = 0.17  #                                                    ACI 22.5.6.1
     axial_divisor: float = 14.0  # 1 + Nu/(14*Ag)                                ACI 22.5.6.1
@@ -293,9 +296,9 @@ class ColumnShearConfig:
 
 @dataclass(frozen=True)
 class ColumnSlendernessConfig:
-    """Slenderness of columns along their length (ACI 6.2.5, 6.6.4.5).
+    """Slenderness of columns along their length (NSCP 406.2.5, 406.6.4.5; ACI 6.2.5, 6.6.4.5).
 
-    The sway (P-Delta) effects come from the second-order analysis (ACI 6.7);
+    The sway (P-Delta) effects come from the second-order analysis (NSCP 406.7; ACI 6.7);
     these values are for the member (P-delta) magnification that is added to it.
     """
 
@@ -365,7 +368,7 @@ class InputConventionConfig:
 class AciCode:
     """All ACI 318M-14 constants used by the designers, grouped by topic."""
 
-    name: str = "ACI 318M-14"
+    name: str = "NSCP 2015 chapter 4 (ACI 318M-14)"
     material: MaterialConfig = field(default_factory=MaterialConfig)
     strength: StrengthReductionConfig = field(default_factory=StrengthReductionConfig)
     beam_flexure: BeamFlexureConfig = field(default_factory=BeamFlexureConfig)
@@ -395,7 +398,7 @@ class AciCode:
         )
 
     def crack_control_spacing(self, fy: float, clear_cover: float) -> float:
-        """Maximum centre-to-centre bar spacing for crack control (ACI 24.3.2).
+        """Maximum centre-to-centre bar spacing for crack control (NSCP 424.3.2; ACI 24.3.2).
 
         ``clear_cover`` is the clear distance from the tension face to the
         surface of the flexural bar (i.e. cover + stirrup diameter).

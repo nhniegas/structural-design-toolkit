@@ -38,6 +38,7 @@ if __package__ in (None, ""):
 
 from design.criteria import dcr_targets  # noqa: E402
 from utilities.latex_help import missing_pdf_reason  # noqa: E402
+from utilities.output_folders import SCHEDULES, output_path, subfolder  # noqa: E402
 
 STORE_SUFFIX = " - design data.pkl"
 # Where the classes of a stored design were before the design folders (v0.3.8 and earlier).
@@ -226,7 +227,7 @@ def confirm_pdelta(connector, title: str) -> bool:
     """False when the user stops because P-delta is off in the model.
 
     The column slenderness adds only the member effect; the sway effect must
-    be in the analysis forces (ACI 6.7).
+    be in the analysis forces (NSCP 406.7; ACI 6.7).
     """
     from utilities._gui_helpers import select_option
 
@@ -371,11 +372,11 @@ def run_beams() -> DesignStore | None:
         store.beam_results = results
         store.save()
         window.update("Saving 1 of 3: the results workbook (.xlsx)")
-        xlsx = write_beam_results_xlsx(results, os.path.join(folder, f"{stem} - Beam Design.xlsx"))
+        xlsx = write_beam_results_xlsx(results, output_path(folder, f"{stem} - Beam Design.xlsx"))
         window.update("Saving 2 of 3: the beam schedules (.dxf)")
-        dxf = export_beam_dxf(results, folder)
+        dxf = export_beam_dxf(results, subfolder(folder, SCHEDULES))
         window.update("Saving 3 of 3: the calculation report (.pdf, LaTeX)")
-        pdf = export_beam_pdf(results, os.path.join(folder, f"{stem} - Beam Calculations.pdf"),
+        pdf = export_beam_pdf(results, output_path(folder, f"{stem} - Beam Calculations.pdf"),
                               smrf, gravity)
     from design.concrete.results_tables import beam_results_report
 
@@ -385,10 +386,10 @@ def run_beams() -> DesignStore | None:
     if carrier_depth:
         summary.add("Carrier depth", "a beam is at least as deep as the beams it carries")
     if compatibility_torsion:
-        summary.add("Beam torsion", "at most phi Tcr (compatibility torsion, ACI 22.7.3.2)")
+        summary.add("Beam torsion", "at most phi Tcr (compatibility torsion, NSCP 422.7.3.2; ACI 22.7.3.2)")
         summary.note(TORSION_NOTE)
     summary.add("Beam bar spacing", "office rule, 150 mm clear" if office_bar_spacing
-                else "crack control only (ACI 24.3.2)")
+                else "crack control only (NSCP 424.3.2; ACI 24.3.2)")
     add_short_spans_to(summary, results, exempt_short_spans)
     summary.add("Deflection stages", stages.describe())
     ready.sources.add_to(summary)
@@ -398,7 +399,7 @@ def run_beams() -> DesignStore | None:
     summary.file("Schedules", ", ".join(os.path.basename(p) for p in dxf))
     summary.file("Calculations", pdf or missing_pdf_reason())
     summary.file("Design data", store.path)
-    summary.show(os.path.join(folder, f"{stem} - Beam Design summary.txt"), popup=True)
+    summary.show(output_path(folder, f"{stem} - Beam Design summary.txt"), popup=True)
     return store
 
 
@@ -416,7 +417,7 @@ class ModelReady:
 
 VE_GRAVITY_PROMPT = (
     "Gravity combination for the beam seismic shear Ve. It is the factored gravity load on "
-    "the span, 1.2 D + f1 L (ACI 318-14 18.6.5.1, NSCP 2015 203.3); the closest combination "
+    "the span, 1.2 D + f1 L (NSCP 418.6.5.1; ACI 18.6.5.1, NSCP 2015 203.3); the closest combination "
     "is selected. A combination without live load, such as 1.4 D, leaves the live load out.")
 SEISMIC_CHOICES = {"Static (EQ)": "EQ", "Response spectrum (RSA)": "RSA", "Both": "Both"}
 # The first choice changes nothing in the model. Tagging renames the members of
@@ -634,10 +635,10 @@ def ask_carrier_depth(title: str, last: dict | None = None) -> bool | None:
 
 
 TORSION_ANALYSIS = "The analysis torsion (as ETABS gives it)"
-TORSION_COMPATIBILITY = "At most phi Tcr: compatibility torsion (ACI 22.7.3.2)"
+TORSION_COMPATIBILITY = "At most phi Tcr: compatibility torsion (NSCP 422.7.3.2; ACI 22.7.3.2)"
 TORSION_NOTE = (
-    "Beam torsion was limited to phi Tcr (ACI 22.7.3.2), which holds where the torsion can "
-    "redistribute after cracking. ACI 22.7.3.3 then requires the adjoining members to be "
+    "Beam torsion was limited to phi Tcr (NSCP 422.7.3.2; ACI 22.7.3.2), which holds where the torsion can "
+    "redistribute after cracking. NSCP 422.7.3.3 (ACI 22.7.3.3) then requires the adjoining members to be "
     "designed for the redistributed moments and shears: an analysis with the torsional "
     "stiffness of the beams reduced (a small J modifier) gives them. Cantilevers keep their "
     "analysis torsion.")
@@ -651,7 +652,7 @@ def ask_compatibility_torsion(title: str, last: dict | None = None) -> bool | No
         title, "Which torsion are the beams designed for?\n\nThe analysis torsion is right "
         "for equilibrium torsion, and for a model whose beams have a reduced torsional "
         "stiffness (J modifier). In a model with the full torsional stiffness, beams that "
-        "frame into each other pick up large compatibility torsion; ACI 22.7.3.2 lets that be "
+        "frame into each other pick up large compatibility torsion; NSCP 422.7.3.2 (ACI 22.7.3.2) lets that be "
         "taken as at most phi Tcr, because it redistributes when the beam cracks. Cantilevers "
         "keep the analysis torsion either way.",
         [TORSION_ANALYSIS, TORSION_COMPATIBILITY],
@@ -660,7 +661,7 @@ def ask_compatibility_torsion(title: str, last: dict | None = None) -> bool | No
 
 
 SPACING_OFFICE = "Office rule: at most 150 mm clear between the bars of a face"
-SPACING_CODE = "Code only: crack control spacing (ACI 24.3.2)"
+SPACING_CODE = "Code only: crack control spacing (NSCP 424.3.2; ACI 24.3.2)"
 
 
 def ask_bar_spacing(title: str, last: dict | None = None) -> bool | None:
@@ -671,25 +672,25 @@ def ask_bar_spacing(title: str, last: dict | None = None) -> bool | None:
     chosen = select_option(
         title, "How many bars does a beam face need for spacing?\n\nThe office rule keeps "
         "the clear spacing at 150 mm or less, so a wide beam gets more bars than its strength "
-        "needs. The code limits the spacing for crack control only (ACI 24.3.2, about 250 mm "
+        "needs. The code limits the spacing for crack control only (NSCP 424.3.2; ACI 24.3.2, about 250 mm "
         "centre to centre). The extra bars of the office rule raise the probable moments of "
         "the beam, and with them the capacity shear of the beam and the joint shear and "
         "capacity shear of the columns.",
         [SPACING_OFFICE, SPACING_CODE],
-        default_index=1 if (last or {}).get("office_bar_spacing") is False else 0)
+        default_index=0 if (last or {}).get("office_bar_spacing") is True else 1)
     return None if chosen is None else chosen == SPACING_OFFICE
 
 
 SHORT_SPAN_KEEP = "Apply the SMRF rules to them, as to every girder"
 SHORT_SPAN_EXEMPT = "Design them without the SMRF rules"
 SHORT_SPAN_NOTE = ("Girders with a clear span under 4d were designed without the SMRF rules of "
-                   "ACI 18.6 (strength ratios, 2.5 % steel limit, probable-moment shear, hoops), "
+                   "NSCP 418.6 (ACI 18.6) (strength ratios, 2.5 % steel limit, probable-moment shear, hoops), "
                    "because they do not qualify as beams of a special moment frame (ACI "
                    "18.6.2.1(a)). They are listed in the 'Seismic rules' column. The columns "
                    "still count their strength in the joint shear and strong column - weak "
-                   "beam checks. Each of them is also a deep beam by ACI 9.9.1.1 (clear span at "
+                   "beam checks. Each of them is also a deep beam by NSCP 409.9.1.1 (ACI 9.9.1.1) (clear span at "
                    "most 4h) and is designed here as an ordinary beam: the strut-and-tie or "
-                   "nonlinear strain design and the distributed steel of ACI 9.9 are not "
+                   "nonlinear strain design and the distributed steel of NSCP 409.9 (ACI 9.9) are not "
                    "covered. Confirm how each is meant to resist the earthquake.")
 
 
@@ -700,12 +701,12 @@ def ask_short_span_girders(title: str, last: dict | None = None) -> bool | None:
 
     chosen = select_option(
         title, "Girders with a clear span under 4d.\n\nA beam of a special moment frame "
-        "must have a clear span of at least 4 times its effective depth (ACI 18.6.2.1(a)). A "
+        "must have a clear span of at least 4 times its effective depth (NSCP 418.6.2.1(a); ACI 18.6.2.1(a)). A "
         "shorter girder does not qualify, and the SMRF rules give it a very large probable-"
         "moment shear that a larger section does not solve. You can design such girders "
         "without the SMRF rules (strength ratios, 2.5 % steel limit, probable-moment shear, "
         "hoops): for the forces of the analysis only. Such a girder is also a deep beam "
-        "by ACI 9.9.1.1, which this design does not cover: it is designed as an ordinary "
+        "by NSCP 409.9.1.1 (ACI 9.9.1.1), which this design does not cover: it is designed as an ordinary "
         "beam. The results say which girders this was applied to.",
         [SHORT_SPAN_KEEP, SHORT_SPAN_EXEMPT],
         default_index=1 if (last or {}).get("exempt_short_spans") else 0)
@@ -884,7 +885,7 @@ def run_deflection() -> pd.DataFrame | None:
                                          points=(store.tables or {}).get("POINTS"))
         table = deflection_table(checked)
         window.update("Saving the deflection workbook (.xlsx)")
-        path = write_deflection_xlsx(table, os.path.join(folder, f"{stem} - Deflection.xlsx"))
+        path = write_deflection_xlsx(table, output_path(folder, f"{stem} - Deflection.xlsx"))
     from utilities.run_summary import RunSummary, listed
 
     from design.concrete.results_tables import deflection_results_report
@@ -903,7 +904,7 @@ def run_deflection() -> pd.DataFrame | None:
     summary.add("Combinations", "; ".join(own) if own else "the DEF names of the model")
     add_targets_to(summary, targets, (dcr_targets.GIRDER, dcr_targets.BEAM))
     if failing:
-        summary.fail("Deflection (ACI 24.2.2): " + listed(failing))
+        summary.fail("Deflection (NSCP 424.2.2; ACI 24.2.2): " + listed(failing))
     summary.file("Results", path)
     summary.show(popup=True)
     return table
@@ -986,12 +987,12 @@ def run_columns() -> DesignStore | None:
         store.save()
         window.update("Saving 1 of 3: the results workbook (.xlsx)")
         xlsx = write_column_results_xlsx(report, groups,
-                                         os.path.join(folder, f"{stem} - Column Design.xlsx"))
+                                         output_path(folder, f"{stem} - Column Design.xlsx"))
         window.update("Saving 2 of 3: the column schedule (.dxf)")
-        dxf = export_column_cad_drawings(report, folder, bars["dmain"], bars["cover"], smrf,
+        dxf = export_column_cad_drawings(report, subfolder(folder, SCHEDULES), bars["dmain"], bars["cover"], smrf,
                                          tie_style, store.tables["CONNECTIVITY"])
         window.update("Saving 3 of 3: the calculation report (.pdf, LaTeX)")
-        pdf = export_column_pdf(report, os.path.join(folder, f"{stem} - Column Calculations.pdf"),
+        pdf = export_column_pdf(report, output_path(folder, f"{stem} - Column Calculations.pdf"),
                                 smrf, bars["dmain"], bars["dties"], bars["cover"])
     from design.concrete.results_tables import column_results_report
 
@@ -1008,7 +1009,7 @@ def run_columns() -> DesignStore | None:
     summary.file("Results", xlsx)
     summary.file("Schedule", ", ".join(os.path.basename(p) for p in dxf))
     summary.file("Calculations", pdf or missing_pdf_reason())
-    summary.show(os.path.join(folder, f"{stem} - Column Design summary.txt"), popup=True)
+    summary.show(output_path(folder, f"{stem} - Column Design summary.txt"), popup=True)
     return store
 
 
@@ -1016,7 +1017,7 @@ def run_columns() -> DesignStore | None:
 _COLUMN_FAILURES = (
     ("Flexure / axial", "Flexure_Check", "FAIL"),
     ("Flexure / axial", "Axial_Check", "FAIL"),
-    ("Slenderness (ACI 6.2.6)", "Slenderness_Check", "FAIL"),
+    ("Slenderness (NSCP 406.2.6; ACI 6.2.6)", "Slenderness_Check", "FAIL"),
     ("Column shear", "Shear_Check", "FAIL"),
     ("Strong column - weak beam (BCC)", "BCC_Status", "FAIL"),
     ("Joint shear", "Joint_Shear_Status", "FAIL"),
@@ -1041,7 +1042,7 @@ def column_summary(report: pd.DataFrame, command: str, model_path: str | None = 
     if "Slenderness_Check" in report.columns:
         slender = report.loc[report["Slenderness_Check"].astype(str).str.contains(
             "slender, moments magnified|FAIL", regex=True), "UniqueName"].astype(str).nunique()
-        summary.add("Slender columns", f"{slender} (member effects, ACI 6.6.4.5; sway effects "
+        summary.add("Slender columns", f"{slender} (member effects, NSCP 406.6.4.5; ACI 6.6.4.5; sway effects "
                                        "from the ETABS P-delta analysis)")
     if not check_top_level:
         summary.note("BCC, joint shear and Ve were not checked at the topmost level "

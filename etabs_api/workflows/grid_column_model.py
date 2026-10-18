@@ -893,7 +893,9 @@ def build_grid_column_model(
         model.View.RefreshView()
     except Exception:
         pass
-    with open(os.path.splitext(path)[0] + " - plan changes.txt", "w", encoding="utf-8") as handle:
+    from utilities.output_folders import beside
+
+    with open(beside(path, " - plan changes.txt"), "w", encoding="utf-8") as handle:
         handle.write(report_text(dxf_path, building, changes, log))
     return building, changes, log, path
 
@@ -1050,8 +1052,10 @@ def run_grid_column_model() -> str | None:
         summary.fail(problem)
     for warning in building.warnings:
         summary.note(warning)
+    from utilities.output_folders import beside
+
     summary.file("Model", path)
-    summary.file("List of changes", os.path.splitext(path)[0] + " - plan changes.txt")
+    summary.file("List of changes", beside(path, " - plan changes.txt"))
     summary.show(popup=True)
     return path
 

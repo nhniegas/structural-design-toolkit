@@ -18,21 +18,21 @@ from utilities.terminal import Report
 MAX_ROWS = 40     # a model with more members than this lists the failing ones
 
 BEAM_EQUATIONS = [
-    "Flexure:     φMₙ ≥ Mᵤ,  Mₙ = Aₛ fy (d − a/2) + A′ₛ f′ₛ (d − d′),  a = (Aₛ fy − A′ₛ f′ₛ) / (0.85 f′c b)   (ACI 22.2)",
-    "Shear:       φVₙ = φ (Vc + Vₛ) ≥ Vᵤ,  Vc = 0.17 √f′c b d,  Vₛ = Aᵥ fyt d / s ≤ 0.66 √f′c b d   (ACI 22.5)",
-    "Torsion:     Tᵤ ≤ φTₙ,  Tₙ = 2 Aₒ Aₜ fyt / s;  compatibility torsion: Tᵤ ≤ φTcr   (ACI 22.7)",
-    "SMRF shear:  Vₑ = (Mpr₁ + Mpr₂) / lₙ ± wᵤ lₙ / 2,  Mpr at 1.25 fy   (ACI 18.6.5.1)",
-    "SMRF bars:   ρ ≤ 0.025;  M⁺ₙ ≥ ½ M⁻ₙ at a support face;  Mₙ ≥ ¼ Mₙ,max at every section   (ACI 18.6.3)",
-    "Deflection:  Iₑ = (Mcr/Mₐ)³ Ig + [1 − (Mcr/Mₐ)³] Icr ≤ Ig,  λΔ = ξ / (1 + 50 ρ′)   (ACI 24.2)",
+    "Flexure:     φMₙ ≥ Mᵤ,  Mₙ = Aₛ fy (d − a/2) + A′ₛ f′ₛ (d − d′),  a = (Aₛ fy − A′ₛ f′ₛ) / (0.85 f′c b)   (NSCP 422.2; ACI 22.2)",
+    "Shear:       φVₙ = φ (Vc + Vₛ) ≥ Vᵤ,  Vc = 0.17 √f′c b d,  Vₛ = Aᵥ fyt d / s ≤ 0.66 √f′c b d   (NSCP 422.5; ACI 22.5)",
+    "Torsion:     Tᵤ ≤ φTₙ,  Tₙ = 2 Aₒ Aₜ fyt / s;  compatibility torsion: Tᵤ ≤ φTcr   (NSCP 422.7; ACI 22.7)",
+    "SMRF shear:  Vₑ = (Mpr₁ + Mpr₂) / lₙ ± wᵤ lₙ / 2,  Mpr at 1.25 fy   (NSCP 418.6.5.1; ACI 18.6.5.1)",
+    "SMRF bars:   ρ ≤ 0.025;  M⁺ₙ ≥ ½ M⁻ₙ at a support face;  Mₙ ≥ ¼ Mₙ,max at every section   (NSCP 418.6.3; ACI 18.6.3)",
+    "Deflection:  Iₑ = (Mcr/Mₐ)³ Ig + [1 − (Mcr/Mₐ)³] Icr ≤ Ig,  λΔ = ξ / (1 + 50 ρ′)   (NSCP 424.2; ACI 24.2)",
     "             Δ after partitions = λΔ Δ(D + 0.25 L) + Δ(D + L) − Δ(D + 0.25 L) ≤ L/480 or L/240",
 ]
 COLUMN_EQUATIONS = [
-    "Axial load and bending:  Mᵤ / φMₙ ≤ 1 at φPₙ = Pᵤ, on the biaxial surface;  φPₙ,max = 0.80 φ [0.85 f′c (Ag − Aₛₜ) + fy Aₛₜ]   (ACI 22.4)",
-    "Slenderness:  k lᵤ / r ≤ 34 + 12 (M₁/M₂) ≤ 40;  else Mc = δₙₛ M₂,  δₙₛ = Cm / (1 − Pᵤ / 0.75 Pc) ≤ 1.4   (ACI 6.2.5, 6.6.4.5)",
-    "Shear:        φVₙ = φ (Vc + Vₛ) ≥ Vᵤ;  SMRF: Vₑ = (Mpr,top + Mpr,bottom) / lᵤ   (ACI 22.5, 18.7.6)",
-    "Strong column - weak beam:  ΣMₙc ≥ 1.2 ΣMₙb   (ACI 18.7.3.2)",
-    "Joint shear:  Vⱼ ≤ φVₙ = 0.85 γ √f′c Aⱼ,  γ = 1.7, 1.2 or 1.0 by the faces confined   (ACI 18.8.4)",
-    "Confinement:  Aₛₕ / (s bc) ≥ 0.3 (Ag/Ach − 1) f′c / fyt  and  0.09 f′c / fyt   (ACI 18.7.5.4)",
+    "Axial load and bending:  Mᵤ / φMₙ ≤ 1 at φPₙ = Pᵤ, on the biaxial surface;  φPₙ,max = 0.80 φ [0.85 f′c (Ag − Aₛₜ) + fy Aₛₜ]   (NSCP 422.4; ACI 22.4)",
+    "Slenderness:  k lᵤ / r ≤ 34 + 12 (M₁/M₂) ≤ 40;  else Mc = δₙₛ M₂,  δₙₛ = Cm / (1 − Pᵤ / 0.75 Pc) ≤ 1.4   (NSCP 406.2.5, 406.6.4.5; ACI 6.2.5, 6.6.4.5)",
+    "Shear:        φVₙ = φ (Vc + Vₛ) ≥ Vᵤ;  SMRF: Vₑ = (Mpr,top + Mpr,bottom) / lᵤ   (NSCP 422.5, 418.7.6; ACI 22.5, 18.7.6)",
+    "Strong column - weak beam:  ΣMₙc ≥ 1.2 ΣMₙb   (NSCP 418.7.3.2; ACI 18.7.3.2)",
+    "Joint shear:  Vⱼ ≤ φVₙ = 0.85 γ √f′c Aⱼ,  γ = 1.7, 1.2 or 1.0 by the faces confined   (NSCP 418.8.4; ACI 18.8.4)",
+    "Confinement:  Aₛₕ / (s bc) ≥ 0.3 (Ag/Ach − 1) f′c / fyt  and  0.09 f′c / fyt   (NSCP 418.7.5.4; ACI 18.7.5.4)",
 ]
 
 
@@ -155,11 +155,11 @@ def column_results_report(report_table: pd.DataFrame,
 
 
 DEFLECTION_EQUATIONS = [
-    "Iₑ = (Mcr/Mₐ)³ Ig + [1 − (Mcr/Mₐ)³] Icr ≤ Ig,  Mcr = fr Ig / (h/2),  fr = 0.62 √f′c   (ACI 24.2.3.5)",
+    "Iₑ = (Mcr/Mₐ)³ Ig + [1 − (Mcr/Mₐ)³] Icr ≤ Ig,  Mcr = fr Ig / (h/2),  fr = 0.62 √f′c   (NSCP 424.2.3.5; ACI 24.2.3.5)",
     "Δ = ∫∫ M / (Ec Iₑ) dx dx  along the span, zero at its supports;  Ec = 4700 √f′c",
-    "λΔ = ξ / (1 + 50 ρ′),  ξ = 2.0 for 5 years or more   (ACI 24.2.4.1)",
+    "λΔ = ξ / (1 + 50 ρ′),  ξ = 2.0 for 5 years or more   (NSCP 424.2.4.1; ACI 24.2.4.1)",
     "Live load:         Δ(D + L) − Δ(D) ≤ L/360          (roof: Δ(D + Lr) − Δ(D) ≤ L/180)",
-    "After partitions:  λΔ Δ(D + 0.25 L) + Δ(D + L) − Δ(D + 0.25 L) ≤ L/480 or L/240   (ACI Table 24.2.2)",
+    "After partitions:  λΔ Δ(D + 0.25 L) + Δ(D + L) − Δ(D + 0.25 L) ≤ L/480 or L/240   (NSCP Table 424.2.2; ACI Table 24.2.2)",
 ]
 
 

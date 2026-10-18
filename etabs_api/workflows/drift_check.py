@@ -11,8 +11,8 @@ needs its own analysis. On the model open in ETABS (no copy):
    combinations (NSCP 208.6.4.1):
 
    * as modelled: your modifiers, unchanged;
-   * strength level: beams 0.35, columns 0.70 (ACI 6.6.3.1.1, NSCP 406.6.3.1.1);
-   * service level: 1.4 times those, at most the gross section (ACI 6.6.3.2.2).
+   * strength level: beams 0.35, columns 0.70 (NSCP 406.6.3.1.1; ACI 6.6.3.1.1);
+   * service level: 1.4 times those, at most the gross section (NSCP 406.6.3.2.2; ACI 6.6.3.2.2).
 
 3. Put the modifiers and scale factors back and, when the model had results,
    analyse it again: it is left as it was, for the strength design.
@@ -59,10 +59,10 @@ class StiffnessLevel:
 
 
 def stiffness_levels(service_factor: float | None = None) -> list[StiffnessLevel]:
-    """As modelled, strength level (ACI 6.6.3.1.1) and service level.
+    """As modelled, strength level (NSCP 406.6.3.1.1; ACI 6.6.3.1.1) and service level.
 
     The service level is ``service_factor`` times the strength level, 1.4 by
-    the code (ACI 6.6.3.2.2) unless the engineer gives another, never above
+    the code (NSCP 406.6.3.2.2; ACI 6.6.3.2.2) unless the engineer gives another, never above
     the gross stiffness. At the service level a member that was modelled
     stiffer than the level keeps its own stiffness, so that a beam given
     0.5 Ig for its flange is not made softer than it was modelled.
@@ -76,11 +76,11 @@ def stiffness_levels(service_factor: float | None = None) -> list[StiffnessLevel
     return [
         StiffnessLevel("As modelled", None, None, "your frame modifiers"),
         StiffnessLevel("Strength level", k.beam_inertia, k.column_inertia,
-                       "ACI 6.6.3.1.1, NSCP 406.6.3.1.1"),
+                       "NSCP 406.6.3.1.1 (ACI 6.6.3.1.1)"),
         StiffnessLevel(f"Service level ({factor:g} x)",
                        service(k.beam_inertia), service(k.column_inertia),
-                       "ACI 6.6.3.2.2, NSCP 406.6.3.2.2" if factor == k.service_stiffness_factor
-                       else f"your factor; ACI 6.6.3.2.2 gives {k.service_stiffness_factor:g}",
+                       "NSCP 406.6.3.2.2 (ACI 6.6.3.2.2)" if factor == k.service_stiffness_factor
+                       else f"your factor; NSCP 406.6.3.2.2 (ACI 6.6.3.2.2) gives {k.service_stiffness_factor:g}",
                        at_least_modelled=True),
     ]
 
@@ -728,7 +728,7 @@ def ask_drift_options(title: str, standard: bool = True) -> DriftOptions | None:
     if which is None:
         return None
     label = "Wind drift limit: h /"
-    stiffer = "Service level stiffness, times the strength level (ACI 6.6.3.2.2: 1.4)"
+    stiffer = "Service level stiffness, times the strength level (NSCP 406.6.3.2.2; ACI 6.6.3.2.2: 1.4)"
     code_factor = NSCP.analysis.service_stiffness_factor
     while True:
         typed = enter_values(title, "Story drift limit under the wind combinations (NSCP 207 "
@@ -811,7 +811,9 @@ def run_drift_check() -> DriftReport | None:
         report.report().show()
     else:
         print(report.text())
-    saved = save_report(report, os.path.splitext(path)[0] + " - Drift.txt")
+    from utilities.output_folders import beside
+
+    saved = save_report(report, beside(path, " - Drift.txt"))
     print(f"Saved: {saved}")
     drift_summary(report, path, saved).show(popup=True, echo=False)
     return report

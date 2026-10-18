@@ -144,7 +144,7 @@ def _bundle_spacing_is_valid(
 
     Column bars need a clear spacing of at least 40 mm, 1.5 db and 4/3 of the
     aggregate (NSCP 425.2.3 / ACI 25.2.3); a bundle counts as one bar of the
-    same area (ACI 25.6.1.6).
+    same area (NSCP 425.6.1.6; ACI 25.6.1.6).
     """
     if aggregate_size is None:
         aggregate_size = CODE.column_strength.default_aggregate_size

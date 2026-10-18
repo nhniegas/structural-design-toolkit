@@ -24,11 +24,11 @@ ETABS keeps stiffness modifiers per member, not per load case. Drift with a diff
    | Level | Beams | Columns | Basis |
    |---|---|---|---|
    | As modelled | yours | yours | the modifiers you assigned, unchanged |
-   | Strength | 0.35 | 0.70 | ACI 6.6.3.1.1 (NSCP 406.6.3.1.1) |
-   | Service | 0.49 | 0.98 | 1.4 times, at most the gross section, ACI 6.6.3.2.2 |
+   | Strength | 0.35 | 0.70 | NSCP 406.6.3.1.1 (ACI 6.6.3.1.1) |
+   | Service | 0.49 | 0.98 | 1.4 times, at most the gross section, NSCP 406.6.3.2.2 (ACI 6.6.3.2.2) |
 
 5. Puts the modifiers and scale factors back and, if the model had results, analyses it again. It is left ready for the strength design.
-6. Prints the report in the terminal and saves it beside the model as `<model> - Drift.txt`. A separate window then shows the summary: the checks and the failures of each stiffness level.
+6. Prints the report in the terminal and saves it in the model's folder as `Summaries/<model> - Drift.txt` (see [Output folders](output_folders.md)). A separate window then shows the summary: the checks and the failures of each stiffness level.
 
 `sdt design` runs the same check once at the end, on the final sizes (see [design loop](etabs_design_loop.md)).
 
@@ -52,7 +52,7 @@ For the spectrum combinations, ETABS gives Max and Min envelopes. The centre-of-
 
 **Typed Ca and Cv.** With the coefficients typed in, ETABS applies the zone 4 minimum 0.8 Z Nv I / R (Eq. 208-11) with Nv = 1. Where that minimum governs a drift pattern, its forces and its drift are too small by the share of the real Nv. `sdt analyze` and `sdt drift` correct it: after each analysis the scale factor of the drift pattern in its own load case is set to the minimum with the real Nv over the V/W ETABS computed, and the model is analysed again. The factor follows the period, so it is worked out again at each stiffness level and when the model is restored, and goes back to 1 when the minimum no longer governs. The report names each case raised and its factor. A pattern still under the minimum (a model analysed outside `sdt`) fails, with the V/W it should have.
 
-**The service level stiffness** is asked with the wind limit: the factor on the strength level, 1.4 by ACI 6.6.3.2.2. Give another value when your office uses one; it is capped at the gross stiffness, and the report names it as yours. At the service level a member that was modelled stiffer than the level keeps its own stiffness: a beam modelled at 0.5 Ig is not set to 0.49.
+**The service level stiffness** is asked with the wind limit: the factor on the strength level, 1.4 by NSCP 406.6.3.2.2 (ACI 6.6.3.2.2). Give another value when your office uses one; it is capped at the gross stiffness, and the report names it as yours. At the service level a member that was modelled stiffer than the level keeps its own stiffness: a beam modelled at 0.5 Ig is not set to 0.49.
 
 **Every story is listed.** Under the checks of each stiffness level the report has a table with one row per story, the top first: the largest seismic drift ratio of the combinations checked, ΔM = 0.7 R times it, the combination it comes from, and the same for wind as h/x. The checks above the table give only the worst story of each load case, and one very flexible level, such as a small deck at the top, would otherwise hide that the storeys below it are over the limit too.
 

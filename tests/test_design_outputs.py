@@ -331,7 +331,7 @@ def test_the_beam_report_has_a_deflection_table():
         "Defl_roof_mm": None, "Defl_roof_limit_mm": None, "Defl_long_mm": 10.16,
         "Defl_long_limit_mm": 20.83, "Defl_ratio": 0.488, "Deflection_Check": "PASS"})
     table = beam_calculations._beam_deflection_table(top)
-    assert table.title == "Deflection (ACI 24.2)"
+    assert table.title == "Deflection (NSCP 424.2; ACI 24.2)"
     live, roof, long_term = table.rows
     assert live[1:] == ["2.05", "27.78", "0.07"]
     assert roof[1] == "N/A - not a roof beam"
@@ -446,7 +446,7 @@ def test_the_column_summary_groups_the_failing_columns_by_check():
     })
     text = cw.column_summary(report, "sdt columns", check_top_level=False).text()
     assert "Columns designed  3" in text and "Failing           2" in text
-    assert "Column shear: C1" in text and "Slenderness (ACI 6.2.6): C2" in text
+    assert "Column shear: C1" in text and "Slenderness (NSCP 406.2.6; ACI 6.2.6): C2" in text
     assert "Slender columns   2" in text
     assert "not checked at the topmost level" in text
 

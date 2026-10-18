@@ -193,7 +193,7 @@ def _column_calc_member(rows: pd.DataFrame) -> MemberReport:
             ["Tie legs along X edge", number(first.get("Transverse_Legs_X"), 0)],
             ["Tie legs along Y edge", number(first.get("Transverse_Legs_Y"), 0)]])
         + [
-            ["Governing ACI 18.7.5 expression", first.get("Confinement_Criteria_Governing")],
+            ["Governing NSCP 418.7.5 (ACI 18.7.5) expression", first.get("Confinement_Criteria_Governing")],
             ["High axial load or high concrete strength rule", first.get("High_Axial_or_High_fc_Check")],
         ]
         + confinement
@@ -283,11 +283,11 @@ def _column_slenderness_table(rows: pd.DataFrame) -> ReportTable | None:
         else "PASS - not slender")
     beta = _numbers_of(rows, "Slender_beta_dns")
     return ReportTable(
-        "Slenderness (ACI 6.2.5, 6.6.4.5)",
+        "Slenderness (NSCP 406.2.5, 406.6.4.5; ACI 6.2.5, 6.6.4.5)",
         ["Axis", Tex("$l_u$ (mm)"), Tex("$k$"), Tex("$k l_u/r$"), "Limit", "Slender",
          Tex("$C_m$"), Tex("$P_c$ (kN)"), Tex(r"$\delta_{ns}$")],
         body, "lrrrrlrrr",
-        "Sway (P-Delta) effects are in the forces of the ETABS P-delta analysis (ACI 6.7). "
+        "Sway (P-Delta) effects are in the forces of the ETABS P-delta analysis (NSCP 406.7; ACI 6.7). "
         "Member (P-delta) effects are added here by moment magnification: Mu2 and Mu3 in the "
         "table above are the magnified design moments. Limit = 34 + 12 M1/M2, at most 40; "
         "k from the alignment chart of a braced column, at most 1.0; (EI)eff = 0.4 Ec Ig / "
@@ -398,7 +398,7 @@ def build_column_calc_report(report: pd.DataFrame, filepath: str, information: l
         raise ValueError("COLUMN DESIGN contains no designed columns to report.")
     try:
         return build_calc_report(
-            "Concrete Column Design Calculations (ACI 318M-14)",
+            "Concrete Column Design Calculations (NSCP 2015, ACI 318M-14)",
             list(information) + [("Columns reported", len(members))],
             ["Mark", "Column", "Story", "Size (mm)", "Bars", "Flexure D/C", "Shear D/C",
              "Status"],
@@ -416,7 +416,7 @@ def export_column_pdf(report: pd.DataFrame, path: str, is_smrf: bool, dmain: flo
                       dties: float, cover: float) -> str | None:
     """The column calculation report (PDF); None when LaTeX fails."""
     information = [
-        ("Design code", "ACI 318M-14"),
+        ("Design code", "NSCP 2015 chapter 4 (ACI 318M-14)"),
         ("Seismic design (SMRF)", "Yes" if is_smrf else "No"),
         ("Vertical bar diameter (mm)", number(dmain, 0)),
         ("Tie bar diameter (mm)", number(dties, 0)),
@@ -424,8 +424,8 @@ def export_column_pdf(report: pd.DataFrame, path: str, is_smrf: bool, dmain: flo
         ("Values shown", "Governing load combination at each end of each column"),
         ("Flexure and axial", "ACI design surface (phi Pn, phi Mnx, phi Mny), capacity along "
                               "the demand's moment direction at phi Pn = Pu"),
-        ("Second-order effects", "Sway: ETABS P-delta analysis (ACI 6.7). Member: moment "
-                                 "magnification (ACI 6.6.4.5)"
+        ("Second-order effects", "Sway: ETABS P-delta analysis (NSCP 406.7; ACI 6.7). Member: moment "
+                                 "magnification (NSCP 406.6.4.5; ACI 6.6.4.5)"
          if "Slenderness_Check" in report.columns else "Not included: the forces must hold them"),
     ]
     return build_column_calc_report(report, path, information, {

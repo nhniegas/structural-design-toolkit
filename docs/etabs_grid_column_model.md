@@ -43,7 +43,7 @@ sdt grids
 3. Choose whether to add a footing level (see below); if so, type the embedment depth (mm) and the name of the ground level (`GF` by default). Both are remembered.
 4. Choose the model: the one open in ETABS, or a new blank model. For the open model, choose whether the changes go **into this model** or **into a copy**: the copy is saved where you choose (`<name> - REV.EDB` is offered) with the model's saved setup inputs, and the model it came from is left as it is on disk. ETABS has the copy open afterwards.
 5. A dialog lists what will change. Choose **Apply these changes** or **Cancel**.
-6. The closing summary, shown in a window and printed in the terminal, lists what was done. The full list of changes is saved beside the model as `<name> - plan changes.txt`.
+6. The closing summary, shown in a window and printed in the terminal, lists what was done. The full list of changes is saved in the model's folder as `Summaries/<name> - plan changes.txt`.
 
 Closing any dialog cancels the run without changing the model.
 

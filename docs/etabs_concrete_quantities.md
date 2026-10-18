@@ -20,7 +20,7 @@ sdt quantities
 | Slab on grade | Its thickness in mm (100 is offered), or 0 to leave it out |
 | Foundation | Yes or no. Asked only when a plan of the foundation model of this model was saved with `sdt foundation` |
 
-The report is printed and saved beside the model as `<model> - Concrete Quantities.txt` and `.xlsx`, and a window shows the summary.
+The report is printed and saved in the model's folder as `Summaries/<model> - Concrete Quantities.txt` and `Results/<model> - Concrete Quantities.xlsx` (see [Output folders](output_folders.md)), and a window shows the summary.
 
 ## What is measured
 

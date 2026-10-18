@@ -26,7 +26,7 @@ ETABS has no NSCP seismic code, so the model uses the UBC 97 auto-seismic patter
 
 `sdt check` reads the UBC 97 inputs and holds them to the NSCP tables. It checks every pattern, including Ca, Cv, the period or coefficient typed in by hand. With results, it recomputes the NSCP base shear coefficient from the period and weight ETABS used, so an edited static pattern is checked too.
 
-Every limit and table value comes from `design/criteria/code_config.py`: `NSCP` for chapter 2, and `CODE` (ACI 318M-14 = NSCP chapter 4) for the member limits. To change a value, change it there.
+Every limit and table value comes from `design/criteria/code_config.py`: `NSCP` for chapter 2, and `CODE` (NSCP chapter 4 = ACI 318M-14) for the member limits. To change a value, change it there.
 
 **Drift.** NSCP 208.6.4.1 computes drift with the 203.3 combinations, so the check reads the story drifts of the `DRIFT` and `WDRIFT` combinations that `sdt setup` creates. For each drift case it reports the worst combination:
 
@@ -59,7 +59,7 @@ Every story is included, those below the ground level too. A model set up before
 | | Drift ΔM = 0.7 R ΔS at most 0.025 h (T < 0.7 s) or 0.020 h, from the drift patterns and the spectrum drift cases (names ending in D) | 208.6.4.2, 208.6.5.1 |
 | Wind | Story range; speed, exposure, Kzt, G and Kd for you to confirm | 207 |
 | Combinations | Strength combinations exist (a model whose combinations are not named `ULS` gets a warning, not a failure: the design commands ask which ones to design for, see [existing models](existing_models.md)); every combination refers to existing cases; seismic strength combinations carry Ev = 0.5 Ca I D on the dead load, (1.2 + Ev) D and (0.9 − Ev) D | 203.3.1, 208.6.1 |
-| Analysis | Beams with the full torsional stiffness (J modifier near 1), which attract large compatibility torsion (ACI 22.7.3.2); Linear static cases on preset P-Delta; the P-delta method | 208.6.3 |
+| Analysis | Beams with the full torsional stiffness (J modifier near 1), which attract large compatibility torsion (NSCP 422.7.3.2; ACI 22.7.3.2); Linear static cases on preset P-Delta; the P-delta method | 208.6.3 |
 | | Mass source without double self weight | 208.6.1 |
 | | Effective cracked-section I, the member modifier times the section modifier as ETABS applies them, of 0.35 (beams) and 0.70 (columns). A modifier assigned to both the members and the sections is applied twice: 0.12 / 0.49 | 208.6.2, 406.6.3.1.1 |
 | | Mass and weight modifiers equal to 1 (any other value reduces W) | 208.6.1 |
