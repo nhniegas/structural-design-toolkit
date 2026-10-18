@@ -231,7 +231,8 @@ def test_circular_columns_are_named_by_diameter():
 def test_extra_patterns_are_added_once_and_soil_is_not_standard():
     settings = ms.merge_settings({"extra_dead": ["elevator dead", "SIDL"], "extra_live": ["Stage"]})
     patterns = {name: kind for name, kind, _ in ms.load_patterns(settings)}
-    assert patterns["ELEVATOR DEAD"] == "Super Dead" and patterns["STAGE"] == "Live"
+    # names keep their case (v0.7.0), so a model's own "Dead" is the same pattern
+    assert patterns["elevator dead"] == "Super Dead" and patterns["Stage"] == "Live"
     assert "SOIL" not in patterns
     assert len(patterns) == len(ms.STANDARD_PATTERNS) + 2
 
@@ -583,3 +584,49 @@ def test_inputs_saved_with_r_only_keep_their_r():
 
     merged = setup.merge_settings({"seismic": {"r_factor": 6.5}})
     assert merged["seismic"]["system"] == "D2" and setup.system_of(merged).r == 6.5
+
+
+class _Patterns:
+    """The LoadPatterns of a fake model: name -> (ETABS type, self weight)."""
+
+    def __init__(self, patterns):
+        self.patterns = patterns
+
+    def GetNameList(self, *_):
+        return 0, list(self.patterns)
+
+    def GetLoadType(self, name):
+        return self.patterns[name][0], 0
+
+    def GetSelfWTMultiplier(self, name):
+        return self.patterns[name][1], 0
+
+
+def test_the_models_own_patterns_get_a_role(monkeypatch):
+    """v0.7.0: setup on a model with its own patterns puts them in the combinations and mass."""
+    from types import SimpleNamespace
+
+    from utilities import _gui_helpers
+
+    model = SimpleNamespace(LoadPatterns=_Patterns({
+        "Dead": (1, 1.0), "SDL": (2, 0.0), "Live": (3, 0.0), "EQX": (5, 0.0),
+        "SELFWEIGHT": (1, 1.0), "WX": (6, 0.0)}))
+    settings = ms.merge_settings(None)
+    found = ms.own_patterns(model, settings)
+    assert [name for name, _, _ in found] == ["Dead", "SDL", "Live", "EQX"]
+    offered = ms.role_defaults(found, settings)
+    assert ms.PATTERN_ROLES[offered["Dead"]] == "extra_dead"
+    assert ms.PATTERN_ROLES[offered["Live"]] == "extra_live"
+    assert ms.PATTERN_ROLES[offered["EQX"]] == "left_out"
+    monkeypatch.setattr(_gui_helpers, "choose_for_each",
+                        lambda title, prompt, labels, choices, defaults: defaults)
+    settings, notes = ms.map_own_patterns(model, settings, "Model Setup")
+    patterns = {name: kind for name, kind, _ in ms.load_patterns(settings)}
+    assert patterns["Dead"] == "Super Dead" and patterns["SDL"] == "Super Dead"
+    assert patterns["Live"] == "Live" and "EQX" not in patterns
+    assert settings["left_out"] == ["EQX"]
+    assert ("Dead", 1.0) in ms.mass_source_loads(settings)
+    assert any("Dead had a self weight multiplier of 1" in n for n in notes)
+    # the strength combinations carry the model's own dead and live patterns
+    combo = {c.name: c for c in ms.combinations(settings)}["ULS 101 1.2 DL + 1.6 LL + 0.5 Lr"]
+    assert dict(combo.cases)["Dead"] == 1.2 and dict(combo.cases)["Live"] == 1.6

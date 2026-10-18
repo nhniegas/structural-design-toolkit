@@ -64,6 +64,8 @@ Notes on the section ranges:
 - Each section is made once per concrete strength listed in "Concrete of the sections", so a long list multiplies the number of sections.
 - Slabs and walls each have their own concrete ("Concrete of the slabs", "Concrete of the walls"), the first frame section concrete by default. Both are always defined as materials, even when they are not in the Materials list.
 
+**A model with load patterns of its own.** When setup runs on an open model, the patterns that are not the setup's own (`Dead`, `SDL`, `Live`, `EQX`, ...) are listed in one dialog, each with a list to say what it is: super dead, live (not reducible), live (reducible), roof live, or left out. Each starts at the role its ETABS type suggests, or the one chosen the last time; seismic and wind patterns start at "left out", since setup defines its own. The patterns given a role go into the strength, service, drift and deflection combinations, the seismic mass and the P-delta load, as the setup's own patterns of that role do. A pattern given a role that had a self weight multiplier (a `Dead` pattern with 1.0) gets 0, since `SELFWEIGHT` carries the self weight and it would otherwise count twice; the closing summary says so. Before v0.7.0 these patterns were left out of every combination and of the mass.
+
 ### 4. Wait for the closing message
 
 A loading window shows the progress. A blank model takes about one to two minutes. The closing summary, shown in a window and printed in the terminal, lists how many of each item were defined, the Ca, Cv and Ev used, the response spectrum scale factor, where the model was saved, and anything that failed.
@@ -109,7 +111,7 @@ Anything with the same name as a definition the setup makes is overwritten. Ever
 | Slabs | `S_<thickness>_<concrete>`, for example `S_150_C04`, of the type chosen (Membrane by default). Stiffness modifiers 1.0 |
 | One-way slabs | Only for membrane slabs, when chosen: `S_<thickness>_<concrete>_1W`, for example `S_150_C04_1W`, the same slab with one-way load distribution. The two-way slab is always made too |
 | Walls | `SW_<thickness>_<concrete>_<rebar>`, thin shell, the name `sdt grids` gives its walls. Stiffness modifiers 1.0 |
-| Load patterns | The office standard set, plus extra super dead, live and reducible live patterns you type. Each gets its linear static load case. Only `SELFWEIGHT` carries self weight |
+| Load patterns | The office standard set, plus extra super dead, live and reducible live patterns you type, and the model's own patterns with the role you gave them. Each gets its linear static load case. Only `SELFWEIGHT` carries self weight |
 | Seismic patterns | `EQXPE`, `EQXNE`, `EQXSD`, `EQYPE`, `EQYNE`, `EQYSD` as UBC 97, program-calculated period |
 | Wind patterns | `WX`, `WY` as ASCE 7-10 on the diaphragms |
 | Response spectrum | Function `RSUBC97`, 5 % damping |

@@ -53,7 +53,7 @@ Closing any dialog cancels the run without changing the model.
 |---|---|
 | Seismic and wind patterns | Their bottom and top story follow the stories (bottom = the ground level). "Per Code" seismic patterns become "User Defined" with the same Ca and Cv, because ETABS resets their source distance when that table is written |
 | Stories | Names and heights from the plan titles. On a model with members, the base elevation and every story height are updated in place and ETABS moves the levels above with their members; stories can only be added or removed while the model has no members |
-| Grid lines | General grid lines in the first grid system. The drawing replaces them on every run |
+| Grid lines | General grid lines in the first grid system. The drawing replaces them on every run; the lines of the model's other grid systems (a rotated wing, an offset grid) are kept (since v0.7.0; before, they were rewritten into the first system) |
 | Column sections | `CR_<width>X<depth>_<concrete>_<rebar>` or `C_<diameter>_...`, created if missing, with the same rebar data as the model setup (no stiffness modifiers) |
 | Columns | From the level below up to the story of the plan. Depth is along the ETABS local 2 axis; the rotation is kept between 0 and 90 degrees |
 | Wall sections | `SW_<thickness>_<concrete>_<rebar>`, thin shell, created if missing |
@@ -89,7 +89,7 @@ Check the list in the confirmation dialog before applying, particularly for a la
 
 ## Limitations
 
-- Stories are not changed once the model has members. If the drawing's stories differ, the run reports it and leaves them.
+- Stories are not added or removed once the model has members. When the drawing names its stories differently from the model (`2F` against `L2`), they are paired before anything is changed: in order when they are as many, otherwise each with the model story within 300 mm of its level. The pairing is shown in the confirmation (`2F = L2, ...`), and the drawing's columns and walls take the model's story names, so the columns of the model are matched as usual. When a story of the drawing finds no pair, the run stops with both lists of stories and their levels, and nothing is changed. Before v0.7.0 a difference in name removed every column of the model.
 - Beams are not created or reconnected. After a column is removed or replaced, reconnect the beams by hand.
 - Loads and assignments on a wall that is removed and drawn again are lost.
 - Only straight walls and rectangular or circular columns are read. Other outlines are skipped and listed as warnings in the report file.

@@ -139,6 +139,8 @@ DEFAULT_SETTINGS = {
     "extra_dead": [],
     "extra_live": [],
     "extra_reducible_live": [],
+    "extra_roof_live": [],
+    "left_out": [],           # the model's own patterns left out of the combinations and mass
     # Seismic mass: every dead pattern at 1.0, plus these fractions of live load.
     "mass": {"include_reducible_live": False},
 }
@@ -257,13 +259,93 @@ def load_patterns(settings: dict) -> list[tuple[str, str, float]]:
     patterns = list(STANDARD_PATTERNS)
     taken = {name for name, _, _ in patterns}
     for key, kind in (("extra_dead", "Super Dead"), ("extra_live", "Live"),
-                      ("extra_reducible_live", "Reducible Live")):
+                      ("extra_reducible_live", "Reducible Live"),
+                      ("extra_roof_live", "Roof Live")):
         for name in settings.get(key, []):
-            name = str(name).strip().upper()
-            if name and name not in taken:
+            name = str(name).strip()
+            if name and name.upper() not in {t.upper() for t in taken}:
                 patterns.append((name, kind, 0.0))
                 taken.add(name)
     return patterns
+
+
+# What each of the model's own load patterns is, for sdt setup (the settings key of each)
+PATTERN_ROLES = {
+    "Super dead (in DL)": "extra_dead",
+    "Live, not reducible (in LL)": "extra_live",
+    "Live, reducible (in LL)": "extra_reducible_live",
+    "Roof live (in Lr)": "extra_roof_live",
+    "Leave it out (not in the combinations or the mass)": "left_out",
+}
+# the role offered first, by the pattern's ETABS type (eLoadPatternType)
+_ROLE_OF_TYPE = {1: "extra_dead", 2: "extra_dead", 3: "extra_live", 4: "extra_reducible_live",
+                 11: "extra_roof_live"}
+
+
+def own_patterns(model, settings: dict) -> list[tuple[str, int, float]]:
+    """The model's load patterns that are not the setup's own: (name, ETABS type,
+    self weight multiplier)."""
+    ours = {name.upper() for name, _, _ in STANDARD_PATTERNS}
+    out = []
+    for name in as_list(model.LoadPatterns.GetNameList(0, [])[1]):
+        name = str(name)
+        if name.upper() in ours:
+            continue
+        kind = int(model.LoadPatterns.GetLoadType(name)[0])
+        weight = float(model.LoadPatterns.GetSelfWTMultiplier(name)[0])
+        out.append((name, kind, weight))
+    return out
+
+
+def role_defaults(found: list[tuple[str, int, float]], settings: dict) -> dict[str, str]:
+    """The role offered for each pattern: the one chosen before, else by its type.
+    Seismic, wind and other patterns are left out: setup makes its own."""
+    label_of = {key: label for label, key in PATTERN_ROLES.items()}
+    out = {}
+    for name, kind, _ in found:
+        before = next((key for key in PATTERN_ROLES.values()
+                       if name.upper() in {str(n).upper() for n in settings.get(key, [])}), None)
+        out[name] = label_of[before or _ROLE_OF_TYPE.get(kind, "left_out")]
+    return out
+
+
+def apply_roles(settings: dict, found: list[tuple[str, int, float]],
+                chosen: dict[str, str]) -> list[str]:
+    """Put each pattern in the list of its role. Returns the notes for the summary
+    (a second self weight set to zero)."""
+    names = {name.upper() for name, _, _ in found}
+    for key in PATTERN_ROLES.values():
+        settings[key] = [n for n in settings.get(key, []) if str(n).upper() not in names]
+    notes = []
+    for name, _, weight in found:
+        key = PATTERN_ROLES[chosen[name]]
+        settings[key].append(name)
+        if weight and key != "left_out":
+            notes.append(f"{name} had a self weight multiplier of {weight:g}: set to 0, since "
+                         "SELFWEIGHT carries the self weight (it would be counted twice)")
+        elif weight:
+            notes.append(f"{name} keeps its self weight multiplier of {weight:g} but is left "
+                         "out of the combinations and the mass")
+    return notes
+
+
+def map_own_patterns(model, settings: dict, title: str) -> tuple[dict, list[str]] | None:
+    """Ask what each of the model's own load patterns is, so the combinations, the
+    mass and the P-delta load include them. None when cancelled."""
+    from utilities._gui_helpers import choose_for_each
+
+    found = own_patterns(model, settings)
+    if not found:
+        return settings, []
+    chosen = choose_for_each(
+        title, "This model has load patterns of its own. Say what each one is, so the "
+        "combinations, the seismic mass and the P-delta load include it. Seismic and wind "
+        "patterns are best left out: setup defines its own (EQX..., EQY..., WX, WY).",
+        [name for name, _, _ in found], list(PATTERN_ROLES), role_defaults(found, settings))
+    if chosen is None:
+        return None
+    notes = apply_roles(settings, found, chosen)
+    return settings, notes
 
 
 def mass_source_loads(settings: dict) -> list[tuple[str, float]]:
@@ -398,6 +480,7 @@ class SetupLog:
     def __init__(self):
         self.counts: dict[str, int] = {}
         self.problems: list[str] = []
+        self.notes: list[str] = []
 
     def done(self, what: str, count: int = 1) -> None:
         self.counts[what] = self.counts.get(what, 0) + count
@@ -1470,6 +1553,12 @@ def run_model_setup() -> str | None:
         settings = ask_settings(merge_settings(load_settings(defaults_path())))
     if settings is None:
         return None
+    notes: list[str] = []
+    if not new_model:
+        mapped = map_own_patterns(model, settings, title)
+        if mapped is None:
+            return None
+        settings, notes = mapped
 
     with LoadingWindow("Defining the model parameters...") as window:
         if new_model:
@@ -1481,6 +1570,7 @@ def run_model_setup() -> str | None:
             show_warning(f"ETABS could not save the model:\n{path}", title=title)
             return None
         log = apply_model_setup(model, settings, progress=window.update)
+        log.notes += notes
         if new_model:
             remove_blank_model_defaults(model)
             # A new model holds nothing else yet, so reloading it from text is safe.
@@ -1507,8 +1597,14 @@ def setup_summary(log: SetupLog, settings: dict, path: str, new_model: bool = Fa
                                         f"Ev {values['ev']:.3f} D")
     summary.add("Spectrum scale factor", f"{values['scale']:.1f} (g I / R; sdt analyze scales it "
                                          "to the static base shear)")
+    own = [f"{label.split(' (')[0].lower()}: {', '.join(settings[key])}"
+           for label, key in PATTERN_ROLES.items() if settings.get(key)]
+    if own:
+        summary.add("Patterns of the model", "; ".join(own))
     for problem in log.problems:
         summary.fail(problem)
+    for note in log.notes:
+        summary.note(note)
     summary.file("Model", path)
     summary.file("Setup inputs", settings_path(path))
     return summary

@@ -35,7 +35,7 @@ import math
 import os
 import re
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 if __package__ in (None, ""):
     # Run as a script: make the project folder (two levels up) importable.
@@ -111,6 +111,8 @@ class Building:
     walls: list[PlanWall] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     base_elevation: float = 0.0  # mm; negative with a footing level
+    # (drawing story, model story) when the drawing's names were paired with the model's
+    story_pairs: list[tuple[str, str]] = field(default_factory=list)
 
 
 def add_footing_level(building: Building, depth: float, ground: str = "GF") -> Building:
@@ -574,6 +576,47 @@ def read_model(model) -> tuple[list[ExistingColumn], list[GridLine], list[tuple[
     return columns, grids, [(str(n), float(h)) for n, h in zip(names, heights)]
 
 
+STORY_MATCH = 300.0  # mm: stories of the drawing and the model this close in level pair up
+
+
+def levels(base: float, stories: list[tuple[str, float]]) -> list[tuple[str, float]]:
+    """(name, elevation of the story's top) from the base and the story heights."""
+    out, top = [], base
+    for name, height in stories:
+        top += height
+        out.append((name, top))
+    return out
+
+
+def pair_stories(drawing: list[tuple[str, float]], model: list[tuple[str, float]]
+                 ) -> list[tuple[str, str]] | None:
+    """Pair the stories of the drawing with those of the model, both as (name,
+    top elevation), lowest first: in order when they are as many, else each with
+    the model story within ``STORY_MATCH`` of its level. None when a story of the
+    drawing finds no pair."""
+    if len(drawing) == len(model):
+        return [(d, m) for (d, _), (m, _) in zip(drawing, model)]
+    out, used = [], set()
+    for name, level in drawing:
+        near = [(abs(level - z), m) for m, z in model if m not in used]
+        best = min(near, default=None)
+        if best is None or best[0] > STORY_MATCH:
+            return None
+        used.add(best[1])
+        out.append((name, best[1]))
+    return out
+
+
+def rename_stories(building: Building, pairs: list[tuple[str, str]]) -> Building:
+    """The drawing with its stories named as the model names them."""
+    to = dict(pairs)
+    building.stories = [(to.get(n, n), h) for n, h in building.stories]
+    building.columns = [replace(c, story=to.get(c.story, c.story)) for c in building.columns]
+    building.walls = [replace(w, story=to.get(w.story, w.story)) for w in building.walls]
+    building.story_pairs = [(d, m) for d, m in pairs if d != m]
+    return building
+
+
 def update_story_heights(model, building: Building, current: list[tuple[str, float]],
                          log) -> bool:
     """Set the base elevation and the story heights of a model that has members.
@@ -637,15 +680,17 @@ def apply_to_model(
         top_of = dict(zip((str(n) for n in as_list(levels[1])), as_list(levels[2])))
         height_of = dict(zip((str(n) for n in as_list(levels[1])), as_list(levels[3])))
 
-        # ---- grids: the drawing replaces the grid lines of the first grid system ----
+        # ---- grids: the drawing replaces the grid lines of the first grid system;
+        # the lines of the other systems (rotated wings, offset grids) are kept ----
         say("Grid lines")
         systems = _table(model, "Grid Definitions - General")
         system = str(systems[0]["Name"]) if systems else "G1"
         rows = [{"Name": system, "LineType": "General (Cartesian)", "ID": g.label,
                  "X1": g.x1, "Y1": g.y1, "X2": g.x2, "Y2": g.y2, "BubbleLoc": "Start",
                  "Visible": "Yes"} for g in building.grids]
-        if rows and ms._edit_table(model, "Grid Definitions - Grid Lines", rows, log,
-                                   replace_all=True):
+        # the rows of the first system are replaced (they share its name); the
+        # rows of the other systems are kept as they are
+        if rows and ms._edit_table(model, "Grid Definitions - Grid Lines", rows, log):
             log.done("grid lines", len(rows))
 
         # ---- materials and the sections the columns need ----
@@ -861,10 +906,32 @@ def build_grid_column_model(
         if progress is not None:
             progress("Reading the columns, walls and grids of the model")
         try:
-            existing, old_grids, _ = read_model(model)
+            existing, old_grids, model_stories = read_model(model)
             old_walls = read_model_walls(model)
+            drawn = [n for n, _ in building.stories]
+            differ = (existing or old_walls) and drawn != [n for n, _ in model_stories]
+            if differ:
+                got = model.Story.GetStories()
+                model_base = float(as_list(got[2])[0]) if as_list(got[2]) else 0.0
         finally:
             model.SetPresentUnits(units)
+        if differ:
+            # The model has members on its own stories: pair the drawing's stories
+            # with them, so no column is removed for a name alone.
+            pairs = pair_stories(levels(building.base_elevation, building.stories),
+                                 levels(model_base, model_stories))
+            if pairs is None:
+                raise RuntimeError(
+                    "The stories of the drawing cannot be paired with those of the model, "
+                    "which already has members: they differ in number and in level (more "
+                    f"than {STORY_MATCH:g} mm). Drawing: "
+                    + ", ".join(f"{n} at {z:g}" for n, z in levels(building.base_elevation,
+                                                                     building.stories))
+                    + ". Model: " + ", ".join(f"{n} at {z:g}" for n, z in
+                                               levels(model_base, model_stories))
+                    + " (mm). Name the stories of the drawing as the model does, or start "
+                      "from a new model.")
+            building = rename_stories(building, pairs)
     if progress is not None:
         progress("Working out what changed")
     changes = plan_changes(existing, old_grids, building, concrete_ksi, rebar_ksi)
@@ -995,8 +1062,11 @@ def run_grid_column_model() -> str | None:
                 return None
 
     def confirm(building, changes) -> bool:
+        paired = ("Stories of the drawing paired with the model's: " + ", ".join(
+            f"{d} = {m}" for d, m in building.story_pairs) + "\n" if building.story_pairs
+            else "")
         counts = (
-            f"Stories: {', '.join(n for n, _ in building.stories)}"
+            paired + f"Stories: {', '.join(n for n, _ in building.stories)}"
             + (f"  (base at {building.base_elevation:g} mm)" if building.base_elevation else "")
             + "\n"
             f"Grid lines: {len(building.grids)}   Columns drawn: {len(building.columns)}   "
