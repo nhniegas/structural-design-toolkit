@@ -277,6 +277,7 @@ def _column_shear_checks(
                 else _section_bending_angle(1.0, 0.0)
             )
             capacity_shear_kN = 0.0
+            probable_moments = [math.nan, math.nan]   # bottom (I) and top (J), kN-m
             if use_capacity:
                 probable_moments = []
                 for end in ("I", "J"):
@@ -381,6 +382,10 @@ def _column_shear_checks(
                         "Required_Transverse_Legs": required_legs,
                         "Shear_Spacing_Limit_mm": shear_spacing_limit,
                         "Clear_Height_mm": clear_length,
+                        # what Ve is made of: (Mpr bottom + Mpr top) / lu, each Mpr
+                        # already limited to what the beams can deliver
+                        "Mpr_Bottom_kNm": probable_moments[0],
+                        "Mpr_Top_kNm": probable_moments[1],
                         "_effective_depth_mm": effective_depth,
                         "_shear_concrete_N": shear_concrete,
                         "_vs_max_N": vs_max,

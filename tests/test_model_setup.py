@@ -610,7 +610,9 @@ def test_the_models_own_patterns_get_a_role(monkeypatch):
 
     model = SimpleNamespace(LoadPatterns=_Patterns({
         "Dead": (1, 1.0), "SDL": (2, 0.0), "Live": (3, 0.0), "EQX": (5, 0.0),
-        "SELFWEIGHT": (1, 1.0), "WX": (6, 0.0)}))
+        "SELFWEIGHT": (1, 1.0), "WX": (6, 0.0),
+        # made by ETABS itself: never listed
+        "WX(1/12)": (6, 0.0), "EQXSD(2/2)": (37, 0.0), "~LLRF": (8, 0.0)}))
     settings = ms.merge_settings(None)
     found = ms.own_patterns(model, settings)
     assert [name for name, _, _ in found] == ["Dead", "SDL", "Live", "EQX"]

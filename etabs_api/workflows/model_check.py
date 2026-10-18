@@ -139,9 +139,21 @@ def _num(value, default=math.nan) -> float:
 # =============================================================================
 SYSTEM_TABLE = "NSCP Table 208-11A"
 SMRF_SYSTEMS = ("C1", "D1")  # special moment frames, alone or in a dual system
+FRAME_ONLY = ("C", "F")      # the families of Table 208-11A with no walls
 
 
-def system_findings(r: float, key: str | None, zone4: bool
+def has_walls(d: ModelData) -> bool:
+    return not d.table("Wall Object Connectivity").empty
+
+
+def candidate_systems(r: float, walls: bool) -> list[SeismicSystem]:
+    """The systems of Table 208-11A with this R; without walls in the model, only
+    the frame systems (moment frames, cantilevered columns)."""
+    found = systems_with_r(r)
+    return found if walls else [s for s in found if s.key[0] in FRAME_ONLY]
+
+
+def system_findings(r: float, key: str | None, zone4: bool, walls: bool = True
                     ) -> tuple[list[SeismicSystem], list[Finding]]:
     """The system(s) an R of the seismic patterns can be, and what to say of them.
 
@@ -150,7 +162,7 @@ def system_findings(r: float, key: str | None, zone4: bool
     from sdt setup or chosen in sdt check) decides when there is one.
     """
     zone = "zone 4" if zone4 else "zone 2"
-    candidates = systems_with_r(r)
+    candidates = candidate_systems(r, walls)
     saved = seismic_system(key)
     if saved is not None:
         if abs(saved.r - r) > 1e-6:
@@ -159,6 +171,10 @@ def system_findings(r: float, key: str | None, zone4: bool
                 f"is {saved.label()}: set R = {saved.r:g} in the patterns, or choose the system "
                 "again (sdt setup)", SYSTEM_TABLE)]
         candidates = [saved]
+    if not candidates and systems_with_r(r):
+        return [], [Finding("Seismic", WARN, f"R = {r:g} is a system with walls ("
+                            + "; ".join(s.label() for s in systems_with_r(r))
+                            + "), but the model has no walls", SYSTEM_TABLE)]
     if not candidates:
         return [], [Finding("Seismic", WARN, f"R = {r:g} is not a concrete system of Table "
                             "208-11A (steel and masonry: 208-11B, 208-11C)", SYSTEM_TABLE)]
@@ -193,7 +209,7 @@ def pattern_r_values(d: ModelData) -> list[float]:
 def ask_seismic_system(d: ModelData, title: str) -> str | None:
     """When the R of the patterns can be more than one system of Table 208-11A and
     none is saved, ask which; the answer is saved with the model. None otherwise."""
-    candidates = [s for r in pattern_r_values(d) for s in systems_with_r(r)]
+    candidates = [s for r in pattern_r_values(d) for s in candidate_systems(r, has_walls(d))]
     if len(candidates) < 2:
         return None
     from etabs_api.workflows import model_inputs as mi
@@ -666,7 +682,7 @@ def check_seismic(d: ModelData, settings: dict | None = None) -> list[Finding]:
                            "NSCP Table 208-1"))
         factors = {_num(x["R"]) for _, x in strength.iterrows()}
         for value in sorted(factors):
-            found, findings = system_findings(value, d.system, zone4)
+            found, findings = system_findings(value, d.system, zone4, has_walls(d))
             out += findings
             systems += found
         cts = {round(_num(x["Ct"]), 4) for _, x in strength.iterrows() if "Ct" in x}
@@ -1312,6 +1328,7 @@ TABLES = (
     "Load Case Definitions - Linear Static", "Load Case Definitions - Summary",
     "Load Combination Definitions", "P-Delta Option Definition", "Mass Source Definition",
     "Material Properties - Concrete Data", "Material Properties - Rebar Data",
+    "Wall Object Connectivity",
 )
 
 

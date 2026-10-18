@@ -48,3 +48,37 @@ def test_subfolder_is_made_for_writers_that_name_their_files(tmp_path):
     target = Path(of.subfolder(str(tmp_path), of.SCHEDULES))
     assert target == tmp_path / "Schedules" and target.is_dir()
 
+
+
+# --------------------------------------------------------------------------- #
+# A model is saved in its own units, not the working N-mm (v0.7.0)
+# --------------------------------------------------------------------------- #
+class _Units:
+    def __init__(self, units):
+        self.units, self.saved_in = units, []
+        self.File = self
+
+    def GetPresentUnits(self):
+        return self.units
+
+    def SetPresentUnits(self, units):
+        self.units = units
+        return 0
+
+    def Save(self, path=None):
+        self.saved_in.append((path, self.units))
+        return 0
+
+
+def test_a_model_is_saved_in_its_own_units():
+    from etabs_api.core import connection as c
+
+    model = _Units(6)                      # kN-m
+    c.use_working_units(model)
+    assert model.units == c.EXTRACTION_UNITS
+    c.save_model(model, "x.EDB")
+    c.save_model(model)
+    assert model.saved_in == [("x.EDB", 6), (None, 6)]
+    assert model.units == c.EXTRACTION_UNITS       # back to work in N-mm
+    c.restore_units()
+    assert model.units == 6

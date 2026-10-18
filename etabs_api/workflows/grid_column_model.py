@@ -42,6 +42,7 @@ if __package__ in (None, ""):
     sys.path.insert(
         0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from etabs_api.core.connection import save_model  # noqa: E402
 from etabs_api.workflows import model_setup as ms
 from etabs_api.core.helpers import as_list, return_code
 
@@ -950,7 +951,7 @@ def build_grid_column_model(
             inputs = ms.load_settings(ms.settings_path(source))
             if inputs is not None:
                 ms.save_settings(inputs, ms.settings_path(path))
-    if return_code(model.File.Save(path)) != 0:
+    if return_code(save_model(model, path)) != 0:
         raise RuntimeError(f"ETABS could not save the model: {path}")
     log = apply_to_model(model, building, changes, concrete_ksi, rebar_ksi, progress)
     if progress is not None:

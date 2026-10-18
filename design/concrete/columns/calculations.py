@@ -96,6 +96,8 @@ def _column_calc_member(rows: pd.DataFrame) -> MemberReport:
             worst_shear = max(utilization, worst_shear) if worst_shear == worst_shear else utilization
             shear_rows.append([
                 label, governing.get("Combo"), number(governing.get("Analysis_Vu_kN")),
+                number(governing.get("Mpr_Bottom_kNm")), number(governing.get("Mpr_Top_kNm")),
+                number(governing.get("Ve_Clear_Height_mm"), 0),
                 number(governing.get("Probable_Ve_kN")), number(governing.get("Design_Vu_kN")),
                 number(governing.get("Vc_kN")), number(governing.get("phi_Vn_kN")),
                 number(utilization), governing.get("Shear_Check"),
@@ -146,10 +148,13 @@ def _column_calc_member(rows: pd.DataFrame) -> MemberReport:
         ),
         ReportTable(
             "Column shear - governing combination at each end",
-            ["End", "Combination", Tex("$V_u$"), Tex("$V_e$"), Tex("Design $V_u$"),
+            ["End", "Combination", Tex("$V_u$"), Tex(r"$M_{pr,bot}$"), Tex(r"$M_{pr,top}$"),
+             Tex(r"$\ell_u$"), Tex("$V_e$"), Tex("Design $V_u$"),
              Tex("$V_c$"), Tex(r"$\phi V_n$"), Tex(r"$V_u/\phi V_n$"), "Check"],
-            shear_rows, "l" + combo + "rrrrrrl",
-            "Forces in kN. Ve is the shear from the probable moment strengths at the column ends.",
+            shear_rows, "l" + combo + "rrrrrrrrrl",
+            "Forces in kN, moments in kN-m, lu in mm. Ve = (Mpr,bot + Mpr,top) / lu (NSCP "
+            "418.7.6.1.1; ACI 18.7.6.1.1): the probable moment strengths at the column ends, each "
+            "at most what the beams framing in can deliver, over the clear height.",
         ),
         ReportTable(
             "Strong column - weak beam",

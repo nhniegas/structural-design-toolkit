@@ -164,6 +164,9 @@ def _build_consolidated_column_report(
                 f"SHEAR - {end}",
                 [
                     f"Analysis_Vu_kN_{end}",
+                    f"Mpr_Bottom_kNm_{end}",
+                    f"Mpr_Top_kNm_{end}",
+                    f"Ve_Clear_Height_mm_{end}",
                     f"Probable_Ve_kN_{end}",
                     f"Design_Vu_kN_{end}",
                     f"Vc_kN_{end}",
@@ -242,8 +245,13 @@ def _build_consolidated_column_report(
             _neglected=shear_checks["Concrete_Shear_Strength_Neglected"].eq(True),
             _passes=shear_checks["Shear_Check"].eq("PASS"),
         )
-        reduced = table.groupby(["_member", "_combo", "_end"], dropna=False).agg(
+        # the Mpr and lu reported are those of the direction with the largest Ve
+        table = table.sort_values("Capacity_Based_Ve_kN", ascending=False, kind="stable")
+        reduced = table.groupby(["_member", "_combo", "_end"], dropna=False, sort=True).agg(
             Analysis_Shear_kN=("Analysis_Shear_kN", "max"),
+            Mpr_Bottom_kNm=("Mpr_Bottom_kNm", "first"),
+            Mpr_Top_kNm=("Mpr_Top_kNm", "first"),
+            Ve_Clear_Height_mm=("Clear_Height_mm", "first"),
             Capacity_Based_Ve_kN=("Capacity_Based_Ve_kN", "max"),
             Design_Shear_kN=("Design_Shear_kN", "max"),
             Vc_kN=("Vc_kN", "min"),
@@ -408,6 +416,9 @@ def _build_consolidated_column_report(
                 if shear_rows is None:
                     for prefix in (
                         "Analysis_Vu_kN",
+                        "Mpr_Bottom_kNm",
+                        "Mpr_Top_kNm",
+                        "Ve_Clear_Height_mm",
                         "Probable_Ve_kN",
                         "Design_Vu_kN",
                         "Vc_kN",
@@ -419,6 +430,11 @@ def _build_consolidated_column_report(
                         report_row[f"{prefix}_{end}"] = "N/A"
                 else:
                     report_row[f"Analysis_Vu_kN_{end}"] = shear_rows["Analysis_Shear_kN"]
+                    for key in ("Mpr_Bottom_kNm", "Mpr_Top_kNm", "Ve_Clear_Height_mm"):
+                        value = shear_rows.get(key)
+                        report_row[f"{key}_{end}"] = (
+                            value if value is not None and value == value
+                            else "N/A - Ve not used")
                     report_row[f"Probable_Ve_kN_{end}"] = (
                         shear_rows.get("note") or shear_rows["Capacity_Based_Ve_kN"])
                     report_row[f"Design_Vu_kN_{end}"] = shear_rows["Design_Shear_kN"]
@@ -569,6 +585,9 @@ def _expand_column_report_hierarchy(
         "SLENDERNESS": list(SLENDERNESS_REPORT_FIELDS),
         "COLUMN SHEAR": [
             "Analysis_Vu_kN",
+            "Mpr_Bottom_kNm",
+            "Mpr_Top_kNm",
+            "Ve_Clear_Height_mm",
             "Probable_Ve_kN",
             "Design_Vu_kN",
             "Vc_kN",
@@ -802,6 +821,9 @@ COLUMN_REPORT_LABELS = {
     "Slender_base": "Base of the column (ψ at the support)",
     "Slenderness_Check": "Slenderness Check",
     "Analysis_Vu_kN": "Analysis Vᵤ (kN)",
+    "Mpr_Bottom_kNm": "Mpr at the Bottom (kN-m)",
+    "Mpr_Top_kNm": "Mpr at the Top (kN-m)",
+    "Ve_Clear_Height_mm": "Clear Height lᵤ for Vₑ (mm)",
     "Probable_Ve_kN": "Probable Vₑ (kN)",
     "Design_Vu_kN": "Design Vᵤ (kN)",
     "Vc_kN": "V꜀ (kN)",

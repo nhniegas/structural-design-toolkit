@@ -91,7 +91,9 @@ def test_typed_near_source_factors_are_used_instead_of_the_distance():
 
 def test_an_r_of_more_than_one_system_asks_for_the_system():
     # 5.5 is C2 (IMRF, NP), E2 (NP) and G1 (shear wall-frame interaction, to 50 m)
-    findings = by_ref(mc.check_seismic(model([seismic_row("EQX", R=5.5)])), "Table 208-11A")
+    walls = {"Wall Object Connectivity": pd.DataFrame([{"UniqueName": "W1"}])}
+    findings = by_ref(mc.check_seismic(model([seismic_row("EQX", R=5.5)], **walls)),
+                      "Table 208-11A")
     assert findings[0].status == mc.WARN and "C2" in findings[0].text and "G1" in findings[0].text
 
 
@@ -99,6 +101,9 @@ def test_intermediate_frame_not_permitted_in_zone_4():
     data = model([seismic_row("EQX", R=5.5)])
     data.system = "C2"
     assert by_ref(mc.check_seismic(data), "Table 208-11A")[0].status == mc.FAIL
+    # with no walls and no system named, R 5.5 can only be the IMRF: it fails as well
+    assert by_ref(mc.check_seismic(model([seismic_row("EQX", R=5.5)])),
+                  "Table 208-11A")[0].status == mc.FAIL
 
 
 def test_dual_system_with_ordinary_walls_not_permitted_in_zone_4():
@@ -408,3 +413,15 @@ def test_the_4d_rule_is_on_the_clear_span_as_the_beam_design_measures_it():
     # a connectivity table with no length, or no beams: nothing to measure
     assert mc.clear_spans(beams.drop(columns="Length"), columns, sections) == {}
     assert mc.clear_spans(beams.iloc[0:0], columns, sections) == {}
+
+
+def test_a_model_without_walls_can_only_be_a_frame_system():
+    # R 8.5 is C1 (moment frame) or D1 (dual, special walls): no walls leaves C1
+    found = by_ref(mc.check_seismic(model([seismic_row("EQX", R=8.5)])), "Table 208-11A")
+    assert found[0].status == mc.OK and "C1" in found[0].text
+    walls = model([seismic_row("EQX", R=8.5)],
+                  **{"Wall Object Connectivity": pd.DataFrame([{"UniqueName": "W1"}])})
+    assert by_ref(mc.check_seismic(walls), "Table 208-11A")[0].status == mc.WARN
+    # an R of walls only, on a model with none
+    alone = by_ref(mc.check_seismic(model([seismic_row("EQX", R=5.0)])), "Table 208-11A")
+    assert alone[0].status == mc.WARN and "has no walls" in alone[0].text

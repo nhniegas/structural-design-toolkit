@@ -34,6 +34,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from design.criteria.code_config import NSCP  # noqa: E402
+from etabs_api.core.connection import save_model  # noqa: E402
 from etabs_api.core.helpers import as_list, return_code  # noqa: E402
 
 G = NSCP.seismic.gravity  # mm/s2
@@ -503,7 +504,7 @@ def reopen_model(connector) -> bool:
         return False
     from etabs_api.core.connection import use_working_units
 
-    opened = (return_code(model.File.Save(path)) == 0
+    opened = (return_code(save_model(model, path)) == 0
               and return_code(model.File.OpenFile(path)) == 0)
     use_working_units(model)  # a file opens in its own units
     return opened
@@ -730,7 +731,7 @@ def run_model_analysis() -> AnalysisReport | None:
         path, counter = f"{stem} - ANALYSIS{extension}", 2
         while os.path.exists(path):
             path, counter = f"{stem} - ANALYSIS ({counter}){extension}", counter + 1
-        model.File.Save(path)
+        save_model(model, path)
 
     from etabs_api.workflows import model_inputs as mi
 
@@ -776,7 +777,7 @@ def run_model_analysis() -> AnalysisReport | None:
             "analysed. If ETABS closed, open the model again.", title=title)
         return None
     # Save() keeps the results; Save(path) drops them even for the same file
-    model.File.Save()
+    save_model(model)
     from utilities import terminal
 
     if terminal.drawn():

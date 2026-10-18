@@ -52,6 +52,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from utilities.output_folders import SCHEDULES, beside, output_path, subfolder  # noqa: E402
+from etabs_api.core.connection import save_model  # noqa: E402
 from etabs_api.workflows.sections import (  # noqa: E402
     Limits,
     Section,
@@ -1026,7 +1027,7 @@ class Workbench:
                 if section.area > old.area:
                     grown.add(name)
                 self.log(f"  {name}: {was} -> {section.name}  ({reason})")
-        self.model.File.Save()
+        save_model(self.model)
         return changes
 
 
@@ -1798,7 +1799,7 @@ def run_design_cli() -> dict | None:
     # the working copy: the original model is not changed
     stem = os.path.splitext(original)[0]
     working = f"{stem} - DESIGN.EDB"
-    model.File.Save(working)
+    save_model(model, working)
     log_path = beside(original, " - DESIGN log.txt")
     with open(log_path, "w", encoding="utf-8") as handle:
         handle.write(f"Design loop of {original}\nWorking copy: {working}\n"
@@ -1832,7 +1833,7 @@ def run_design_cli() -> dict | None:
                   f"{joint_min_side(settings):g} (20 beam bar diameters, NSCP 418.8.2.3; ACI 18.8.2.3)")
         summary = run_design_loop(bench)
         window.update("Saving the final results, calculations and schedules")
-        model.File.Save()  # the working copy; Save(path) would drop the analysis results
+        save_model(model)  # the working copy; Save(path) would drop the analysis results
         save_final_design(bench, summary, working, folder)
         summary["drift"] = final_drift_check(bench, drift_options, folder,
                                              os.path.splitext(os.path.basename(working))[0])

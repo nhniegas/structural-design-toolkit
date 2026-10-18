@@ -39,6 +39,7 @@ if __package__ in (None, ""):
 
 from design.criteria.code_config import (
     CODE, CONCRETE_SYSTEMS, DEFAULT_SYSTEM, NSCP, seismic_system, systems_with_r)
+from etabs_api.core.connection import save_model  # noqa: E402
 from etabs_api.core.helpers import as_list, return_code
 from etabs_api.workflows.load_combinations import DRIFT_SPECTRUM_CASES as lc_drift_cases
 from etabs_api.workflows.load_combinations import Combination, build_combinations
@@ -282,6 +283,12 @@ _ROLE_OF_TYPE = {1: "extra_dead", 2: "extra_dead", 3: "extra_live", 4: "extra_re
                  11: "extra_roof_live"}
 
 
+def etabs_generated(name: str) -> bool:
+    """A pattern ETABS makes by itself: the parts of a wind or seismic pattern
+    (``WX(3/12)``, ``EQXSD(1/2)``) and the hidden ones (``~LLRF``, ``~RSAXECC``)."""
+    return name.startswith("~") or re.fullmatch(r".+\(\d+/\d+\)", name) is not None
+
+
 def own_patterns(model, settings: dict) -> list[tuple[str, int, float]]:
     """The model's load patterns that are not the setup's own: (name, ETABS type,
     self weight multiplier)."""
@@ -289,7 +296,7 @@ def own_patterns(model, settings: dict) -> list[tuple[str, int, float]]:
     out = []
     for name in as_list(model.LoadPatterns.GetNameList(0, [])[1]):
         name = str(name)
-        if name.upper() in ours:
+        if name.upper() in ours or etabs_generated(name):
             continue
         kind = int(model.LoadPatterns.GetLoadType(name)[0])
         weight = float(model.LoadPatterns.GetSelfWTMultiplier(name)[0])
@@ -863,7 +870,7 @@ def save_and_reopen(model, path: str, log: SetupLog) -> bool:
     first save after the edit still works, and opening that file clears
     what ETABS kept.
     """
-    if not log.check(model.File.Save(path), f"saving the model: {path}"):
+    if not log.check(save_model(model, path), f"saving the model: {path}"):
         return False
     opened = log.check(model.File.OpenFile(path), "opening the saved model again")
     from etabs_api.core.connection import use_working_units
@@ -993,7 +1000,7 @@ def make_seismic_per_code(model, path: str, settings: dict, log: SetupLog) -> bo
         log.problems.append(f"per-code seismic skipped: the model has {frames} frames and a "
                             "reload from text would rename them (Ca and Cv stay user defined)")
         return False
-    if not log.check(model.File.Save(path), "saving before the per-code seismic step"):
+    if not log.check(save_model(model, path), "saving before the per-code seismic step"):
         return False
     text_path = os.path.splitext(path)[0] + ".$et"
     try:
@@ -1012,7 +1019,7 @@ def make_seismic_per_code(model, path: str, settings: dict, log: SetupLog) -> bo
         from etabs_api.core.connection import use_working_units
 
         opened = log.check(model.File.OpenFile(edited), "opening the edited model text file")
-        done = (opened and log.check(model.File.Save(path), "saving the per-code model")
+        done = (opened and log.check(save_model(model, path), "saving the per-code model")
                 and log.check(model.File.OpenFile(path), "opening the saved per-code model"))
         use_working_units(model)  # a file opens in its own units
         return done
@@ -1284,7 +1291,7 @@ def setup_model(
             path, counter = f"{stem} - SETUP{extension}", 2
             while os.path.exists(path):
                 path, counter = f"{stem} - SETUP ({counter}){extension}", counter + 1
-    if return_code(model.File.Save(path)) != 0:
+    if return_code(save_model(model, path)) != 0:
         raise RuntimeError(f"ETABS could not save the model: {path}")
     log = apply_model_setup(model, settings)
     if new_model:
@@ -1566,7 +1573,7 @@ def run_model_setup() -> str | None:
             # does not replace the model that is open in ETABS.
             model.InitializeNewModel(UNITS_N_MM)
             model.File.NewBlank()
-        if return_code(model.File.Save(path)) != 0:
+        if return_code(save_model(model, path)) != 0:
             show_warning(f"ETABS could not save the model:\n{path}", title=title)
             return None
         log = apply_model_setup(model, settings, progress=window.update)

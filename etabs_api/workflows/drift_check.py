@@ -36,6 +36,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from design.criteria.code_config import NSCP  # noqa: E402
+from etabs_api.core.connection import save_model  # noqa: E402
 from etabs_api.core.helpers import as_list, return_code  # noqa: E402
 from etabs_api.workflows import model_check as mc  # noqa: E402
 
@@ -628,7 +629,7 @@ def run_drift(connector, reference: str = CORNERS,
             raise_drift_cases_to_minimum(connector, run)   # the factor of the restored periods
             report.restored = True
         else:
-            model.File.Save()
+            save_model(model)
     return report
 
 

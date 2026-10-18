@@ -36,6 +36,7 @@ if __package__ in (None, ""):
     sys.path.insert(
         0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from etabs_api.core.connection import save_model  # noqa: E402
 from etabs_api.core.helpers import as_list, return_code  # noqa: E402
 
 MAX_BEND_DEGREES = 45.0  # a line continues through a joint up to this bend
@@ -544,13 +545,13 @@ def auto_tag_frames(prefixes: dict[str, str] | None = None,
 
     new_path = model_path if in_place else tagged_model_path(model_path)
     with LoadingWindow("Tagging beams and columns...") as window:
-        if return_code(model.File.Save(new_path)) != 0:
+        if return_code(save_model(model, new_path)) != 0:
             show_warning(f"ETABS could not save the model:\n{new_path}", title="Auto Tagging")
             return None
         if model.GetModelIsLocked():
             model.SetModelIsLocked(False)  # names cannot change in a locked model
         failed = apply_frame_tags(connector, tags, progress=window.update)
-        model.File.Save(new_path)
+        save_model(model, new_path)
         connector.refresh_view()
 
     from utilities.run_summary import RunSummary, listed
