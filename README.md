@@ -89,7 +89,7 @@ LaTeX is not part of the download. The PDF calculation reports need it; without 
 winget install MiKTeX.MiKTeX
 ```
 
-Then open a new terminal. On the first report MiKTeX asks to install the packages it lacks: allow it.
+Then open a new terminal and run `sdt doctor`. It lists the LaTeX packages the reports use and offers to install those MiKTeX lacks, so no report stops to ask for one.
 
 From a terminal the program takes the same commands as below, for example `sdt.exe beams`.
 
@@ -162,7 +162,7 @@ sdt quantities  # concrete volume by story, floor area and the concrete ratio in
 sdt composite   # rectangular filled composite column, AISC DG6 (no ETABS)
 sdt steel       # wide-flange steel member, AISC 360-22 (no ETABS)
 sdt wind        # MWFRS wind pressures, ASCE 7 directional procedure (no ETABS)
-sdt doctor      # check that this machine can run the toolkit: ETABS, dialogs, LaTeX
+sdt doctor      # check that this machine can run the toolkit: ETABS, dialogs, LaTeX and its packages
 sdt             # the menu of commands (also what the packaged sdt.exe opens with)
 sdt --help      # list the commands
 sdt --version   # the version

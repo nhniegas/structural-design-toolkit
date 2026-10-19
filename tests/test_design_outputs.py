@@ -122,6 +122,96 @@ def test_beam_workbook_drops_the_unused_etabs_fields_and_states_its_blanks(tmp_p
 
 
 # --------------------------------------------------------------------------
+# THE MEMBERS THAT FAIL ARE MARKED IN THE WORKBOOKS
+# --------------------------------------------------------------------------
+def _fill(cell) -> str:
+    return str(cell.fill.fgColor.rgb)[-6:] if cell.fill.fill_type == "solid" else ""
+
+
+def test_beam_workbook_marks_the_rows_the_name_and_the_results_of_a_failing_beam(tmp_path):
+    from openpyxl import load_workbook
+
+    from utilities import _xlsx_values as xv
+
+    results = pd.DataFrame({
+        "Story": ["2F"] * 4, "UniqueName": ["2GX-1", "2GX-1", "2GX-2", "2GX-2"],
+        "Face": ["TOP", "BOTTOM"] * 2, "Mu_left": [100.0, 50.0, 90.0, 40.0],
+        "Deflection_Check": ["PASS", "PASS", "FAIL", "FAIL"],
+        "Design_Status": ["OK", "OK", "FAILED: DEFLECTION (ACI 24.2.2)", "OK"],
+    })
+    path = beam_results.write_beam_results_xlsx(results, str(tmp_path / "beams.xlsx"))
+    sheet = load_workbook(path).active
+    headers = [cell.value for cell in sheet[1]]
+    name, moment = headers.index("UniqueName"), headers.index("Mᵤ, left")
+    status = [i for i, cell in enumerate(sheet[4]) if str(cell.value).startswith("FAILED")][0]
+    for row in (4, 5):                               # both rows of the beam that fails
+        assert _fill(sheet[row][moment]) == xv.FAIL_ROW_FILL
+        assert _fill(sheet[row][name]) == xv.FAIL_CELL_FILL
+        assert sheet[row][name].font.bold
+        assert str(sheet[row][name].font.color.rgb)[-6:] == xv.FAIL_FONT
+    assert _fill(sheet[4][status]) == xv.FAIL_CELL_FILL and sheet[4][status].font.bold
+    assert _fill(sheet[5][status]) == xv.FAIL_ROW_FILL          # "OK" on the bottom row
+    for row in (2, 3):                               # the beam that passes is not marked
+        assert all(_fill(cell) not in (xv.FAIL_ROW_FILL, xv.FAIL_CELL_FILL)
+                   for cell in sheet[row])
+        assert not sheet[row][name].font.bold
+
+
+def test_column_workbook_marks_every_row_of_a_failing_column(tmp_path):
+    from openpyxl import load_workbook
+
+    from utilities import _xlsx_values as xv
+
+    report, groups = _column_report()
+    other = report.copy()
+    other["UniqueName"] = "2-C2"
+    other.loc[other.index[0], "Flexure_Check"] = "FAIL"
+    both = pd.concat([report, other], ignore_index=True)
+    path = col_report.write_column_results_xlsx(both, groups, str(tmp_path / "columns.xlsx"))
+    sheet = load_workbook(path).active
+    headers = [cell.value for cell in sheet[3]]
+    name = headers.index("Unique Name")
+    rows: dict = {}
+    for r in range(4, sheet.max_row + 1):
+        rows.setdefault(sheet.cell(row=r, column=name + 1).value, []).append(r)
+    assert len(rows) == 2
+    for label, numbers in rows.items():
+        failing = label == "2-C2"
+        for r in numbers:
+            fills = {_fill(cell) for cell in sheet[r]}
+            assert (xv.FAIL_ROW_FILL in fills) == failing
+            assert (_fill(sheet[r][name]) == xv.FAIL_CELL_FILL) == failing
+    marked = [cell.value for r in rows["2-C2"] for cell in sheet[r]
+              if _fill(cell) == xv.FAIL_CELL_FILL and cell.value != "2-C2"]
+    assert marked and all(str(value).upper().startswith(xv.FAILING) for value in marked)
+
+
+def test_deflection_workbook_marks_the_beam_that_fails(tmp_path):
+    from openpyxl import load_workbook
+
+    from design.concrete import workflow
+    from utilities import _xlsx_values as xv
+
+    table = pd.DataFrame({"Story": ["2F", "2F"], "UniqueName": ["2B-1", "2B-2"],
+                          "Deflection check": ["PASS", "FAIL: above the target ratio 0.9"]})
+    sheet = load_workbook(workflow.write_deflection_xlsx(table, str(tmp_path / "d.xlsx"))).active
+    assert [_fill(cell) for cell in sheet[2]] == ["", "", ""]
+    assert [_fill(cell) for cell in sheet[3]] == [xv.FAIL_ROW_FILL, xv.FAIL_CELL_FILL,
+                                                  xv.FAIL_CELL_FILL]
+
+
+def test_a_failing_result_is_told_from_the_rest():
+    from utilities._xlsx_values import is_failure
+
+    for text in ("FAIL", "FAILED: SHEAR STRENGTH", "fail: above the target ratio 0.9", "ERROR",
+                 "BLOCKED at joint 12", " NOT OK"):
+        assert is_failure(text)
+    for value in ("PASS", "OK", "N/A - not a roof beam", "Not checked - topmost level", 1.2,
+                  None):
+        assert not is_failure(value)
+
+
+# --------------------------------------------------------------------------
 # LEVELS WHERE THE CAPACITY-DESIGN CHECKS MAY BE LEFT OUT
 # --------------------------------------------------------------------------
 def _joint_rows() -> pd.DataFrame:

@@ -108,8 +108,10 @@ def test_the_preamble_has_the_header_the_footer_and_a_fallback_for_each_package(
                      r"\definecolor{sdtamber}{HTML}{FFAA2C}", r"Page \sdtpages"):
         assert expected in text
     # a missing package gives a plainer report, never a failed one
-    for package in ("tgheros", "sansmath", "colortbl", "lastpage", "fancyhdr"):
+    for package in ("tgheros", "sansmath", "colortbl", "fancyhdr"):
         assert rf"\IfFileExists{{{package}.sty}}" in text
+    # "Page x of y" is written with no package: lastpage is not asked for
+    assert "lastpage.sty" not in text and r"\newlabel{sdtlastpage}" in text
     assert style.INK == "1C1E24" and style.AMBER == "FFAA2C"       # those of the icon
 
 

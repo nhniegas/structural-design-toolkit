@@ -1,9 +1,11 @@
 """``sdt doctor``: check that this machine can run the toolkit.
 
-It changes nothing. It reports, one line per check, what the commands need:
-ETABS and its API, the dialogs, the loading window, LaTeX for the PDF
-reports, and where the toolkit keeps its files. Run it first on a new
-machine, and when a command does not start.
+It reports, one line per check, what the commands need: ETABS and its API,
+the dialogs, the loading window, LaTeX for the PDF reports and its packages,
+and where the toolkit keeps its files. It changes nothing in a model. The one
+thing it can install, when you agree, is the LaTeX packages the reports use
+that MiKTeX lacks. Run it first on a new machine, and when a command does not
+start.
 """
 
 from __future__ import annotations
@@ -157,6 +159,52 @@ def check_latex() -> Check:
         "calculation reports are not. " + INSTALL_HINT)
 
 
+LATEX_PACKAGES = "LaTeX packages"
+
+
+def check_latex_packages() -> Check | None:
+    """The LaTeX packages of the reports. None when there is no LaTeX to ask."""
+    from utilities.latex_help import REPORT_PACKAGES, is_miktex, latex_path, missing_packages
+
+    if latex_path() is None:
+        return None
+    missing = missing_packages()
+    if missing is None:
+        return WARN, LATEX_PACKAGES, "could not be listed (kpsewhich was not found)"
+    if not missing:
+        return OK, LATEX_PACKAGES, (
+            f"all {len(set(REPORT_PACKAGES.values()))} packages of the reports are installed")
+    how = ("sdt doctor can install them" if is_miktex() else
+           "install them with: tlmgr install " + " ".join(missing))
+    return WARN, LATEX_PACKAGES, f"missing: {', '.join(missing)}. {how}"
+
+
+def offer_latex_packages(check: Check) -> Check:
+    """Ask to install the missing MiKTeX packages, install them, and check again."""
+    from utilities import latex_help
+    from utilities._gui_helpers import select_option
+
+    missing = latex_help.missing_packages()
+    if not missing or not latex_help.is_miktex():
+        return check
+    yes = "Yes - install them now"
+    choice = select_option(
+        "sdt doctor", "The PDF reports use LaTeX packages that MiKTeX lacks on this machine: "
+        + ", ".join(missing) + ". Install them now? It needs the internet and takes about a "
+        "minute. Without them MiKTeX asks for each one when a report is written.",
+        [yes, "No - leave them"])
+    if choice != yes:
+        return check
+    print(f"Installing the LaTeX packages: {', '.join(missing)} ...", flush=True)
+    failed = latex_help.install_packages(missing)
+    after = check_latex_packages() or check
+    if failed and after[0] != OK:
+        return WARN, LATEX_PACKAGES, (
+            f"could not be installed: {', '.join(failed)}. Check the internet connection, "
+            "or install them in the MiKTeX Console (Packages)")
+    return after
+
+
 def check_3d_kernel() -> Check:
     """Whether build123d, which makes the solids of ``sdt 3d``, can be loaded."""
     try:
@@ -193,6 +241,9 @@ def run_doctor(version: str = "") -> list[Check]:
     if api[0] == OK:
         checks.append(check_running_etabs())
     checks.append(check_latex())
+    packages = check_latex_packages()
+    if packages is not None:
+        checks.append(offer_latex_packages(packages) if packages[0] == WARN else packages)
     checks.append(check_3d_kernel())
     checks.append(check_design_processes())
     failed = sum(1 for status, _, _ in checks if status == FAIL)

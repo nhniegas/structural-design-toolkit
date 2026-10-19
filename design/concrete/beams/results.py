@@ -194,6 +194,10 @@ def write_beam_results_xlsx(results: pd.DataFrame, path: str) -> str:
                     cell.fill = grey
                 if row == first + 1:
                     cell.border = Border(bottom=thin)
+    if "UniqueName" in internal:
+        from utilities._xlsx_values import mark_failures
+
+        mark_failures(sheet, 2, internal.index("UniqueName") + 1)
     sheet.freeze_panes = "C2"
     book.save(path)
     return path
