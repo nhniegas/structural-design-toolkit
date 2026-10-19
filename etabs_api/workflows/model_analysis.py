@@ -122,8 +122,9 @@ class AnalysisReport:
         if ax is not None:
             if ax.applied:
                 worst = max(ax.ax.items(), key=lambda item: item[1])
-                lines.append(f"Ax (NSCP 208.5.1.4): applied after {ax.rounds} analysis round(s); "
-                             f"largest {worst[1]:.2f} at {worst[0][0]} {worst[0][1]}. The added "
+                lines.append(f"Ax (NSCP 208.5.1.4): applied once, from the static cases with 5 % "
+                             f"eccentricity; largest {worst[1]:.2f} at {worst[0][0]} "
+                             f"{worst[0][1]}. The added "
                              f"torsion is in the patterns {', '.join(ax.patterns)}; the spectrum "
                              f"eccentricity is {ax.spectrum_eccentricity:.3f}.")
                 lines += [f"  {story} {direction}: Ax {value:.2f}"
@@ -712,7 +713,7 @@ def analyze_model(connector, zone_factor: float | None = None, ct: float | None 
             report.rho_combinations = rho_combinations(
                 connector.sap_model, {d: r.rho for d, r in report.rho.items()} | {
                     d: 1.0 for d in ("X", "Y") if d not in report.rho})
-            if report.rho_combinations:
+            if not connector.sap_model.GetModelIsLocked():
                 # editing the combinations unlocks the model and clears its results
                 say("Running the analysis again with rho in the combinations")
                 run()

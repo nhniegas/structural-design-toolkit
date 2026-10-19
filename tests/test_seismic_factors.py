@@ -47,11 +47,6 @@ def test_added_torque_is_ax_minus_one_times_the_accidental_with_the_sign():
     assert sf.added_torques(ax, accidental, "X", -1.0) == {"RF": pytest.approx(-50.0)}
 
 
-def test_ax_settles():
-    assert sf.settled({("RF", "X"): 1.40}, {("RF", "X"): 1.43})
-    assert not sf.settled({("RF", "X"): 1.40}, {("RF", "X"): 1.50})
-
-
 # --------------------------------------------------------------------------
 # RHO
 # --------------------------------------------------------------------------

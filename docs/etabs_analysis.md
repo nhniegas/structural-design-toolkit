@@ -30,7 +30,8 @@ The report is printed in the terminal and the model is saved. A separate window 
    - ETABS has no per-level eccentricity for UBC 97 patterns. So the part added, (Ax − 1) times the level's accidental torque, is a load pattern of its own beside each static pattern (`AX EQXPE` and so on). It is a moment on a joint of the level's rigid diaphragm.
    - The accidental torque of a level is half the difference of the story torques of the + and − eccentricity patterns. It is added in every combination that has its pattern, so the directional, strength, service and Em combinations all carry it.
    - The spectrum cases take 5 % times the largest Ax as their eccentricity.
-   - The model is analysed again and Ax is read from the displacements of the pattern with its added torsion (`AXCHK EQXPE` combinations). This repeats until no Ax moves more than 0.05, at most three rounds. The amplified torsion raises the ratio again, so Ax can climb each round. If it has not settled after three rounds, the report says so and the last round's values are applied; a level at 3.00 is at the cap of the equation.
+   - Ax is read once, from the static cases with their 5 % eccentricity, and applied; the model is then analysed once more so its results include the added torsion. It is not read again after the torsion is added: the added torsion would raise the ratio again, and Ax would climb with each round.
+   - The `AX` patterns are load cases of their own. Running `sdt analyze` again reads the same Ax from the plain patterns, and replaces the torsion loads rather than adding to them.
    - The drift patterns are not amplified.
 4. The spectrum scaling of step 2, to 90 % or 100 % (NSCP 208.5.3.5.4). The drift cases always go to 100 % of the drift patterns.
 5. **The redundancy factor ρ** (NSCP 208.6.1, Eq. 208-20): ρ = 2 − 6.1 / (rmax √AB).

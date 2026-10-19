@@ -9,8 +9,9 @@
   pattern (``AX EQXPE`` ...), a moment on the level's rigid diaphragm, in every
   combination with its pattern. The accidental torque of a level is half the
   difference of the story torques of the + and - eccentricity patterns. Ax is
-  read again from the displacements with the added torque until it settles. The
-  spectrum cases take 5 % times the largest Ax as their eccentricity.
+  read once, from the static cases with their 5 % eccentricity, and not again
+  after the torsion is added. The spectrum cases take 5 % times the largest Ax as
+  their eccentricity.
 * **rho** (NSCP 208.6.1, Eq. 208-20): rho = 2 - 6.1 / (rmax sqrt(AB)), AB the
   ground floor area in m2, rmax the largest element-story shear ratio at or below
   two-thirds of the height. The story shear is what the story's columns and walls
@@ -41,8 +42,6 @@ from dataclasses import dataclass, field
 
 AX_MAX = 3.0
 AX_TORSION_LIMIT = 1.2
-AX_SETTLED = 0.05            # rounds stop when no Ax moves more than this
-AX_ROUNDS = 3
 AX_PREFIX = "AX "            # the added torsion pattern of EQXPE is "AX EQXPE"
 ECCENTRICITY = 0.05
 SHARED_COLUMN = 0.70         # a column with frame bays on both sides
@@ -99,11 +98,6 @@ def added_torques(ax: dict[tuple[str, str], float], accidental: dict[str, float]
     return {story: (ax.get((story, direction), 1.0) - 1.0) * sign * torque
             for story, torque in accidental.items()
             if ax.get((story, direction), 1.0) > 1.0 + 1e-9}
-
-
-def settled(old: dict, new: dict) -> bool:
-    keys = set(old) | set(new)
-    return all(abs(old.get(k, 1.0) - new.get(k, 1.0)) <= AX_SETTLED for k in keys)
 
 
 # =============================================================================
@@ -304,12 +298,9 @@ def diaphragm_joints(model) -> dict[str, str]:
 @dataclass
 class AxResult:
     ax: dict[tuple[str, str], float] = field(default_factory=dict)
-    rounds: int = 0
     patterns: list[str] = field(default_factory=list)
     spectrum_eccentricity: float | None = None
     notes: list[str] = field(default_factory=list)
-    settled: bool = False
-    change: float = 0.0
 
     @property
     def applied(self) -> bool:
@@ -333,9 +324,11 @@ def _add_to_combinations(model, pattern: str, added: str) -> int:
 
 
 def apply_ax(connector, run, progress=None) -> AxResult:
-    """Amplify the accidental torsion of each level by its Ax (see the module), and
-    analyse again until Ax settles (at most AX_ROUNDS). ``run`` runs the analysis;
-    the model is analysed when this is called."""
+    """Amplify the accidental torsion of each level by its Ax (see the module), read
+    once from the static seismic cases with their 5 % eccentricity, then analyse
+    again. ``run`` runs the analysis; the model is analysed when this is called.
+    The Ax patterns are separate load cases, so a model analysed again gets the same
+    Ax, and their loads are replaced, not added."""
     from etabs_api.workflows import model_setup as ms
     from etabs_api.workflows.model_analysis import spectrum_cases
 
@@ -362,51 +355,29 @@ def apply_ax(connector, run, progress=None) -> AxResult:
         joints = diaphragm_joints(model)
         accidental = {p: accidental_torques(story_torques(connector, [p, m]), order, p, m)
                       for p, m, _ in pairs}
-        checks = {}
-        for round_number in range(1, AX_ROUNDS + 1):
-            say(f"Ax round {round_number}: amplifying the accidental torsion")
-            if model.GetModelIsLocked():
-                model.SetModelIsLocked(False)
-            for plus, minus, direction in pairs:
-                for pattern, sign in ((plus, 1.0), (minus, -1.0)):
-                    added = AX_PREFIX + pattern
-                    if added not in _names(model.LoadPatterns):
-                        model.LoadPatterns.Add(added, 8, 0.0, True)   # eLoadPatternType Other
-                        _add_to_combinations(model, pattern, added)
-                        out.patterns.append(added)
-                    torques = added_torques(ax, accidental[plus], direction, sign)
-                    for story in order:
-                        joint = joints.get(story)
-                        if joint is None:
-                            continue
-                        model.PointObj.SetLoadForce(
-                            joint, added, [0.0, 0.0, 0.0, 0.0, 0.0, torques.get(story, 0.0)],
-                            True, "Global", 0)
-                    check = f"AXCHK {pattern}"
-                    if check not in _names(model.RespCombo):
-                        model.RespCombo.Add(check, 0)
-                        model.RespCombo.SetCaseList(check, 0, pattern, 1.0)
-                        model.RespCombo.SetCaseList(check, 0, added, 1.0)
-                    checks[pattern] = check
-            largest = max(ax.values())
-            out.spectrum_eccentricity = ECCENTRICITY * largest
-            for case in spectrum_cases(connector):
-                model.LoadCases.ResponseSpectrum.SetEccentricity(case, out.spectrum_eccentricity)
-            run()
-            out.rounds = round_number
-            again = level_ax(displacement_rows(connector, combos=list(checks.values())))
-            if settled(ax, again):
-                ax = again
-                out.settled = True
-                break
-            out.change = max(abs(again.get(k, 1.0) - ax.get(k, 1.0)) for k in set(ax) | set(again))
-            ax = again
-        out.ax = dict(ax)
-        if not out.settled:
-            out.notes.append(f"Ax had not settled after {AX_ROUNDS} rounds (the last change "
-                             f"{out.change:.2f}): the amplified torsion raises the drift ratio "
-                             "again; the values of the last round are applied. A level at 3.00 "
-                             "is at the cap of Eq. 208-7.")
+        say("Ax: amplifying the accidental torsion")
+        if model.GetModelIsLocked():
+            model.SetModelIsLocked(False)
+        for plus, minus, direction in pairs:
+            for pattern, sign in ((plus, 1.0), (minus, -1.0)):
+                added = AX_PREFIX + pattern
+                if added not in _names(model.LoadPatterns):
+                    model.LoadPatterns.Add(added, 8, 0.0, True)   # eLoadPatternType Other
+                    out.patterns.append(added)
+                _add_to_combinations(model, pattern, added)
+                torques = added_torques(ax, accidental[plus], direction, sign)
+                for story in order:
+                    joint = joints.get(story)
+                    if joint is None:
+                        continue
+                    model.PointObj.SetLoadForce(
+                        joint, added, [0.0, 0.0, 0.0, 0.0, 0.0, torques.get(story, 0.0)],
+                        True, "Global", 0)
+        out.spectrum_eccentricity = ECCENTRICITY * max(ax.values())
+        for case in spectrum_cases(connector):
+            model.LoadCases.ResponseSpectrum.SetEccentricity(case, out.spectrum_eccentricity)
+        say("Ax: running the analysis with the amplified torsion")
+        run()
         missing = [s for s in order if s not in joints]
         if missing:
             out.notes.append("Ax: no rigid diaphragm joint at " + ", ".join(missing)
@@ -576,9 +547,10 @@ def rho_combinations(model, rho: dict[str, float], log=None) -> int:
             items = list(zip((int(k) for k in as_list(got[1])), (str(c) for c in
                                                                   as_list(got[2])),
                              (float(f) for f in as_list(got[3]))))
-            if rhoed in combos:
-                model.RespCombo.Delete(rhoed)
-            model.RespCombo.Add(rhoed, 0)
+            if rhoed not in combos:
+                model.RespCombo.Add(rhoed, 0)
+            # an existing one is updated in place: deleting it would also take it out
+            # of the combinations that use it
             for kind, case, factor in items:
                 model.RespCombo.SetCaseList(rhoed, kind, case,
                                             factor * rho[case_direction(case)])
