@@ -1142,9 +1142,12 @@ def column_summary(report: pd.DataFrame, command: str, model_path: str | None = 
             "slender, moments magnified|FAIL", regex=True), "UniqueName"].astype(str).nunique()
         summary.add("Slender columns", f"{slender} (member effects, NSCP 406.6.4.5; ACI 6.6.4.5; sway effects "
                                        "from the ETABS P-delta analysis)")
-    if not check_top_level:
+    if check_top_level is False:
         summary.note("BCC, joint shear and Ve were not checked at the topmost level "
                      "(your choice).")
+    elif check_top_level is not True:
+        summary.note("BCC and joint shear were not checked at the topmost level (your "
+                     "choice); Ve was.")
     if not check_foundation_level:
         summary.note("BCC, joint shear and the probable-moment shear Ve were not checked at "
                      "the foundation level (your choice): those columns use the analysis shear.")
