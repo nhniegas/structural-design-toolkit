@@ -347,3 +347,25 @@ def test_frame_forces_come_as_numbers_in_the_layout_of_the_tables(monkeypatch):
 def test_the_tables_are_read_when_etabs_gives_no_numbers(monkeypatch):
     monkeypatch.setattr(af, "_read", _connectivity)
     assert af.frame_force_arrays(_ResultsConnector(fail=True), ["DEAD"], {}) is None
+
+
+def test_a_model_with_no_releases_has_none():
+    from etabs_api.workflows import analysis_forces as af
+
+    class Tables:
+        def SetLoadCasesSelectedForDisplay(self, cases):
+            return 0
+
+        def SetLoadCombinationsSelectedForDisplay(self, combos):
+            return 0
+
+    class Model:
+        DatabaseTables = Tables()
+
+    class Connector:
+        sap_model = Model()
+
+        def _read_database_table(self, name):
+            raise RuntimeError("return code 1")      # ETABS has no table then
+
+    assert af.frame_releases(Connector()) == {}

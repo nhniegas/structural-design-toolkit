@@ -239,9 +239,13 @@ class ETABSDataExporter:
         frame_section_properties_rectangular = self.etabs.get_data(
             "Frame Section Property Definitions - Concrete Rectangular"
         )
-        frame_section_properties_circular = self.etabs.get_data(
-            "Frame Section Property Definitions - Concrete Circle"
-        )
+        try:
+            frame_section_properties_circular = self.etabs.get_data(
+                "Frame Section Property Definitions - Concrete Circle"
+            )
+        except RuntimeError:   # a model with no circular section has no such table
+            frame_section_properties_circular = pd.DataFrame(
+                columns=["Name", "Material", "t3", "DesignType"])
         concrete_beam_reinforcing = self.etabs.get_data(
             "Frame Section Property Definitions - Concrete Beam Reinforcing"
         )

@@ -36,7 +36,7 @@ The report is printed in the terminal and the model is saved. A separate window 
 4. The spectrum scaling of step 2, to 90 % or 100 % (NSCP 208.5.3.5.4). The drift cases always go to 100 % of the drift patterns.
 5. **The redundancy factor ρ** (NSCP 208.6.1, Eq. 208-20): ρ = 2 − 6.1 / (rmax √AB).
    - **AB** is the plan area of the lowest floor above the seismic base, overhangs in (m²).
-   - **rmax** is the largest element-story shear ratio ri at or below two-thirds of the height, under EQXPE (X) and EQYPE (Y):
+   - **rmax** is the largest element-story shear ratio ri of the stories at or below two-thirds of the height (those that start below it, so a one-story building counts its story), under EQXPE (X) and EQYPE (Y):
      - for a moment frame, the shears along the direction of two adjacent columns joined by a beam, over the story shear, taking 70 % for a column with frame bays on both sides;
      - for a wall (a labelled pier running in that direction), its shear times 3 / lw (lw in m), over the story shear.
    - **The story shear** is the sum of the shears the story's columns and walls carry in that direction, or ETABS's story force when that is larger. Where walls carry the shear back (a podium or a backstay below grade), the story force ETABS gives is a small net value, and every column would look like the whole story.
