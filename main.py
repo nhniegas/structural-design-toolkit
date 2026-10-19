@@ -7,15 +7,21 @@ the same commands.
     sdt setup       define materials, frame sections, load patterns, the UBC 97
                     response spectrum, load cases, mass source, P-delta and
                     load combinations       (etabs_api/workflows/model_setup.py)
-    sdt grids       build or update the stories, grids, columns and walls from
-                    a DXF of framing plans  (etabs_api/workflows/grid_column_model.py)
+    sdt model       build or update the stories, grids, columns and walls from
+                    a DXF of framing plans (etabs_api/workflows/grid_column_model.py),
+                    then frame the floors: girders, beams and slabs of least
+                    concrete with frame action, ranked and drawn, the one picked
+                    built with its loads (etabs_api/workflows/model_framing.py)
+    sdt grids       the old name of sdt model
     sdt tag         give every beam and column of the open model its unique
                     name, in a tagged copy  (etabs_api/workflows/frame_tagger.py)
     sdt check       check the open model for missing or inconsistent inputs
                     (read only; etabs_api/workflows/model_check.py)
-    sdt analyze     run the analysis, scale the response spectrum to the static
-                    base shear, check periods, modal mass and weight
-                    (etabs_api/workflows/model_analysis.py)
+    sdt analyze     run the analysis, amplify the torsion by Ax, scale the
+                    response spectrum to the static base shear (90 % when
+                    regular), put rho in the combinations, check periods,
+                    modal mass and weight (etabs_api/workflows/model_analysis.py,
+                    etabs_api/workflows/seismic_factors.py)
     sdt drift       story drift of the DRIFT / WDRIFT combinations with the drift
                     stiffness, strength and service level; the model is restored
                     (etabs_api/workflows/drift_check.py)
@@ -81,7 +87,7 @@ import argparse
 import sys
 from pathlib import Path
 
-VERSION = "0.6.0"  # the same as in pyproject.toml (tests/test_main.py checks it)
+VERSION = "0.13.0"  # the same as in pyproject.toml (tests/test_main.py checks it)
 # Hidden first argument: this process is the progress window of another one
 # (utilities/_gui_helpers.LoadingWindow). It is how the packaged program,
 # which has no separate Python to start, opens that window.
@@ -117,10 +123,10 @@ def _setup():
     return run_model_setup()
 
 
-def _grids():
-    from etabs_api.workflows.grid_column_model import run_grid_column_model
+def _model():
+    from etabs_api.workflows.model_framing import run_model
 
-    return run_grid_column_model()
+    return run_model()
 
 
 def _tag():
@@ -151,6 +157,24 @@ def _beams():
     from design.concrete.workflow import run_beams
 
     return run_beams()
+
+
+def _walls():
+    from etabs_api.workflows.wall_design import run_walls_cli
+
+    return run_walls_cli()
+
+
+def _compatibility():
+    from etabs_api.workflows.compatibility import run_compatibility_cli
+
+    return run_compatibility_cli()
+
+
+def _schedules():
+    from design.concrete.workflow import run_schedules
+
+    return run_schedules()
 
 
 def _deflection():
@@ -233,18 +257,26 @@ def _doctor():
 
 COMMANDS = {
     "setup": (_setup, "define materials, sections, loads, spectrum, cases and combinations"),
-    "grids": (_grids, "build or update stories, grids, columns and walls from a DXF"),
+    "model": (_model, "stories, grids, columns and walls from a DXF, then the framing of "
+                      "the floors (girders, beams, slabs, loads)"),
+    "grids": (_model, "the old name of sdt model"),
     "tag": (_tag, "give every beam and column of the open model its unique name"),
     "check": (_check, "check the open model for missing or inconsistent inputs (read only)"),
-    "analyze": (_analyze, "run, scale the response spectrum, check periods, mass and weight"),
+    "analyze": (_analyze, "run, apply Ax and rho, scale the response spectrum, check periods, "
+                          "mass and weight"),
     "drift": (_drift, "story drift with the drift stiffness (strength, service), then restore"),
     "irregularity": (_irregularity, "vertical and plan irregularities, Ax and the P-delta "
                                     "stability coefficient (read only)"),
-    "beams": (_beams, "extract the forces and design the beams (ACI 318M-14)"),
+    "beams": (_beams, "extract the forces and design the beams (NSCP 2015)"),
     "deflection": (_deflection, "check only the beam deflections (bars of the last beam design)"),
     "columns": (_columns, "design the columns (with slenderness) from the stored beam step"),
     "design": (_design, "analysis and design loop that resizes beams and columns"),
+    "walls": (_walls, "design the structural walls (planar, L, U, cores): NSCP 418.10 and 411"),
+    "compatibility": (_compatibility, "members not in the lateral system (group GRAVITY ONLY): "
+                                      "forces at the design displacement, NSCP 418.14"),
     "foundation": (_foundation, "foundation model from the support reactions, or update its forces"),
+    "schedules": (_schedules, "beam and column schedules (DXF) again from a stored design, "
+                              "without designing (no ETABS)"),
     "plans": (_plans, "framing plans of every floor as one DXF (beams, columns, marks, grids)"),
     "3d": (_model_3d, "the concrete of the model as 3D solids in a STEP file, for AutoCAD"),
     "quantities": (_quantities, "concrete volume, floor area and their ratio in m3/m2 (read only)"),

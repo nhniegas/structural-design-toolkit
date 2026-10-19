@@ -1,7 +1,10 @@
 """Structural code constants: ACI 318M-14, NSCP 2015, ASCE 7-10 and UBC 97.
 
-* ``CODE`` (``AciCode``): ACI 318M-14, used by the beam and column designers
-  (NSCP 2015 chapter 4 follows it: ACI clause X is NSCP clause 4X).
+* ``CODE`` (``AciCode``): NSCP 2015 chapter 4, used by the beam and column
+  designers. It follows ACI 318M-14 clause for clause: ACI clause X is NSCP
+  clause 4X (checked for every clause the program cites). The comments below
+  give the ACI number; what the user sees cites both, "NSCP 418.6.2.1 (ACI
+  18.6.2.1)".
 * ``NSCP`` (``NscpCode``): NSCP 2015 chapter 2, the loads, load combinations,
   live load reduction (with the ASCE 7-10 alternate) and earthquake provisions
   (with the UBC 97 tables that ETABS uses, which NSCP 208 follows).
@@ -80,7 +83,7 @@ class StrengthReductionConfig:
         """phi for flexure / combined P-M from the extreme tension strain.
 
         Compression-controlled up to the yield strain, tension-controlled from
-        0.005, straight-line transition in between (ACI Table 21.2.2).
+        0.005, straight-line transition in between (NSCP Table 421.2.2; ACI Table 21.2.2).
         """
         low = self.compression_spiral if spiral else self.compression_tied
         yield_strain = fy / es
@@ -129,7 +132,7 @@ class BeamShearConfig:
 
 @dataclass(frozen=True)
 class BeamTorsionConfig:
-    """Torsion thresholds, capacity and detailing limits (ACI 22.7, 9.6.4, 9.7.5)."""
+    """Torsion thresholds, capacity and detailing limits (NSCP 422.7, 409.6.4, 409.7.5; ACI 22.7, 9.6.4, 9.7.5)."""
 
     threshold_coeff: float = 0.083  # Tth = 0.083*sqrt(fc')*Acp^2/pcp          ACI Table 22.7.4.1(a)
     cracking_coeff: float = 0.33  # Tcr = 0.33*sqrt(fc')*Acp^2/pcp             ACI Table 22.7.5.1(a)
@@ -174,7 +177,7 @@ class BeamDetailingConfig:
 
 @dataclass(frozen=True)
 class BeamSeismicConfig:
-    """Special moment frame beam requirements (ACI 18.6)."""
+    """Special moment frame beam requirements (NSCP 418.6; ACI 18.6)."""
 
     max_reinforcement_ratio: float = 0.025  #                                 ACI 18.6.3.1
     positive_to_negative_at_face: float = 0.50  #                             ACI 18.6.3.2
@@ -227,7 +230,7 @@ class ColumnStrengthConfig:
 
 @dataclass(frozen=True)
 class ColumnTransverseConfig:
-    """Tie, hoop and spiral limits (ACI 25.7.2, 25.7.3, 18.7.5)."""
+    """Tie, hoop and spiral limits (NSCP 425.7.2, 425.7.3, 418.7.5; ACI 25.7.2, 25.7.3, 18.7.5)."""
 
     tie_spacing_bar_multiple: float = 16.0  # s <= 16 db                         ACI 25.7.2.1
     tie_spacing_tie_multiple: float = 48.0  # s <= 48 dtie                       ACI 25.7.2.1
@@ -244,7 +247,7 @@ class ColumnTransverseConfig:
 
 @dataclass(frozen=True)
 class ColumnSeismicConfig:
-    """Special moment frame column and joint requirements (ACI 18.7, 18.8)."""
+    """Special moment frame column and joint requirements (NSCP 418.7, 418.8; ACI 18.7, 18.8)."""
 
     min_dimension: float = 300.0  # mm                                           ACI 18.7.2.1(a)
     min_aspect_ratio: float = 0.40  #                                            ACI 18.7.2.1(b)
@@ -283,7 +286,7 @@ class ColumnSeismicConfig:
 
 @dataclass(frozen=True)
 class ColumnShearConfig:
-    """Non-seismic column shear strength (ACI 22.5.6)."""
+    """Non-seismic column shear strength (NSCP 422.5.6; ACI 22.5.6)."""
 
     vc_coeff: float = 0.17  #                                                    ACI 22.5.6.1
     axial_divisor: float = 14.0  # 1 + Nu/(14*Ag)                                ACI 22.5.6.1
@@ -293,9 +296,9 @@ class ColumnShearConfig:
 
 @dataclass(frozen=True)
 class ColumnSlendernessConfig:
-    """Slenderness of columns along their length (ACI 6.2.5, 6.6.4.5).
+    """Slenderness of columns along their length (NSCP 406.2.5, 406.6.4.5; ACI 6.2.5, 6.6.4.5).
 
-    The sway (P-Delta) effects come from the second-order analysis (ACI 6.7);
+    The sway (P-Delta) effects come from the second-order analysis (NSCP 406.7; ACI 6.7);
     these values are for the member (P-delta) magnification that is added to it.
     """
 
@@ -365,7 +368,7 @@ class InputConventionConfig:
 class AciCode:
     """All ACI 318M-14 constants used by the designers, grouped by topic."""
 
-    name: str = "ACI 318M-14"
+    name: str = "NSCP 2015 chapter 4 (ACI 318M-14)"
     material: MaterialConfig = field(default_factory=MaterialConfig)
     strength: StrengthReductionConfig = field(default_factory=StrengthReductionConfig)
     beam_flexure: BeamFlexureConfig = field(default_factory=BeamFlexureConfig)
@@ -395,7 +398,7 @@ class AciCode:
         )
 
     def crack_control_spacing(self, fy: float, clear_cover: float) -> float:
-        """Maximum centre-to-centre bar spacing for crack control (ACI 24.3.2).
+        """Maximum centre-to-centre bar spacing for crack control (NSCP 424.3.2; ACI 24.3.2).
 
         ``clear_cover`` is the clear distance from the tension face to the
         surface of the flexural bar (i.e. cover + stirrup diameter).
@@ -439,7 +442,7 @@ class LoadFactorConfig:
     sustained_live: float = 0.25  # D + 0.25 L for long-term deflection (practice)
     vertical_effect: float = 0.5  # Ev = 0.5 Ca I D                    NSCP 208.6.1
     orthogonal: float = 0.3  # 100 % one direction + 30 % the other    NSCP 208.7.1
-    omega0: float = 2.8  # Em = Omega0 Eh, concrete systems            NSCP Table 208-11A
+    omega0: float = 2.8  # Em = Omega0 Eh; by system, CONCRETE_SYSTEMS  NSCP Table 208-11A
     rho: float = 1.0  # redundancy (1.0 <= rho <= 1.25 for SMRF)        NSCP 208.6.1
     drift_rho: float = 1.0  # rho when calculating drift              NSCP 208.6.1
 
@@ -476,6 +479,87 @@ class LiveLoadReductionConfig:
 # =============================================================================
 # NSCP 2015 SECTION 208 (UBC 97): EARTHQUAKE
 # =============================================================================
+NL, NP = None, 0.0  # height limit: no limit / not permitted
+
+
+@dataclass(frozen=True)
+class SeismicSystem:
+    """One row of NSCP Table 208-11A (earthquake-force-resisting systems of concrete).
+
+    ``zone2`` and ``zone4`` are the building height limits in m: ``NL`` (None)
+    for no limit, ``NP`` (0) where the system is not permitted.
+    """
+
+    key: str
+    family: str
+    name: str
+    r: float
+    omega0: float
+    zone2: float | None
+    zone4: float | None
+
+    def limit(self, zone4: bool) -> float | None:
+        return self.zone4 if zone4 else self.zone2
+
+    def permitted(self, zone4: bool) -> bool:
+        return self.limit(zone4) != NP
+
+    def label(self) -> str:
+        """For the lists: the family, the system, R, Omega0 and the zone 4 limit."""
+        z4 = self.zone4
+        limit = ("no height limit" if z4 is NL else "not permitted" if z4 == NP
+                 else f"up to {z4:g} m")
+        return (f"{self.key}. {self.family}: {self.name} (R {self.r:g}, Omega0 "
+                f"{self.omega0:g}; zone 4: {limit})")
+
+
+# NSCP 2015 Table 208-11A, read from the code (page 2-223), in its order
+CONCRETE_SYSTEMS: tuple[SeismicSystem, ...] = (
+    SeismicSystem("A1", "Bearing wall", "special reinforced concrete shear walls",
+                  4.5, 2.8, NL, 50.0),
+    SeismicSystem("A2", "Bearing wall", "ordinary reinforced concrete shear walls",
+                  4.5, 2.8, NL, NP),
+    SeismicSystem("B1", "Building frame", "special reinforced concrete shear walls or "
+                  "braced frames (shear walls)", 5.0, 2.8, NL, 75.0),
+    SeismicSystem("B2", "Building frame", "ordinary reinforced concrete shear walls or "
+                  "braced frames", 5.6, 2.2, NL, NP),
+    SeismicSystem("B3", "Building frame", "intermediate precast shear walls or braced frames",
+                  5.0, 2.5, NL, 10.0),
+    SeismicSystem("C1", "Moment-resisting frame", "special reinforced concrete moment frames",
+                  8.5, 2.8, NL, NL),
+    SeismicSystem("C2", "Moment-resisting frame", "intermediate reinforced concrete moment "
+                  "frames", 5.5, 2.8, NL, NP),
+    SeismicSystem("C3", "Moment-resisting frame", "ordinary reinforced concrete moment frames",
+                  3.5, 2.8, NL, NP),
+    SeismicSystem("D1", "Dual system", "special reinforced concrete shear walls",
+                  8.5, 2.8, NL, NL),
+    SeismicSystem("D2", "Dual system", "ordinary reinforced concrete shear walls",
+                  6.5, 2.8, NL, NP),
+    SeismicSystem("E1", "Dual system with intermediate moment frames", "special reinforced "
+                  "concrete shear walls", 6.5, 2.8, NL, 50.0),
+    SeismicSystem("E2", "Dual system with intermediate moment frames", "ordinary reinforced "
+                  "concrete shear walls", 5.5, 2.8, NL, NP),
+    SeismicSystem("E3", "Dual system with intermediate moment frames", "shear wall-frame "
+                  "interactive system with ordinary reinforced concrete moment frames and "
+                  "ordinary reinforced concrete shear walls", 4.2, 2.8, NP, NP),
+    SeismicSystem("F1", "Cantilevered column building", "cantilevered column elements",
+                  2.2, 2.0, NL, 10.0),
+    SeismicSystem("G1", "Shear wall-frame interaction", "shear wall-frame interaction systems",
+                  5.5, 2.8, NL, 50.0),
+)
+DEFAULT_SYSTEM = "C1"  # special reinforced concrete moment frames
+
+
+def seismic_system(key: str | None) -> SeismicSystem | None:
+    """The system of Table 208-11A with this key, or None."""
+    return next((s for s in CONCRETE_SYSTEMS if s.key == key), None)
+
+
+def systems_with_r(r: float) -> list[SeismicSystem]:
+    """Every concrete system of Table 208-11A with this R (R alone does not name one)."""
+    return [s for s in CONCRETE_SYSTEMS if abs(s.r - r) < 1e-6]
+
+
 @dataclass(frozen=True)
 class SeismicConfig:
     """Earthquake loads: NSCP 208, with the UBC 97 tables ETABS uses."""
@@ -505,18 +589,6 @@ class SeismicConfig:
     na_cap: float = 1.1  # Na may be capped when regular, SMRF, rho 1.0  NSCP 208.4.4.3
     near_fault_km: float = 2.0  # site-specific spectrum recommended   NSCP 208.4.4.3
     importance_factors: tuple = (1.0, 1.25, 1.5)  #                    NSCP Table 208-1
-    # R -> (system, permitted in zone 4), concrete                     NSCP Table 208-11A
-    concrete_r: dict = field(default_factory=lambda: {
-        8.5: ("special moment frame (or dual system with special walls)", True),
-        6.5: ("dual system: ordinary walls, or special walls with IMRF", True),
-        5.6: ("building frame: ordinary walls", False),
-        5.5: ("intermediate moment frame / shear wall-frame interaction", False),
-        5.0: ("building frame: special walls", True),
-        4.5: ("bearing wall: special walls", True),
-        4.2: ("shear wall-frame interactive with ordinary frames", False),
-        3.5: ("ordinary moment frame", False),
-        2.2: ("cantilevered column", True),
-    })
     smrf_r: float = 8.5  #                                             NSCP Table 208-11A
     # Method A, Ct in ft units (ETABS) -> (system, Ct in m units)      NSCP 208.5.2.2 Eq. 208-12
     ct: dict = field(default_factory=lambda: {

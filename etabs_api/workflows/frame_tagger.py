@@ -36,6 +36,7 @@ if __package__ in (None, ""):
     sys.path.insert(
         0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from etabs_api.core.connection import save_model  # noqa: E402
 from etabs_api.core.helpers import as_list, return_code  # noqa: E402
 
 MAX_BEND_DEGREES = 45.0  # a line continues through a joint up to this bend
@@ -544,13 +545,20 @@ def auto_tag_frames(prefixes: dict[str, str] | None = None,
 
     new_path = model_path if in_place else tagged_model_path(model_path)
     with LoadingWindow("Tagging beams and columns...") as window:
-        if return_code(model.File.Save(new_path)) != 0:
+        if return_code(save_model(model, new_path)) != 0:
             show_warning(f"ETABS could not save the model:\n{new_path}", title="Auto Tagging")
             return None
         if model.GetModelIsLocked():
             model.SetModelIsLocked(False)  # names cannot change in a locked model
         failed = apply_frame_tags(connector, tags, progress=window.update)
-        model.File.Save(new_path)
+        # the walls: one pier label per straight leg, the legs that meet one wall (sdt walls)
+        from etabs_api.workflows import wall_piers
+
+        window.update("Pier labels of the walls")
+        panels, stories = wall_piers.read_wall_panels(connector)
+        walls = wall_piers.plan_walls(panels, stories) if panels else []
+        piers = wall_piers.apply_pier_labels(model, walls) if walls else 0
+        save_model(model, new_path)
         connector.refresh_view()
 
     from utilities.run_summary import RunSummary, listed
@@ -559,6 +567,9 @@ def auto_tag_frames(prefixes: dict[str, str] | None = None,
     summary.add("Beams", len(beams))
     summary.add("Columns", len(columns))
     summary.add("Tagged", len(tags) - len(failed))
+    if walls:
+        summary.add("Walls", f"{len(walls)}: {piers} wall panels labelled as piers "
+                             "(W1A, W1B, ...: one label per straight leg)")
     summary.add("Target", "the model itself" if in_place else
                 "a tagged copy (the original model was not changed)")
     if clashes:

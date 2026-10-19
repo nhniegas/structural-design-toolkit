@@ -51,6 +51,8 @@ SERVICE_SEISMIC = 1.0 / _FACTORS.service_seismic_divisor  # E / 1.4 in the servi
 # drift case: a drift pattern (period not capped) or a spectrum drift case.
 DRIFT_SET = "DRIFT"         # seismic drift combinations, 203-5 and 203-7
 WIND_DRIFT_SET = "WDRIFT"   # wind drift combinations, 203-3, 203-4 and 203-6
+# the wind blows either way: every wind combination with +W and with -W
+WIND_SIGNS = (("+", 1.0), ("-", -1.0))
 DRIFT_SPECTRUM_CASES = ("RSAXD", "RSAYD")
 
 
@@ -138,19 +140,23 @@ def build_combinations(
     ):
         group("ULS_GRAVITY", name)
     for number, (text, case) in zip((103, 104), w):
-        group("ULS_WIND", add(
-            f"ULS {number} {_g(d)} DL + {_g(k.roof_live)} Lr + {_g(k.wind_with_roof)} {text}",
-            gravity(d, 0.0, k.roof_live) + [(case, k.wind_with_roof)], design=True))
+        for op, sign in WIND_SIGNS:
+            group("ULS_WIND", add(
+                f"ULS {number} {_g(d)} DL + {_g(k.roof_live)} Lr {op} {_g(k.wind_with_roof)} "
+                f"{text}",
+                gravity(d, 0.0, k.roof_live) + [(case, sign * k.wind_with_roof)], design=True))
     for number, (text, case) in zip((105, 106), w):
-        group("ULS_WIND", add(
-            f"ULS {number} {_g(d)} DL + f LL + {_g(k.roof_live_companion)} Lr + "
-            f"{_g(k.wind)} {text}",
-            gravity(d, f, k.roof_live_companion) + [(case, k.wind)], design=True))
+        for op, sign in WIND_SIGNS:
+            group("ULS_WIND", add(
+                f"ULS {number} {_g(d)} DL + f LL + {_g(k.roof_live_companion)} Lr {op} "
+                f"{_g(k.wind)} {text}",
+                gravity(d, f, k.roof_live_companion) + [(case, sign * k.wind)], design=True))
     seismic("ULS", 107, f"({_g(d)} + Ev) DL + f LL + {_g(k.seismic)}", gravity(d + ev, f),
             k.seismic * rho, "ULS", True)
     for number, (text, case) in zip((108, 109), w):
-        group("ULS_WIND", add(f"ULS {number} {_g(d_min)} DL + {_g(k.wind)} {text}",
-                              gravity(d_min) + [(case, k.wind)], design=True))
+        for op, sign in WIND_SIGNS:
+            group("ULS_WIND", add(f"ULS {number} {_g(d_min)} DL {op} {_g(k.wind)} {text}",
+                                  gravity(d_min) + [(case, sign * k.wind)], design=True))
     seismic("ULS", 110, f"({_g(d_min)} - Ev) DL + {_g(k.seismic)}", gravity(d_min - ev),
             k.seismic * rho, "ULS", True)
 
@@ -160,23 +166,27 @@ def build_combinations(
     group("SLS_GRAVITY", add(f"SLS 100 {_g(s)} DL + {_g(s)} LL + {_g(s)} Lr", gravity(s, s, s)))
     group("SLS_GRAVITY", add(f"SLS 101 {_g(s)} DL + {_g(c)} LL + {_g(c)} Lr", gravity(s, c, c)))
     for number, (text, case) in zip((102, 103), w):
-        group("SLS_WIND", add(f"SLS {number} {_g(s)} DL + {_g(sw)} {text}",
-                              gravity(s) + [(case, sw)]))
+        for op, sign in WIND_SIGNS:
+            group("SLS_WIND", add(f"SLS {number} {_g(s)} DL {op} {_g(sw)} {text}",
+                                  gravity(s) + [(case, sign * sw)]))
     seismic("SLS", 104, f"({_g(s)} + {_g(e)} Ev) DL + {_g(e)}", gravity(s + e * ev), e * rho, "SLS")
     for number, (text, case) in zip((105, 106), w):
-        group("SLS_WIND", add(f"SLS {number} {_g(s)} DL + {_g(c)} LL + {_g(c)} Lr + "
-                              f"{_g(c * sw)} {text}",
-                              gravity(s, c, c) + [(case, c * sw)]))
+        for op, sign in WIND_SIGNS:
+            group("SLS_WIND", add(f"SLS {number} {_g(s)} DL + {_g(c)} LL + {_g(c)} Lr {op} "
+                                  f"{_g(c * sw)} {text}",
+                                  gravity(s, c, c) + [(case, sign * c * sw)]))
     seismic("SLS", 107, f"({_g(s)} + {_g(c * e)} Ev) DL + {_g(c)} LL + {_g(c * e)}",
             gravity(s + c * e * ev, c), c * e * rho, "SLS")
     for number, (text, case) in zip((108, 109), w):
-        group("SLS_WIND", add(f"SLS {number} {_g(s_min)} DL + {_g(sw)} {text}",
-                              gravity(s_min) + [(case, sw)]))
+        for op, sign in WIND_SIGNS:
+            group("SLS_WIND", add(f"SLS {number} {_g(s_min)} DL {op} {_g(sw)} {text}",
+                                  gravity(s_min) + [(case, sign * sw)]))
     seismic("SLS", 110, f"({_g(s_min)} - {_g(e)} Ev) DL + {_g(e)}", gravity(s_min - e * ev),
             e * rho, "SLS")
     for number, (text, case) in zip((111, 112), w):
-        group("SLS_WIND", add(f"SLS {number} {_g(s)} DL + {_g(s)} LL + {_g(sw)} {text}",
-                              gravity(s, s) + [(case, sw)]))
+        for op, sign in WIND_SIGNS:
+            group("SLS_WIND", add(f"SLS {number} {_g(s)} DL + {_g(s)} LL {op} {_g(sw)} {text}",
+                                  gravity(s, s) + [(case, sign * sw)]))
     seismic("SLS", 113, f"({_g(s)} + {_g(e)} Ev) DL + {_g(s)} LL + {_g(e)}",
             gravity(s + e * ev, s), e * rho, "SLS")
 
@@ -200,7 +210,12 @@ def build_combinations(
              gravity(d, f, k.roof_live_companion) + [(case, k.wind)]),
             (102, f"{_g(d_min)} DL + {_g(k.wind)}", gravity(d_min) + [(case, k.wind)]),
         ):
-            group("WDRIFT", add(f"{WIND_DRIFT_SET} {number} {expression} {text}", cases))
+            for op, sign in WIND_SIGNS:
+                group("WDRIFT", add(f"{WIND_DRIFT_SET} {number} {expression} {text}"
+                                    if sign > 0 else
+                                    f"{WIND_DRIFT_SET} {number} {expression} {text} reversed",
+                                    [(name, factor * (sign if name == case else 1.0))
+                                     for name, factor in cases]))
 
     # ---- deflection (unfactored, no live load reduction) ----
     out.extend(deflection_set(dead, live, roof))

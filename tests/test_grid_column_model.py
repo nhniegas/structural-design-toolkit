@@ -353,4 +353,36 @@ def test_changes_go_into_a_copy_that_keeps_the_setup_inputs(tmp_path, monkeypatc
     assert log is not None and path == copy and opened == [copy]
     assert saved and set(saved) == {copy}          # the open model's own file is never saved
     assert setup.load_settings(setup.settings_path(copy)) == {"seismic": {"ct": 0.03}}
-    assert (tmp_path / "rev02 - plan changes.txt").is_file()
+    assert (tmp_path / "Summaries" / "rev02 - plan changes.txt").is_file()
+
+
+# --------------------------------------------------------------------------- #
+# v0.7.0: the drawing's stories paired with the model's, no column lost to a name
+# --------------------------------------------------------------------------- #
+def test_stories_pair_in_order_when_they_are_as_many():
+    from etabs_api.workflows import grid_column_model as gcm
+
+    drawing = gcm.levels(0.0, [("2F", 4500.0), ("3F", 3500.0), ("RD", 3500.0)])
+    model = gcm.levels(0.0, [("L2", 4500.0), ("L3", 3500.0), ("ROOF", 3500.0)])
+    assert gcm.pair_stories(drawing, model) == [("2F", "L2"), ("3F", "L3"), ("RD", "ROOF")]
+
+
+def test_stories_pair_by_level_when_they_differ_in_number():
+    from etabs_api.workflows import grid_column_model as gcm
+
+    drawing = gcm.levels(0.0, [("2F", 4500.0), ("RD", 7000.0)])
+    model = gcm.levels(0.0, [("L2", 4550.0), ("L3", 3500.0), ("ROOF", 3500.0)])
+    assert gcm.pair_stories(drawing, model) == [("2F", "L2"), ("RD", "ROOF")]
+    # a level with no story of the model near it: no pairing
+    far = gcm.levels(0.0, [("2F", 4500.0), ("RD", 9000.0)])
+    assert gcm.pair_stories(far, model) is None
+
+
+def test_renamed_stories_carry_the_columns_and_walls():
+    from etabs_api.workflows import grid_column_model as gcm
+
+    building = gcm.Building(stories=[("2F", 4500.0)],
+                            columns=[gcm.PlanColumn("2F", 0.0, 0.0, 500.0, 500.0)])
+    gcm.rename_stories(building, [("2F", "L2")])
+    assert building.stories == [("L2", 4500.0)] and building.columns[0].story == "L2"
+    assert building.story_pairs == [("2F", "L2")]

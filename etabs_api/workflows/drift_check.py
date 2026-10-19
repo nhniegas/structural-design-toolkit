@@ -11,8 +11,8 @@ needs its own analysis. On the model open in ETABS (no copy):
    combinations (NSCP 208.6.4.1):
 
    * as modelled: your modifiers, unchanged;
-   * strength level: beams 0.35, columns 0.70 (ACI 6.6.3.1.1, NSCP 406.6.3.1.1);
-   * service level: 1.4 times those, at most the gross section (ACI 6.6.3.2.2).
+   * strength level: beams 0.35, columns 0.70 (NSCP 406.6.3.1.1; ACI 6.6.3.1.1);
+   * service level: 1.4 times those, at most the gross section (NSCP 406.6.3.2.2; ACI 6.6.3.2.2).
 
 3. Put the modifiers and scale factors back and, when the model had results,
    analyse it again: it is left as it was, for the strength design.
@@ -27,6 +27,7 @@ The values are in design/criteria/code_config.py.
 from __future__ import annotations
 
 import os
+import re
 import sys
 from dataclasses import dataclass, field
 
@@ -36,6 +37,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from design.criteria.code_config import NSCP  # noqa: E402
+from etabs_api.core.connection import save_model  # noqa: E402
 from etabs_api.core.helpers import as_list, return_code  # noqa: E402
 from etabs_api.workflows import model_check as mc  # noqa: E402
 
@@ -59,10 +61,10 @@ class StiffnessLevel:
 
 
 def stiffness_levels(service_factor: float | None = None) -> list[StiffnessLevel]:
-    """As modelled, strength level (ACI 6.6.3.1.1) and service level.
+    """As modelled, strength level (NSCP 406.6.3.1.1; ACI 6.6.3.1.1) and service level.
 
     The service level is ``service_factor`` times the strength level, 1.4 by
-    the code (ACI 6.6.3.2.2) unless the engineer gives another, never above
+    the code (NSCP 406.6.3.2.2; ACI 6.6.3.2.2) unless the engineer gives another, never above
     the gross stiffness. At the service level a member that was modelled
     stiffer than the level keeps its own stiffness, so that a beam given
     0.5 Ig for its flange is not made softer than it was modelled.
@@ -76,11 +78,11 @@ def stiffness_levels(service_factor: float | None = None) -> list[StiffnessLevel
     return [
         StiffnessLevel("As modelled", None, None, "your frame modifiers"),
         StiffnessLevel("Strength level", k.beam_inertia, k.column_inertia,
-                       "ACI 6.6.3.1.1, NSCP 406.6.3.1.1"),
+                       "NSCP 406.6.3.1.1 (ACI 6.6.3.1.1)"),
         StiffnessLevel(f"Service level ({factor:g} x)",
                        service(k.beam_inertia), service(k.column_inertia),
-                       "ACI 6.6.3.2.2, NSCP 406.6.3.2.2" if factor == k.service_stiffness_factor
-                       else f"your factor; ACI 6.6.3.2.2 gives {k.service_stiffness_factor:g}",
+                       "NSCP 406.6.3.2.2 (ACI 6.6.3.2.2)" if factor == k.service_stiffness_factor
+                       else f"your factor; NSCP 406.6.3.2.2 (ACI 6.6.3.2.2) gives {k.service_stiffness_factor:g}",
                        at_least_modelled=True),
     ]
 
@@ -288,7 +290,7 @@ def level_findings(drifts: dict[str, tuple[float, str]], seismic: pd.DataFrame,
 @dataclass
 class DriftReport:
     model_path: str = ""
-    reference: str = CENTER
+    reference: str = CORNERS
     seismic: str = BOTH
     wind_denominator: float = NSCP.wind.drift_limit_denominator
     levels: list[tuple[StiffnessLevel, list[mc.Finding], dict[str, float]]] = field(
@@ -298,6 +300,12 @@ class DriftReport:
     picked: list[str] = field(default_factory=list)  # combinations the user picked, if any
     stories: dict[str, list[tuple]] = field(default_factory=dict)  # level name: story_table rows
     modifiers: list[mc.Finding] = field(default_factory=list)  # your modifiers, judged
+    # every story of every level, for resizing: level -> {(combination, story):
+    # (drift ratio, is wind)}; the drift pattern periods and R of each level
+    story_drifts: dict[str, dict[tuple[str, str], tuple[float, bool]]] = field(
+        default_factory=dict)
+    level_periods: dict[str, dict[str, float]] = field(default_factory=dict)
+    level_r: dict[str, float | None] = field(default_factory=dict)
     modelled: str = ""  # the effective I of your modifiers, as text
 
     def report(self):
@@ -469,7 +477,7 @@ def drift_load_cases(connector) -> dict[str, tuple[str, bool]]:
     return out
 
 
-def run_drift(connector, reference: str = CENTER,
+def run_drift(connector, reference: str = CORNERS,
               wind_denominator: float = NSCP.wind.drift_limit_denominator,
               levels: list[StiffnessLevel] | None = None, progress=None,
               seismic: str = BOTH, combos: list[str] | None = None,
@@ -580,8 +588,12 @@ def run_drift(connector, reference: str = CENTER,
                               cases)
                 drifts = center_drifts(moved, base_elevation)
                 by_story = center_story_drifts(moved, base_elevation)
-            # the pattern definitions read only with the patterns selected for display
-            model.DatabaseTables.SetLoadPatternsSelectedForDisplay(patterns)
+            # the pattern definitions read only with the patterns selected for display;
+            # the names are read again: the patterns ETABS makes at the analysis
+            # (EQXSD(1/2) and so on, which hold the period used) did not exist before
+            # it on a model that had no results
+            model.DatabaseTables.SetLoadPatternsSelectedForDisplay(
+                [str(n) for n in as_list(model.LoadPatterns.GetNameList(0, [])[1])])
             try:
                 pattern_table = connector._read_database_table(SEISMIC_TABLE)
             except Exception:  # no UBC 97 seismic pattern in this model
@@ -616,6 +628,10 @@ def run_drift(connector, reference: str = CENTER,
                 return str(combo).upper().startswith("WDRIFT")
 
             report.stories[level.name] = story_table(by_story, story_order, is_wind, used_r)
+            report.story_drifts[level.name] = {key: (ratio, is_wind(key[0]))
+                                               for key, ratio in by_story.items()}
+            report.level_periods[level.name] = dict(periods)
+            report.level_r[level.name] = used_r
     finally:
         say("Restoring the strength modifiers and spectrum scale factors")
         model.SetModelIsLocked(False)
@@ -628,7 +644,7 @@ def run_drift(connector, reference: str = CENTER,
             raise_drift_cases_to_minimum(connector, run)   # the factor of the restored periods
             report.restored = True
         else:
-            model.File.Save()
+            save_model(model)
     return report
 
 
@@ -637,7 +653,7 @@ def run_drift(connector, reference: str = CENTER,
 # =============================================================================
 @dataclass
 class DriftOptions:
-    reference: str = CENTER
+    reference: str = CORNERS
     seismic: str = BOTH
     wind_denominator: float = NSCP.wind.drift_limit_denominator
     # set by resolve_drift_combinations on a model without the DRIFT / WDRIFT names
@@ -714,9 +730,11 @@ def ask_drift_options(title: str, standard: bool = True) -> DriftOptions | None:
     """
     from utilities._gui_helpers import enter_values, select_option, show_warning
 
-    where = select_option(title, "Where should the drift be read?",
-                          ["Diaphragm centre of mass",
-                           "Outer four corners (extreme column joints of each story)"])
+    where = select_option(title, "Where should the drift be read?\n\nThe outer corners give the "
+                          "largest drift of each story, torsion included, and also read the "
+                          "stories that have no diaphragm. The centre of mass leaves both out.",
+                          ["Outer four corners (extreme column joints of each story)",
+                           "Diaphragm centre of mass"])
     if where is None:
         return None
     which = "Both"
@@ -728,7 +746,7 @@ def ask_drift_options(title: str, standard: bool = True) -> DriftOptions | None:
     if which is None:
         return None
     label = "Wind drift limit: h /"
-    stiffer = "Service level stiffness, times the strength level (ACI 6.6.3.2.2: 1.4)"
+    stiffer = "Service level stiffness, times the strength level (NSCP 406.6.3.2.2; ACI 6.6.3.2.2: 1.4)"
     code_factor = NSCP.analysis.service_stiffness_factor
     while True:
         typed = enter_values(title, "Story drift limit under the wind combinations (NSCP 207 "
@@ -751,6 +769,51 @@ def ask_drift_options(title: str, standard: bool = True) -> DriftOptions | None:
         CENTER if where.startswith("Diaphragm") else CORNERS,
         BOTH if which == "Both" else (STATIC if which.startswith("Static") else SPECTRUM),
         denominator, service_factor=None if factor == code_factor else factor)
+
+
+_DIRECTION = re.compile(r"(?:EQ|RSA|W)([XY])", re.IGNORECASE)
+
+
+def combo_direction(combo: str, drift_cases: dict[str, tuple[str, bool]] | None = None
+                    ) -> str | None:
+    """X or Y: the direction of the lateral load of a drift combination, from its load
+    case (EQXSD, RSAYD, WX, ...). None when the name does not say it."""
+    case = (drift_cases or {}).get(combo, (combo, False))[0]
+    found = _DIRECTION.search(str(case)) or _DIRECTION.search(str(combo))
+    return found.group(1).upper() if found else None
+
+
+def drift_excess(report: DriftReport, drift_cases: dict[str, tuple[str, bool]] | None = None
+                 ) -> dict[tuple[str, str | None], tuple[float, str, str]]:
+    """The stories over their drift limit, at any stiffness level checked:
+    (story, direction) -> (drift / limit, combination, level), the largest of each.
+
+    Seismic: Delta_M = 0.7 R Delta_S against 0.025 or 0.020 h by the period of the
+    drift patterns (NSCP 208.6.5.1). Wind: Delta / h against 1 / the typed limit.
+    """
+    return {key: value for key, value in drift_ratios(report, drift_cases).items()
+            if value[0] > 1.0 + 1e-9}
+
+
+def drift_ratios(report: DriftReport, drift_cases: dict[str, tuple[str, bool]] | None = None
+                 ) -> dict[tuple[str, str | None], tuple[float, str, str]]:
+    """Every story's drift over its limit, as ``drift_excess``, those that pass too."""
+    out: dict[tuple[str, str | None], tuple[float, str, str]] = {}
+    for level, drifts in report.story_drifts.items():
+        periods = report.level_periods.get(level, {})
+        r_factor = report.level_r.get(level) or mc.SEIS.smrf_r
+        for (combo, story), (ratio, wind) in drifts.items():
+            if wind:
+                over = ratio * report.wind_denominator
+            else:
+                case = (drift_cases or {}).get(combo, (str(combo).split()[-1], False))[0]
+                period = periods.get(case) or (max(periods.values()) if periods else None)
+                limit = mc.drift_limit(period) if period else mc.SEIS.drift_limit_long
+                over = mc.SEIS.drift_amplification * r_factor * ratio / limit
+            key = (story, combo_direction(combo, drift_cases))
+            if key not in out or over > out[key][0]:
+                out[key] = (over, combo, level)
+    return out
 
 
 def failures(report: DriftReport) -> list[tuple[str, mc.Finding]]:
@@ -811,7 +874,9 @@ def run_drift_check() -> DriftReport | None:
         report.report().show()
     else:
         print(report.text())
-    saved = save_report(report, os.path.splitext(path)[0] + " - Drift.txt")
+    from utilities.output_folders import beside
+
+    saved = save_report(report, beside(path, " - Drift.txt"))
     print(f"Saved: {saved}")
     drift_summary(report, path, saved).show(popup=True, echo=False)
     return report

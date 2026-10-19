@@ -26,14 +26,14 @@ SMRF_GRAVITY = SMRF_NOT_APPLIED + ": gravity beam, not part of the moment frame"
 
 
 # A clear span under 4d is also under 4h, so such a girder is a deep beam by ACI 9.9.1.1(a).
-SMRF_SHORT_SPAN = (SMRF_NOT_APPLIED + ": clear span under 4d (ACI 18.6.2.1(a)); a deep beam by "
-                   "ACI 9.9.1.1, designed here as an ordinary beam")
+SMRF_SHORT_SPAN = (SMRF_NOT_APPLIED + ": clear span under 4d (NSCP 418.6.2.1(a); ACI 18.6.2.1(a)); a deep beam by "
+                   "NSCP 409.9.1.1 (ACI 9.9.1.1), designed here as an ordinary beam")
 
 
 def short_span_girder(clear_span: float, depth: float, cover: float, d_stirrup: float,
                       d_main: float, code: AciCode = CODE) -> bool:
     """Whether a girder is shorter than a beam of a special moment frame may be:
-    clear span under 4d (ACI 18.6.2.1(a)), d to the centre of one layer of bars."""
+    clear span under 4d (NSCP 418.6.2.1(a); ACI 18.6.2.1(a)), d to the centre of one layer of bars."""
     d = depth - cover - d_stirrup - d_main / 2.0
     return clear_span < code.beam_seismic.min_clear_span_to_depth * d
 

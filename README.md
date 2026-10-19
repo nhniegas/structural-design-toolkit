@@ -6,8 +6,8 @@ Structural design calculations and ETABS automation, run from the terminal with 
 
 | Run from | Design module (`design/`) | What it does |
 |---|---|---|
-| `sdt beams` | `concrete/beams/` | ACI 318M-14 beam flexure, shear, torsion, deflection and SMRF checks from ETABS forces; girder and beam schedule DXF; PDF calculation report |
-| `sdt columns` | `concrete/columns/` | ACI 318M-14 column P-M with slenderness, shear, confinement, strong-column and joint-shear checks; column schedule DXF; PDF calculation report |
+| `sdt beams` | `concrete/beams/` | NSCP 2015 (ACI 318M-14) beam flexure, shear, torsion, deflection and SMRF checks from ETABS forces; girder and beam schedule DXF; PDF calculation report |
+| `sdt columns` | `concrete/columns/` | NSCP 2015 (ACI 318M-14) column P-M with slenderness, shear, confinement, strong-column and joint-shear checks; column schedule DXF; PDF calculation report |
 | `sdt composite` | `steel/composite_column_aiscDG06.py` | AISC Design Guide 6 rectangular filled composite column; one window with the section drawn and its interaction diagram; printout and/or PDF report |
 | `sdt steel` | `steel/wide_flange_aisc360.py` | AISC 360-22 wide-flange capacity checks; one window with the section drawn and the ratio of every check; printout and/or PDF report |
 | `sdt wind` | `loads/wind_directional_asce7.py` | ASCE 7 directional procedure (MWFRS) wind pressures; printout and/or PDF report |
@@ -33,13 +33,14 @@ tools/          the ETABS test runner and the icon
 
 Supporting code:
 
-- `design/criteria/code_config.py`: every structural code value, each with its clause. `CODE` holds ACI 318M-14 (NSCP chapter 4), used by the beam and column designers. `NSCP` holds NSCP 2015 chapter 2: load factors, live load reduction (with the ASCE 7 alternate), and the earthquake values with the UBC 97 tables that ETABS uses. NSCP 2015 governs; the other codes are guides.
+- `design/criteria/code_config.py`: every structural code value, each with its clause. `CODE` holds NSCP 2015 chapter 4 (ACI 318M-14), used by the beam and column designers; the program cites both, NSCP first. `NSCP` holds NSCP 2015 chapter 2: load factors, live load reduction (with the ASCE 7 alternate), and the earthquake values with the UBC 97 tables that ETABS uses. NSCP 2015 governs; the other codes are guides.
 - `etabs_api/core/`: the ETABS connection and thin wrappers for tables, geometry, assignments, loads, properties, results and stories.
 - `etabs_api/workflows/`: automation built on the office conventions, listed below.
 - `design/concrete/workflow.py`: the `sdt beams`, `sdt deflection` and `sdt columns` commands and the design data stored between them.
 - `etabs_api/workflows/exporter.py`: the ETABS tables the beam and column design need.
 - `etabs_api/workflows/frame_tagger.py`: automatic unique names for beams and columns (`sdt tag`).
 - `etabs_api/workflows/grid_column_model.py`: stories, grids, columns and walls of an ETABS model from a DXF of framing plans.
+- `etabs_api/workflows/framing.py`: the framing of each floor (girders, beams, slabs) at rule sizes, the options ranked by concrete volume and frame action; `etabs_api/workflows/model_framing.py`: `sdt model`, which draws, analyses and builds them.
 - `etabs_api/workflows/analysis_forces.py`: factored forces from the analysis results (combinations, spectrum and wind permutations, NSCP live load reduction, pattern live load).
 - `etabs_api/workflows/design_loop.py`, `sections.py`: the analysis and design loop with member resizing.
 - `etabs_api/workflows/tributary.py`: geometric tributary areas for the live load reduction.
@@ -54,11 +55,11 @@ Supporting code:
 - `etabs_api/workflows/concrete_quantities.py`: the concrete volume, the floor area and the ratio in m3/m2 (`sdt quantities`).
 - `design/concrete/beams/`: the beam design in files by job (design, sections, supports, results, schedule, calculations, options).
 - `design/concrete/columns/`: the column design in files by job (design, sizing, section, layouts, flexure, transverse, shear, joints, tables, report, schedule, calculations, options).
-- `design/concrete/beams/deflection.py`: beam deflection checks (ACI 318M-14 24.2).
+- `design/concrete/beams/deflection.py`: beam deflection checks (NSCP 424.2; ACI 24.2).
 - `design/criteria/dcr_targets.py`: target demand / capacity ratios by member type and check.
 - `design/concrete/beams/carriers.py`: which beam carries which, and the rule that a carrier is at least as deep.
-- `design/concrete/columns/slenderness.py`: slenderness of columns along their length (ACI 6.2.5, 6.6.4.5): unbraced lengths and k from the frame, the moment magnifier and the minimum moment. The sway effects come from the ETABS P-delta analysis.
-- `design/concrete/columns/interaction.py`: the biaxial P-Mx-My design interaction surface of a column layout, built once and cached. It also provides the demand convex hull and the 3D figure for the calculation report.
+- `design/concrete/columns/slenderness.py`: slenderness of columns along their length (NSCP 406.2.5, 406.6.4.5; ACI 6.2.5, 6.6.4.5): unbraced lengths and k from the frame, the moment magnifier and the minimum moment. The sway effects come from the ETABS P-delta analysis.
+- `design/concrete/columns/interaction.py`: the biaxial P-Mx-My design interaction surface of a column layout, built once and cached. It also provides the demand convex hull, the 3D figure and the P-M diagrams in the XZ and YZ planes for the calculation report.
 - `etabs_api/workflows/model_analysis.py`: analysis run, response spectrum scaling, period, modal mass and weight checks.
 - `etabs_api/workflows/model_setup.py`, `ubc97.py`, `load_combinations.py`: definition of materials, sections, loads and NSCP 2015 combinations in an ETABS model.
 - `utilities/design_cli.py`: the dialog workflow of the standalone checks (input dialogs, then printout, PDF or both); `utilities/design_window.py`: the window of the composite, steel and pile cap checks (inputs, live drawing, results).
@@ -134,6 +135,9 @@ Each guide in `docs/` covers one tool: how to run it, its inputs, what it writes
 - [Steel and composite modules](docs/steel_design_documentation.md)
 - [Wind load calculator](docs/wind_calculator_asce7_documentation.md)
 - [Pile cap design](docs/pile_cap_design.md)
+- [Wall design](docs/etabs_wall_design.md)
+- [Deformation compatibility](docs/etabs_compatibility.md)
+- [Output folders: where each file is written](docs/output_folders.md)
 - [Results in the terminal](docs/terminal_output.md)
 - [The dialogs](docs/dialogs.md)
 - [The calculation reports](docs/calculation_reports.md)
@@ -148,16 +152,20 @@ Every tool is a command of `sdt`, the ETABS workflows and the standalone checks 
 ```powershell
 .venv\Scripts\Activate.ps1
 sdt setup       # materials, sections, loads, spectrum, cases and combinations
-sdt grids       # stories, grids, columns and walls from a DXF of framing plans
+sdt model       # stories, grids, columns and walls from a DXF, then the framing of the floors
+sdt grids       # the old name of sdt model
 sdt tag         # unique names for every beam and column (a tagged copy or the model itself)
 sdt check       # check the open model against NSCP 2015 (read only)
-sdt analyze     # run, scale the response spectrum, check periods, modal mass and weight
+sdt analyze     # run, apply Ax and rho, scale the response spectrum, check periods, modal mass and weight
 sdt drift       # story drift with the drift stiffness, then restore the model
 sdt irregularity  # vertical and plan irregularities, Ax and the P-delta stability coefficient (read only)
 sdt beams       # extract the forces and design the beams; results, calcs and schedules
 sdt deflection  # only the beam deflections (bars of the last beam design)
 sdt columns     # design the columns from the stored beam step
 sdt design      # analysis and beam/column design loop that resizes members until they pass
+sdt schedules   # the beam and column schedules (DXF) again from a stored design, no ETABS
+sdt walls       # structural walls: planar, L, U and cores, NSCP 418.10 and 411
+sdt compatibility  # members not in the lateral system (group GRAVITY ONLY): forces at the design displacement, NSCP 418.14
 sdt foundation  # a second model for the foundation, from the support reactions; or update its forces
 sdt plans       # framing plans of every floor as one DXF: beams, columns, marks, grids; the foundation plan too
 sdt 3d          # the model as 3D solids in a STEP file, for AutoCAD; the foundation and the bars too
@@ -202,11 +210,11 @@ This defines the materials, frame sections, load patterns, UBC 97 response spect
 
 ## Building grids, columns and walls from a DXF
 
-`sdt grids`. It reads framing plans drawn in one DXF file and creates the stories, grid lines, columns and walls in ETABS; run again on a revised drawing, it updates the model. See [Grids, columns and walls from a DXF](docs/etabs_grid_column_model.md).
+`sdt model` (old name `sdt grids`). It reads framing plans drawn in one DXF file and creates the stories, grid lines, columns and walls in ETABS; run again on a revised drawing, it updates the model. See [Grids, columns and walls from a DXF](docs/etabs_grid_column_model.md). It then frames the floors: the girders, beams and slabs of least concrete that keep frame action, drawn and ranked, the one you pick built with the loads of each occupancy zone. See [The model from a DXF, with its framing](docs/etabs_model.md).
 
 ## Running and checking the analysis
 
-`sdt analyze` runs the analysis, scales the response spectrum cases to 100 % of the static base shear, and checks the periods against UBC 97 Method A, the modal participating mass and the seismic weight. See [ETABS analysis checks](docs/etabs_analysis.md).
+`sdt analyze` runs the analysis, amplifies the accidental torsion of a torsionally irregular structure by Ax (NSCP 208.5.1.4), scales the response spectrum cases to 100 % of the static base shear (90 % for a structure `sdt irregularity` found regular, NSCP 208.5.3.5.4), puts the redundancy factor ρ of each direction in the seismic combinations (NSCP 208.6.1), and checks the periods against UBC 97 Method A, the modal participating mass and the seismic weight. See [ETABS analysis checks](docs/etabs_analysis.md).
 
 `sdt check` checks the open model against NSCP 2015 without changing it, and prints one line per check in the terminal. It covers missing loads, supports and diaphragms; the seismic inputs against the Section 208 tables (Z, Na, Nv, Ca, Cv, I, R, Ct); the story ranges and the Ev term in the combinations; P-delta, the mass source and the cracked-section modifiers; and the Section 418 member limits. After `sdt analyze` it also recomputes the base shear coefficient and period cap, and checks the spectrum scaling, modal mass and the drift ΔM = 0.7RΔS. See [Model check](docs/etabs_model_check.md).
 
@@ -214,7 +222,7 @@ This defines the materials, frame sections, load patterns, UBC 97 response spect
 
 `sdt irregularity` reads the analysed model and reports each irregularity of UBC 97 Tables 16-L and 16-M (NSCP 2015 Tables 208-9 and 208-10): soft story, mass, vertical geometric, weak story (from the column design), torsional with the amplifier Ax, re-entrant corners and diaphragm openings. The types that need judgement are listed with what the model shows. It also gives the P-delta stability coefficient of each story, on first-order drifts from a copy of the model analysed with P-delta off. Nothing is changed in the model. See [Irregularity check](docs/etabs_irregularity.md).
 
-`sdt design` runs the analysis and the beam and column design again and again on a copy of the model, resizing the members until they pass (deflection included). It can end with the [full project report](docs/project_report.md): one PDF with the analysis (3D view, framing plans, loads, combinations, seismic and wind criteria, drifts, irregularities), the design of every member, and the calculation tables. See [Design loop](docs/etabs_design_loop.md).
+`sdt design` runs the analysis and the beam and column design again and again on a copy of the model, resizing the members until they pass (deflection included), and, if you choose, until every story passes drift and every wall passes (a wall leg grows 50 mm at a time). It can end with the [full project report](docs/project_report.md): one PDF with the analysis (3D view, framing plans, loads, combinations, seismic and wind criteria, drifts, irregularities), the design of every member, and the calculation tables. See [Design loop](docs/etabs_design_loop.md).
 
 ## Foundation model
 
@@ -231,6 +239,14 @@ This defines the materials, frame sections, load patterns, UBC 97 response spect
 ## Concrete quantities
 
 `sdt quantities` gives the volume of concrete of each story and of the building, the floor area, and the concrete ratio in m3/m2. Beams are measured below the slab and between the faces of their supports, slabs less their openings and the columns through them, so nothing is counted twice. The slab on grade, which is not modelled as a rule, is the footprint of the building by the thickness you type, and the footings and tie beams of the saved foundation plan can be added. See [Concrete quantities](docs/etabs_concrete_quantities.md).
+
+## Wall design
+
+`sdt walls` designs the structural walls, planar, L, U and cores, to NSCP 2015 418.10 (special) or 411 (ordinary), wall by wall. Each straight leg has its own pier label (`sdt tag` gives them), and the legs that meet are designed together as one section: axial load and bending by strain compatibility about each principal axis, shear leg by leg, minimum steel and curtains, and special boundary elements by the displacement and the stress methods. See [Wall design](docs/etabs_wall_design.md).
+
+## Deformation compatibility
+
+`sdt compatibility` checks the members that are not part of the seismic-force-resisting system (NSCP 2015 208.7.2.3 and 418.14): the members of the ETABS group `GRAVITY ONLY`, which it can propose and create, and every gravity beam. It finds the design displacement δu with those members pinned (the frames alone), takes their forces at δu in the model as built, adds the gravity load, and says whether 418.14.3.2 or 418.14.3.3 applies and whether the detailing meets it. See [Deformation compatibility](docs/etabs_compatibility.md).
 
 ## Pile cap design
 
@@ -272,13 +288,12 @@ The tag starts `.github/workflows/release.yml`: it runs the tests, builds the pr
 
 Not in this version, and planned for later ones:
 
-- **Shear wall design.** Walls are counted and reported as not designed.
-- **Drift in the design loop.** Drift is checked on the final sizes and reported; members are not resized for it.
+- **Drift by the most effective members.** The design loop grows the columns and girders of the stories that fail drift; choosing the members that remove the most drift per concrete added is not done yet.
 - **Steel and composite members from the ETABS model.** `sdt steel` and `sdt composite` are standalone checks with typed inputs.
 - **Flanged beams.** The design loop resizes rectangular beams and rectangular or circular columns only.
 - **Applying Ax to the model.** `sdt irregularity` reports the accidental torsion amplifier of each level; it does not yet write it into the seismic patterns.
 - **The irregularities left to judgement**: in-plane discontinuity, out-of-plane offsets, non-parallel systems, and the change of diaphragm stiffness from story to story.
-- **Redundancy factor ρ and the system factors.** ρ is a fixed value, and R and Ω0 are not checked against Table 208-11A by system.
+- **Redundancy factor ρ.** ρ is a fixed value (R and Ω0 come from the system of Table 208-11A since v0.7.0).
 - **Slabs on the framing plans.** `sdt plans` draws beams, columns, walls and grids; slab marks and span arrows are not drawn yet.
 - **Equations in the batch reports.** The beam and column reports, and Part C of the full project report, hold tables of values for each member. Writing out the equations of every member with their numbers is planned as a choice.
 - **The full project report for a model designed earlier.** Today it is written at the end of `sdt design` only.

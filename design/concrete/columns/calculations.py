@@ -96,6 +96,8 @@ def _column_calc_member(rows: pd.DataFrame) -> MemberReport:
             worst_shear = max(utilization, worst_shear) if worst_shear == worst_shear else utilization
             shear_rows.append([
                 label, governing.get("Combo"), number(governing.get("Analysis_Vu_kN")),
+                number(governing.get("Mpr_Bottom_kNm")), number(governing.get("Mpr_Top_kNm")),
+                number(governing.get("Ve_Clear_Height_mm"), 0),
                 number(governing.get("Probable_Ve_kN")), number(governing.get("Design_Vu_kN")),
                 number(governing.get("Vc_kN")), number(governing.get("phi_Vn_kN")),
                 number(utilization), governing.get("Shear_Check"),
@@ -146,10 +148,13 @@ def _column_calc_member(rows: pd.DataFrame) -> MemberReport:
         ),
         ReportTable(
             "Column shear - governing combination at each end",
-            ["End", "Combination", Tex("$V_u$"), Tex("$V_e$"), Tex("Design $V_u$"),
+            ["End", "Combination", Tex("$V_u$"), Tex(r"$M_{pr,bot}$"), Tex(r"$M_{pr,top}$"),
+             Tex(r"$\ell_u$"), Tex("$V_e$"), Tex("Design $V_u$"),
              Tex("$V_c$"), Tex(r"$\phi V_n$"), Tex(r"$V_u/\phi V_n$"), "Check"],
-            shear_rows, "l" + combo + "rrrrrrl",
-            "Forces in kN. Ve is the shear from the probable moment strengths at the column ends.",
+            shear_rows, "l" + combo + "rrrrrrrrrl",
+            "Forces in kN, moments in kN-m, lu in mm. Ve = (Mpr,bot + Mpr,top) / lu (NSCP "
+            "418.7.6.1.1; ACI 18.7.6.1.1): the probable moment strengths at the column ends, each "
+            "at most what the beams framing in can deliver, over the clear height.",
         ),
         ReportTable(
             "Strong column - weak beam",
@@ -193,7 +198,7 @@ def _column_calc_member(rows: pd.DataFrame) -> MemberReport:
             ["Tie legs along X edge", number(first.get("Transverse_Legs_X"), 0)],
             ["Tie legs along Y edge", number(first.get("Transverse_Legs_Y"), 0)]])
         + [
-            ["Governing ACI 18.7.5 expression", first.get("Confinement_Criteria_Governing")],
+            ["Governing NSCP 418.7.5 (ACI 18.7.5) expression", first.get("Confinement_Criteria_Governing")],
             ["High axial load or high concrete strength rule", first.get("High_Axial_or_High_fc_Check")],
         ]
         + confinement
@@ -283,11 +288,11 @@ def _column_slenderness_table(rows: pd.DataFrame) -> ReportTable | None:
         else "PASS - not slender")
     beta = _numbers_of(rows, "Slender_beta_dns")
     return ReportTable(
-        "Slenderness (ACI 6.2.5, 6.6.4.5)",
+        "Slenderness (NSCP 406.2.5, 406.6.4.5; ACI 6.2.5, 6.6.4.5)",
         ["Axis", Tex("$l_u$ (mm)"), Tex("$k$"), Tex("$k l_u/r$"), "Limit", "Slender",
          Tex("$C_m$"), Tex("$P_c$ (kN)"), Tex(r"$\delta_{ns}$")],
         body, "lrrrrlrrr",
-        "Sway (P-Delta) effects are in the forces of the ETABS P-delta analysis (ACI 6.7). "
+        "Sway (P-Delta) effects are in the forces of the ETABS P-delta analysis (NSCP 406.7; ACI 6.7). "
         "Member (P-delta) effects are added here by moment magnification: Mu2 and Mu3 in the "
         "table above are the magnified design moments. Limit = 34 + 12 M1/M2, at most 40; "
         "k from the alignment chart of a braced column, at most 1.0; (EI)eff = 0.4 Ec Ig / "
@@ -323,7 +328,8 @@ def column_interaction_figure(rows: pd.DataFrame, path: str, dmain: float, dties
     compact JPEG when the path ends in .jpg, as the calculation report asks).
 
     The demands are every combination at both ends; the hull vertices and the
-    governing demand are marked. None when the layout has no surface.
+    governing demand are marked. The P-M diagrams in the XZ and YZ planes are saved
+    beside it (``planes_path``). None when the layout has no surface.
     """
     from design.concrete.columns.interaction import (
         demand_moments,
@@ -357,7 +363,20 @@ def column_interaction_figure(rows: pd.DataFrame, path: str, dmain: float, dties
     utilization = [surface.utilization(*point) for point in points]
     governing = int(np.argmax(utilization)) if utilization else None
     title = f"{first['UniqueName']} - {first.get('Section')} - {bars} bars"
+    from design.concrete.columns.interaction import plot_planes
+
+    plot_planes(surface, points, planes_path(path), title)
     return plot_surface(surface, points, path, title, hull, governing)
+
+
+def planes_path(path: str) -> str:
+    """The file of the XZ and YZ plane diagrams written beside the surface ``path``."""
+    stem, extension = os.path.splitext(path)
+    return f"{stem}_planes{extension}"
+
+
+PLANES_CAPTION = ("The P-M diagrams of the same surface in the XZ plane (My = 0) and the YZ "
+                  "plane (Mx = 0), with each demand's Mx and My.")
 
 
 # The table the interaction surface is set beside: it is narrow, and long enough to
@@ -370,7 +389,7 @@ def build_column_calc_report(report: pd.DataFrame, filepath: str, information: l
     """Write the column calculation PDF from the report (internal field names).
 
     ``figure_options`` (dmain, dties, cover, is_smrf) adds each column's 3D
-    interaction surface with its demands.
+    interaction surface with its demands, and its P-M diagrams in the XZ and YZ planes.
     """
     import shutil
 
@@ -392,13 +411,15 @@ def build_column_calc_report(report: pd.DataFrame, filepath: str, information: l
         member = _column_calc_member(rows)
         if name in figures:
             member.figures.append(figures[name])
+            if os.path.isfile(os.path.join(folder, planes_path(figures[name][0]))):
+                member.figures.append((planes_path(figures[name][0]), PLANES_CAPTION))
             member.beside_figure = BESIDE_FIGURE
         members.append(member)
     if not members:
         raise ValueError("COLUMN DESIGN contains no designed columns to report.")
     try:
         return build_calc_report(
-            "Concrete Column Design Calculations (ACI 318M-14)",
+            "Concrete Column Design Calculations (NSCP 2015, ACI 318M-14)",
             list(information) + [("Columns reported", len(members))],
             ["Mark", "Column", "Story", "Size (mm)", "Bars", "Flexure D/C", "Shear D/C",
              "Status"],
@@ -416,7 +437,7 @@ def export_column_pdf(report: pd.DataFrame, path: str, is_smrf: bool, dmain: flo
                       dties: float, cover: float) -> str | None:
     """The column calculation report (PDF); None when LaTeX fails."""
     information = [
-        ("Design code", "ACI 318M-14"),
+        ("Design code", "NSCP 2015 chapter 4 (ACI 318M-14)"),
         ("Seismic design (SMRF)", "Yes" if is_smrf else "No"),
         ("Vertical bar diameter (mm)", number(dmain, 0)),
         ("Tie bar diameter (mm)", number(dties, 0)),
@@ -424,8 +445,8 @@ def export_column_pdf(report: pd.DataFrame, path: str, is_smrf: bool, dmain: flo
         ("Values shown", "Governing load combination at each end of each column"),
         ("Flexure and axial", "ACI design surface (phi Pn, phi Mnx, phi Mny), capacity along "
                               "the demand's moment direction at phi Pn = Pu"),
-        ("Second-order effects", "Sway: ETABS P-delta analysis (ACI 6.7). Member: moment "
-                                 "magnification (ACI 6.6.4.5)"
+        ("Second-order effects", "Sway: ETABS P-delta analysis (NSCP 406.7; ACI 6.7). Member: moment "
+                                 "magnification (NSCP 406.6.4.5; ACI 6.6.4.5)"
          if "Slenderness_Check" in report.columns else "Not included: the forces must hold them"),
     ]
     return build_column_calc_report(report, path, information, {

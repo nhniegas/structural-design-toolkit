@@ -480,6 +480,82 @@ def enter_values(
     return result["value"]
 
 
+def choose_for_each(
+    title: str, prompt: str, labels: list[str], choices: list[str],
+    defaults: dict[str, str] | None = None,
+) -> dict[str, str] | None:
+    """A dialog with one drop-down list per label, every list offering ``choices``.
+
+    Returns ``{label: choice}``, or ``None`` when the window is closed without
+    confirming. From an answers file it is answered like ``enter_values``,
+    each answer matched to one of the choices.
+    """
+    if not labels:
+        raise ValueError("choose_for_each needs at least one label.")
+    offered = {label: (defaults or {}).get(label, choices[0]) for label in labels}
+    scripted = answers.values(title, prompt, labels, offered)
+    if scripted is not answers.ASK:   # answered from the answers file
+        if scripted is None:
+            return None
+        out = {}
+        for label, text in scripted.items():
+            match = answers._match_option(text, choices)
+            if match is None:
+                raise answers.AnswersError(f"{label!r}: {text!r} is not one of " +
+                                           " | ".join(choices))
+            out[label] = match
+        return out
+    result: dict[str, dict[str, str] | None] = {"value": None}
+
+    root = _window(title)
+
+    def close():
+        _close(root)
+
+    def confirm():
+        result["value"] = {label: var.get() for label, var in chosen.items()}
+        close()
+
+    root.protocol("WM_DELETE_WINDOW", close)
+    _header(root, title)
+    body = tk.Frame(root, bg=BG)
+    body.pack(fill=tk.BOTH, expand=True, padx=_px(root, 24), pady=(_px(root, 18), _px(root, 18)))
+    text = tk.Frame(body, bg=BG)
+    text.pack(fill=tk.X)
+    rows = tk.Frame(body, bg=BG)
+    rows.pack(fill=tk.X, pady=(_px(root, 16), 0))
+    rows.columnconfigure(1, weight=1)
+    chosen: dict[str, tk.StringVar] = {}
+    width = max(len(c) for c in choices) + 2
+    for row, label in enumerate(labels):
+        tk.Label(rows, text=label, bg=BG, fg=TEXT, font=(BODY_FONT, 10), anchor="w").grid(
+            row=row, column=0, sticky="w", pady=_px(root, 4), padx=(0, _px(root, 16)))
+        var = tk.StringVar(root, value=offered[label])
+        menu = tk.OptionMenu(rows, var, *choices)
+        menu.configure(bg=FIELD, fg=TEXT, activebackground=AMBER_DIM, activeforeground=TEXT,
+                       highlightthickness=1, highlightbackground=LINE, relief=tk.FLAT,
+                       font=(BODY_FONT, 10), anchor="w", width=width, bd=0)
+        menu["menu"].configure(bg=FIELD, fg=TEXT, activebackground=AMBER,
+                               activeforeground=BG, font=(BODY_FONT, 10), bd=0)
+        menu.grid(row=row, column=1, sticky="ew", pady=_px(root, 4))
+        chosen[label] = var
+
+    root.update_idletasks()
+    _prompt(text, prompt, max(rows.winfo_reqwidth(), _px(root, 400)))
+    _footer(root, confirm, close)
+    root.bind("<Return>", lambda _event: confirm())
+    root.bind("<Escape>", lambda _event: close())
+    _place(root)
+    try:
+        root.lift()
+        root.focus_force()
+        root.mainloop()
+    except tk.TclError:
+        pass
+    answers.keep(title, prompt, result["value"])
+    return result["value"]
+
+
 class DualListboxSelector:
     """A screen-centered window with two lists: what is available, and what is
     chosen. Items move with the buttons between them or with a double click."""

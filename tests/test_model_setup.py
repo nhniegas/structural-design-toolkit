@@ -113,7 +113,7 @@ def test_static_and_spectrum_sets_share_one_number_and_one_format():
         assert sum(n.startswith(f"ULS {number} ") and " EQ" in n for n in names) == 8
         assert sum(n.startswith(f"ULS {number} ") and " RSA" in n for n in names) == 8
     assert not any(" - " in n and not ("(0.9 - Ev)" in n or "(0.6 - " in n or "- 1.0 Em" in n
-                                       or n.startswith("DRIFT "))
+                                       or n.startswith("DRIFT ") or n.endswith((" WX", " WY")))
                    for n in names)
 
 
@@ -135,7 +135,7 @@ def test_combinations_only_use_what_was_created_before_them():
     for combo in lc.build_combinations(PATTERNS, 0.4):
         assert all(name in seen for name, _ in combo.combos), combo.name
         seen.add(combo.name)
-    assert len(seen) == 168
+    assert len(seen) == 188          # 168 before v0.7.0, plus 20 with the wind reversed
 
 
 def test_drift_combinations_follow_203_with_rho_one():
@@ -150,6 +150,21 @@ def test_drift_combinations_follow_203_with_rho_one():
     wind = combos["WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WX"]
     assert dict(wind.cases)["WX"] == 1.0
     assert combos["ENVE_DRIFT"].envelope and combos["ENVE_WDRIFT"].envelope
+
+
+def test_every_wind_combination_also_has_the_wind_reversed():
+    """The wind blows either way (v0.7.0): 0.9 D - 1.0 W governs the uplift."""
+    combos = _combos()
+    assert dict(combos["ULS 108 0.9 DL + 1.0 WX"].cases)["WX"] == 1.0
+    assert dict(combos["ULS 108 0.9 DL - 1.0 WX"].cases)["WX"] == -1.0
+    assert dict(combos["SLS 103 1.0 DL - 0.6 WY"].cases)["WY"] == -0.6
+    reversed_drift = combos["WDRIFT 101 1.2 DL + f LL + 0.5 Lr + 1.0 WX reversed"]
+    assert dict(reversed_drift.cases)["WX"] == -1.0
+    for kind in ("ULS", "SLS", "WDRIFT"):
+        plus = [n for n in combos if n.startswith(kind + " ") and " WX" in n and "reversed" not in n
+                and " - " not in n.split(" DL")[-1]]
+        minus = [n for n in combos if n.startswith(kind + " ") and " WX" in n and n not in plus]
+        assert len(plus) == len(minus) > 0, kind
 
 
 def test_deflection_combinations_are_unfactored_and_not_designed():
@@ -216,7 +231,8 @@ def test_circular_columns_are_named_by_diameter():
 def test_extra_patterns_are_added_once_and_soil_is_not_standard():
     settings = ms.merge_settings({"extra_dead": ["elevator dead", "SIDL"], "extra_live": ["Stage"]})
     patterns = {name: kind for name, kind, _ in ms.load_patterns(settings)}
-    assert patterns["ELEVATOR DEAD"] == "Super Dead" and patterns["STAGE"] == "Live"
+    # names keep their case (v0.7.0), so a model's own "Dead" is the same pattern
+    assert patterns["elevator dead"] == "Super Dead" and patterns["Stage"] == "Live"
     assert "SOIL" not in patterns
     assert len(patterns) == len(ms.STANDARD_PATTERNS) + 2
 
@@ -545,3 +561,74 @@ def test_the_wind_table_is_not_written_when_it_already_holds_the_values():
     blank = [{"Name": "WX", "Angle": ""}, {"Name": "WY", "Angle": 0.0}]
     assert ms.table_holds(model, ms.WIND_TABLE, blank) is False
     assert ms.table_holds(model, ms.WIND_TABLE, blank, ignore=("Angle",)) is True
+
+
+def test_the_system_gives_r_and_omega0():
+    """NSCP Table 208-11A: Omega0 follows the system chosen (v0.7.0), not one value for all."""
+    from etabs_api.workflows import model_setup as setup
+
+    settings = setup.merge_settings(None)
+    assert setup.system_of(settings).key == "C1" and setup.system_omega0(settings) == 2.8
+    settings["seismic"].update(system="B2", r_factor=5.6)   # ordinary walls, building frame
+    assert setup.system_omega0(settings) == 2.2
+    sslc = {c.name: c for c in setup.combinations(settings)}["SSLC 100 1.2 DL + f LL + 1.0 Em EQ"]
+    assert sslc.combos == [("ENVE_EQ", 2.2)]
+    # inputs saved before v0.7.0 have only R: the first system with it
+    settings["seismic"].pop("system")
+    settings["seismic"]["r_factor"] = 2.2
+    assert setup.system_of(settings).key == "F1" and setup.system_omega0(settings) == 2.0
+
+
+def test_inputs_saved_with_r_only_keep_their_r():
+    from etabs_api.workflows import model_setup as setup
+
+    merged = setup.merge_settings({"seismic": {"r_factor": 6.5}})
+    assert merged["seismic"]["system"] == "D2" and setup.system_of(merged).r == 6.5
+
+
+class _Patterns:
+    """The LoadPatterns of a fake model: name -> (ETABS type, self weight)."""
+
+    def __init__(self, patterns):
+        self.patterns = patterns
+
+    def GetNameList(self, *_):
+        return 0, list(self.patterns)
+
+    def GetLoadType(self, name):
+        return self.patterns[name][0], 0
+
+    def GetSelfWTMultiplier(self, name):
+        return self.patterns[name][1], 0
+
+
+def test_the_models_own_patterns_get_a_role(monkeypatch):
+    """v0.7.0: setup on a model with its own patterns puts them in the combinations and mass."""
+    from types import SimpleNamespace
+
+    from utilities import _gui_helpers
+
+    model = SimpleNamespace(LoadPatterns=_Patterns({
+        "Dead": (1, 1.0), "SDL": (2, 0.0), "Live": (3, 0.0), "EQX": (5, 0.0),
+        "SELFWEIGHT": (1, 1.0), "WX": (6, 0.0),
+        # made by ETABS itself: never listed
+        "WX(1/12)": (6, 0.0), "EQXSD(2/2)": (37, 0.0), "~LLRF": (8, 0.0)}))
+    settings = ms.merge_settings(None)
+    found = ms.own_patterns(model, settings)
+    assert [name for name, _, _ in found] == ["Dead", "SDL", "Live", "EQX"]
+    offered = ms.role_defaults(found, settings)
+    assert ms.PATTERN_ROLES[offered["Dead"]] == "extra_dead"
+    assert ms.PATTERN_ROLES[offered["Live"]] == "extra_live"
+    assert ms.PATTERN_ROLES[offered["EQX"]] == "left_out"
+    monkeypatch.setattr(_gui_helpers, "choose_for_each",
+                        lambda title, prompt, labels, choices, defaults: defaults)
+    settings, notes = ms.map_own_patterns(model, settings, "Model Setup")
+    patterns = {name: kind for name, kind, _ in ms.load_patterns(settings)}
+    assert patterns["Dead"] == "Super Dead" and patterns["SDL"] == "Super Dead"
+    assert patterns["Live"] == "Live" and "EQX" not in patterns
+    assert settings["left_out"] == ["EQX"]
+    assert ("Dead", 1.0) in ms.mass_source_loads(settings)
+    assert any("Dead had a self weight multiplier of 1" in n for n in notes)
+    # the strength combinations carry the model's own dead and live patterns
+    combo = {c.name: c for c in ms.combinations(settings)}["ULS 101 1.2 DL + 1.6 LL + 0.5 Lr"]
+    assert dict(combo.cases)["Dead"] == 1.2 and dict(combo.cases)["Live"] == 1.6

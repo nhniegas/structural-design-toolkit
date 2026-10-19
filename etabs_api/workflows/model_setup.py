@@ -37,7 +37,9 @@ if __package__ in (None, ""):
     sys.path.insert(
         0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from design.criteria.code_config import CODE, NSCP
+from design.criteria.code_config import (
+    CODE, CONCRETE_SYSTEMS, DEFAULT_SYSTEM, NSCP, seismic_system, systems_with_r)
+from etabs_api.core.connection import save_model  # noqa: E402
 from etabs_api.core.helpers import as_list, return_code
 from etabs_api.workflows.load_combinations import DRIFT_SPECTRUM_CASES as lc_drift_cases
 from etabs_api.workflows.load_combinations import Combination, build_combinations
@@ -131,13 +133,15 @@ DEFAULT_SETTINGS = {
     "walls": {"thickness": [150, 200, 250, 300], "concrete_ksi": None},
     "seismic": {
         "zone_factor": 0.4, "soil_type": "SD", "source_type": "A", "distance_km": 10.0,
-        "importance": 1.0, "r_factor": NSCP.seismic.smrf_r, "ct": 0.03,
+        "importance": 1.0, "system": DEFAULT_SYSTEM, "r_factor": NSCP.seismic.smrf_r, "ct": 0.03,
         "eccentricity": NSCP.seismic.eccentricity,
     },
     "wind": {"speed": 150.0, "exposure": "B", "kzt": 1.0, "gust": 0.85, "kd": 0.85},
     "extra_dead": [],
     "extra_live": [],
     "extra_reducible_live": [],
+    "extra_roof_live": [],
+    "left_out": [],           # the model's own patterns left out of the combinations and mass
     # Seismic mass: every dead pattern at 1.0, plus these fractions of live load.
     "mass": {"include_reducible_live": False},
 }
@@ -256,13 +260,101 @@ def load_patterns(settings: dict) -> list[tuple[str, str, float]]:
     patterns = list(STANDARD_PATTERNS)
     taken = {name for name, _, _ in patterns}
     for key, kind in (("extra_dead", "Super Dead"), ("extra_live", "Live"),
-                      ("extra_reducible_live", "Reducible Live")):
+                      ("extra_reducible_live", "Reducible Live"),
+                      ("extra_roof_live", "Roof Live")):
         for name in settings.get(key, []):
-            name = str(name).strip().upper()
-            if name and name not in taken:
+            name = str(name).strip()
+            if name and name.upper() not in {t.upper() for t in taken}:
                 patterns.append((name, kind, 0.0))
                 taken.add(name)
     return patterns
+
+
+# What each of the model's own load patterns is, for sdt setup (the settings key of each)
+PATTERN_ROLES = {
+    "Super dead (in DL)": "extra_dead",
+    "Live, not reducible (in LL)": "extra_live",
+    "Live, reducible (in LL)": "extra_reducible_live",
+    "Roof live (in Lr)": "extra_roof_live",
+    "Leave it out (not in the combinations or the mass)": "left_out",
+}
+# the role offered first, by the pattern's ETABS type (eLoadPatternType)
+_ROLE_OF_TYPE = {1: "extra_dead", 2: "extra_dead", 3: "extra_live", 4: "extra_reducible_live",
+                 11: "extra_roof_live"}
+
+
+def etabs_generated(name: str) -> bool:
+    """A pattern ETABS makes by itself: the parts of a wind or seismic pattern
+    (``WX(3/12)``, ``EQXSD(1/2)``) and the hidden ones (``~LLRF``, ``~RSAXECC``); also
+    the added torsion of Ax that sdt analyze makes (``AX EQXPE``)."""
+    return (name.startswith(("~", "AX EQ")) or re.fullmatch(r".+\(\d+/\d+\)", name)
+            is not None)
+
+
+def own_patterns(model, settings: dict) -> list[tuple[str, int, float]]:
+    """The model's load patterns that are not the setup's own: (name, ETABS type,
+    self weight multiplier)."""
+    ours = {name.upper() for name, _, _ in STANDARD_PATTERNS}
+    out = []
+    for name in as_list(model.LoadPatterns.GetNameList(0, [])[1]):
+        name = str(name)
+        if name.upper() in ours or etabs_generated(name):
+            continue
+        kind = int(model.LoadPatterns.GetLoadType(name)[0])
+        weight = float(model.LoadPatterns.GetSelfWTMultiplier(name)[0])
+        out.append((name, kind, weight))
+    return out
+
+
+def role_defaults(found: list[tuple[str, int, float]], settings: dict) -> dict[str, str]:
+    """The role offered for each pattern: the one chosen before, else by its type.
+    Seismic, wind and other patterns are left out: setup makes its own."""
+    label_of = {key: label for label, key in PATTERN_ROLES.items()}
+    out = {}
+    for name, kind, _ in found:
+        before = next((key for key in PATTERN_ROLES.values()
+                       if name.upper() in {str(n).upper() for n in settings.get(key, [])}), None)
+        out[name] = label_of[before or _ROLE_OF_TYPE.get(kind, "left_out")]
+    return out
+
+
+def apply_roles(settings: dict, found: list[tuple[str, int, float]],
+                chosen: dict[str, str]) -> list[str]:
+    """Put each pattern in the list of its role. Returns the notes for the summary
+    (a second self weight set to zero)."""
+    names = {name.upper() for name, _, _ in found}
+    for key in PATTERN_ROLES.values():
+        settings[key] = [n for n in settings.get(key, []) if str(n).upper() not in names]
+    notes = []
+    for name, _, weight in found:
+        key = PATTERN_ROLES[chosen[name]]
+        settings[key].append(name)
+        if weight and key != "left_out":
+            notes.append(f"{name} had a self weight multiplier of {weight:g}: set to 0, since "
+                         "SELFWEIGHT carries the self weight (it would be counted twice)")
+        elif weight:
+            notes.append(f"{name} keeps its self weight multiplier of {weight:g} but is left "
+                         "out of the combinations and the mass")
+    return notes
+
+
+def map_own_patterns(model, settings: dict, title: str) -> tuple[dict, list[str]] | None:
+    """Ask what each of the model's own load patterns is, so the combinations, the
+    mass and the P-delta load include them. None when cancelled."""
+    from utilities._gui_helpers import choose_for_each
+
+    found = own_patterns(model, settings)
+    if not found:
+        return settings, []
+    chosen = choose_for_each(
+        title, "This model has load patterns of its own. Say what each one is, so the "
+        "combinations, the seismic mass and the P-delta load include it. Seismic and wind "
+        "patterns are best left out: setup defines its own (EQX..., EQY..., WX, WY).",
+        [name for name, _, _ in found], list(PATTERN_ROLES), role_defaults(found, settings))
+    if chosen is None:
+        return None
+    notes = apply_roles(settings, found, chosen)
+    return settings, notes
 
 
 def mass_source_loads(settings: dict) -> list[tuple[str, float]]:
@@ -314,11 +406,28 @@ def seismic_values(settings: dict) -> dict:
     }
 
 
+def system_of(settings: dict):
+    """The system of NSCP Table 208-11A of the setup inputs. Inputs saved before
+    v0.7.0 have only R: the first system with that R is taken."""
+    s = settings["seismic"]
+    found = seismic_system(s.get("system"))
+    if found is None:
+        found = next(iter(systems_with_r(float(s.get("r_factor", 0)))), None)
+    return found
+
+
+def system_omega0(settings: dict) -> float:
+    """Omega0 of the system (NSCP Table 208-11A), for Em = Omega0 Eh."""
+    found = system_of(settings)
+    return found.omega0 if found else OMEGA0
+
+
 def combinations(settings: dict) -> list[Combination]:
     values = seismic_values(settings)
     return build_combinations(
         {name: kind for name, kind, _ in load_patterns(settings)},
-        values["ca"], settings["seismic"]["importance"], RHO, OMEGA0, LIVE_FACTOR,
+        values["ca"], settings["seismic"]["importance"], RHO, system_omega0(settings),
+        LIVE_FACTOR,
     )
 
 
@@ -338,6 +447,11 @@ def merge_settings(saved: dict | None) -> dict:
                     merged[key][inner] = inner_value
         else:
             merged[key] = value
+    seismic = (saved or {}).get("seismic") or {}
+    if "r_factor" in seismic and "system" not in seismic:
+        # saved before v0.7.0, with R only: the system follows R, not the default
+        match = systems_with_r(float(seismic["r_factor"]))
+        merged["seismic"]["system"] = match[0].key if match else None
     return merged
 
 
@@ -375,6 +489,7 @@ class SetupLog:
     def __init__(self):
         self.counts: dict[str, int] = {}
         self.problems: list[str] = []
+        self.notes: list[str] = []
 
     def done(self, what: str, count: int = 1) -> None:
         self.counts[what] = self.counts.get(what, 0) + count
@@ -757,7 +872,7 @@ def save_and_reopen(model, path: str, log: SetupLog) -> bool:
     first save after the edit still works, and opening that file clears
     what ETABS kept.
     """
-    if not log.check(model.File.Save(path), f"saving the model: {path}"):
+    if not log.check(save_model(model, path), f"saving the model: {path}"):
         return False
     opened = log.check(model.File.OpenFile(path), "opening the saved model again")
     from etabs_api.core.connection import use_working_units
@@ -887,7 +1002,7 @@ def make_seismic_per_code(model, path: str, settings: dict, log: SetupLog) -> bo
         log.problems.append(f"per-code seismic skipped: the model has {frames} frames and a "
                             "reload from text would rename them (Ca and Cv stay user defined)")
         return False
-    if not log.check(model.File.Save(path), "saving before the per-code seismic step"):
+    if not log.check(save_model(model, path), "saving before the per-code seismic step"):
         return False
     text_path = os.path.splitext(path)[0] + ".$et"
     try:
@@ -906,7 +1021,7 @@ def make_seismic_per_code(model, path: str, settings: dict, log: SetupLog) -> bo
         from etabs_api.core.connection import use_working_units
 
         opened = log.check(model.File.OpenFile(edited), "opening the edited model text file")
-        done = (opened and log.check(model.File.Save(path), "saving the per-code model")
+        done = (opened and log.check(save_model(model, path), "saving the per-code model")
                 and log.check(model.File.OpenFile(path), "opening the saved per-code model"))
         use_working_units(model)  # a file opens in its own units
         return done
@@ -1046,7 +1161,10 @@ class SetupResult:
             ["Seismic source type", s["source_type"]],
             ["Distance to the source (km)", f"{s['distance_km']:g}"],
             ["Importance factor, I", f"{s['importance']:g}"],
+            ["System (Table 208-11A)", system_of(self.settings).label()
+             if system_of(self.settings) else "-"],
             ["R", f"{s['r_factor']:g}"],
+            ["Omega0", f"{system_omega0(self.settings):g}"],
             ["Ct", f"{s['ct']:g}"],
             ["Ca", f"{values['ca']:.4f}"],
             ["Cv", f"{values['cv']:.4f}"],
@@ -1175,7 +1293,7 @@ def setup_model(
             path, counter = f"{stem} - SETUP{extension}", 2
             while os.path.exists(path):
                 path, counter = f"{stem} - SETUP ({counter}){extension}", counter + 1
-    if return_code(model.File.Save(path)) != 0:
+    if return_code(save_model(model, path)) != 0:
         raise RuntimeError(f"ETABS could not save the model: {path}")
     log = apply_model_setup(model, settings)
     if new_model:
@@ -1297,7 +1415,7 @@ def ask_settings(settings: dict) -> dict | None:
         "Seismic zone factor Z": s["zone_factor"], "Soil profile type (SA to SE)": s["soil_type"],
         "Seismic source type (A, B, C)": s["source_type"],
         "Distance to the source (km)": s["distance_km"], "Importance factor I": s["importance"],
-        "R": s["r_factor"], "Ct (as typed in ETABS)": s["ct"],
+        "Ct (as typed in ETABS)": s["ct"],
         "Accidental eccentricity ratio": s["eccentricity"],
     }
     answers = ask("Seismic (UBC 97)", "One set of seismic inputs for the whole project. Ca and "
@@ -1305,12 +1423,22 @@ def ask_settings(settings: dict) -> dict | None:
     if answers is None:
         return None
     for key, label in zip(
-        ("zone_factor", "soil_type", "source_type", "distance_km", "importance", "r_factor",
+        ("zone_factor", "soil_type", "source_type", "distance_km", "importance",
          "ct", "eccentricity"), fields,
     ):
         text = answers[label].strip()
         s[key] = text.upper() if key in ("soil_type", "source_type") else float(text)
     seismic_values(settings)  # raises a clear error on an invalid zone, soil or source
+    current = system_of(settings) or seismic_system(DEFAULT_SYSTEM)
+    labels = [system.label() for system in CONCRETE_SYSTEMS]
+    chosen = select_option(
+        "Seismic (UBC 97)", "The earthquake-force-resisting system (NSCP Table 208-11A). R and "
+        "Omega0 follow from it, and sdt check compares the building height with its limit.",
+        labels, default_index=labels.index(current.label()))
+    if chosen is None:
+        return None
+    system = CONCRETE_SYSTEMS[labels.index(chosen)]
+    s["system"], s["r_factor"] = system.key, system.r
 
     # ---- wind ----
     w = settings["wind"]
@@ -1434,6 +1562,12 @@ def run_model_setup() -> str | None:
         settings = ask_settings(merge_settings(load_settings(defaults_path())))
     if settings is None:
         return None
+    notes: list[str] = []
+    if not new_model:
+        mapped = map_own_patterns(model, settings, title)
+        if mapped is None:
+            return None
+        settings, notes = mapped
 
     with LoadingWindow("Defining the model parameters...") as window:
         if new_model:
@@ -1441,10 +1575,11 @@ def run_model_setup() -> str | None:
             # does not replace the model that is open in ETABS.
             model.InitializeNewModel(UNITS_N_MM)
             model.File.NewBlank()
-        if return_code(model.File.Save(path)) != 0:
+        if return_code(save_model(model, path)) != 0:
             show_warning(f"ETABS could not save the model:\n{path}", title=title)
             return None
         log = apply_model_setup(model, settings, progress=window.update)
+        log.notes += notes
         if new_model:
             remove_blank_model_defaults(model)
             # A new model holds nothing else yet, so reloading it from text is safe.
@@ -1471,8 +1606,14 @@ def setup_summary(log: SetupLog, settings: dict, path: str, new_model: bool = Fa
                                         f"Ev {values['ev']:.3f} D")
     summary.add("Spectrum scale factor", f"{values['scale']:.1f} (g I / R; sdt analyze scales it "
                                          "to the static base shear)")
+    own = [f"{label.split(' (')[0].lower()}: {', '.join(settings[key])}"
+           for label, key in PATTERN_ROLES.items() if settings.get(key)]
+    if own:
+        summary.add("Patterns of the model", "; ".join(own))
     for problem in log.problems:
         summary.fail(problem)
+    for note in log.notes:
+        summary.note(note)
     summary.file("Model", path)
     summary.file("Setup inputs", settings_path(path))
     return summary

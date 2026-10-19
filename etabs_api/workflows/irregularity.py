@@ -20,6 +20,9 @@ Computed from the analysis results, on the static seismic load cases:
   from the column design (``sdt columns`` must have run).
 * **Re-entrant corners** (plan type 2) and the openings of the diaphragm
   (plan type 3), from the outline of the floor shells.
+* A story with no diaphragm (no floor or joint assigned one) is left out of
+  the story-to-story checks above and listed: its mass, stiffness and drift
+  are not those of a floor. A model with no diaphragm at all is compared as is.
 * **P-delta stability coefficient** ``theta = Px D / (Vx h)`` of each story
   (UBC 1630.1.3), on first-order drifts: a copy of the model is analysed with
   P-delta off, and removed.
@@ -112,9 +115,32 @@ def compared_stories(masses: list[tuple[str, float]], base: str | None
     return stories, below, minor
 
 
-def levels_note(below: list[str], minor: list[str]) -> str:
+def diaphragm_stories(rows: list[dict]) -> set[str]:
+    """The stories with a diaphragm, from rows of the area and joint diaphragm
+    assignments (each with "Story" and "Diaphragm"). A joint "From Shell Object"
+    has a diaphragm only through a floor, which the area rows give."""
+    return {str(row.get("Story")) for row in rows
+            if str(row.get("Diaphragm") or "").strip() not in ("", "None", "nan",
+                                                                 "From Shell Object")
+            and str(row.get("Story") or "").strip() not in ("", "None", "nan")}
+
+
+def without_diaphragm(order: list[str], with_diaphragm: set[str]) -> list[str]:
+    """The stories of ``order`` with no diaphragm. None are when the model has no
+    diaphragm at all: then every story is compared as before."""
+    if not with_diaphragm:
+        return []
+    return [story for story in order if story not in with_diaphragm]
+
+
+def levels_note(below: list[str], minor: list[str], no_diaphragm: list[str] | None = None
+                ) -> str:
     """What is said of the levels left out of the vertical comparisons."""
     parts = []
+    if no_diaphragm:
+        whose = "their" if len(no_diaphragm) > 1 else "its"
+        parts.append(", ".join(no_diaphragm) + f" (no diaphragm: {whose} mass, stiffness and "
+                     "drift are not those of a floor)")
     if below:
         parts.append(", ".join(below) + " (at or below the base of the seismic patterns)")
     if minor:
@@ -823,10 +849,18 @@ def read_irregularity(connector, model_path: str, first_order: bool = True,
 
     corners, opening = plan_items([s for s in shapes if s[1] is not None])
     offset, plane, parallel = judged_items(planted, len(order))
+    say("Reading the diaphragms")
+    no_diaphragm = without_diaphragm(order, diaphragm_stories(
+        _table(model, "Area Assignments - Diaphragms")
+        + _table(model, "Joint Assignments - Diaphragms")))
     stories, below, minor = compared_stories(
         [(story, mass_of.get(story, 0.0)) for story in order if mass_of.get(story, 0.0) > NO_VALUE],
         _seismic_base(model))
-    note = levels_note(below, minor)
+    # a level at or below the base is left out for that already
+    no_diaphragm = [story for story in no_diaphragm if story not in below]
+    stories = [story for story in stories if story not in no_diaphragm]
+    minor = [story for story in minor if story not in no_diaphragm]
+    note = levels_note(below, minor, no_diaphragm)
     if note:
         report.notes.append(note)
     if strengths is not None:
@@ -837,7 +871,8 @@ def read_irregularity(connector, model_path: str, first_order: bool = True,
         geometry_item([row for row in extents if row[0] in stories]), offset,
         weak_story_item(strengths),
         torsion_item(pairs(drifts, "Max Drift", "Avg Drift"),
-                     pairs(moved, "Maximum", "Average"), order),
+                     pairs(moved, "Maximum", "Average"),
+                     [story for story in order if story not in no_diaphragm]),
         corners, opening, plane, parallel]
     if store is not None and column_report is not None and (
             store.is_stale() if design_is_old is None else design_is_old):
@@ -939,10 +974,18 @@ def run_irregularity() -> IrregularityReport | None:
         report.report().show()
     else:
         print(report.text())
-    saved = os.path.splitext(path)[0] + " - Irregularity.txt"
+    from utilities.output_folders import beside
+
+    saved = beside(path, " - Irregularity.txt")
     with open(saved, "w", encoding="utf-8") as handle:
         handle.write(report.text().lstrip("\n") + "\n")
     print(f"Saved: {saved}")
+    from etabs_api.workflows.seismic_factors import save_regularity
+
+    # sdt analyze reads it: 90 % spectrum scaling only for a regular structure
+    save_regularity(path, [i.name for i in report.items
+                           if i.irregular and i.group in (VERTICAL, PLAN)],
+                    [i.name for i in report.items if i.verdict.startswith(JUDGE)])
     irregularity_summary(report, saved).show(popup=True, echo=False)
     return report
 

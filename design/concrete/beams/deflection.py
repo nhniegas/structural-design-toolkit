@@ -1,4 +1,4 @@
-"""Beam deflection checks, ACI 318M-14 24.2, from the designed bars and the service moments.
+"""Beam deflection checks, NSCP 424.2 (ACI 24.2), from the designed bars and the service moments.
 
 For each beam, after its bars are chosen:
 
@@ -73,7 +73,7 @@ LIMIT_NOT_DAMAGED = 240
 
 
 def time_factor(months: float) -> float:
-    """xi for a load sustained ``months``: ACI Table 24.2.4.1.3 (1.0 at 3 months,
+    """xi for a load sustained ``months``: NSCP Table 424.2.4.1.3 (ACI Table 24.2.4.1.3) (1.0 at 3 months,
     1.2 at 6, 1.4 at 12, 2.0 at 60 or more), straight lines in between and
     from zero at the start."""
     months = max(0.0, float(months))
@@ -142,7 +142,7 @@ def cracked_inertia(b: float, d: float, as_tension: float, d_prime: float,
 
 
 def effective_inertia(ma: float, mcr: float, ig: float, icr: float) -> float:
-    """ACI 318-14 Eq. 24.2.3.5a; Ig when the section does not crack."""
+    """NSCP Eq. 424.2.3.5a (ACI Eq. 24.2.3.5a); Ig when the section does not crack."""
     if ma <= mcr or ma <= 0:
         return ig
     ratio = (mcr / ma) ** 3
@@ -279,7 +279,7 @@ DEFLECTION_COLUMNS = {
 }
 # shown only when the engineer gave the stages
 STAGE_COLUMNS = ("Defl_first_load_mm", "Defl_at_partitions_mm", "Defl_deducted_mm", "Defl_stages")
-DEFLECTION_FAILED = "FAILED: DEFLECTION (ACI 24.2.2)"
+DEFLECTION_FAILED = "FAILED: DEFLECTION (NSCP 424.2.2; ACI 24.2.2)"
 _ZONES = ("left", "mid", "right")
 _TIP_I = "Tip from rotation at I (mm)"
 _TIP_J = "Tip from rotation at J (mm)"

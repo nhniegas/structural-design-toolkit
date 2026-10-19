@@ -1,6 +1,6 @@
 # Grids, Columns and Walls from a DXF
 
-`sdt grids` (or `python main.py grids`) reads framing plans from one DXF file and builds the stories, grid lines, columns and walls of an ETABS model. Beams are drawn by hand in ETABS afterwards. When the plans are revised, running it again updates the model.
+`sdt model` (old name `sdt grids`) reads framing plans from one DXF file and builds the stories, grid lines, columns and walls of an ETABS model. When the plans are revised, running it again updates the model. It then offers to frame the floors (girders, beams, slabs and their loads): see [The model from a DXF, with its framing](etabs_model.md). Answer No to draw the beams by hand instead.
 
 Code: `etabs_api/workflows/grid_column_model.py`. Sample drawings: `edb/plan dxf/`.
 
@@ -33,7 +33,7 @@ Other rules:
 
 ```powershell
 .venv\Scripts\Activate.ps1
-sdt grids
+sdt model
 ```
 
 `python etabs_api/workflows/grid_column_model.py` does the same.
@@ -43,7 +43,7 @@ sdt grids
 3. Choose whether to add a footing level (see below); if so, type the embedment depth (mm) and the name of the ground level (`GF` by default). Both are remembered.
 4. Choose the model: the one open in ETABS, or a new blank model. For the open model, choose whether the changes go **into this model** or **into a copy**: the copy is saved where you choose (`<name> - REV.EDB` is offered) with the model's saved setup inputs, and the model it came from is left as it is on disk. ETABS has the copy open afterwards.
 5. A dialog lists what will change. Choose **Apply these changes** or **Cancel**.
-6. The closing summary, shown in a window and printed in the terminal, lists what was done. The full list of changes is saved beside the model as `<name> - plan changes.txt`.
+6. The closing summary, shown in a window and printed in the terminal, lists what was done. The full list of changes is saved in the model's folder as `Summaries/<name> - plan changes.txt`.
 
 Closing any dialog cancels the run without changing the model.
 
@@ -53,7 +53,7 @@ Closing any dialog cancels the run without changing the model.
 |---|---|
 | Seismic and wind patterns | Their bottom and top story follow the stories (bottom = the ground level). "Per Code" seismic patterns become "User Defined" with the same Ca and Cv, because ETABS resets their source distance when that table is written |
 | Stories | Names and heights from the plan titles. On a model with members, the base elevation and every story height are updated in place and ETABS moves the levels above with their members; stories can only be added or removed while the model has no members |
-| Grid lines | General grid lines in the first grid system. The drawing replaces them on every run |
+| Grid lines | General grid lines in the first grid system. The drawing replaces them on every run; the lines of the model's other grid systems (a rotated wing, an offset grid) are kept (since v0.7.0; before, they were rewritten into the first system) |
 | Column sections | `CR_<width>X<depth>_<concrete>_<rebar>` or `C_<diameter>_...`, created if missing, with the same rebar data as the model setup (no stiffness modifiers) |
 | Columns | From the level below up to the story of the plan. Depth is along the ETABS local 2 axis; the rotation is kept between 0 and 90 degrees |
 | Wall sections | `SW_<thickness>_<concrete>_<rebar>`, thin shell, created if missing |
@@ -89,7 +89,7 @@ Check the list in the confirmation dialog before applying, particularly for a la
 
 ## Limitations
 
-- Stories are not changed once the model has members. If the drawing's stories differ, the run reports it and leaves them.
+- Stories are not added or removed once the model has members. When the drawing names its stories differently from the model (`2F` against `L2`), they are paired before anything is changed: in order when they are as many, otherwise each with the model story within 300 mm of its level. The pairing is shown in the confirmation (`2F = L2, ...`), and the drawing's columns and walls take the model's story names, so the columns of the model are matched as usual. When a story of the drawing finds no pair, the run stops with both lists of stories and their levels, and nothing is changed. Before v0.7.0 a difference in name removed every column of the model.
 - Beams are not created or reconnected. After a column is removed or replaced, reconnect the beams by hand.
 - Loads and assignments on a wall that is removed and drawn again are lost.
 - Only straight walls and rectangular or circular columns are read. Other outlines are skipped and listed as warnings in the report file.

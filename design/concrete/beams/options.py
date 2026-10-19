@@ -52,7 +52,7 @@ def ask_earth_cover_stories(stories: list[str], normal_cover: float,
 
 
 def ask_deflection_limit() -> int | None:
-    """Ask the long-term deflection limit (ACI Table 24.2.2); remembered for next time."""
+    """Ask the long-term deflection limit (NSCP Table 424.2.2; ACI Table 24.2.2); remembered for next time."""
     import json
 
     from utilities._gui_helpers import select_option
@@ -122,7 +122,7 @@ def ask_deflection_stages(title: str = "Beam Design - Deflection") -> Deflection
     chosen = select_option(
         title, "When are the partitions built?\n\nThe deflection that can damage partitions "
         "is the long-term deflection after they are built, plus the live load. The code lets "
-        "you leave out the long-term deflection that happens before (ACI Table 24.2.2). With "
+        "you leave out the long-term deflection that happens before (NSCP Table 424.2.2; ACI Table 24.2.2). With "
         "the time of construction the results also show the deflection at each stage.",
         [STAGES_UNKNOWN, STAGES_ENTER], default_index=1 if last.active else 0)
     if chosen is None:

@@ -56,6 +56,10 @@ The checks of the response spectrum scaling, the period cap and the base shear c
 
 Drift on combinations you picked uses their load cases as they are. Where a seismic case in them has the capped period of the strength design (NSCP 208.5.2.2), the drift is on larger forces than NSCP 208.6.5.2 requires, which is on the safe side; the report says so. The static / response spectrum question of `sdt drift` is not asked: the spectrum is scaled when a picked combination has a response spectrum case.
 
+## Units
+
+A model may be in any units. The commands work in N and mm through the ETABS API, and put the model's own units back at the end. A model a command saves (a copy, or the model after an analysis) is saved in its own units, so it opens again in kN-m if it was in kN-m (since v0.7.0; before, it opened in N-mm).
+
 ## What the summary tells you
 
 Every summary ends with where the inputs came from:

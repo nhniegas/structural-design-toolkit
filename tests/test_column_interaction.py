@@ -152,3 +152,26 @@ def test_closed_form_clip_matches_polygon_clipping():
             if clipped.area > 1:
                 assert float(sx) / float(area) == pytest.approx(clipped.centroid.x, abs=1e-6)
                 assert float(sy) / float(area) == pytest.approx(clipped.centroid.y, abs=1e-6)
+
+
+def test_plane_curves_are_the_surface_along_each_axis(rectangle):
+    _, _, surface = rectangle
+    curves = ci.plane_curves(surface, points=12)
+    for plane, (ux, uy) in (("XZ", (1, 0)), ("YZ", (0, 1))):
+        p, plus, minus = curves[plane]
+        assert p[0] < 0 < p[-1]
+        middle = len(p) // 2
+        expected, _ = surface.capacity(p[middle] * 1e3, ux, uy)
+        assert plus[middle] == pytest.approx(expected / 1e6)
+        # a symmetric section bends the same both ways
+        assert minus[middle] == pytest.approx(-plus[middle], rel=1e-3)
+    # the 600 wide, 800 deep section is stronger about x than about y
+    assert curves["XZ"][1].max() > curves["YZ"][1].max()
+
+
+def test_plot_planes_writes_the_figure(rectangle, tmp_path):
+    _, _, surface = rectangle
+    demands = np.array([[1.0e6, 2.0e8, -1.0e8], [2.0e6, -1.0e8, 5.0e7]])
+    path = ci.plot_planes(surface, demands, str(tmp_path / "C1_planes.png"), "C1")
+    assert (tmp_path / "C1_planes.png").stat().st_size > 0
+    assert path.endswith("C1_planes.png")

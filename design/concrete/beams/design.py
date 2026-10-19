@@ -32,7 +32,7 @@ from design.concrete.beams.results import (
 )
 
 
-COMPATIBILITY_TORSION = ("Compatibility torsion: Tu taken as at most phi Tcr (ACI 22.7.3.2); "
+COMPATIBILITY_TORSION = ("Compatibility torsion: Tu taken as at most phi Tcr (NSCP 422.7.3.2; ACI 22.7.3.2); "
                          "Tu in the table is the analysis value")
 
 
@@ -47,7 +47,7 @@ def torsion_basis_of(support_status: object, compatibility_torsion: bool) -> str
 
 
 def _torsion_code(torsion_basis: str, code: AciCode) -> AciCode:
-    """The code values with the torsion reduction of ACI 22.7.3.2 on or off."""
+    """The code values with the torsion reduction of NSCP 422.7.3.2 (ACI 22.7.3.2) on or off."""
     if torsion_basis == COMPATIBILITY_TORSION:
         return override(code, beam_torsion__allow_redistribution=True)
     return code
@@ -618,9 +618,9 @@ def _execute_beam_design(
                         if s_r["shear_failed"] or t_r["torsion_failed"]:
                             failure = (
                                 "SHEAR STRENGTH: Vu > phi(Vc + 0.66 sqrt(fc') bw d), "
-                                "ACI 22.5.1.2" if s_r["shear_failed"]
+                                "NSCP 422.5.1.2 (ACI 22.5.1.2)" if s_r["shear_failed"]
                                 else "SHEAR STRENGTH: shear + torsion stress above "
-                                "ACI 22.7.7.1"
+                                "NSCP 422.7.7.1 (ACI 22.7.7.1)"
                             )
                             if failure not in section_failures:
                                 section_failures.append(failure)
@@ -813,11 +813,11 @@ def _execute_beam_design(
                 summary["Design_Status"] = "FAILED: MAX BARS EXCEEDED (>3 LAYERS)"
             elif smrf_flexure_check == "FAIL":
                 summary["Design_Status"] = (
-                    "FAILED: SMRF MOMENT STRENGTH RATIOS (ACI 18.6.3.2)"
+                    "FAILED: SMRF MOMENT STRENGTH RATIOS (NSCP 418.6.3.2; ACI 18.6.3.2)"
                 )
             elif smrf_rho_check == "FAIL":
                 summary["Design_Status"] = (
-                    "FAILED: SMRF STEEL RATIO ABOVE 2.5% (ACI 18.6.3.1)"
+                    "FAILED: SMRF STEEL RATIO ABOVE 2.5% (NSCP 418.6.3.1; ACI 18.6.3.1)"
                 )
             elif section_failures:  # the section, not the stirrups, is too small
                 summary["Design_Status"] = "FAILED: " + "; ".join(section_failures)
@@ -967,7 +967,7 @@ def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict
                  long_limit_divisor: int = LIMIT_DAMAGED, progress=None,
                  earth_cover_stories=(), carrier_depth: bool = False,
                  compatibility_torsion: bool = False,
-                 office_bar_spacing: bool = True,
+                 office_bar_spacing: bool = False,
                  exempt_short_spans: bool = False,
                  deflection_stages: DeflectionStages | None = None,
                  load_path: dict | None = None) -> pd.DataFrame:
@@ -977,11 +977,11 @@ def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict
     SERVICE LOADS. ``earth_cover_stories`` are the levels whose beams get the
     75 mm earth-contact cover. ``carrier_depth`` also requires a beam to be at
     least as deep as the beams it carries. ``compatibility_torsion`` limits
-    the design torsion to phi Tcr (ACI 22.7.3.2). ``office_bar_spacing`` False
+    the design torsion to phi Tcr (NSCP 422.7.3.2; ACI 22.7.3.2). ``office_bar_spacing`` False
     drops the office rule of 150 mm clear between bars: the bar count for
-    spacing then comes from crack control (ACI 24.3.2). ``exempt_short_spans``
+    spacing then comes from crack control (NSCP 424.3.2; ACI 24.3.2). ``exempt_short_spans``
     designs the girders with a clear span under 4d without the SMRF rules
-    (ACI 18.6.2.1(a)). ``deflection_stages`` (when the partitions are built)
+    (NSCP 418.6.2.1(a); ACI 18.6.2.1(a)). ``deflection_stages`` (when the partitions are built)
     deducts the long-term deflection before them. ``load_path`` is what holds
     each beam end (``load_path_pushes``); it is read from the tables when not
     given, and the design loop gives the reading of its first analysis so

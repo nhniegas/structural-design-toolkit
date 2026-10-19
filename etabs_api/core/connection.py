@@ -138,6 +138,24 @@ def use_working_units(model) -> None:
                    f"SetPresentUnits({UNIT_NAMES[EXTRACTION_UNITS]})")
 
 
+def save_model(model, path: str | None = None):
+    """Save ``model`` (to ``path``, or to its own file) in the units it had before the
+    command, then go back to the working units.
+
+    ETABS stores the present units in the file: a model saved while a command
+    works in N-mm opens next time in N-mm (found on ETABS 22, v0.7.0). Returns
+    what ``File.Save`` returns.
+    """
+    original = next((units for borrowed, units in _BORROWED_UNITS if borrowed is model), None)
+    if original is not None:
+        model.SetPresentUnits(original)
+    try:
+        return model.File.Save(path) if path is not None else model.File.Save()
+    finally:
+        if original is not None:
+            model.SetPresentUnits(EXTRACTION_UNITS)
+
+
 def model_file(model) -> str:
     """The path of the open model as the user knows it: its .EDB.
 
@@ -157,9 +175,8 @@ def model_file(model) -> str:
 def restore_units() -> None:
     """Put back the units of every model a command worked on (``use_working_units``).
 
-    These are the units of the API session. ETABS does not store them in the
-    model file, and they are not the units its window displays, so nothing
-    needs to be saved again.
+    ETABS stores the present units in the model file, so every save during a
+    command goes through ``save_model``, which saves in these units.
     """
     while _BORROWED_UNITS:
         model, original = _BORROWED_UNITS.pop()
@@ -285,7 +302,7 @@ class ETABSConnector:
         if self.sap_model is None:
             return False
         try:
-            self.sap_model.File.Save()
+            save_model(self.sap_model)
             func_name = sys._getframe().f_code.co_name
             print(f"[{func_name}] Model saved successfully.")
             return True
@@ -530,7 +547,7 @@ class ETABSConnector:
     def close_model(self):
         """Save and close the ETABS application."""
         try:
-            self.sap_model.File.Save()
+            save_model(self.sap_model)
             func_name = sys._getframe().f_code.co_name
             print(f"[{func_name}] Model saved successfully.")
             self.etabs_object.ApplicationExit(False)

@@ -416,13 +416,15 @@ def run_quantities() -> Quantities | None:
         report.show()
     else:
         print(report.plain())
-    stem = os.path.splitext(path)[0]
+    from utilities.output_folders import beside
+
     files = {}
     try:
-        with open(stem + " - Concrete Quantities.txt", "w", encoding="utf-8") as handle:
+        text_path = beside(path, " - Concrete Quantities.txt")
+        with open(text_path, "w", encoding="utf-8") as handle:
             handle.write(report.plain().lstrip("\n") + "\n")
-        files["Report"] = stem + " - Concrete Quantities.txt"
-        files["Workbook"] = save_workbook(quantities, stem + " - Concrete Quantities.xlsx")
+        files["Report"] = text_path
+        files["Workbook"] = save_workbook(quantities, beside(path, " - Concrete Quantities.xlsx"))
     except PermissionError:
         show_warning("The quantities workbook is open in another program: close it and run sdt "
                      "quantities again to save it.", title=title)

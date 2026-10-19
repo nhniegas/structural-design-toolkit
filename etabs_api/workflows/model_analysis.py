@@ -34,6 +34,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from design.criteria.code_config import NSCP  # noqa: E402
+from etabs_api.core.connection import save_model  # noqa: E402
 from etabs_api.core.helpers import as_list, return_code  # noqa: E402
 
 G = NSCP.seismic.gravity  # mm/s2
@@ -68,6 +69,7 @@ class ShearScaling:
     spectrum_before: float       # N
     factor: float                # applied to the spectrum scale factor (1 = unchanged)
     spectrum_after: float        # N
+    target: float = SCALE_TARGET  # share of the static base shear: 1.0, or 0.9 when regular
 
 
 @dataclass
@@ -105,14 +107,50 @@ class AnalysisReport:
     story_weights: pd.DataFrame = field(default_factory=pd.DataFrame)
     warnings: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)  # checks that do not apply to this model
+    scale_target: float = SCALE_TARGET          # 0.9 when the structure is regular
+    scale_reason: str = ""
+    ax: object = None                           # seismic_factors.AxResult
+    rho: dict = field(default_factory=dict)     # direction -> seismic_factors.Rho
+    rho_combinations: int = 0
+
+    def seismic_lines(self) -> list[str]:
+        """Ax, rho and the scaling share, as lines."""
+        lines = []
+        if self.scale_reason:
+            lines.append(self.scale_reason)
+        ax = self.ax
+        if ax is not None:
+            if ax.applied:
+                worst = max(ax.ax.items(), key=lambda item: item[1])
+                lines.append(f"Ax (NSCP 208.5.1.4): applied once, from the static cases with 5 % "
+                             f"eccentricity; largest {worst[1]:.2f} at {worst[0][0]} "
+                             f"{worst[0][1]}. The added "
+                             f"torsion is in the patterns {', '.join(ax.patterns)}; the spectrum "
+                             f"eccentricity is {ax.spectrum_eccentricity:.3f}.")
+                lines += [f"  {story} {direction}: Ax {value:.2f}"
+                          for (story, direction), value in sorted(ax.ax.items())
+                          if value > 1.0 + 1e-9]
+            lines += ax.notes
+        for direction, r in sorted(self.rho.items()):
+            lines.append(f"rho {direction} = {r.rho:.3f} (NSCP 208.6.1: 2 - 6.1 / (rmax sqrt AB) "
+                         f"= 2 - 6.1 / ({r.r_max:.3f} x sqrt {r.area:.0f}) = {r.computed:.3f}; "
+                         f"rmax at {r.story or '-'}, {r.element or '-'})")
+            lines += [f"  {note}" for note in r.notes]
+        if self.rho:
+            lines.append(f"rho put in {self.rho_combinations} strength and service combinations "
+                         "(EQ_RHO and RSA_RHO); the Em and drift combinations keep rho 1.0."
+                         if self.rho_combinations else
+                         "rho not put in the combinations: the model has none of the setup's "
+                         "(EQ_COMBO_nn); use it in your own.")
+        return lines
 
     def report(self):
         """The report for the terminal: tables, and the equations with their numbers."""
         from utilities.terminal import Report
 
         out = Report("ETABS ANALYSIS", [f"Model: {self.model_path}"] if self.model_path else [])
-        out.heading(f"Response spectrum scaled to {SCALE_TARGET * 100:g} % of the static "
-                    "base shear (drift cases: of the drift patterns)")
+        out.heading(f"Response spectrum scaled to {self.scale_target * 100:g} % of the static "
+                    "base shear (drift cases: 100 % of the drift patterns)")
         out.table(["Direction", "Static case", "V static (kN)", "Spectrum case",
                    "V before (kN)", "V after (kN)", "Scale factor x"],
                   [[s.direction, s.static_case, f"{s.static_shear / 1e3:,.1f}", s.spectrum_case,
@@ -167,6 +205,10 @@ class AnalysisReport:
         if not self.story_weights.empty:
             out.table([str(c) for c in self.story_weights.columns],
                       self.story_weights.values.tolist(), "Weight of each story")
+        seismic = self.seismic_lines()
+        if seismic:
+            out.heading("Torsion amplification, redundancy and scaling")
+            out.lines(seismic)
         out.heading("Warnings")
         out.lines(self.warnings or ["None."], "yellow" if self.warnings else "green")
         if self.notes:
@@ -179,8 +221,8 @@ class AnalysisReport:
         lines = ["", "=" * 72, "ETABS ANALYSIS", "=" * 72]
         if self.model_path:
             lines.append(f"Model: {self.model_path}")
-        lines += ["", f"--- Response spectrum scaled to {SCALE_TARGET * 100:g} % of the static "
-                  "base shear (drift cases: of the drift patterns) ---"]
+        lines += ["", f"--- Response spectrum scaled to {self.scale_target * 100:g} % of the "
+                  "static base shear (drift cases: 100 % of the drift patterns) ---"]
         for s in self.scaling:
             lines.append(
                 f"{s.direction}: static {s.static_case} {s.static_shear / 1e3:,.1f} kN | "
@@ -224,6 +266,9 @@ class AnalysisReport:
             lines.append(f"Base reaction of the same loads:     {self.reaction_weight / 1e3:,.1f} kN")
         if not self.story_weights.empty:
             lines.append(self.story_weights.to_string(index=False))
+        seismic = self.seismic_lines()
+        if seismic:
+            lines += ["", "--- Torsion amplification, redundancy and scaling ---"] + seismic
         lines += ["", "--- Warnings ---"] + (self.warnings or ["None."])
         if self.notes:
             lines += ["", "--- Not applicable to this model ---"] + self.notes
@@ -312,8 +357,11 @@ def multiply_spectrum_scale(connector, case: str, factor: float) -> None:
         raise RuntimeError(f"Could not set the scale factor of {case}.")
 
 
-def scale_spectrum_to_static(connector, run, progress=None) -> list[ShearScaling]:
-    """Scale each spectrum case up to the static base shear of its direction.
+def scale_spectrum_to_static(connector, run, progress=None, target: float = SCALE_TARGET
+                             ) -> list[ShearScaling]:
+    """Scale each spectrum case up to ``target`` times the static base shear of its
+    direction (1.0; 0.9 for a regular structure, NSCP 208.5.3.5.4). The drift
+    spectrum cases always go to 100 % of the drift patterns.
 
     ``run`` runs the analysis. Returns the scaling of each direction.
     """
@@ -334,14 +382,15 @@ def scale_spectrum_to_static(connector, run, progress=None) -> list[ShearScaling
         static_case = max(own, key=lambda c: abs(first.loc[c, component]))
         out[case] = ShearScaling(direction, static_case, abs(first.loc[static_case, component]),
                                  case, abs(first.loc[case, component]), 1.0,
-                                 abs(first.loc[case, component]))
+                                 abs(first.loc[case, component]),
+                                 SCALE_TARGET if drift else target)
     say = progress or (lambda text: None)
     for attempt in range(1, MAX_SCALING_RUNS + 1):
         changed = False
         for item in out.values():
             if item.spectrum_after <= 0:
                 continue
-            ratio = SCALE_TARGET * item.static_shear / item.spectrum_after
+            ratio = item.target * item.static_shear / item.spectrum_after
             if ratio > 1.0 + SCALE_TOLERANCE / 10:  # scale up only
                 multiply_spectrum_scale(connector, item.spectrum_case, ratio)
                 item.factor *= ratio
@@ -356,8 +405,8 @@ def scale_spectrum_to_static(connector, run, progress=None) -> list[ShearScaling
         for case, item in out.items():
             component = "FX" if item.direction == "X" else "FY"
             item.spectrum_after = abs(again.loc[case, component])
-        if all(abs(i.spectrum_after / (SCALE_TARGET * i.static_shear) - 1) <= SCALE_TOLERANCE
-               or i.spectrum_after > SCALE_TARGET * i.static_shear for i in out.values()):
+        if all(abs(i.spectrum_after / (i.target * i.static_shear) - 1) <= SCALE_TOLERANCE
+               or i.spectrum_after > i.target * i.static_shear for i in out.values()):
             break
     return sorted(out.values(), key=lambda s: s.direction)
 
@@ -503,7 +552,7 @@ def reopen_model(connector) -> bool:
         return False
     from etabs_api.core.connection import use_working_units
 
-    opened = (return_code(model.File.Save(path)) == 0
+    opened = (return_code(save_model(model, path)) == 0
               and return_code(model.File.OpenFile(path)) == 0)
     use_working_units(model)  # a file opens in its own units
     return opened
@@ -609,13 +658,17 @@ def raise_drift_cases_to_minimum(connector, run, progress=None) -> list[MinimumS
 
 
 def analyze_model(connector, zone_factor: float | None = None, ct: float | None = None,
-                  scale: bool = True, progress=None) -> AnalysisReport:
-    """Reset the spectrum to g I / R, run, scale it to the static base shear, run
-    again, and check periods, mass and weight. ``progress`` gets each step."""
+                  scale: bool = True, progress=None, target: float = SCALE_TARGET,
+                  amplify_torsion: bool = False, redundancy: bool = False,
+                  setup: dict | None = None) -> AnalysisReport:
+    """Reset the spectrum to g I / R, run, scale it to ``target`` times the static
+    base shear, run again, and check periods, mass and weight. ``progress`` gets
+    each step. ``amplify_torsion`` applies Ax before the scaling and ``redundancy``
+    puts rho in the combinations after it (``seismic_factors``)."""
     say = progress or (lambda text: None)
     from etabs_api.core.connection import model_file
 
-    report = AnalysisReport(model_path=model_file(connector.sap_model))
+    report = AnalysisReport(model_path=model_file(connector.sap_model), scale_target=target)
     if scale:
         say("Putting the response spectrum cases back to g I / R")
         if reset_spectrum_scale(connector) is None and spectrum_cases(connector):
@@ -639,14 +692,37 @@ def analyze_model(connector, zone_factor: float | None = None, ct: float | None 
     if scale:
         say("Checking the drift patterns against the zone 4 minimum")
         report.minimum_scaling = raise_drift_cases_to_minimum(connector, run, say)
+    if amplify_torsion:
+        from etabs_api.workflows.seismic_factors import apply_ax
+
+        say("Torsional irregularity: amplifying the accidental torsion (Ax)")
+        report.ax = apply_ax(connector, run, say)
+    if scale:
         say("Comparing the spectrum and static base shears")
-        report.scaling = scale_spectrum_to_static(connector, run, say)
+        report.scaling = scale_spectrum_to_static(connector, run, say, target)
         if not report.scaling:
             report.notes.append(
                 "Scaling of the response spectrum to the static base shear: not applicable (it "
                 "needs a static seismic case and a response spectrum case in each direction).")
+    if redundancy:
+        from etabs_api.workflows.seismic_factors import compute_rho, rho_combinations
+
+        say("Redundancy factor rho")
+        report.rho = compute_rho(connector, setup, say)
+        if report.rho:
+            report.rho_combinations = rho_combinations(
+                connector.sap_model, {d: r.rho for d, r in report.rho.items()} | {
+                    d: 1.0 for d in ("X", "Y") if d not in report.rho})
+            if not connector.sap_model.GetModelIsLocked():
+                # editing the combinations unlocks the model and clears its results
+                say("Running the analysis again with rho in the combinations")
+                run()
+        for r in report.rho.values():
+            if r.over_smrf:
+                report.warnings.append(f"rho {r.direction} {r.rho:.3f} is over 1.25 for special "
+                                       "moment frames: add bays (NSCP 208.6.1).")
     for item in report.scaling:
-        if item.spectrum_after < SCALE_TARGET * item.static_shear * (1 - SCALE_TOLERANCE):
+        if item.spectrum_after < item.target * item.static_shear * (1 - SCALE_TOLERANCE):
             report.warnings.append(f"{item.spectrum_case} base shear is below the static base "
                                    "shear after scaling.")
 
@@ -720,6 +796,7 @@ def run_model_analysis() -> AnalysisReport | None:
     if not os.path.isfile(path):
         show_warning("Save the ETABS model first: it has no file yet.", title=title)
         return None
+    original = path
     where = select_option(
         title, "The response spectrum cases are scaled in the model. Which model?",
         ["This model", "A copy saved beside it"])
@@ -730,7 +807,7 @@ def run_model_analysis() -> AnalysisReport | None:
         path, counter = f"{stem} - ANALYSIS{extension}", 2
         while os.path.exists(path):
             path, counter = f"{stem} - ANALYSIS ({counter}){extension}", counter + 1
-        model.File.Save(path)
+        save_model(model, path)
 
     from etabs_api.workflows import model_inputs as mi
 
@@ -765,9 +842,41 @@ def run_model_analysis() -> AnalysisReport | None:
         mi.save(path, seismic={**saved.get(mi.MODEL_KEY, {}).get("seismic", {}),
                                "zone_factor": zone, "ct": ct})
 
+    from etabs_api.workflows import seismic_factors as sf
+
+    target, reason = sf.IRREGULAR_TARGET, ""
+    record = sf.load_regularity(path) or sf.load_regularity(original)
+    if record is None:
+        reason = ("Spectrum at 100 % of the static base shear: no sdt irregularity result for "
+                  "this model. For 90 % on a regular structure, run sdt irregularity, then sdt "
+                  "analyze again (NSCP 208.5.3.5.4).")
+    elif record.get("irregular"):
+        reason = ("Spectrum at 100 % of the static base shear: irregular ("
+                  + ", ".join(record["irregular"]) + "), NSCP 208.5.3.5.4 item 3.")
+    else:
+        answer = select_option(
+            title, "sdt irregularity found the structure regular in every type it checks. "
+            "NSCP 208.5.3.5.4 lets the response spectrum go down to 90 % of the static base "
+            "shear for a regular structure.\n\nAre these types, which it cannot check, also "
+            "absent?\n\n  - in-plane discontinuity in vertical elements (vertical type 4)\n"
+            "  - out-of-plane offsets (plan type 4)\n  - non-parallel systems (plan type 5)",
+            ["Yes, the structure is regular: scale to 90 %",
+             "No, or not sure: scale to 100 %"])
+        if answer is None:
+            return None
+        if answer.startswith("Yes"):
+            target = sf.REGULAR_TARGET
+            reason = ("Spectrum at 90 % of the static base shear: regular by sdt irregularity, "
+                      "and the types it cannot check confirmed absent (NSCP 208.5.3.5.4 "
+                      "item 1).")
+        else:
+            reason = ("Spectrum at 100 % of the static base shear: the types sdt irregularity "
+                      "cannot check were not confirmed absent.")
     try:
         with LoadingWindow("Analysis") as window:
-            report = analyze_model(connector, zone, ct, progress=window.update)
+            report = analyze_model(connector, zone, ct, progress=window.update, target=target,
+                                   amplify_torsion=True, redundancy=True, setup=saved)
+            report.scale_reason = reason
     except (RuntimeError, COMError) as error:  # COMError: ETABS stopped answering
         show_warning(
             f"ETABS could not finish the analysis:\n\n{error}\n\n"
@@ -776,7 +885,7 @@ def run_model_analysis() -> AnalysisReport | None:
             "analysed. If ETABS closed, open the model again.", title=title)
         return None
     # Save() keeps the results; Save(path) drops them even for the same file
-    model.File.Save()
+    save_model(model)
     from utilities import terminal
 
     if terminal.drawn():
@@ -812,8 +921,21 @@ def analysis_summary(report: AnalysisReport, model_path: str | None = None):
                     f"{report.height_from.split(' to ')[0]}")
     if report.seismic_weight is not None:
         summary.add("Weight of every level", f"{report.seismic_weight / 1e3:,.0f} kN")
+    if report.scaling:
+        summary.add("Spectrum scaled to", f"{report.scale_target * 100:g} % of the static base "
+                                          "shear")
+    if report.ax is not None:
+        largest = max(report.ax.ax.values(), default=1.0)
+        summary.add("Ax (NSCP 208.5.1.4)", f"largest {largest:.2f}, applied" if report.ax.applied
+                    else "1.00 everywhere (no torsional irregularity)")
+    for direction, r in sorted(report.rho.items()):
+        summary.add(f"rho {direction} (NSCP 208.6.1)", f"{r.rho:.3f} (rmax {r.r_max:.3f} at "
+                                                       f"{r.story or '-'})")
     for warning in report.warnings:
         summary.fail(warning)
+    for line in report.seismic_lines():
+        if not line.startswith("  "):
+            summary.note(line)
     for note in report.notes:
         summary.note(note)
     summary.file("Model (saved with its results)", model_path)

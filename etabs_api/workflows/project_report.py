@@ -28,6 +28,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
+from utilities.output_folders import CALCULATIONS, subfolder
 
 QUESTION = "Write the full project report?"
 YES, NO = "Yes, write the full report", "No"
@@ -781,14 +782,14 @@ def report_body(data: ReportData) -> str:
 
     # ---------------------------------------------------------------- PART B
     add(_part("B", "Design", "The design basis, the result of every beam and column against "
-              "ACI 318M-14, and the concrete quantities."))
+              "NSCP 2015 chapter 4 (ACI 318M-14), and the concrete quantities."))
     add(_sec("B1", "Design basis"))
     bars, column_bars = data.inputs.get("beam_bars") or {}, data.inputs.get("column_bars") or {}
-    seismic_beams = "Special moment frame (ACI 18.6)" if data.smrf else "Not a special moment frame"
-    seismic_columns = "Special moment frame (ACI 18.7, 18.8)" if data.smrf else \
+    seismic_beams = "Special moment frame (NSCP 418.6; ACI 18.6)" if data.smrf else "Not a special moment frame"
+    seismic_columns = "Special moment frame (NSCP 418.7, 418.8; ACI 18.7, 18.8)" if data.smrf else \
         "Not a special moment frame"
     add(_table(["Item", "Beams and girders", "Columns"], [
-        ["Design code", "ACI 318M-14", "ACI 318M-14"],
+        ["Design code", "NSCP 2015 chapter 4 (ACI 318M-14)", "NSCP 2015 chapter 4 (ACI 318M-14)"],
         ["Seismic detailing", seismic_beams, seismic_columns],
         ["Main bars", f"{_number(bars.get('dm')):.0f} mm", f"{_number(column_bars.get('dmain')):.0f} mm"],
         ["Stirrups and ties", f"{_number(bars.get('ds')):.0f} mm",
@@ -797,7 +798,7 @@ def report_body(data: ReportData) -> str:
         ["Design forces", "Envelope of the strength combinations",
          "Every strength combination, at both ends"],
         ["Slenderness", "-", _Unwrapped("Sway effect from the P-delta analysis, member effect by "
-                                        "moment magnification (ACI 6.6.4)")],
+                                        "moment magnification (NSCP 406.6.4; ACI 6.6.4)")],
         ["Combinations", f"{len(data.inputs.get('combos') or [])} strength combinations", "the same"],
     ], r"p{34mm}p{62mm}>{\raggedright\arraybackslash}p{66mm}"))
 
@@ -949,6 +950,10 @@ def member_reports(beams, columns, smrf: bool, folder: str, figure_options: dict
                     member.figures.append((relative, "Design interaction surface of the final "
                                            "bar layout with every combination at both ends."
                                            + _bcc_caption(rows)))
+                    from design.concrete.columns.calculations import PLANES_CAPTION, planes_path
+
+                    if os.path.isfile(os.path.join(folder, planes_path(relative))):
+                        member.figures.append((planes_path(relative), PLANES_CAPTION))
                     member.beside_figure = BESIDE_FIGURE
             column_members.append(member)
     return beam_members, column_members
@@ -1054,14 +1059,14 @@ def gather(connector, model_path: str, folder: str, summary: dict, settings, inf
         data.beams, data.columns, data.smrf, folder, figure_options, say))
     data.beam_members, data.column_members = found or ([], [])
     data.files = [
-        (f"{stem} - Beam Design.xlsx", "Every value of the beam design"),
-        (f"{stem} - Beam Calculations.pdf", "The calculation tables of each beam"),
-        (f"{stem} - Column Design.xlsx", "Every value of the column design"),
-        (f"{stem} - Column Calculations.pdf", "The calculation tables and interaction surface of "
+        (f"Results/{stem} - Beam Design.xlsx", "Every value of the beam design"),
+        (f"Calculations/{stem} - Beam Calculations.pdf", "The calculation tables of each beam"),
+        (f"Results/{stem} - Column Design.xlsx", "Every value of the column design"),
+        (f"Calculations/{stem} - Column Calculations.pdf", "The calculation tables and interaction surface of "
                                               "each column"),
-        ("Beam, girder and column schedules (.dxf)", "The reinforcement schedules, by floor"),
-        (f"{stem} - Drift.txt", "The story drift of the final sizes"),
-        (f"{stem} summary.txt", "The summary of the design loop"),
+        ("Schedules: beam, girder and column schedules (.dxf)", "The reinforcement schedules, by floor"),
+        (f"Summaries/{stem} - Drift.txt", "The story drift of the final sizes"),
+        (f"Summaries/{stem} summary.txt", "The summary of the design loop"),
     ]
     return data
 
@@ -1069,13 +1074,16 @@ def gather(connector, model_path: str, folder: str, summary: dict, settings, inf
 def write_project_report(connector, model_path: str, folder: str, summary: dict, settings,
                          info: ProjectInfo, analysis=None, drift=None, tables: dict | None = None,
                          wind_denominator: float = 400.0, progress=None) -> str | None:
-    """Gather the finished model and write ``<model> - Project Report.pdf`` in ``folder``."""
+    """Gather the finished model and write ``<model> - Project Report.pdf`` in the
+    Calculations subfolder of ``folder``, its figures beside it (LaTeX finds them by a
+    path relative to the report)."""
     say = progress or (lambda text: None)
-    data = gather(connector, model_path, folder, summary, settings, info, analysis, drift, tables,
-                  wind_denominator, say)
+    calculations = subfolder(folder, CALCULATIONS)
+    data = gather(connector, model_path, calculations, summary, settings, info, analysis, drift,
+                  tables, wind_denominator, say)
     say("Report: writing the PDF (LaTeX)")
     stem = os.path.splitext(os.path.basename(model_path))[0]
-    return build_report(data, os.path.join(folder, f"{stem} - Project Report"))
+    return build_report(data, os.path.join(calculations, f"{stem} - Project Report"))
 
 
 # =============================================================================

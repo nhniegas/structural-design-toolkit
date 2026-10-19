@@ -1777,3 +1777,29 @@ def test_a_spiral_pitch_is_taken_down_never_up():
     assert spiral["Transverse_Spacing_Provided_mm"] == 40.0
     assert spiral["Provided_Confinement_Ratio"] >= spiral["Required_Confinement_Ratio"]
     assert spiral["Required_Legs_X"] == 2
+
+
+def test_every_section_of_the_schedule_is_drawn_at_one_scale(tmp_path):
+    """v0.8.1: a 400 and an 800 column are drawn 20 and 40 mm wide at 1 : 20, not both
+    filling their cells, so their sizes compare on the drawing."""
+    def row(name, size):
+        engine = build_rect_column(size, size)
+        layout = col_layouts._enumerate_column_bar_layouts(engine, 60)[0]
+        return {"Unique Name": name, "Column Label": name.split("-")[-1], "Story": "L1",
+                "f′c (MPa)": 28.0, "Width (mm)": size, "Depth (mm)": size,
+                "Diameter (mm)": np.nan, "Longitudinal Bars": sum(c for *_, c in layout),
+                "Bundle Layout": col_transverse._column_layout_summary(layout),
+                "Tie Bar Diameter (mm)": 10.0, "Tie / Spiral Spacing (mm)": 100.0}
+
+    target = tmp_path / "scale.dxf"
+    col_schedule.generate_dxf_column_schedule(
+        pd.DataFrame([row("L1-C1", 400.0), row("L1-C2", 800.0)]), str(target), 25.0, 40.0,
+        True, section_scale=20.0)
+    doc = ezdxf.readfile(target)
+    widths = []
+    for entity in doc.modelspace():
+        if entity.dxf.layer == "CONCRETE" and entity.dxftype() == "LWPOLYLINE":
+            xs = [p[0] for p in entity.get_points()]
+            widths.append(round(max(xs) - min(xs), 6))
+    assert sorted(widths) == [20.0, 40.0]
+    assert any("1:20" in e.dxf.text for e in doc.modelspace() if e.dxftype() == "TEXT")

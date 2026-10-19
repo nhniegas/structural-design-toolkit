@@ -56,6 +56,7 @@ import pandas as pd
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from etabs_api.core.connection import save_model  # noqa: E402
 from etabs_api.core.helpers import as_list, return_code  # noqa: E402
 
 SUFFIX = " - FOUNDATION"
@@ -824,7 +825,7 @@ def create_foundation(connector, foundation_path: str, options: Options,
     if sup.analysed_now:
         outcome.notes.append("The superstructure was analysed first: not every case had results.")
     say("Saving the copy that becomes the foundation model")
-    if not _ok(model.File.Save(foundation_path)):
+    if not _ok(save_model(model, foundation_path)):
         raise RuntimeError(f"ETABS could not save {foundation_path}.")
     use_working_units(model)
     if model.GetModelIsLocked():
@@ -843,7 +844,7 @@ def create_foundation(connector, foundation_path: str, options: Options,
     say(f"Combinations ({len(sup.combos)})")
     _make_combinations(model, sup.combos, outcome)
     _pdelta_off(model, outcome)
-    if not _ok(model.File.Save(foundation_path)):
+    if not _ok(save_model(model, foundation_path)):
         outcome.problems.append("the foundation model could not be saved")
     outcome.supports = len(sup.supports)
     outcome.equilibrium = equilibrium_rows(sup.patterns, sup.base)
@@ -964,7 +965,7 @@ def update_foundation(connector, foundation_path: str, options: Options | None =
                              "foundation model that came from it were made again.")
     else:
         outcome.combinations = len(sup.combos)
-    if not _ok(model.File.Save(foundation_path)):
+    if not _ok(save_model(model, foundation_path)):
         outcome.problems.append("the foundation model could not be saved")
     outcome.supports = len(joints)
     outcome.equilibrium = equilibrium_rows(sup.patterns, sup.base)
@@ -1039,7 +1040,9 @@ def _write_files(sup: Superstructure, options: Options, joints: dict[str, str],
     outcome.files["Foundation model"] = path
     outcome.files["Supports and exported loads"] = save_manifest(
         path, _manifest(sup, options, joints, path, [c.name for c in sup.combos]))
-    workbook = os.path.splitext(path)[0] + " - Reactions.xlsx"
+    from utilities.output_folders import beside
+
+    workbook = beside(path, " - Reactions.xlsx")
     try:
         outcome.files["Reactions and check"] = reactions_workbook(sup, outcome, workbook)
     except OSError as error:

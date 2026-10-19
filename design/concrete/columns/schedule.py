@@ -29,6 +29,9 @@ from design.concrete.columns.report import (
 )
 
 
+DEFAULT_SECTION_SCALE = 20.0   # the column sections are drawn at 1 : 20 unless chosen
+
+
 def _bundle_histogram(summary: str) -> dict[int, int]:
     """Parse the report bundle summary into bundle-size to package-count pairs."""
     result: dict[int, int] = {}
@@ -161,7 +164,7 @@ def _rotate_dxf_vector(
 
 
 def _hook_tail_length_dxf(tie_bar_diameter: float) -> float:
-    """Return the ACI 25.3.2 hook extension in millimetres (6 db, at least 75 mm)."""
+    """Return the NSCP 425.3.2 (ACI 25.3.2) hook extension in millimetres (6 db, at least 75 mm)."""
     cfg = CODE.drawing
     return max(cfg.hook_tail_bar_multiple * tie_bar_diameter, cfg.hook_tail_min)
 
@@ -745,8 +748,12 @@ def _draw_column_section(
     cover: float,
     is_smrf: bool,
     inner_tie_style: str = "crossties",
+    fixed_scale: float | None = None,
 ) -> None:
-    """Draw a scaled column section, bar bundles, hoops, inner ties, and hooks."""
+    """Draw a scaled column section, bar bundles, hoops, inner ties, and hooks.
+
+    ``fixed_scale`` (drawing mm per mm) draws every section at one scale, so the
+    sizes compare; without it the section fills the box it is given."""
     diameter = (
         float(row["Diameter (mm)"])
         if pd.notna(row["Diameter (mm)"])
@@ -755,7 +762,7 @@ def _draw_column_section(
     is_circular = diameter > 0
     width = diameter if is_circular else float(row["Width (mm)"])
     height = diameter if is_circular else float(row["Depth (mm)"])
-    scale = min(drawing_width / width, drawing_height / height)
+    scale = fixed_scale or min(drawing_width / width, drawing_height / height)
     scaled_width, scaled_height = width * scale, height * scale
     left, bottom = x_center - scaled_width / 2.0, y_center - scaled_height / 2.0
     right, top = left + scaled_width, bottom + scaled_height
@@ -844,12 +851,15 @@ def generate_dxf_column_schedule(
     is_smrf: bool,
     inner_tie_style: str = "crossties",
     story_order: list[str] | None = None,
+    section_scale: float = DEFAULT_SECTION_SCALE,
 ) -> None:
     """Create one grouped column schedule DXF for the supplied floor report.
 
     ``inner_tie_style`` is ``"crossties"`` or ``"hoops"`` (closed inner hoops).
     ``story_order`` lists the stories from the bottom up; without it the order
-    is guessed from the story names.
+    is guessed from the story names. Every section is drawn at 1 : ``section_scale``
+    on paper (the schedule is drawn in paper millimetres), so a larger column is
+    drawn larger; the cells grow when the largest section needs it.
     """
     if report.empty:
         raise ValueError("Column design report has no rows to export.")
@@ -913,9 +923,16 @@ def generate_dxf_column_schedule(
     # Proportions of the office column schedule: F'c, floor level and mark
     # columns, then one detail column per mark.
     left_widths = [30.0, 50.0, 59.0]
-    detail_width = 90.0
+    sides = [(float(r["Diameter (mm)"]), float(r["Diameter (mm)"]))
+             if pd.notna(r["Diameter (mm)"]) and float(r["Diameter (mm)"]) > 0
+             else (float(r["Width (mm)"]), float(r["Depth (mm)"]))
+             for _, r in report.iterrows()]
+    widest = max((w for w, _ in sides), default=0.0) / section_scale
+    deepest = max((d for _, d in sides), default=0.0) / section_scale
+    # the section takes at most 78 % of the cell width and 82 % of its height
+    detail_width = max(90.0, math.ceil(widest / 0.78))
     header_height = 8.0
-    drawing_height = 88.0
+    drawing_height = max(88.0, math.ceil(deepest / 0.82))
     data_height = 7.0
     text_height = 3.5  # headers, row names and values
     level_text_height = 4.5  # F'c and floor level
@@ -964,6 +981,11 @@ def generate_dxf_column_schedule(
         story_x_positions.append(story_x_positions[-1] + detail_width)
 
     y_top = 0.0
+    note = modelspace.add_text(
+        f"COLUMN SECTIONS DRAWN TO SCALE 1:{section_scale:g} (THE SCHEDULE IN mm ON PAPER)",
+        dxfattribs={"height": level_text_height, "style": "SIMPLEX", "layer": "TABLE"})
+    note.set_placement((0.0, y_top + 3.0 * level_text_height),
+                       align=ezdxf.enums.TextEntityAlignment.LEFT)
     for story_index, story in enumerate(story_values):
         has_header = story_index == 0
         story_header_height = header_height if has_header else 0.0
@@ -1085,6 +1107,7 @@ def generate_dxf_column_schedule(
                     else cover,
                     is_smrf,
                     inner_tie_style,
+                    fixed_scale=1.0 / section_scale,
                 )
             else:
                 add_text(
@@ -1140,6 +1163,24 @@ def generate_dxf_column_schedule(
     return
 
 
+SECTION_SCALES = (10, 15, 20, 25, 30, 40, 50)
+
+
+def ask_section_scale(last: float | None = None) -> float | None:
+    """The drawing scale of the column sections, 1 : n (every section at the same)."""
+    from utilities._gui_helpers import select_option
+
+    labels = [f"1 : {n}" for n in SECTION_SCALES]
+    offered = int(last) if last in SECTION_SCALES else int(DEFAULT_SECTION_SCALE)
+    chosen = select_option(
+        "Column Schedule - Scale",
+        "Every column section is drawn at the same scale, so their sizes can be compared. "
+        "The schedule is drawn in millimetres on paper: at 1 : 20 a 600 mm column is drawn "
+        "30 mm wide. The cells grow when the largest column needs it.",
+        labels, default_index=labels.index(f"1 : {offered}"))
+    return None if chosen is None else float(chosen.split(":")[1])
+
+
 INNER_TIE_STYLE_LABELS = {
     "Crossties (one tie with a hook at each end)": "crossties",
     "Closed inner hoops (each enclosing two bar positions)": "hoops",
@@ -1166,8 +1207,10 @@ def export_column_cad_drawings(
     is_smrf: bool,
     inner_tie_style: str,
     connectivity: pd.DataFrame,
+    section_scale: float = None,
 ) -> list[str]:
-    """Export one stacked all-story column schedule DXF from the design report."""
+    """Export one stacked all-story column schedule DXF from the design report,
+    every section at 1 : ``section_scale`` (1 : 20 when not given)."""
     destination = output_directory
     if not os.path.isdir(destination):
         raise NotADirectoryError(f"DXF output directory does not exist: {destination}")
@@ -1192,5 +1235,6 @@ def export_column_cad_drawings(
             _clean_table(connectivity),
             dict(zip(report["Unique Name"].astype(str), report["Story"].astype(str))),
         ),
+        section_scale=section_scale or DEFAULT_SECTION_SCALE,
     )
     return [output_path]

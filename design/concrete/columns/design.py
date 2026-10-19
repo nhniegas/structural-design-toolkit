@@ -104,7 +104,7 @@ def design_columns(
 ) -> tuple[pd.DataFrame, list, pd.DataFrame]:
     """Design every column and run the SMRF checks.
 
-    ``slenderness`` adds the member slenderness of ACI 6.6.4.5 (see
+    ``slenderness`` adds the member slenderness of NSCP 406.6.4.5 (ACI 6.6.4.5) (see
     ``design/concrete/columns/slenderness.py``): the moments at the column ends are
     magnified before the bars are chosen. The sway effects must be in the
     forces already (the ETABS P-delta analysis).
@@ -959,7 +959,7 @@ def design_columns(
                 short_dim < seismic_cfg.min_dimension
                 or short_dim / long_dim < seismic_cfg.min_aspect_ratio
             ):
-                dimension_check = "FAIL: ACI 18.7.2.1"
+                dimension_check = "FAIL: NSCP 418.7.2.1 (ACI 18.7.2.1)"
                 status = "FAIL: SMRF dimensional limits"
             if final_engine.shape == "rectangular":
                 tie_spacing_limit = min(
@@ -1171,7 +1171,7 @@ def design_columns(
                 check.update(member_slenderness.records.get(
                     (str(check["Combo"]), str(check["End"])), {}))
             if member_slenderness.failed:
-                status = "FAIL: column slenderness (ACI 6.2.6) - enlarge the section"
+                status = "FAIL: column slenderness (NSCP 406.2.6; ACI 6.2.6) - enlarge the section"
         force_check_rows.extend(selected_checks)
         layout_summary = _column_layout_summary(selected_layout)
         transverse_summary = transverse_text(

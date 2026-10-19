@@ -20,7 +20,7 @@ sdt irregularity
 |---|---|
 | P-delta stability coefficient | Analyse a copy of the model with P-delta off, for first-order drifts; or use the drifts of the model as analysed, which include P-delta |
 
-The report is printed and saved beside the model as `<model> - Irregularity.txt`, and a window shows the summary.
+The report is printed and saved in the model's folder as `Summaries/<model> - Irregularity.txt`, and a window shows the summary.
 
 ## What is checked
 
@@ -94,11 +94,14 @@ The other choice reads the drifts of the model as it is. They are a little large
 The report ends with what the irregularities found ask for:
 
 - whether the static force procedure is still allowed (an irregular structure of at most five stories or 20 m; UBC 1629.8.3) or the dynamic procedure is required (1629.8.4);
-- the spectrum scaling that applies: 90 % of the static base shear for a regular structure, 100 % for an irregular one (UBC 1631.5.4). `sdt analyze` always scales to 100 %; this report does not change that.
+- the spectrum scaling that applies: 90 % of the static base shear for a regular structure, 100 % for an irregular one (NSCP 208.5.3.5.4). The command writes `<model> - regularity.json` beside the model (Summaries): the irregular types and those left to the engineer. `sdt analyze` reads it and scales to 90 % only when no type was found irregular and you confirm the judged types are absent.
+
+Ax is reported here; `sdt analyze` applies it to the model (see [ETABS analysis](etabs_analysis.md)).
 
 ## Limits
 
-- **Levels that are not stories.** ETABS has a story for every level. Two kinds are left out of the stiffness, mass, geometry and strength comparisons, and the report names them: the level the static seismic patterns start from with those below it, and a minor level, one with under 10 % of the mass of the largest story (a footing tie level, a landing). Compared with a full story, either gave a mass ratio in the hundreds. The 10 % is a rule of the toolkit, not of the code: read the line and judge a level it leaves out. Torsion, the plan checks and the stability coefficient still cover every level.
+- **Levels that are not stories.** ETABS has a story for every level. Two kinds are left out of the stiffness, mass, geometry and strength comparisons, and the report names them: the level the static seismic patterns start from with those below it, and a minor level, one with under 10 % of the mass of the largest story (a footing tie level, a landing). Compared with a full story, either gave a mass ratio in the hundreds. The 10 % is a rule of the toolkit, not of the code: read the line and judge a level it leaves out. The plan checks and the stability coefficient still cover every level.
+- **Stories with no diaphragm.** A story where no floor and no joint is assigned a diaphragm by name (a tie beam level, a level with no slab) is left out of the stiffness, mass, geometry, strength and torsion comparisons, and the report lists it: its mass, stiffness and drift are not those of a floor. A joint that takes its diaphragm "From Shell Object" counts only through its floor. A level at or below the base is listed for that reason only. A model with no diaphragm at all is compared as it is.
 - **Ax where a level has no diaphragm.** Ax is from the displacements of a level. Where ETABS gives none, Ax is shown as "-", not as 1.00.
 - **Re-entrant corners** are measured where the floor outline turns inward. A corner cut off at an angle is not one. A model with no floor shells has no outline, and the check is not made.
 - **Penthouses.** A one-story penthouse need not be considered for the vertical geometric type; the command does not know which story is a penthouse.

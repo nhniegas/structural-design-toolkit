@@ -51,7 +51,7 @@ Seven dialogs follow (eight with membrane slabs). Each box already holds the val
 | Materials | Concrete strengths (ksi); rebar grades (ksi) | `4, 5, 6` and `60` give C04, C05, C06 and G60 |
 | Frame Sections | Concrete and rebar of the sections; then for each kind of section a range as `min, max, step` in mm | Girders G: width `300, 600, 100`, depth `500, 1000, 100`. Leave a range blank to skip that kind |
 | Slab and Wall Sections | Slab thicknesses (mm); slab type (Membrane, Shell-Thin or Shell-Thick); concrete of the slabs (ksi); wall thicknesses (mm); concrete of the walls (ksi). When the type is Membrane, a second dialog asks whether to add a one-way counterpart of each slab | `100, 125, 150, 200`, `Membrane`, `4`, `150, 200, 250, 300`, `5`. Leave a list blank to skip it |
-| Seismic (UBC 97) | Zone factor Z, soil profile type, source type, distance (km), I, R, Ct, eccentricity ratio | `0.4`, `SD`, `A`, `8`, `1`, `8.5`, `0.03`, `0.05` |
+| Seismic (UBC 97) | Zone factor Z, soil profile type, source type, distance (km), I, Ct, eccentricity ratio; then the seismic system, picked from the list of NSCP Table 208-11A | `0.4`, `SD`, `A`, `8`, `1`, `0.03`, `0.05`; C1, special reinforced concrete moment frames |
 | Wind (ASCE 7-10) | Wind speed (as typed in ETABS, mph), exposure type, Kzt, gust factor, Kd | `150`, `B`, `1`, `0.85`, `0.85` |
 | Load Patterns | Extra super dead, live and reducible live patterns | `ELEVATOR DEAD, CONCRETE PAD` |
 | Mass Source | A choice: include 20 % of the reducible live load in the seismic mass, or not | |
@@ -63,6 +63,8 @@ Notes on the section ranges:
 - Circular columns `C` take a diameter range.
 - Each section is made once per concrete strength listed in "Concrete of the sections", so a long list multiplies the number of sections.
 - Slabs and walls each have their own concrete ("Concrete of the slabs", "Concrete of the walls"), the first frame section concrete by default. Both are always defined as materials, even when they are not in the Materials list.
+
+**A model with load patterns of its own.** When setup runs on an open model, the patterns that are not the setup's own (`Dead`, `SDL`, `Live`, `EQX`, ...) are listed in one dialog, each with a list to say what it is: super dead, live (not reducible), live (reducible), roof live, or left out. Each starts at the role its ETABS type suggests, or the one chosen the last time; seismic and wind patterns start at "left out", since setup defines its own. The patterns given a role go into the strength, service, drift and deflection combinations, the seismic mass and the P-delta load, as the setup's own patterns of that role do. A pattern given a role that had a self weight multiplier (a `Dead` pattern with 1.0) gets 0, since `SELFWEIGHT` carries the self weight and it would otherwise count twice; the closing summary says so. Before v0.7.0 these patterns were left out of every combination and of the mass.
 
 ### 4. Wait for the closing message
 
@@ -109,7 +111,7 @@ Anything with the same name as a definition the setup makes is overwritten. Ever
 | Slabs | `S_<thickness>_<concrete>`, for example `S_150_C04`, of the type chosen (Membrane by default). Stiffness modifiers 1.0 |
 | One-way slabs | Only for membrane slabs, when chosen: `S_<thickness>_<concrete>_1W`, for example `S_150_C04_1W`, the same slab with one-way load distribution. The two-way slab is always made too |
 | Walls | `SW_<thickness>_<concrete>_<rebar>`, thin shell, the name `sdt grids` gives its walls. Stiffness modifiers 1.0 |
-| Load patterns | The office standard set, plus extra super dead, live and reducible live patterns you type. Each gets its linear static load case. Only `SELFWEIGHT` carries self weight |
+| Load patterns | The office standard set, plus extra super dead, live and reducible live patterns you type, and the model's own patterns with the role you gave them. Each gets its linear static load case. Only `SELFWEIGHT` carries self weight |
 | Seismic patterns | `EQXPE`, `EQXNE`, `EQXSD`, `EQYPE`, `EQYNE`, `EQYSD` as UBC 97, program-calculated period |
 | Wind patterns | `WX`, `WY` as ASCE 7-10 on the diaphragms |
 | Response spectrum | Function `RSUBC97`, 5 % damping |
@@ -123,7 +125,7 @@ A new blank model also has the default `Dead` and `Live` patterns of ETABS remov
 
 ## Seismic coefficients
 
-One set of seismic inputs is typed per project: zone factor, soil profile type, source type, distance, I, R and Ct. Ca and Cv are worked out from them with the UBC 97 tables (`ubc97.py`) and used for the six seismic patterns, the response spectrum function and the vertical effect, so they cannot disagree.
+One set of seismic inputs is typed per project: zone factor, soil profile type, source type, distance, I and Ct, and the system is picked from NSCP Table 208-11A. R and Ω0 come from the system (since v0.7.0; R alone does not name a system: 5.5 is three of them), and the system is saved with the inputs for `sdt check`. Inputs saved before v0.7.0 hold only R: the first system with that R is taken, and the dialog shows it to confirm. Ca and Cv are worked out from them with the UBC 97 tables (`ubc97.py`) and used for the six seismic patterns, the response spectrum function and the vertical effect, so they cannot disagree.
 
 How the seismic patterns hold these inputs depends on the model:
 
@@ -139,11 +141,11 @@ Names are `<set> <number> <expression>`, for example `ULS 107 (1.2 + Ev) DL + f 
 
 | Set | Use |
 |---|---|
-| `ULS` | Strength. These are the concrete design combinations |
-| `SLS` | Service checks |
-| `SSLC` | Special seismic combinations with Em = 2.8 Eh |
+| `ULS` | Strength. These are the concrete design combinations. Every wind combination is made twice, with `+ W` and `- W`, since the wind blows either way (`ULS 108 0.9 DL + 1.0 WX` and `ULS 108 0.9 DL - 1.0 WX`; since v0.7.0) |
+| `SLS` | Service checks, the wind with both signs as in `ULS` |
+| `SSLC` | Special seismic combinations with Em = Ω0 Eh, Ω0 of the system (2.8 for most; 2.2 for ordinary walls of a building frame, 2.5 for intermediate precast walls, 2.0 for cantilevered columns) |
 | `DRIFT` | Seismic drift, NSCP 208.6.4.1, using the 203.3 combinations 203-5 and 203-7, `(1.2 + Ev) DL + f LL ± 1.0 E` and `(0.9 - Ev) DL ± 1.0 E`, with ρ = 1.0 (208.6.1). E is a drift case: `EQXSD` / `EQYSD` (period not capped), or `RSAXD` / `RSAYD` (no sign: the spectrum is an envelope). The scaling by `sdt analyze` changes the cases, so the combinations follow it with no change. Envelope `ENVE_DRIFT` |
-| `WDRIFT` | Wind drift, 203-3, 203-4 and 203-6 on `WX` and `WY`. NSCP sets no limit; `sdt check` asks for one (h/400 by default). Envelope `ENVE_WDRIFT` |
+| `WDRIFT` | Wind drift, 203-3, 203-4 and 203-6 on `WX` and `WY`, each also with the wind reversed (the name ends in `reversed`). NSCP sets no limit; `sdt check` asks for one (h/400 by default). Envelope `ENVE_WDRIFT` |
 | `DEF` | Deflection checks, unfactored: `DEF 100 1.0 DL`, `DEF 101 1.0 DL + 1.0 LL`, `DEF 102 1.0 DL + 0.25 LL` (sustained) and `DEF 103 1.0 DL + 1.0 Lr` |
 | `EQ_COMBO_01` to `08`, `RSA_COMBO_01` to `08` | The eight directional combinations: 100 % in one direction with 30 % in the other |
 | `ENVE_...` | Envelopes |

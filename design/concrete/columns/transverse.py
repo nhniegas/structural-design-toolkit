@@ -1,4 +1,4 @@
-"""Ties, hoops and spirals: confinement and the transverse detailing rules (ACI 18.7.5, 25.7)."""
+"""Ties, hoops and spirals: confinement and the transverse detailing rules (NSCP 418.7.5, 425.7; ACI 18.7.5, 25.7)."""
 
 import math
 import numpy as np
@@ -24,7 +24,7 @@ def _meets(provided: float, required: float) -> bool:
 
 
 def _smrf_so_limit(code: AciCode, hx: float | None = None) -> float:
-    """Hoop spacing limit 'so' of ACI 18.7.5.3: 100 + (350 - hx)/3, kept within 100..150 mm."""
+    """Hoop spacing limit 'so' of NSCP 418.7.5.3 (ACI 18.7.5.3): 100 + (350 - hx)/3, kept within 100..150 mm."""
     cfg = code.column_seismic
     hx = cfg.hx_assumed if hx is None else hx
     so = cfg.so_min + (cfg.so_hx_reference - hx) / cfg.so_hx_divisor
@@ -47,7 +47,7 @@ def _minimum_tie_diameter(engine: ColumnFlexureDesign, bar_layout=None) -> float
 
 def _confined_core(engine: ColumnFlexureDesign) -> tuple[float, float]:
     """bc along the width and along the depth: the core to the OUTSIDE edges of the
-    hoops (ACI 18.7.5.4 notation), in mm."""
+    hoops (NSCP 418.7.5.4; ACI 18.7.5.4 notation), in mm."""
     return engine.width - 2.0 * engine.cc, engine.height - 2.0 * engine.cc
 
 
