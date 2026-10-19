@@ -203,8 +203,13 @@ def plan_walls(panels: list[Panel], story_order: list[str]) -> list[Wall]:
 # =============================================================================
 def read_wall_panels(connector) -> tuple[list[Panel], list[str]]:
     """The wall panels of the open model (in N-mm) and the story names, bottom first."""
+    import pandas as pd
+
     model = connector.sap_model
-    walls = connector._read_database_table("Wall Object Connectivity")
+    try:
+        walls = connector._read_database_table("Wall Object Connectivity")
+    except RuntimeError:     # a model with no walls has no such table
+        walls = pd.DataFrame()
     points = connector._read_database_table("Point Object Connectivity")
     xy = {str(r["UniqueName"]): (float(r["X"]), float(r["Y"]), float(r["Z"]))
           for _, r in points.iterrows()}

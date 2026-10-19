@@ -12,6 +12,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from etabs_api.workflows import wall_piers as wp  # noqa: E402
 from etabs_api.workflows.wall_piers import Panel, legs_of_story, plan_walls  # noqa: E402
 
 STORIES = ["GF", "2F", "3F"]
@@ -67,3 +68,25 @@ def test_a_beam_joining_two_separate_walls_is_a_coupling_beam():
     found = coupling_beams(beams, walls)
     assert [beam.name for beam, *_ in found] == ["CB1"]
     assert found[0][3] == pytest.approx(1500.0, abs=15.0)   # 3000 to 4500 between the walls
+
+
+def test_a_model_with_no_walls_has_no_panels():
+    import pandas as pd
+
+    class Stories:
+        def GetStories(self):
+            return (0, ["Base", "2F"], [0.0, 3000.0])
+
+    class Model:
+        Story = Stories()
+
+    class Connector:
+        sap_model = Model()
+
+        def _read_database_table(self, name):
+            if name == "Wall Object Connectivity":     # ETABS has no such table then
+                raise RuntimeError("return code 1")
+            return pd.DataFrame({"UniqueName": ["1"], "X": [0.0], "Y": [0.0], "Z": [0.0]})
+
+    panels, stories = wp.read_wall_panels(Connector())
+    assert panels == [] and stories == ["2F"]
