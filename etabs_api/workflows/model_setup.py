@@ -285,8 +285,10 @@ _ROLE_OF_TYPE = {1: "extra_dead", 2: "extra_dead", 3: "extra_live", 4: "extra_re
 
 def etabs_generated(name: str) -> bool:
     """A pattern ETABS makes by itself: the parts of a wind or seismic pattern
-    (``WX(3/12)``, ``EQXSD(1/2)``) and the hidden ones (``~LLRF``, ``~RSAXECC``)."""
-    return name.startswith("~") or re.fullmatch(r".+\(\d+/\d+\)", name) is not None
+    (``WX(3/12)``, ``EQXSD(1/2)``) and the hidden ones (``~LLRF``, ``~RSAXECC``); also
+    the added torsion of Ax that sdt analyze makes (``AX EQXPE``)."""
+    return (name.startswith(("~", "AX EQ")) or re.fullmatch(r".+\(\d+/\d+\)", name)
+            is not None)
 
 
 def own_patterns(model, settings: dict) -> list[tuple[str, int, float]]:

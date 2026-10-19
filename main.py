@@ -17,9 +17,11 @@ the same commands.
                     name, in a tagged copy  (etabs_api/workflows/frame_tagger.py)
     sdt check       check the open model for missing or inconsistent inputs
                     (read only; etabs_api/workflows/model_check.py)
-    sdt analyze     run the analysis, scale the response spectrum to the static
-                    base shear, check periods, modal mass and weight
-                    (etabs_api/workflows/model_analysis.py)
+    sdt analyze     run the analysis, amplify the torsion by Ax, scale the
+                    response spectrum to the static base shear (90 % when
+                    regular), put rho in the combinations, check periods,
+                    modal mass and weight (etabs_api/workflows/model_analysis.py,
+                    etabs_api/workflows/seismic_factors.py)
     sdt drift       story drift of the DRIFT / WDRIFT combinations with the drift
                     stiffness, strength and service level; the model is restored
                     (etabs_api/workflows/drift_check.py)
@@ -85,7 +87,7 @@ import argparse
 import sys
 from pathlib import Path
 
-VERSION = "0.12.0"  # the same as in pyproject.toml (tests/test_main.py checks it)
+VERSION = "0.13.0"  # the same as in pyproject.toml (tests/test_main.py checks it)
 # Hidden first argument: this process is the progress window of another one
 # (utilities/_gui_helpers.LoadingWindow). It is how the packaged program,
 # which has no separate Python to start, opens that window.
@@ -260,7 +262,8 @@ COMMANDS = {
     "grids": (_model, "the old name of sdt model"),
     "tag": (_tag, "give every beam and column of the open model its unique name"),
     "check": (_check, "check the open model for missing or inconsistent inputs (read only)"),
-    "analyze": (_analyze, "run, scale the response spectrum, check periods, mass and weight"),
+    "analyze": (_analyze, "run, apply Ax and rho, scale the response spectrum, check periods, "
+                          "mass and weight"),
     "drift": (_drift, "story drift with the drift stiffness (strength, service), then restore"),
     "irregularity": (_irregularity, "vertical and plan irregularities, Ax and the P-delta "
                                     "stability coefficient (read only)"),

@@ -980,6 +980,12 @@ def run_irregularity() -> IrregularityReport | None:
     with open(saved, "w", encoding="utf-8") as handle:
         handle.write(report.text().lstrip("\n") + "\n")
     print(f"Saved: {saved}")
+    from etabs_api.workflows.seismic_factors import save_regularity
+
+    # sdt analyze reads it: 90 % spectrum scaling only for a regular structure
+    save_regularity(path, [i.name for i in report.items
+                           if i.irregular and i.group in (VERTICAL, PLAN)],
+                    [i.name for i in report.items if i.verdict.startswith(JUDGE)])
     irregularity_summary(report, saved).show(popup=True, echo=False)
     return report
 

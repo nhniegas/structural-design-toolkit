@@ -156,7 +156,7 @@ sdt model       # stories, grids, columns and walls from a DXF, then the framing
 sdt grids       # the old name of sdt model
 sdt tag         # unique names for every beam and column (a tagged copy or the model itself)
 sdt check       # check the open model against NSCP 2015 (read only)
-sdt analyze     # run, scale the response spectrum, check periods, modal mass and weight
+sdt analyze     # run, apply Ax and rho, scale the response spectrum, check periods, modal mass and weight
 sdt drift       # story drift with the drift stiffness, then restore the model
 sdt irregularity  # vertical and plan irregularities, Ax and the P-delta stability coefficient (read only)
 sdt beams       # extract the forces and design the beams; results, calcs and schedules
@@ -214,7 +214,7 @@ This defines the materials, frame sections, load patterns, UBC 97 response spect
 
 ## Running and checking the analysis
 
-`sdt analyze` runs the analysis, scales the response spectrum cases to 100 % of the static base shear, and checks the periods against UBC 97 Method A, the modal participating mass and the seismic weight. See [ETABS analysis checks](docs/etabs_analysis.md).
+`sdt analyze` runs the analysis, amplifies the accidental torsion of a torsionally irregular structure by Ax (NSCP 208.5.1.4), scales the response spectrum cases to 100 % of the static base shear (90 % for a structure `sdt irregularity` found regular, NSCP 208.5.3.5.4), puts the redundancy factor ρ of each direction in the seismic combinations (NSCP 208.6.1), and checks the periods against UBC 97 Method A, the modal participating mass and the seismic weight. See [ETABS analysis checks](docs/etabs_analysis.md).
 
 `sdt check` checks the open model against NSCP 2015 without changing it, and prints one line per check in the terminal. It covers missing loads, supports and diaphragms; the seismic inputs against the Section 208 tables (Z, Na, Nv, Ca, Cv, I, R, Ct); the story ranges and the Ev term in the combinations; P-delta, the mass source and the cracked-section modifiers; and the Section 418 member limits. After `sdt analyze` it also recomputes the base shear coefficient and period cap, and checks the spectrum scaling, modal mass and the drift ΔM = 0.7RΔS. See [Model check](docs/etabs_model_check.md).
 

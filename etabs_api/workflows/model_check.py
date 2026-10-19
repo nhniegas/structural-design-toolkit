@@ -760,7 +760,9 @@ def check_seismic(d: ModelData, settings: dict | None = None) -> list[Finding]:
                            f"{ratio * 100:.0f} % of the static {static / 1e3:,.0f} kN" +
                            ("" if status == OK else f" ({regular * 100:g} % is enough only for a "
                             f"regular structure, {irregular * 100:g} % if irregular; sdt analyze "
-                            f"scales it to {irregular * 100:g} %)" if status == WARN else
+                            f"uses {regular * 100:g} % only when sdt irregularity found the "
+                            "structure regular and you confirmed the types it cannot check)"
+                            if status == WARN else
                             f" (below {regular * 100:g} %: scale it, sdt analyze)"),
                            "NSCP 208.5.3.5.4",
                            equation=f"{case}: Vspectrum / Vstatic = "

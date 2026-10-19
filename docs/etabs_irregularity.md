@@ -94,7 +94,9 @@ The other choice reads the drifts of the model as it is. They are a little large
 The report ends with what the irregularities found ask for:
 
 - whether the static force procedure is still allowed (an irregular structure of at most five stories or 20 m; UBC 1629.8.3) or the dynamic procedure is required (1629.8.4);
-- the spectrum scaling that applies: 90 % of the static base shear for a regular structure, 100 % for an irregular one (UBC 1631.5.4). `sdt analyze` always scales to 100 %; this report does not change that.
+- the spectrum scaling that applies: 90 % of the static base shear for a regular structure, 100 % for an irregular one (NSCP 208.5.3.5.4). The command writes `<model> - regularity.json` beside the model (Summaries): the irregular types and those left to the engineer. `sdt analyze` reads it and scales to 90 % only when no type was found irregular and you confirm the judged types are absent.
+
+Ax is reported here; `sdt analyze` applies it to the model (see [ETABS analysis](etabs_analysis.md)).
 
 ## Limits
 
