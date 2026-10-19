@@ -7,6 +7,14 @@ Every design module that runs this way offers the same four names:
 * ``summary_text(result)``    the results as plain text for the terminal
 * ``export_pdf(result, path)``  the PDF calculation report; returns its path or None
 
+and may offer two more:
+
+* ``INPUT_GROUPS``            [(dialog title, [Field, ...]), ...]: the inputs asked
+                              over several dialogs, one after the other, when one
+                              would not fit on the screen
+* ``complete(values)``        called after the dialogs and before the calculation,
+                              to ask what a dialog cannot (a file to read)
+
 ``run_design`` turns those into the terminal workflow. The inputs typed last
 time are offered again, so a second member only needs the values that change.
 """
@@ -17,7 +25,8 @@ import json
 import os
 from dataclasses import dataclass
 
-COMMAND_OF = {"composite_column": "composite", "steel_section": "steel", "wind_loads": "wind"}
+COMMAND_OF = {"composite_column": "composite", "steel_section": "steel", "wind_loads": "wind",
+              "pile_cap": "pilecap"}
 OUTPUT_OPTIONS = {
     "Print the results in the terminal": (True, False),
     "Export a PDF calculation report": (False, True),
@@ -108,6 +117,7 @@ def run_design(module, title: str, name: str, report_name: str):
     )
 
     fields = module.INPUTS
+    groups = getattr(module, "INPUT_GROUPS", None) or [(title, fields)]
     saved = _load(name)
     shown = {}
     for field in fields:
@@ -116,18 +126,22 @@ def run_design(module, title: str, name: str, report_name: str):
             f"{value:g}" if isinstance(value, float) else str(value))
 
     while True:  # ask again, with the same entries, until the inputs are valid
-        typed = enter_values(title, "Inputs of the check. Leave an optional box blank.",
-                             list(shown), shown)
-        if typed is None:
-            return None
-        shown = typed
+        for group_title, group in groups:
+            labels = [dialog_label(f) for f in group]
+            typed = enter_values(group_title, "Inputs of the check. Leave an optional box blank.",
+                                 labels, {label: shown[label] for label in labels})
+            if typed is None:
+                return None
+            shown.update(typed)
         try:
-            values = parse_inputs(fields, {f.label: typed[dialog_label(f)] for f in fields})
+            values = parse_inputs(fields, {f.label: shown[dialog_label(f)] for f in fields})
+            if hasattr(module, "complete"):
+                values = module.complete(values)
             result = module.calculate(values)
             break
         except (ValueError, KeyError, ZeroDivisionError) as error:
             show_warning(f"The check could not run:\n\n{error}", title=title)
-    _save(name, values)
+    _save(name, {key: value for key, value in values.items() if key in {f.key for f in fields}})
 
     from utilities.run_summary import RunSummary
 

@@ -2328,13 +2328,13 @@ INPUTS = [
     Field("Fy", "Yield strength Fy (MPa)", 345.0),
     Field("Fu", "Tensile strength Fu (MPa)", 450.0),
     Field("method", "Design method", "LRFD", kind="choice", choices=("LRFD", "ASD")),
-    Field("Lx", "Unbraced length about x, Lx (m)", None, optional=True),
+    Field("Lx", "Unbraced length about x, Lx (m); blank: Ly", None, optional=True),
     Field("Ly", "Unbraced length about y, Ly (m)", 4.0),
-    Field("Lz", "Torsional unbraced length Lz (m)", None, optional=True),
+    Field("Lz", "Torsional unbraced length Lz (m); blank: Ly", None, optional=True),
     Field("Kx", "Effective length factor Kx", 1.0),
     Field("Ky", "Effective length factor Ky", 1.0),
     Field("Kz", "Effective length factor Kz", 1.0),
-    Field("Lb", "Lateral-torsional unbraced length Lb (m)", None, optional=True),
+    Field("Lb", "Lateral-torsional unbraced length Lb (m); blank: Ly", None, optional=True),
     Field("Cb", "LTB modification factor Cb", 1.0),
     Field("axial", "Axial force", "Compression", kind="choice",
           choices=("Compression", "Tension")),
@@ -2344,9 +2344,9 @@ INPUTS = [
     Field("Vrx", "Shear demand along the web, Vrx (kN)", 0.0),
     Field("Vry", "Shear demand along the flanges, Vry (kN)", 0.0),
     Field("Tr", "Torsion demand Tr (kN-m)", 0.0),
-    Field("a", "Stiffener spacing a (mm)", None, optional=True),
-    Field("st_b", "Stiffener plate width (mm)", None, optional=True),
-    Field("st_t", "Stiffener plate thickness (mm)", None, optional=True),
+    Field("a", "Stiffener spacing a (mm); blank: no stiffeners", None, optional=True),
+    Field("st_b", "Stiffener plate width (mm); blank: no stiffeners", None, optional=True),
+    Field("st_t", "Stiffener plate thickness (mm); blank: no stiffeners", None, optional=True),
     Field("tension_field", "Tension field action", "No", kind="choice", choices=("Yes", "No")),
 ]
 
@@ -2472,10 +2472,128 @@ def export_pdf(check: SteelCheck, path: str) -> Optional[str]:
         return None
 
 
-def run():
-    """Terminal workflow: input dialog, then printout, PDF report or both."""
+def run(window: Optional[bool] = None):
+    """``sdt steel``: the window with the inputs, a drawing of the section and,
+    after a run, the ratio of every check, and the results.
+
+    With an answers file (or ``window=False``) the input dialog of
+    ``utilities/design_cli.py`` is used instead, which the file answers."""
+    from utilities import answers
+
+    if window is None:
+        window = not answers.replaying()
+    if window:
+        from utilities.design_window import open_window
+
+        return open_window(sys.modules[__name__], "steel_section", "Steel Section (AISC 360-22)",
+                           "WideFlange_Capacity_Report", "steel")
     return run_design(sys.modules[__name__], "Steel Section (AISC 360-22)",
                       "steel_section", "WideFlange_Capacity_Report")
+
+
+# =========================================================================== #
+# THE WINDOW (utilities/design_window.py)
+# =========================================================================== #
+PREVIEW_TITLE = "SECTION AND CHECKS"
+CHECK_NAMES = {"ten": "Tension", "cmp": "Compression", "fx": "Flexure about x",
+               "fy": "Flexure about y", "vx": "Shear, web", "vy": "Shear, flanges",
+               "h": "Combined forces"}
+
+
+def _ratios(check: SteelCheck) -> list:
+    """(name, ratio, governing limit state) of every check that has a demand."""
+    results = ReportBuilder(check.member).run(check.demands)
+    out = []
+    for key, name in CHECK_NAMES.items():
+        item = results.get(key)
+        if item is not None and getattr(item, "dcr", None) is not None:
+            out.append((name, float(item.dcr), str(item.governing or "")))
+    return out
+
+
+def preview(figure, values: dict, check: Optional[SteelCheck]) -> str:
+    """The section to scale from the AISC table; after a run, the ratio of every
+    check as a bar."""
+    from matplotlib.patches import Rectangle
+
+    from utilities.design_window import PLOT, ratio_colour, style_axes
+
+    member = check.member if check is not None else WideFlangeCapacity(
+        str(values["section"]).strip(), Fy=float(values["Fy"]), Fu=float(values["Fu"]))
+    s = member.s
+    d, bf, tf, tw = s.d, s.bf, s.tf, s.tw
+    ax = figure.add_axes([0.02, 0.36, 0.4, 0.6] if check is not None else [0.1, 0.1, 0.8, 0.82])
+    style_axes(ax, ticks=False)
+    steel = dict(facecolor="#8A8F99", edgecolor=PLOT["text"], lw=1.0)
+    ax.add_patch(Rectangle((-bf / 2, d / 2 - tf), bf, tf, **steel))
+    ax.add_patch(Rectangle((-bf / 2, -d / 2), bf, tf, **steel))
+    ax.add_patch(Rectangle((-tw / 2, -d / 2 + tf), tw, d - 2 * tf, **steel))
+    pad = 0.18 * max(d, bf)
+    ax.annotate(f"bf = {bf:.0f}", (0, d / 2 + pad * 0.3), ha="center", color=PLOT["muted"],
+                fontsize=8)
+    ax.annotate(f"d = {d:.0f}", (bf / 2 + pad * 0.3, 0), ha="left", va="center", rotation=90,
+                color=PLOT["muted"], fontsize=8)
+    ax.annotate(f"tf = {tf:.1f}", (bf / 2, d / 2 - tf / 2), xytext=(4, 0),
+                textcoords="offset points", va="center", color=PLOT["muted"], fontsize=7)
+    ax.annotate(f"tw = {tw:.1f}", (tw / 2, 0), xytext=(4, 0), textcoords="offset points",
+                va="center", color=PLOT["muted"], fontsize=7)
+    ax.set_aspect("equal")
+    ax.set_xlim(-max(bf, d) / 2 - pad, max(bf, d) / 2 + pad)
+    ax.set_ylim(-d / 2 - pad, d / 2 + pad)
+    lines = [f"{s.name}: d {d:.0f} mm, bf {bf:.0f} mm, tf {tf:.1f} mm, tw {tw:.1f} mm, "
+             f"A {s.A:,.0f} mm2, Fy {values['Fy']:g} MPa"]
+    if check is None:
+        return "\n".join(lines)
+    ratios = _ratios(check)
+    bars = figure.add_axes([0.68, 0.36, 0.29, 0.58])
+    style_axes(bars)
+    names = [name for name, _, _ in ratios]
+    values_ = [ratio for _, ratio, _ in ratios]
+    bars.barh(names, values_, color=[ratio_colour(r) for r in values_])
+    bars.axvline(1.0, color=PLOT["red"], lw=0.8, ls=":")
+    bars.tick_params(axis="y", labelsize=7, colors=PLOT["text"])
+    bars.set_xlim(0, max(1.1, max(values_ or [0]) * 1.1))
+    bars.invert_yaxis()
+    bars.set_xlabel("demand / capacity")
+    note = figure.add_axes([0.05, 0.04, 0.9, 0.24])
+    style_axes(note, ticks=False)
+    for side in note.spines.values():
+        side.set_visible(False)
+    text = "\n".join(f"{name}: {ratio:.3f}  ({gov})" for name, ratio, gov in ratios)
+    note.text(0.0, 1.0, text, va="top", ha="left", color=PLOT["text"], fontsize=7.5,
+              family="monospace", transform=note.transAxes)
+    lines.append("The bars are the demand over the design strength of each check; the "
+                 "governing limit state of each is listed under the drawing.")
+    return "\n".join(lines)
+
+
+def result_parts(check: SteelCheck) -> list:
+    """The results panel of the window: each check with its ratio and what governs."""
+    parts = [(f"{check.member.s.name}, {check.member.method}\n", "head")]
+    ratios = _ratios(check)
+    worst = max(ratios, key=lambda r: r[1]) if ratios else None
+    if worst:
+        verdict = "PASS" if worst[1] <= 1.0 else "FAIL"
+        parts.append((f"RESULT: {verdict}, governing {worst[0].lower()} at {worst[1]:.3f}\n\n",
+                      "pass" if verdict == "PASS" else "fail"))
+    for name, ratio, governing in ratios:
+        parts.append((f"{ratio:6.3f}  ", "pass" if ratio <= 1.0 else "fail"))
+        parts.append((f"{name}\n", None))
+        parts.append((f"        {governing}\n", "muted"))
+    if not ratios:
+        parts.append(("No demand was given: type at least one force.\n", "muted"))
+    parts.append(("\nPrint in the terminal for every table and equation.\n", "muted"))
+    return parts
+
+
+def window_summary(check: SteelCheck) -> tuple:
+    ratios = _ratios(check)
+    if not ratios:
+        return f"{check.member.s.name}: no demand", []
+    worst = max(ratios, key=lambda r: r[1])
+    failures = [f"{name}: {ratio:.3f}" for name, ratio, _ in ratios if ratio > 1.0]
+    return (f"{check.member.s.name}: governing {worst[0].lower()} {worst[1]:.3f} "
+            f"{'PASS' if not failures else 'FAIL'}", failures)
 
 
 # =========================================================================== #

@@ -27,6 +27,7 @@ A terminal cannot draw LaTeX as a PDF does. The equations use Greek letters, the
 | `sdt steel` | The tables of the calculation report | Every equation of the calculation report, with its numbers |
 | `sdt composite` | Section checks, strengths, shear, interaction | Axial strength, shear and the interaction |
 | `sdt wind` | Inputs, velocity pressure profile, Cp tables, pressures | The velocity pressure with its numbers, and the pressure equation |
+| `sdt pilecap` | The bars, every check with its clause, the pile reactions | Pile reactions, flexure, one-way and two-way shear, strut-and-tie |
 | `sdt doctor`, the menu, every closing summary | Tables | |
 
 **One-member checks and model checks print their equations with numbers.** For `sdt beams`, `sdt columns` and `sdt design` the equations are printed once, as the key to the table. The calculation of each member, with its numbers, is in the PDF calculation report.
@@ -56,7 +57,7 @@ The design takes the same time. The tables are built once, when the command ends
 
 - `utilities/terminal.py`: the report (headings, tables, equations, lines), its two forms, and `math`, which turns the LaTeX of a calculation report into terminal symbols.
 - `design/concrete/results_tables.py`: the beam, deflection and column tables and their equations.
-- Each command builds its own report: `findings_report` in `model_check.py`, `AnalysisReport.report`, `DriftReport.report`, `RunSummary.report`, and `terminal_report` in the steel, composite and wind modules.
+- Each command builds its own report: `findings_report` in `model_check.py`, `AnalysisReport.report`, `DriftReport.report`, `RunSummary.report`, and `terminal_report` in the steel, composite, wind and pile cap modules.
 
 ## Tests
 

@@ -1,6 +1,6 @@
 # The Calculation Reports
 
-`sdt beams`, `sdt columns`, `sdt steel`, `sdt composite` and `sdt wind` each write a PDF calculation report. All five share one format, described here. What each report holds is in the guide of its command.
+`sdt beams`, `sdt columns`, `sdt steel`, `sdt composite`, `sdt wind` and `sdt pilecap` each write a PDF calculation report. All six share one format, described here. What each report holds is in the guide of its command.
 
 Code: `utilities/report_style.py` (the look), `utilities/_calc_report.py` (the beam and column reports).
 
@@ -30,7 +30,7 @@ Code: `utilities/report_style.py` (the look), `utilities/_calc_report.py` (the b
 
 **Beam and column reports** hold the intermediate and final values of each member in tables, with no equation written out for each member; on a model of a hundred members that would be a report of several hundred pages. The column report keeps the interaction surface of each column, with every combination plotted against it. Each column starts on a new page and takes two: its forces and checks on the first, and on the second its transverse reinforcement with the interaction surface at its right, then its design status. Set under the tables, the surface was pushed to the next page and left a half empty one.
 
-**Steel, composite and wind reports** are for one member or one building, and write their equations with the numbers. The steel report is set to fit one page; when it cannot, it runs to a second, numbered like the first.
+**Steel, composite, wind and pile cap reports** are for one member or one building, and write their equations with the numbers. The pile cap report also has a plan of the cap and a table of every check with its clause. The steel report is set to fit one page; when it cannot, it runs to a second, numbered like the first.
 
 ## Tables that are too wide
 

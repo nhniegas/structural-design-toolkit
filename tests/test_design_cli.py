@@ -159,7 +159,7 @@ def typed_defaults(module) -> dict:
 def test_run_prints_when_asked(dialogs, capsys):
     dialogs["values"] = [typed_defaults(composite)]
     dialogs["option"] = "Print the results in the terminal"
-    assert composite.run() is not None
+    assert composite.run(window=False) is not None
     assert "phi Pn (kN)" in capsys.readouterr().out
     title, text = dialogs["summaries"][-1]           # the closing summary window
     assert title.startswith("Summary - sdt composite") and "printed in the terminal" in text
@@ -181,20 +181,75 @@ def test_run_asks_again_after_a_bad_value(dialogs):
     bad = typed_defaults(steel) | {dialog_label(steel.INPUTS[1]): "abc"}
     dialogs["values"] = [bad, typed_defaults(steel)]
     dialogs["option"] = None
-    assert steel.run() is not None
+    assert steel.run(window=False) is not None
     assert len(dialogs["warnings"]) == 1 and "must be a number" in dialogs["warnings"][0]
 
 
 def test_run_cancelled_returns_none(dialogs):
-    assert composite.run() is None
+    assert composite.run(window=False) is None
 
 
 def test_run_offers_last_inputs_again(dialogs, monkeypatch):
     first = typed_defaults(composite) | {dialog_label(composite.INPUTS[0]): "5000"}
     dialogs["values"] = [first]
-    composite.run()
+    composite.run(window=False)
     seen = []
     monkeypatch.setattr(_gui_helpers, "enter_values",
                         lambda title, prompt, labels, shown: seen.append(shown) or None)
-    composite.run()
+    composite.run(window=False)
     assert seen[0][dialog_label(composite.INPUTS[0])] == "5000"
+
+
+# --------------------------------------------------------------------------- #
+# The window of the composite and steel checks (utilities/design_window.py)
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("module", [composite, steel], ids=["composite", "steel"])
+def test_the_drawing_before_and_after_a_run(module):
+    from matplotlib.figure import Figure
+
+    values = defaults(module)
+    if module is steel:
+        values |= {"Pr": 800.0, "Mrx": 250.0, "Vrx": 150.0}
+    before = module.preview(Figure(), values, None)
+    figure = Figure()
+    result = module.calculate(values)
+    after = module.preview(figure, values, result)
+    assert before and after and len(figure.axes) >= 2          # section plus chart(s)
+    parts = module.result_parts(result)
+    assert parts and any(tag == "pass" for _, tag in parts)
+    line, failures = module.window_summary(result)
+    assert "PASS" in line and failures == []
+
+
+def test_the_steel_drawing_names_an_unknown_section():
+    from matplotlib.figure import Figure
+
+    with pytest.raises(Exception):
+        steel.preview(Figure(), defaults(steel) | {"section": "W99X999"}, None)
+
+
+@pytest.mark.parametrize("module, name", [(composite, "composite_column"),
+                                          (steel, "steel_section")], ids=["composite", "steel"])
+def test_the_window_runs_the_check(module, name, monkeypatch, tmp_path):
+    import tkinter as tk
+
+    from utilities.design_window import DesignWindow
+
+    monkeypatch.setattr(design_cli, "_saved_path", lambda n: str(tmp_path / f"{n}.json"))
+    try:
+        window = DesignWindow(module, name, "Test", "report")
+    except tk.TclError:
+        pytest.skip("no display for Tk")
+    try:
+        window.root.withdraw()
+        if module is steel:
+            window.widgets["Mrx"].set("250")
+        window.run()
+        assert window.result is not None
+        assert "PASS" in window.text.get("1.0", "end")
+        key = "b" if module is composite else "Fy"
+        window.widgets[key].set("abc")
+        window.redraw()                       # an invalid value: a message, no exception
+        assert window.legend.cget("text") == ""
+    finally:
+        window.close()
