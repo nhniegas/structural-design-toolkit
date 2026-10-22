@@ -700,7 +700,10 @@ def ensure_analysis(connector, cases: list[str]) -> bool:
 
 def frame_releases(connector) -> dict[str, tuple[bool, bool]]:
     """Moment (M3) releases at the I and J ends of every frame that has one."""
-    table = _read(connector, "Frame Assignments - Releases and Partial Fixity")
+    try:
+        table = _read(connector, "Frame Assignments - Releases and Partial Fixity")
+    except RuntimeError:    # a model with no release has no such table
+        return {}
     if table.empty:
         return {}
     yes = table[["M3I", "M3J"]].astype(str).eq("Yes")

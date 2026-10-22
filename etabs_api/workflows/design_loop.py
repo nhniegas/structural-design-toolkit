@@ -101,7 +101,8 @@ class LoopSettings:
     ct: float = 0.03
     size_on_forces: bool = True  # failing columns jump to the first passing size
     beam_earth_cover_stories: tuple = ()  # levels whose beams get the 75 mm earth cover
-    check_top_level: bool = True  # BCC, joint shear and Ve at the topmost level
+    check_top_level: bool | str = True  # BCC, joint shear and Ve at the topmost level;
+    # "joints": BCC and joint shear left out there, Ve kept
     check_foundation_level: bool = True  # BCC, joint shear and Ve at the bottom-most story
     inner_tie_style: str = "crossties"  # how the column schedule draws the interior ties
     section_scale: float = 20.0  # the column schedule draws every section at 1 : this
@@ -2349,8 +2350,11 @@ def loop_summary(summary: dict, settings: LoopSettings, original: str, working: 
         settings.sources.add_to(out)
     if settings.beam_earth_cover_stories:
         out.note("75 mm beam cover on: " + ", ".join(settings.beam_earth_cover_stories))
-    if not settings.check_top_level:
+    if settings.check_top_level is False:
         out.note("BCC, joint shear and Ve were not checked at the topmost level (your choice).")
+    elif settings.check_top_level is not True:
+        out.note("BCC and joint shear were not checked at the topmost level (your choice); "
+                 "Ve was.")
     if not settings.check_foundation_level:
         out.note("BCC, joint shear and Ve were not checked at the foundation level "
                  "(your choice).")

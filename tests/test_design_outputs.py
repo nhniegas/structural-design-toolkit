@@ -451,6 +451,17 @@ def test_the_column_summary_groups_the_failing_columns_by_check():
     assert "not checked at the topmost level" in text
 
 
+def test_the_column_summary_says_when_only_bcc_and_joint_shear_are_left_out():
+    from design.concrete.columns.options import TOP_JOINTS_ONLY, TOP_LEVEL_OPTIONS
+
+    report = pd.DataFrame({"UniqueName": ["C1"], "Combo": ["U1"],
+                           "Column_Design_Status": ["PASS"]})
+    text = cw.column_summary(report, "sdt columns", check_top_level=TOP_JOINTS_ONLY).text()
+    assert "BCC and joint shear were not checked at the topmost level" in text
+    assert "Ve was" in text
+    assert list(TOP_LEVEL_OPTIONS.values()) == [True, False, TOP_JOINTS_ONLY]
+
+
 def test_the_beam_summary_groups_the_failing_beams_by_reason():
     results = pd.DataFrame({
         "UniqueName": ["B1", "B1", "B2", "B2", "B3", "B3"],

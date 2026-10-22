@@ -112,7 +112,8 @@ def design_columns(
     ``check_top_level`` False leaves out the strong column - weak beam and
     joint shear checks at the joints on top of the columns (no column above),
     and designs the shear of those topmost columns for the analysis shear
-    instead of the probable-moment shear Ve.
+    instead of the probable-moment shear Ve; ``"joints"`` (``TOP_JOINTS_ONLY``)
+    leaves out only the strong column - weak beam and joint shear checks there.
     ``check_foundation_level`` False leaves them out at the joints of the
     bottom-most story columns, whose shear is then designed for the analysis
     shear instead of the probable-moment shear Ve. Both are asked by
@@ -514,14 +515,15 @@ def design_columns(
     skipped_joints: dict[str, str] = {}
     foundation_columns: set[str] = set()
     top_columns: set[str] = set()       # no column stands on them
-    if is_smrf and not (check_top_level and check_foundation_level):
+    if is_smrf and not (check_top_level is True and check_foundation_level):
         ends_of = {member: column_ends(member) for member in column_candidates}
-        if not check_top_level:
+        if check_top_level is not True:
             bottoms = {bottom for bottom, _ in ends_of.values()}
             for member, (_, top) in ends_of.items():
                 if top not in bottoms:
                     skipped_joints[top] = TOP_LEVEL_SKIPPED
-                    top_columns.add(member)
+                    if check_top_level is False:     # TOP_JOINTS_ONLY keeps Ve
+                        top_columns.add(member)
         if not check_foundation_level:
             story_of = {str(member): str(story) for member, story in story_by_member.items()}
             order = _story_order_from_stacks(connectivity, story_of)

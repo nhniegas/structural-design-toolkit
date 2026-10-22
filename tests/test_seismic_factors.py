@@ -81,7 +81,10 @@ def test_frame_bays_and_the_element_story_shear_ratio():
 def test_wall_ratio_and_the_lower_two_thirds():
     assert sf.wall_ratio(300.0, 6.0, 1000.0) == pytest.approx(300 * 3 / 6 / 1000)
     stories = sf.lower_two_thirds({"2F": 4000, "3F": 7500, "4F": 11000, "RF": 14500}, 0.0)
-    assert stories == ["2F", "3F"]            # 2/3 of 14.5 m is 9.67 m: 4F at 11 m is out
+    # 2/3 of 14.5 m is 9.67 m: 4F starts at 7.5 m, below it; RF starts at 11 m, above
+    assert stories == ["2F", "3F", "4F"]
+    # a one-story building: its only story
+    assert sf.lower_two_thirds({"2F": 8700}, 1500) == ["2F"]
 
 
 def test_case_direction():

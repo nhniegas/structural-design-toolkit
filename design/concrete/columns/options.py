@@ -132,9 +132,13 @@ def ask_column_design_options(
     return continuous_vertical_bars, bottom_story_cover
 
 
+TOP_JOINTS_ONLY = "joints"   # topmost level: BCC and joint shear left out, Ve kept
+
 TOP_LEVEL_OPTIONS = {
     "Yes - check them (NSCP 418.7.3, 418.8; ACI 18.7.3, 18.8)": True,
     "No - leave them out; design the topmost columns for the analysis shear": False,
+    "BCC and joint shear only - leave those out; keep Ve (NSCP 418.7.6; ACI 18.7.6)":
+        TOP_JOINTS_ONLY,
 }
 
 
@@ -150,7 +154,8 @@ def ask_capacity_check_levels(is_smrf: bool, last: dict | None = None
     they usually fail for reasons of geometry.
 
     Returns ``(check_top_level, check_foundation_level)``, or None when a
-    dialog is closed. Without seismic design there is nothing to ask.
+    dialog is closed. ``check_top_level`` is True, False (BCC, joint shear and
+    Ve left out) or ``TOP_JOINTS_ONLY`` (BCC and joint shear left out, Ve kept). Without seismic design there is nothing to ask.
     """
     if not is_smrf:
         return True, True
@@ -164,7 +169,8 @@ def ask_capacity_check_levels(is_smrf: bool, last: dict | None = None
         "above, and those columns)? One column alone must there be 1.2 times stronger than "
         "the beams, and the check often fails.",
         list(TOP_LEVEL_OPTIONS),
-        default_index=0 if last.get("check_top_level", True) else 1)
+        default_index=list(TOP_LEVEL_OPTIONS.values()).index(last.get("check_top_level", True))
+        if last.get("check_top_level", True) in TOP_LEVEL_OPTIONS.values() else 0)
     if chosen is None:
         return None
     top = TOP_LEVEL_OPTIONS[chosen]

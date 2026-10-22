@@ -21,7 +21,7 @@ sdt design
 | Design inputs | SMRF on or off, the gravity combination for the beam seismic shear, beam bars and cover, column bars and cover (as in `sdt beams` / `sdt columns`) |
 | Column questions | Bottom-story cover and vertical bars carried down; asked once for every iteration |
 | Cover against earth | The floor levels whose beams get 75 mm cover, as in `sdt beams` |
-| Capacity-design checks by level | With SMRF on: whether BCC, joint shear and Ve are run at the topmost level and at the foundation level, as in `sdt columns`. A level left out no longer drives the column sizes |
+| Capacity-design checks by level | With SMRF on: whether BCC, joint shear and Ve are run at the topmost level (or BCC and joint shear only left out there, Ve kept) and at the foundation level, as in `sdt columns`. A level left out no longer drives the column sizes |
 | Interior ties of the column schedule | Crossties or closed inner hoops, as in `sdt columns`; used for the `Column_Schedule.dxf` of the final design |
 | Deflection limit | L/480 (partitions likely to be damaged) or L/240 |
 | When the partitions are built | Not known, or the months and the dead load share before them, as in `sdt beams`. With them the long-term deflection before the partitions is deducted, so fewer beams are made deeper for deflection |

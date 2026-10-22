@@ -183,11 +183,18 @@ def wall_ratio(shear: float, length_m: float, story_shear: float) -> float:
 
 
 def lower_two_thirds(elevations: dict[str, float], base: float) -> list[str]:
-    """The stories at or below two-thirds of the height above ``base``."""
+    """The stories at or below two-thirds of the height above ``base``: those that start
+    below it (the bottom of a story is the level under it). A one-story building is its
+    story; a taller one includes the story that crosses two-thirds of the height."""
     if not elevations:
         return []
     height = max(elevations.values()) - base
-    return [s for s, z in elevations.items() if z - base <= 2.0 / 3.0 * height + 1e-6]
+    out, bottom = [], base
+    for story, z in sorted(elevations.items(), key=lambda item: item[1]):
+        if bottom - base < 2.0 / 3.0 * height - 1e-6:
+            out.append(story)
+        bottom = z
+    return out
 
 
 # =============================================================================
