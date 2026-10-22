@@ -62,6 +62,8 @@ SAME_PLACE = 5.0  # mm; a column this close to its old place has not moved
 ON_GRID = 100.0  # mm; a column this close to a grid line is on it
 MOVE_LIMIT = 2500.0  # mm; farthest an off-grid column is followed as "moved"
 ANGLE_TOLERANCE = 0.5  # degrees
+ARC_PIECE = 2000.0  # mm; an arc of a slab, opening or zone outline is read as straight pieces this long at most
+DUPLICATE = 5.0  # mm; a column drawn this close to an equal one of the same plan is the same column
 _STORY_TEXT = re.compile(r"STORY\s+(.+?)\s+HEIGHT\s+([\d.]+)", re.IGNORECASE)
 
 
@@ -202,6 +204,10 @@ def read_framing_plans(path: str, layers: dict | None = None) -> Building:
             points = points[:-1]
         return points
 
+    def outline_of(entity) -> list[tuple[float, float]]:
+        """The corners of a polyline with each arc (bulge) as straight pieces."""
+        return polyline_points(entity, ARC_PIECE)
+
     texts = {key: [text_of(e) for e in modelspace.query("TEXT MTEXT") if on(e, key)]
              for key in ("story", "grid", "load")}
     frames = []
@@ -237,10 +243,17 @@ def read_framing_plans(path: str, layers: dict | None = None) -> Building:
         building.stories.append((story, height))
 
         labels = [(t, x, y) for t, x, y in texts["grid"] if inside(frame, x, y)]
-        for entity in modelspace.query("LINE"):
+        for entity in modelspace.query("LINE LWPOLYLINE"):
             if not on(entity, "grid"):
                 continue
-            a, b = entity.dxf.start, entity.dxf.end
+            if entity.dxftype() == "LWPOLYLINE":     # a grid line drawn as a 2-point polyline
+                points = entity.get_points()
+                if len(points) != 2 or entity.closed:
+                    continue
+                a = ezdxf.math.Vec2(points[0][0], points[0][1])
+                b = ezdxf.math.Vec2(points[1][0], points[1][1])
+            else:
+                a, b = entity.dxf.start, entity.dxf.end
             if not inside(frame, (a.x + b.x) / 2, (a.y + b.y) / 2):
                 continue
             near = min(
@@ -253,13 +266,21 @@ def read_framing_plans(path: str, layers: dict | None = None) -> Building:
             # The lowest plan that shows a grid defines it.
             grids.setdefault(near[1], GridLine(near[1], a.x - ox, a.y - oy, b.x - ox, b.y - oy))
 
-        for entity in modelspace.query("LWPOLYLINE CIRCLE"):
+        drawn: list[PlanColumn] = []
+        for entity in modelspace.query("LWPOLYLINE CIRCLE LINE"):
             if not on(entity, "column"):
+                continue
+            if entity.dxftype() == "LINE":
+                start = entity.dxf.start
+                if inside(frame, start.x, start.y):
+                    building.warnings.append(
+                        f"{story}: a plain line on the column layer was skipped (draw the "
+                        "column as a closed polyline or a circle).")
                 continue
             if entity.dxftype() == "CIRCLE":
                 centre, diameter = entity.dxf.center, round(2.0 * entity.dxf.radius)
                 if inside(frame, centre.x, centre.y):
-                    building.columns.append(PlanColumn(
+                    drawn.append(PlanColumn(
                         story, centre.x - ox, centre.y - oy, diameter, diameter, 0.0, True))
                 continue
             points = corners_of(entity)
@@ -269,8 +290,17 @@ def read_framing_plans(path: str, layers: dict | None = None) -> Building:
                 building.warnings.append(
                     f"{story}: a column outline with {len(points)} corners was skipped.")
                 continue
-            building.columns.append(
-                rectangle_column(story, [(x - ox, y - oy) for x, y in points]))
+            drawn.append(rectangle_column(story, [(x - ox, y - oy) for x, y in points]))
+        for column in drawn:
+            if any(math.dist((column.x, column.y), (c.x, c.y)) <= DUPLICATE
+                   and (round(c.width), round(c.depth), c.circular)
+                   == (round(column.width), round(column.depth), column.circular)
+                   for c in building.columns if c.story == story):
+                building.warnings.append(
+                    f"{story}: a column drawn twice at ({column.x / 1000:.2f}, "
+                    f"{column.y / 1000:.2f}) m was read once.")
+                continue
+            building.columns.append(column)
         for entity in modelspace.query("LWPOLYLINE LINE"):
             if not on(entity, "wall"):
                 continue
@@ -302,15 +332,47 @@ def read_framing_plans(path: str, layers: dict | None = None) -> Building:
             else:
                 building.warnings.append(
                     f"{story}: a wall polyline with no width and {len(local)} corners was skipped.")
-        _read_floor(building, story, modelspace, frame, (ox, oy), on, corners_of, inside,
+        _read_floor(building, story, modelspace, frame, (ox, oy), on, outline_of, inside,
                     texts["load"])
     building.grids = list(grids.values())
     return building
 
 
+def polyline_points(entity, piece: float = ARC_PIECE) -> list[tuple[float, float]]:
+    """The corners of an LWPOLYLINE, each arc (a bulge) replaced by straight pieces no
+    longer than ``piece`` along the arc; the closing point is not repeated."""
+    raw = [(p[0], p[1], p[4]) for p in entity.get_points("xyseb")]
+    if len(raw) > 1 and math.dist(raw[0][:2], raw[-1][:2]) < 1e-6:
+        raw = raw[:-1]
+    closed = entity.closed or len(raw) > 2
+    out = []
+    for index, (x, y, bulge) in enumerate(raw):
+        out.append((x, y))
+        if abs(bulge) < 1e-9 or (index == len(raw) - 1 and not closed):
+            continue
+        nx, ny = raw[(index + 1) % len(raw)][:2]
+        chord = math.dist((x, y), (nx, ny))
+        if chord < 1e-6:
+            continue
+        sweep = 4.0 * math.atan(bulge)                 # signed: + is counter-clockwise
+        radius = chord / (2.0 * math.sin(abs(sweep) / 2.0))
+        # the centre: from the chord's middle along its left normal (signed by the sweep)
+        mx, my = (x + nx) / 2.0, (y + ny) / 2.0
+        ux, uy = (nx - x) / chord, (ny - y) / chord
+        offset = radius * math.cos(abs(sweep) / 2.0) * (1.0 if bulge > 0 else -1.0)
+        cx, cy = mx - uy * offset, my + ux * offset
+        start = math.atan2(y - cy, x - cx)
+        parts = max(1, math.ceil(abs(sweep) * radius / piece - 1e-9))
+        for k in range(1, parts):
+            angle = start + sweep * k / parts
+            out.append((cx + radius * math.cos(angle), cy + radius * math.sin(angle)))
+    return out
+
+
 def _read_floor(building: Building, story: str, modelspace, frame, origin, on, corners_of,
                 inside, load_texts) -> None:
-    """The slab outline, openings and load zones of one plan (closed polylines)."""
+    """The slab outline, openings and load zones of one plan (closed polylines; arcs as
+    straight pieces of ``ARC_PIECE`` at most)."""
     from shapely.geometry import Point, Polygon
 
     ox, oy = origin

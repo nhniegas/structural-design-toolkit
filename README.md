@@ -210,7 +210,7 @@ This defines the materials, frame sections, load patterns, UBC 97 response spect
 
 ## Building grids, columns and walls from a DXF
 
-`sdt model` (old name `sdt grids`). It reads framing plans drawn in one DXF file and creates the stories, grid lines, columns and walls in ETABS; run again on a revised drawing, it updates the model. See [Grids, columns and walls from a DXF](docs/etabs_grid_column_model.md). It then frames the floors: the girders, beams and slabs of least concrete that keep frame action, drawn and ranked, the one you pick built with the loads of each occupancy zone. See [The model from a DXF, with its framing](docs/etabs_model.md).
+`sdt model` (old name `sdt grids`). It reads framing plans drawn in one DXF file and creates the stories, grid lines, columns and walls in ETABS; run again on a revised drawing, it updates the model. See [Grids, columns and walls from a DXF](docs/etabs_grid_column_model.md). It then frames the floors: the girders (along the grid lines, at any angle), beams, slabs and edge beams of least concrete that keep frame action, drawn and ranked, the one you pick built with the loads of each occupancy zone; a bottom floor with no slab gets tie beams. See [The model from a DXF, with its framing](docs/etabs_model.md).
 
 ## Running and checking the analysis
 

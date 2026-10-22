@@ -318,3 +318,131 @@ def test_screening_text_marks_a_marginal_option():
     assert "passes" in mf.screening_text({"drift": 0.9, "story": "3F", "direction": "X"})
     assert [mf.screening_rank(r) for r in ({"drift": 0.9}, {"drift": 1.05}, {"drift": 1.3},
                                            None)] == [0, 1, 2, 3]
+
+
+# --------------------------------------------------------------------------
+# ANGLED GRIDS, EDGES, VOIDS AND TIE BEAMS (2026-10-22)
+# --------------------------------------------------------------------------
+def turned_floor(angle=30.0, outline=True, **extra):
+    """The 3 x 2 bay grid of ``grid_floor`` turned by ``angle`` about the origin, with its
+    grid lines."""
+    def turn(x, y):
+        return fr._rotate(x, y, angle)
+
+    supports = [fr.Support(*turn(x, y), 500, 500, f"C{x}-{y}") for x in XS for y in YS]
+    grids = [(*turn(x, -2000), *turn(x, 18000)) for x in XS]
+    grids += [(*turn(-2000, y), *turn(20000, y)) for y in YS]
+    shape = [[turn(0, 0), turn(18000, 0), turn(18000, 16000), turn(0, 16000)]] if outline else []
+    return fr.Floor("2F", supports, outline=shape, grid_lines=grids, **extra)
+
+
+def test_girders_follow_grid_lines_at_an_angle():
+    lines = fr.girders(turned_floor(30.0), 300)
+    assert len(lines) == 17
+    assert all(fr.parallel(m.angle, 30.0) or fr.parallel(m.angle, 120.0) for m in lines)
+    assert sorted(round(m.length) for m in lines) == sorted(
+        round(m.length) for m in fr.girders(grid_floor(), 300))
+
+
+def test_a_turned_floor_frames_like_the_straight_one():
+    settings = fr.FramingSettings()
+    straight = fr.frame_floor(grid_floor(), settings, 125, "X")
+    turned = fr.frame_floor(turned_floor(30.0), settings, 125, "X")
+    assert not turned.problems
+    assert kinds(turned.members) == kinds(straight.members)
+    beams = [m for m in turned.members if m.kind == fr.BEAM]
+    assert beams and all(fr.parallel(m.angle, 30.0) or fr.parallel(m.angle, 120.0) for m in beams)
+    assert turned.volume == pytest.approx(straight.volume, rel=1e-6)
+    assert fr.frame_action(turned_floor(30.0), turned).passed
+
+
+def test_the_lowest_floor_without_a_slab_gets_tie_beams_only():
+    floor = grid_floor(outline=[])
+    floor.ties_only = True
+    framing = fr.frame_floor(floor, fr.FramingSettings(), 150)
+    assert set(kinds(framing.members)) == {fr.TIE} and framing.slab_area == 0
+    assert fr.frame_action(floor, framing).passed
+    setup = ms.merge_settings({})
+    tie = framing.members[0]
+    assert mf.section_name(tie, setup).startswith("FTB_")
+
+
+def test_a_void_across_a_girder_gets_edge_beams_not_the_girder():
+    void = [(4000, 6000), (8000, 6000), (8000, 10000), (4000, 10000)]   # across x = 6000
+    floor = grid_floor(openings=[void])
+    framing = fr.frame_floor(floor, fr.FramingSettings(), 150)
+    from shapely.geometry import LineString, Polygon
+
+    core = Polygon(void).buffer(-100)
+    girders = [m for m in framing.members if m.kind == fr.GIRDER]
+    assert not any(LineString(m.ends()).intersects(core) for m in girders)
+    edges = [m for m in framing.members if m.kind == fr.EDGE]
+    assert edges and all(Polygon(void).exterior.distance(LineString(m.ends()).centroid) < 1
+                         for m in edges)
+    assert any("voids cross" in n for n in framing.notes)
+
+
+def test_an_opening_inside_one_bay_keeps_its_trimmers_on_a_turned_floor():
+    hole = [fr._rotate(x, y, 30.0) for x, y in ((13000, 9000), (15000, 9000), (15000, 11000),
+                                                 (13000, 11000))]
+    framing = fr.frame_floor(turned_floor(30.0, openings=[hole]), fr.FramingSettings(), 150)
+    trimmers = [m for m in framing.members if m.kind == fr.TRIMMER]
+    assert len(trimmers) == 4
+    assert all(fr.parallel(m.angle, 30.0) or fr.parallel(m.angle, 120.0) for m in trimmers)
+
+
+def test_a_slab_edge_far_beyond_the_columns_gets_cantilevers_from_them():
+    # the slab runs 5 m past the last column line, which has no girder along the edge side
+    outline = [[(0, 0), (18000, 0), (18000, 21000), (0, 21000)]]
+    settings = fr.FramingSettings(edge_span=4000)
+    framing = fr.frame_floor(grid_floor(outline=outline), settings, 150)
+    tips = [m for m in framing.members if m.kind == fr.CANTILEVER
+            and max(m.y1, m.y2) == pytest.approx(21000)]
+    assert {round(min(m.x1, m.x2)) for m in tips} >= {6000, 12000}   # the inner columns
+    assert all(m.length <= settings.long_cantilever + 1 for m in tips)
+    assert any(m.kind == fr.EDGE and m.y1 == pytest.approx(21000) for m in framing.members)
+
+
+def test_an_edge_within_a_metre_of_its_girder_is_a_plain_overhang():
+    outline = [[(0, -600), (18000, -600), (18000, 16000), (0, 16000)]]
+    framing = fr.frame_floor(grid_floor(outline=outline), fr.FramingSettings(), 150)
+    assert fr.EDGE not in kinds(framing.members)
+    assert fr.CANTILEVER not in kinds(framing.members)
+    assert framing.slab_area == pytest.approx(18 * 16.6, abs=0.05)
+
+
+def test_slab_holes_are_the_openings_inside_a_piece():
+    small = [(2000, 2000), (2600, 2000), (2600, 2600), (2000, 2600)]
+    floor = grid_floor(openings=[small])
+    framing = fr.frame_floor(floor, fr.FramingSettings(), 150)
+    holes = mf.slab_holes(floor, framing)
+    assert len(holes) == 1 and len(holes[0]) == 4
+
+
+def test_the_reader_takes_polyline_grids_drops_twin_columns_and_reads_arcs(tmp_path):
+    doc = ezdxf.new("R2010")
+    msp = doc.modelspace()
+    msp.add_lwpolyline([(-1000, -1000), (20000, -1000), (20000, 20000), (-1000, 20000)],
+                       close=True, dxfattribs={"layer": "S-STORY"})
+    msp.add_text("STORY 2F   HEIGHT 3500", dxfattribs={"layer": "S-STORY", "height": 300}
+                 ).set_placement((0, -500))
+    msp.add_point((0, 0), dxfattribs={"layer": "S-ORIGIN"})
+    msp.add_lwpolyline([(0, 0), (0, 15000)], dxfattribs={"layer": "S-GRID"})
+    msp.add_text("1", dxfattribs={"layer": "S-GRID", "height": 300}).set_placement((0, 15500))
+    for _ in range(2):        # drawn twice
+        msp.add_lwpolyline([(-250, -250), (250, -250), (250, 250), (-250, 250)], close=True,
+                           dxfattribs={"layer": "S-COLUMN"})
+    msp.add_line((5000, 0), (5500, 0), dxfattribs={"layer": "S-COLUMN"})
+    msp.add_lwpolyline([(0, 0, 0, 0, 0), (10000, 0, 0, 0, 1.0), (10000, 10000, 0, 0, 0),
+                        (0, 10000, 0, 0, 0)], format="xyseb", close=True,
+                       dxfattribs={"layer": "S-SLAB"})
+    path = tmp_path / "plans.dxf"
+    doc.saveas(path)
+    building = gc.read_framing_plans(str(path))
+    assert [g.label for g in building.grids] == ["1"]
+    assert len(building.columns) == 1
+    assert any("drawn twice" in w for w in building.warnings)
+    assert any("plain line on the column layer" in w for w in building.warnings)
+    slab = building.floors["2F"]["slab"][0]
+    assert len(slab) > 6                       # the half circle as pieces
+    assert max(x for x, _ in slab) == pytest.approx(15000, abs=1)   # bulge 1: a half circle
