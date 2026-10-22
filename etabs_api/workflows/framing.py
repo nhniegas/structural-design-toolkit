@@ -965,14 +965,14 @@ def skeleton(floor: Floor, settings: FramingSettings):
     span = longest_span(settings.girder_depths, settings.fy)
     lines = girders(floor, settings.off_line, max_span=span)
     voids, inside = large_openings(floor, settings, lines, tolerance)
-    cores = [v.buffer(-tolerance) for v in voids]
+    cores = [v.buffer(-SLAB_ONLY_OVERHANG) for v in voids]   # a girder along the edge stays
     cores = [c for c in cores if not c.is_empty]
     if cores:
         lines = girders(floor, settings.off_line, cores, span)
     added = frame_girders(floor, lines, off_line=settings.off_line, voids=cores, max_span=span)
     lines += added
     slab = slab_shape(floor, voids)
-    first = bays(floor, lines, slab=slab)
+    first = bays(floor, lines, tolerance, slab=slab)
     lines, notes = transfer_girders(floor, lines, [b for b in first if b.panel], tolerance)
     if added:
         notes.append(f"{len(added)} girders added so that every column is held along each of "
@@ -987,7 +987,7 @@ def skeleton(floor: Floor, settings: FramingSettings):
     lines += long_stubs
     stubs += long_stubs
     stub_notes += long_notes
-    edges = edge_members(slab, lines, floor.supports, max_piece=settings.edge_span)
+    edges = edge_members(slab, lines, floor.supports, max_piece=2 * settings.edge_span)
     lines += edges
     notes += stub_notes
     if edges:
@@ -997,7 +997,7 @@ def skeleton(floor: Floor, settings: FramingSettings):
     framed = size_members(lines, settings.girder_depths, settings.girder_widths, settings.fy,
                           problems)
     holes = [Polygon(p) for p in floor.openings if len(p) >= 3]
-    panels = [b for b in bays(floor, framed, slab=slab)
+    panels = [b for b in bays(floor, framed, tolerance, slab=slab)
               if not any(h.contains(b.polygon.representative_point()) for h in holes)]
     result = (framed, panels, notes, problems)
     _SKELETONS[key] = (floor, result)
@@ -1079,6 +1079,7 @@ def _edge_pieces(slab, members: list[Member], supports: list[Support], tolerance
         for ring in [polygon.exterior] + list(polygon.interiors):
             ring_line = LineString(ring.coords)
             stops = {ring_line.project(Point(c)): None for c in ring.coords}
+            stops[ring_line.length] = None        # the ring closes on its first point
             for p in marks:
                 gap = ring_line.distance(p)
                 if gap <= near:
@@ -1228,8 +1229,11 @@ def frame_floor(floor: Floor, settings: FramingSettings, thickness: float,
         options = panel_options(bay, girder, settings, thickness, out.problems)
         chosen = best_option(options, thickness, settings, prefer, strict=prefer is not None)
         if chosen is None:
-            out.problems.append(f"a bay of {bay.lx / 1000:.2f} x {bay.ly / 1000:.2f} m needs "
-                                f"more than {thickness:.0f} mm of slab")
+            c = bay.polygon.representative_point()
+            out.problems.append(f"a bay of {bay.lx / 1000:.2f} x {bay.ly / 1000:.2f} m at "
+                                f"({c.x / 1000:.1f}, {c.y / 1000:.1f}) m needs more than "
+                                f"{thickness:.0f} mm of slab: its slab is drawn with no beams")
+            out.choices.append((bay, Option(TWO_WAY, thickness, [], max(bay.lx, bay.ly))))
             continue
         out.choices.append((bay, chosen))
     if scheme == "least":
@@ -1250,7 +1254,9 @@ def frame_floor(floor: Floor, settings: FramingSettings, thickness: float,
             c = bay.polygon.representative_point()
             out.problems.append(f"an overhang of {bay.polygon.area / 1e6:.1f} m2 at "
                                 f"({c.x / 1000:.1f}, {c.y / 1000:.1f}) m has no girder to "
-                                f"cantilever from within {settings.long_cantilever / 1000:g} m")
+                                f"cantilever from within {settings.long_cantilever / 1000:g} "
+                                "m: its slab is drawn with no beams")
+            out.choices.append((bay, Option(OVERHANG, 0.0, [], spacing)))
             continue
         # a cantilever has no continuous end; an edge beam continues into the next one
         edges = [i for i, m in enumerate(extra) if m.kind == EDGE]
