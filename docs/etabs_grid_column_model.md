@@ -12,8 +12,8 @@ All framing plans go in one file, side by side, in millimetres.
 |---|---|
 | `S-STORY` | One closed rectangle around each plan and, inside it, one text: `STORY 2F   HEIGHT 4500` |
 | `S-ORIGIN` | One point per plan at the same building point, so the plans stack correctly |
-| `S-GRID` | One line per grid, at any angle and of any length, with its label as a text at one end. The bubble is optional |
-| `S-COLUMN` | Each column as its outline: a closed rectangle at any rotation, or a circle. It need not be on a grid |
+| `S-GRID` | One line per grid (a line, or a polyline of two points), at any angle and of any length, with its label as a text at one end. The bubble is optional |
+| `S-COLUMN` | Each column as its outline: a closed rectangle at any rotation, or a circle. It need not be on a grid. A column drawn twice (the same shape within 5 mm) is read once; plain lines on this layer are skipped with a warning |
 | `S-WALL` | Walls and core walls, drawn either way below |
 
 Walls:

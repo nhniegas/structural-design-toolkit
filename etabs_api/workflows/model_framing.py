@@ -23,7 +23,7 @@ from etabs_api.workflows import framing as fr
 from etabs_api.workflows import framing_plans as fp
 from etabs_api.workflows import model_setup as ms
 
-GIRDER_KINDS = (fr.GIRDER, fr.TRANSFER)
+GIRDER_KINDS = (fr.GIRDER, fr.TRANSFER, fr.TIE)
 DIAPHRAGM = "D1"
 LIVE_KINDS = {"Reducible live (LIVERED)": "LIVERED", "Live, not reducible (LIVENRED)": "LIVENRED",
               "Roof live (LIVEROOF)": "LIVEROOF"}
@@ -37,7 +37,8 @@ MARGINAL = 1.10                # a framing over its drift limit by no more than 
 # =============================================================================
 def framing_settings(setup: dict, hold: str = "volume", held: float = 0.0,
                      max_depth: dict[str, float] | None = None, off_line: float = 300.0,
-                     trimmer_from: float = 1000.0) -> fr.FramingSettings:
+                     trimmer_from: float = 1000.0, max_cantilever: float = 3000.0,
+                     long_cantilever: float = 8000.0) -> fr.FramingSettings:
     """The framing inputs from the setup settings (``model_setup.merge_settings``)."""
     sections = setup["sections"]
 
@@ -46,22 +47,26 @@ def framing_settings(setup: dict, hold: str = "volume", held: float = 0.0,
 
     girder_widths, girder_depths = sizes("G", "width"), sizes("G", "depth")
     beam_widths, beam_depths = sizes("B", "width"), sizes("B", "depth")
+    tie_widths, tie_depths = sizes("FTB", "width"), sizes("FTB", "depth")
     if not girder_depths or not girder_widths:
         raise ValueError("The setup has no girder sizes (G): run sdt setup with a G range.")
     return fr.FramingSettings(
         fy=ms.rebar_properties(setup["section_rebar_ksi"])["fy"],
         girder_widths=girder_widths, girder_depths=girder_depths,
         beam_widths=beam_widths or girder_widths, beam_depths=beam_depths or girder_depths,
+        tie_widths=tie_widths or girder_widths, tie_depths=tie_depths or girder_depths,
         thicknesses=[float(t) for t in setup.get("slabs", {}).get("thickness", [])] or [150.0],
         hold=hold, held=float(held), max_depth=dict(max_depth or {}), off_line=float(off_line),
-        trimmer_from=float(trimmer_from))
+        trimmer_from=float(trimmer_from), max_cantilever=float(max_cantilever),
+        long_cantilever=float(long_cantilever))
 
 
 def section_name(member: fr.Member, setup: dict) -> str:
-    """The setup name of a member's section: G_ for girders, B_ for the others."""
+    """The setup name of a member's section: G_ for girders, FTB_ for tie beams, B_ for
+    the others."""
     concrete = ms.grade_name("C", setup["section_concrete_ksi"][0])
     rebar = ms.grade_name("G", setup["section_rebar_ksi"])
-    prefix = "G" if member.kind in GIRDER_KINDS else "B"
+    prefix = "FTB" if member.kind == fr.TIE else "G" if member.kind in GIRDER_KINDS else "B"
     return f"{prefix}_{member.width:.0f}X{member.depth:.0f}_{concrete}_{rebar}"
 
 
@@ -78,7 +83,18 @@ def slab_pieces(floor: fr.Floor, framing: fr.FloorFraming
                 ) -> list[tuple[list[tuple[float, float]], bool, str]]:
     """The floor objects of a framing: each piece of slab between the members, walls
     and slab edge, without the openings, cut by the load zones. (outline, one-way,
-    zone name or DEFAULT_ZONE)."""
+    zone name or DEFAULT_ZONE). An opening inside a piece is in ``slab_holes``."""
+    return [(points, one_way, zone) for points, one_way, zone, _ in _pieces(floor, framing)]
+
+
+def slab_holes(floor: fr.Floor, framing: fr.FloorFraming) -> list[list[tuple[float, float]]]:
+    """The openings that fall inside a slab piece (not on its edge): each is drawn in
+    ETABS as an opening over the floor."""
+    return [hole for *_, holes in _pieces(floor, framing) for hole in holes]
+
+
+def _pieces(floor: fr.Floor, framing: fr.FloorFraming):
+    """(outline, one-way, zone, holes) of each slab piece."""
     from shapely.geometry import LineString, Polygon
     from shapely.ops import polygonize, unary_union
 
@@ -116,8 +132,9 @@ def slab_pieces(floor: fr.Floor, framing: fr.FloorFraming
                 if polygon.geom_type != "Polygon" or polygon.area < 1e4:
                     continue
                 points = list(polygon.simplify(1.0).exterior.coords)[:-1]
+                inner = [list(ring.coords)[:-1] for ring in polygon.interiors]
                 if len(points) >= 3:
-                    out.append((points, owner, name))
+                    out.append((points, owner, name, inner))
     return out
 
 
@@ -259,6 +276,7 @@ def build_framing(model, candidate: fr.Candidate, floors: list[fr.Floor], setup:
         for framing in candidate.floors:
             floor = by_story[framing.story]
             pieces = slab_pieces(floor, framing)
+            holes = slab_holes(floor, framing)
             for story in framing.stories:
                 if story not in tops:
                     log.problems.append(f"story {story}: not in the model")
@@ -302,6 +320,14 @@ def build_framing(model, candidate: fr.Candidate, floors: list[fr.Floor], setup:
                             log.check(model.AreaObj.SetLoadUniform(
                                 name, pat, value / 1000.0, 10, True, "Global", 0),
                                 f"{pat} on {name}")
+                for points in holes:          # an opening inside a slab piece
+                    xs, ys = [p[0] for p in points], [p[1] for p in points]
+                    made = model.AreaObj.AddByCoord(len(points), xs, ys, [z] * len(points), "",
+                                                    "Default", "", "Global")
+                    if log.check(made, f"opening on {story}"):
+                        name = str(made[3]) if len(made) > 3 else ""
+                        if log.check(model.AreaObj.SetOpening(name, True), f"opening {name}"):
+                            log.done("openings")
     finally:
         model.SetPresentUnits(units)
 
@@ -403,6 +429,10 @@ def screening_rank(result: dict | None) -> int:
 # =============================================================================
 # TERMINAL WORKFLOW
 # =============================================================================
+CANTILEVER_FIELD = "Longest cantilever beam from a column out to a slab edge (mm)"
+LONG_CANTILEVER_FIELD = "Longest cantilever beam where an edge has no support over 12 m (mm)"
+TIES_ONLY = "Tie beams only (slab on grade): FTB sections along the girder lines"
+SLAB_TO_GIRDERS = "A slab up to its outer girders, like any floor"
 HOLD_VOLUME = "Least concrete: try every slab thickness of the setup"
 HOLD_THICKNESS = "Hold a slab thickness: the beam spacing follows from it"
 HOLD_SPACING = "Hold a beam spacing: the slab thickness follows from it"
@@ -434,8 +464,10 @@ def ask_framing(title: str, floors: list[fr.Floor], setup: dict) -> dict | None:
         fields["Largest beam spacing (mm)"] = str(saved.get("spacing", 3000))
     fields["A column this far off a line still frames into it (mm)"] = str(
         saved.get("off_line", 300))
-    fields["Openings this large or larger get trimmer beams (mm)"] = str(
+    fields["Openings this large or larger get beams around them (mm)"] = str(
         saved.get("trimmer_from", 1000))
+    fields[CANTILEVER_FIELD] = str(saved.get("max_cantilever", 3000))
+    fields[LONG_CANTILEVER_FIELD] = str(saved.get("long_cantilever", 8000))
     fields["Options to draw"] = str(saved.get("draw", 3))
     fields["Options to build and analyse in ETABS (0 for none)"] = str(saved.get("analyse", 2))
     for floor in floors:
@@ -449,7 +481,9 @@ def ask_framing(title: str, floors: list[fr.Floor], setup: dict) -> dict | None:
         held = (float(typed["Slab thickness held (mm)"]) if mode == "thickness" else
                 float(typed["Largest beam spacing (mm)"]) if mode == "spacing" else 0.0)
         off_line = float(typed["A column this far off a line still frames into it (mm)"])
-        trimmer_from = float(typed["Openings this large or larger get trimmer beams (mm)"])
+        trimmer_from = float(typed["Openings this large or larger get beams around them (mm)"])
+        max_cantilever = float(typed[CANTILEVER_FIELD])
+        long_cantilever = float(typed[LONG_CANTILEVER_FIELD])
         draw = max(1, int(float(typed["Options to draw"])))
         analyse = max(0, int(float(typed["Options to build and analyse in ETABS (0 for none)"])))
         depths = {}
@@ -488,10 +522,12 @@ def ask_framing(title: str, floors: list[fr.Floor], setup: dict) -> dict | None:
                       saved.get("thickness", 150),
                       "spacing": held if mode == "spacing" else saved.get("spacing", 3000),
                       "off_line": off_line, "trimmer_from": trimmer_from, "draw": draw,
+                      "max_cantilever": max_cantilever, "long_cantilever": long_cantilever,
                       "analyse": analyse, "depths": {**saved.get("depths", {}), **depths},
                       "loads": {**loads_saved, **{z: list(v) for z, v in loads.items()}}},
                      _defaults_path())
-    return {"settings": framing_settings(setup, mode, held, depths, off_line, trimmer_from),
+    return {"settings": framing_settings(setup, mode, held, depths, off_line, trimmer_from,
+                                         max_cantilever, long_cantilever),
             "draw": draw, "analyse": analyse, "loads": loads}
 
 
@@ -537,6 +573,14 @@ def _frame(title: str, path: str, building, floors: list[fr.Floor], summary) -> 
         summary.note("Framing not done: run sdt setup first, then sdt model again.")
         return None
     setup = ms.merge_settings(stored)
+    if floors and not floors[0].outline and any(f.outline for f in floors[1:]):
+        ties = select_option(title, f"The lowest floor, {floors[0].story}, has no slab outline "
+                             "while the floors above have one. How is it framed?",
+                             [TIES_ONLY, SLAB_TO_GIRDERS])
+        if ties is None:
+            return None
+        if ties == TIES_ONLY:
+            floors = fr.floors_from_building(building, ground_ties=True)
     asked = ask_framing(title, floors, setup)
     if asked is None:
         return None
