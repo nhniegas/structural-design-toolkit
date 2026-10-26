@@ -93,6 +93,22 @@ def slab_holes(floor: fr.Floor, framing: fr.FloorFraming) -> list[list[tuple[flo
     return [hole for *_, holes in _pieces(floor, framing) for hole in holes]
 
 
+SLIT = 5.0   # mm: spikes and slits narrower than twice this go from a slab piece
+
+
+def clean_piece(shape):
+    """A slab piece without spikes or slits (an edge that runs out and straight back).
+
+    Cutting a face by an opening that touches it can leave such an edge, and
+    ETABS refuses an area whose outline runs back on itself. Shrinking and
+    growing the piece by SLIT takes off a spike; growing and shrinking it
+    closes a slit. Square (mitred) corners keep the other corners where they are.
+    """
+    mitre = 2
+    return (shape.buffer(-SLIT, join_style=mitre).buffer(SLIT, join_style=mitre)
+            .buffer(SLIT, join_style=mitre).buffer(-SLIT, join_style=mitre))
+
+
 def _pieces(floor: fr.Floor, framing: fr.FloorFraming):
     """(outline, one-way, zone, holes) of each slab piece."""
     from shapely.geometry import LineString, Polygon
@@ -104,20 +120,30 @@ def _pieces(floor: fr.Floor, framing: fr.FloorFraming):
         lines.append(slab.boundary)
     holes = unary_union([Polygon(p).buffer(0) for p in floor.openings if len(p) >= 3])
     zones = [(name, Polygon(p).buffer(0)) for name, p in floor.zones if len(p) >= 3]
+    from shapely.strtree import STRtree
+
+    lines += [ring for hole in getattr(holes, "geoms", [holes]) if not hole.is_empty
+              for ring in [hole.exterior, *hole.interiors]]    # faces end at the openings
     one_way = [(bay.polygon, option.kind in (fr.ONE_WAY_X, fr.ONE_WAY_Y, fr.OVERHANG))
                for bay, option in framing.choices]
+    tree = STRtree([shape for shape, _ in one_way]) if one_way else None
     out = []
     for face in polygonize(unary_union(lines)):
         if face.area < 1e4:
             continue
-        inside = face.representative_point()
+        piece = clean_piece(face.difference(holes) if not holes.is_empty else face)
+        if piece.area < 1e4:
+            continue
+        inside = piece.representative_point()
         if slab is not None and not slab.buffer(fr.NEAR).contains(inside):
             continue
-        owner = next((way for shape, way in one_way if shape.buffer(fr.NEAR).contains(inside)),
-                     None)
-        if owner is None:
+        # the bay the piece lies in: the one it shares the most area with
+        shared = [(one_way[int(i)][0].intersection(piece).area, one_way[int(i)][1])
+                  for i in (tree.query(piece) if tree is not None else [])]
+        shared = [(area, way) for area, way in shared if area > 0.5 * piece.area]
+        if not shared:
             continue          # not a bay of the framing (a bay it could not frame)
-        piece = face.difference(holes) if not holes.is_empty else face
+        owner = max(shared)[1]
         parts = []
         rest = piece
         for name, zone in zones:

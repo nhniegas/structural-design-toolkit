@@ -300,6 +300,18 @@ def test_slab_pieces_cover_the_slab_without_the_openings_and_split_by_zone():
     assert {zone for _, _, zone in pieces} == {"STORAGE", mf.DEFAULT_ZONE}
 
 
+def test_a_slab_piece_loses_its_slits_and_spikes_but_keeps_its_corners():
+    from shapely.geometry import Polygon
+
+    # a 6 x 4 m piece with a slit running 1 m in from the top edge and a spike out of the right
+    ring = [(0, 0), (6000, 0), (6000, 2000), (7000, 2000), (6000, 2000), (6000, 4000),
+            (3000, 4000), (3000, 3000), (3000, 4000), (0, 4000)]
+    clean = mf.clean_piece(Polygon(ring))
+    assert clean.geom_type == "Polygon" and not clean.interiors
+    corners = {(round(x), round(y)) for x, y in clean.simplify(1.0).exterior.coords}
+    assert corners == {(0, 0), (6000, 0), (6000, 4000), (0, 4000)}
+
+
 def test_the_options_drawing_and_table(tmp_path):
     floors = [grid_floor()]
     ranked = fr.candidates(floors, fr.FramingSettings(thicknesses=[125, 150]))[:2]
@@ -380,6 +392,25 @@ def test_a_void_across_a_girder_gets_edge_beams_not_the_girder():
     assert edges and all(Polygon(void).exterior.distance(LineString(m.ends()).centroid) < 1
                          for m in edges)
     assert any("voids cross" in n for n in framing.notes)
+
+
+def test_a_light_well_inside_one_bay_is_a_void_tied_to_the_frame_and_the_slab_goes_round_it():
+    supports = [fr.Support(x, y, 500, 500, f"C{x}-{y}") for x in (0, 10000, 20000)
+                for y in (0, 10000, 20000)]
+    well = [(2000, 2000), (8000, 2000), (8000, 8000), (2000, 8000)]          # 36 m2, 2 m in
+    floor = fr.Floor("2F", supports, outline=[[(0, 0), (20000, 0), (20000, 20000), (0, 20000)]],
+                     openings=[well])
+    framing = fr.frame_floor(floor, fr.FramingSettings(trimmer_from=1000), 150)
+    from shapely.geometry import LineString, Polygon
+
+    assert fr.TRIMMER not in kinds(framing.members)
+    edges = [m for m in framing.members if m.kind == fr.EDGE]
+    assert edges and all(Polygon(well).exterior.distance(LineString(m.ends()).centroid) < 1
+                         for m in edges)
+    assert any("tie the voids" in n for n in framing.notes)
+    pieces = mf.slab_pieces(floor, framing)
+    area = sum(Polygon(points).area for points, _, _ in pieces) / 1e6
+    assert area == pytest.approx(20 * 20 - 36, abs=0.05)
 
 
 def test_an_opening_inside_one_bay_keeps_its_trimmers_on_a_turned_floor():
