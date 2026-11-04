@@ -970,7 +970,8 @@ def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict
                  office_bar_spacing: bool = False,
                  exempt_short_spans: bool = False,
                  deflection_stages: DeflectionStages | None = None,
-                 load_path: dict | None = None) -> pd.DataFrame:
+                 load_path: dict | None = None,
+                 deflection_flanges: bool = False) -> pd.DataFrame:
     """Design every beam from the extracted tables; deflection when service loads exist.
 
     ``tables`` holds FACTORED LOADS, FRAME DATA, CONNECTIVITY and (optional)
@@ -985,7 +986,9 @@ def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict
     deducts the long-term deflection before them. ``load_path`` is what holds
     each beam end (``load_path_pushes``); it is read from the tables when not
     given, and the design loop gives the reading of its first analysis so
-    that it does not change as the sizes do. The target ratios are those that
+    that it does not change as the sizes do. ``deflection_flanges`` checks the
+    deflection of a beam with a slab beside it as a T- or L-beam, from the SLAB
+    FLANGES table (NSCP 406.3.2.1). The target ratios are those that
     are active (``dcr_targets.use``). Returns the results, two rows (TOP,
     BOTTOM) per beam.
     """
@@ -1008,10 +1011,15 @@ def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict
     )
     service = tables.get("SERVICE LOADS")
     if service is not None and len(service) and not results.empty:
+        flanges = None
+        if deflection_flanges:
+            from design.concrete.beams.flanges import FLANGE_TABLE, flanges_from_table
+
+            flanges = flanges_from_table(tables.get(FLANGE_TABLE))
         results = add_deflection_columns(results, service, long_limit_divisor,
                                          tables["CONNECTIVITY"], progress=progress,
                                          stages=deflection_stages, points=tables.get("POINTS"),
-                                         pushes=pushes)
+                                         pushes=pushes, flanges=flanges)
     if carrier_depth and not results.empty:
         from design.concrete.beams.carriers import add_carrier_depth_check
 

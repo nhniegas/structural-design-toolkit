@@ -6,6 +6,11 @@ For each beam, after its bars are chosen:
    of the flexural design): Ec = 4700 sqrt(f'c), Ig = b h^3 / 12,
    fr = 0.62 sqrt(f'c), Mcr = fr Ig / (h / 2), and Icr of the cracked
    transformed section with the zone's tension and compression bars.
+   With the slab taken as a flange (``add_deflection_columns(flanges=...)``)
+   a beam with a slab beside it is a T- or L-beam: Ig and yt of the flanged
+   section, Mcr = fr Ig / yt, and Icr with the flange in compression under a
+   sagging moment; the flange width is that of NSCP Table 406.3.2.1 with the
+   span checked as ln (see ``flanges``).
 2. Ie of each zone (Eq. 24.2.3.5a) at Ma = the largest moment of the full
    service load (DL + LL) in the zone. The same Ie is used for every load:
    once cracked under the full service load the beam stays cracked.
@@ -216,6 +221,7 @@ class BeamSection:
     bar: float
     top: dict[str, list[float]]      # zone -> bar counts of layers 1..3 (top face)
     bottom: dict[str, list[float]]   # zone -> bar counts of layers 1..3 (bottom face)
+    flange: object = None            # flanges.Flange: the slab beside it (T- and L-beams)
 
 
 @dataclass
@@ -238,6 +244,7 @@ class DeflectionResult:
     # the largest (deflection / limit) that the rotation of the support gives by itself, with
     # no bending of the span at all: what no section of the span can take away
     support: float = 0.0
+    section: str = ""                     # the section used: rectangular, T- or L-beam
 
     @property
     def ratio(self) -> float:
@@ -255,6 +262,7 @@ class DeflectionResult:
 # BEAM DESIGN TABLE
 # =============================================================================
 DEFLECTION_COLUMNS = {
+    "Defl_section": "Deflection section",
     "Defl_Ie_left": "Iₑ, left (mm⁴)",
     "Defl_Ie_mid": "Iₑ, mid (mm⁴)",
     "Defl_Ie_right": "Iₑ, right (mm⁴)",
@@ -279,6 +287,8 @@ DEFLECTION_COLUMNS = {
 }
 # shown only when the engineer gave the stages
 STAGE_COLUMNS = ("Defl_first_load_mm", "Defl_at_partitions_mm", "Defl_deducted_mm", "Defl_stages")
+# shown only when the slab is taken as a flange (T- and L-beams)
+FLANGE_COLUMNS = ("Defl_section",)
 DEFLECTION_FAILED = "FAILED: DEFLECTION (NSCP 424.2.2; ACI 24.2.2)"
 _ZONES = ("left", "mid", "right")
 _TIP_I = "Tip from rotation at I (mm)"
@@ -363,14 +373,34 @@ def support_cuts(xs: list[np.ndarray], qs: list[np.ndarray],
     return cuts
 
 
-def _stiffness(part: SpanPart) -> tuple[dict[str, float], np.ndarray, float]:
-    """Ie of each zone of a segment, E Ie along it (N-mm2 / 1e6) and its lambda."""
+def _stiffness(part: SpanPart, ln: float = 0.0
+               ) -> tuple[dict[str, float], np.ndarray, float, str]:
+    """Ie of each zone of a segment, E Ie along it (N-mm2 / 1e6), its lambda and its section.
+
+    A section with a slab beside it (``BeamSection.flange``) is a T- or
+    L-beam, its overhangs from the span ``ln`` (NSCP Table 406.3.2.1): Ig and
+    yt of the flanged gross section, and Icr with the flange in compression
+    under a sagging moment. Under a hogging moment the cracked section is the
+    web (``flanges``).
+    """
     sec = part.section
     b, h, fc = sec.width, sec.depth, sec.fc
     ec = 4700.0 * math.sqrt(fc)
     n = ES / ec
-    ig = b * h**3 / 12.0
-    mcr = 0.62 * math.sqrt(fc) * ig / (h / 2.0) / 1e6  # kN-m
+    fr = 0.62 * math.sqrt(fc)
+    flanged = sec.flange is not None and sec.flange.sides > 0
+    if flanged:
+        from design.concrete.beams.flanges import t_section
+
+        gross = t_section(b, h, sec.flange, ln)
+        ig, described = gross.ig, gross.describe()
+        # Mcr = fr Ig / yt, yt from the centroid to the tension face (NSCP 424.2.3.5b)
+        mcr_sag = fr * ig / (h - gross.centroid) / 1e6   # kN-m
+        mcr_hog = fr * ig / gross.centroid / 1e6
+    else:
+        ig = b * h**3 / 12.0
+        mcr_sag = mcr_hog = fr * ig / (h / 2.0) / 1e6   # kN-m
+        described = "Rectangular"
     x = part.x
     zone_of = _zones(x) if part.zones is None else np.asarray(part.zones)
     full = np.asarray(part.moments[COMBO_FULL], float)
@@ -387,8 +417,15 @@ def _stiffness(part: SpanPart) -> tuple[dict[str, float], np.ndarray, float]:
         as_bot, z_bot = steel(sec.bottom[zone], bottom_depths, sec.bar)
         if peak < 0:  # hogging: top bars in tension, depths measured from the bottom face
             icr = cracked_inertia(b, h - z_top, as_top, h - z_bot, as_bot, n)
+            mcr = mcr_hog
+        elif flanged:  # sagging: the flange is in compression
+            from design.concrete.beams.flanges import cracked_inertia_flanged
+
+            icr = cracked_inertia_flanged(gross.parts, z_bot, as_bot, z_top, as_top, n)
+            mcr = mcr_sag
         else:
             icr = cracked_inertia(b, z_bot, as_bot, z_top, as_top, n)
+            mcr = mcr_sag
         ie[zone] = effective_inertia(abs(peak), mcr, ig, icr)
     # E I in N-mm2 / 1e6, so that M in kN-m over it is the curvature in 1/mm
     ei = np.array([ec * ie[z] for z in zone_of]) / 1e6
@@ -400,7 +437,7 @@ def _stiffness(part: SpanPart) -> tuple[dict[str, float], np.ndarray, float]:
         as_comp = steel(sec.bottom[zone], bottom_depths, sec.bar)[0]
         d_eff = h - steel(sec.top[zone], top_depths, sec.bar)[1]
     rho_prime = as_comp / (b * d_eff) if d_eff > 0 else 0.0
-    return ie, ei, XI_LONG_TERM / (1.0 + 50.0 * rho_prime)
+    return ie, ei, XI_LONG_TERM / (1.0 + 50.0 * rho_prime), described
 
 
 def span_deflection(parts: list[SpanPart], cantilever_root: str | None = None,
@@ -418,12 +455,14 @@ def span_deflection(parts: list[SpanPart], cantilever_root: str | None = None,
     root caused by the rotation of the support (a rigid rotation). The limits
     use the whole span.
     """
-    stiffness = [_stiffness(part) for part in parts]
     x = np.concatenate([part.x for part in parts])
+    span = float(x.max() - x.min())
+    # the span checked is the ln of the flange width (NSCP Table 406.3.2.1): its stations
+    # stop at the end offsets, the faces of the supports
+    stiffness = [_stiffness(part, span) for part in parts]
     ei = np.concatenate([s[1] for s in stiffness])
     lam = np.concatenate([np.full(len(part.x), s[2]) for part, s in zip(parts, stiffness)])
     owner = np.concatenate([np.full(len(part.x), i) for i, part in enumerate(parts)])
-    span = float(x.max() - x.min())
     combos = set.intersection(*(set(part.moments) for part in parts))
 
     def profile(combo: str) -> np.ndarray:
@@ -467,7 +506,7 @@ def span_deflection(parts: list[SpanPart], cantilever_root: str | None = None,
         if roof_curve is not None:
             support_roof = rigid(COMBO_ROOF) - rigid_dead
     out = {}
-    for i, (part, (ie, _, part_lam)) in enumerate(zip(parts, stiffness)):
+    for i, (part, (ie, _, part_lam, described)) in enumerate(zip(parts, stiffness)):
         mine = owner == i
         from_support = 0.0
         if support_live is not None and span > 0:
@@ -490,6 +529,7 @@ def span_deflection(parts: list[SpanPart], cantilever_root: str | None = None,
                    else f"{parts[0].name} to {parts[-1].name}")
             + (", cantilever" if cantilever_root else ""),
             support=max(from_support, 0.0),
+            section=described,
         )
     return out
 
@@ -653,7 +693,7 @@ def beam_spans(connectivity, members: list[str], points=None,
 def add_deflection_columns(results, service, long_limit_divisor: float = LIMIT_DAMAGED,
                            connectivity=None, progress=None,
                            stages: DeflectionStages | None = None, points=None,
-                           pushes: dict | None = None):
+                           pushes: dict | None = None, flanges: dict | None = None):
     """Add the deflection checks to the beam design results (TOP and BOTTOM rows).
 
     ``service`` is the SERVICE LOADS table and ``connectivity`` the
@@ -664,13 +704,17 @@ def add_deflection_columns(results, service, long_limit_divisor: float = LIMIT_D
     ``points`` (the joint coordinates) lets an end on an unsplit girder count
     as supported (see ``beam_spans``). ``pushes`` is what holds each beam end
     (``carriers.end_pushes``); it is read from ``service`` when not given.
+    ``flanges`` (beam name -> ``flanges.Flange``) takes the slab beside each
+    beam as its flange: T- and L-beams (NSCP 406.3.2.1). None keeps every beam
+    rectangular, as before.
     """
     import pandas as pd
 
     staged = stages is not None and stages.active
     out = results.copy()
     for column in DEFLECTION_COLUMNS:
-        if staged or column not in STAGE_COLUMNS:
+        if (staged or column not in STAGE_COLUMNS) and (
+                flanges is not None or column not in FLANGE_COLUMNS):
             out[column] = None
     if service is None or len(service) == 0:
         out["Deflection_Check"] = "NO DEF COMBOS"
@@ -701,6 +745,7 @@ def add_deflection_columns(results, service, long_limit_divisor: float = LIMIT_D
             cover=float(top["cc"]), stirrup=float(top["ds"]), bar=float(top["dm"]),
             top={z: _counts(top, z) for z in _ZONES},
             bottom={z: _counts(bottom, z) for z in _ZONES},
+            flange=None if flanges is None else flanges.get(name),
         )
 
     def moments_of(name: str):
@@ -916,6 +961,8 @@ def add_deflection_columns(results, service, long_limit_divisor: float = LIMIT_D
             "Defl_ratio": round(result.ratio, 3),
             "Defl_support_ratio": round(result.support, 3),
         }
+        if flanges is not None:
+            values["Defl_section"] = result.section
         if staged:
             values.update({
                 "Defl_first_load_mm": round(result.at_first_load, 2),

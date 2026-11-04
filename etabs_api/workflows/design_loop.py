@@ -115,6 +115,7 @@ class LoopSettings:
     office_bar_spacing: bool = False  # beam bars at most 150 mm clear (False: crack control)
     exempt_short_spans: bool = False  # girders under 4d clear span without the SMRF rules
     deflection_stages: object = None  # deflection.DeflectionStages: when partitions are built
+    deflection_flanges: bool = False  # deflection of T- and L-beams with the slab (406.3.2.1)
     resize_for_drift: bool = False  # grow columns and girders until every story passes drift
     design_walls: bool = False      # design the walls and thicken their legs (sdt walls)
     wall_kinds: dict = field(default_factory=dict)   # wall name: special or ordinary
@@ -1007,7 +1008,8 @@ class Workbench:
                             office_bar_spacing=self.settings.office_bar_spacing,
                             exempt_short_spans=self.settings.exempt_short_spans,
                             deflection_stages=self.settings.deflection_stages,
-                            load_path=self.load_path())
+                            load_path=self.load_path(),
+                            deflection_flanges=self.settings.deflection_flanges)
 
     def design_columns(self, beams: pd.DataFrame) -> pd.DataFrame:
         from design.concrete.columns.design import design_columns
@@ -2030,6 +2032,11 @@ def run_design_cli() -> dict | None:
     deflection_stages = ask_deflection_stages(title)
     if deflection_stages is None:
         return None
+    from design.concrete.beams.options import ask_deflection_section, describe_deflection_section
+
+    deflection_flanges = ask_deflection_section(title)
+    if deflection_flanges is None:
+        return None
     from design.criteria import dcr_targets
     from design.concrete.workflow import ask_carrier_depth, ask_dcr_targets
 
@@ -2171,7 +2178,7 @@ def run_design_cli() -> dict | None:
         compatibility_torsion=compatibility_torsion,
         office_bar_spacing=office_bar_spacing,
         exempt_short_spans=exempt_short_spans,
-        deflection_stages=deflection_stages,
+        deflection_stages=deflection_stages, deflection_flanges=deflection_flanges,
         resize_for_drift=resize_for_drift, drift_options=drift_options,
         design_walls=bool(walls), wall_kinds=(walls or {}).get("kinds", {}),
         wall_values=(walls or {}).get("values", {}),
@@ -2212,6 +2219,7 @@ def run_design_cli() -> dict | None:
             bench.log("Girders with a clear span under 4d are designed without the SMRF rules "
                       "(NSCP 418.6.2.1(a); ACI 18.6.2.1(a)).")
         bench.log("Deflection stages: " + deflection_stages.describe() + ".")
+        bench.log("Deflection section: " + describe_deflection_section(deflection_flanges) + ".")
         bench.log("Beam lines: " + line_sharing_text(settings) + ".")
         bench.log(f"Combinations: {len(combos)} ULS ({seismic})")
         bench.log("The loop sizes the members for strength and deflection, then for drift: "
@@ -2345,6 +2353,9 @@ def loop_summary(summary: dict, settings: LoopSettings, original: str, working: 
     add_short_spans_to(out, beams, settings.exempt_short_spans)
     if settings.deflection_stages is not None:
         out.add("Deflection stages", settings.deflection_stages.describe())
+    from design.concrete.beams.options import describe_deflection_section
+
+    out.add("Deflection section", describe_deflection_section(settings.deflection_flanges))
     out.add("Beam lines", line_sharing_text(settings))
     if settings.sources is not None:
         settings.sources.add_to(out)
@@ -2388,6 +2399,7 @@ def save_final_design(bench: Workbench, summary: dict, working: str, folder: str
         "long_limit": settings.long_limit,
         "deflection_stages": (settings.deflection_stages.to_saved()
                               if settings.deflection_stages is not None else None),
+        "deflection_flanges": settings.deflection_flanges,
         "beam_earth_cover_stories": list(settings.beam_earth_cover_stories),
         "check_top_level": settings.check_top_level,
         "check_foundation_level": settings.check_foundation_level,

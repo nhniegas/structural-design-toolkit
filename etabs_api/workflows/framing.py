@@ -58,6 +58,7 @@ SLAB_ONLY_OVERHANG = 1000.0  # mm: a slab edge this close beyond its girder need
 MIN_PIECE = 300.0            # mm: a beam cut shorter than this by its bay is not made
 MIN_FRAME_GIRDER = 1500.0    # mm: a girder added for frame action is not made shorter
 EDGE_SUPPORT_SPACING = 6000.0  # mm: cantilevers along an edge with no other support
+VOID_AREA = 30e6             # mm2: an opening this large is a void (edge beams), not trimmed
 
 
 def longest_span(depths: list[float], fy: float) -> float:
@@ -547,8 +548,10 @@ def bays(floor: Floor, members: list[Member], tolerance: float = 50.0, slab=None
     if edge is not None:
         lines.append(edge)
     faces = [f for f in polygonize(unary_union(lines)) if f.area > 1e4]
-    if slab is not None:
-        faces = [f for f in faces if slab.buffer(NEAR).contains(f.representative_point())]
+    if slab is not None:          # a face at least half on the slab is a bay
+        near = slab.buffer(NEAR)
+        faces = [f for f in faces if near.contains(f.representative_point())
+                 or near.intersection(f).area >= 0.5 * f.area]
     tree = STRtree(member_lines) if member_lines else None
     out = []
     for face in faces:
@@ -920,8 +923,8 @@ _SKELETONS: dict = {}
 def large_openings(floor: Floor, settings: FramingSettings, lines: list[Member],
                    tolerance: float) -> tuple[list, list]:
     """The openings of ``trimmer_from`` or more: (voids, inside), voids crossing a girder
-    of ``lines`` (shapely polygons, become slab edge), the others (point lists, get
-    trimmer beams)."""
+    of ``lines`` or of VOID_AREA or more (shapely polygons, become slab edge), the
+    others (point lists, get trimmer beams)."""
     from shapely.geometry import LineString, Polygon
 
     voids, inside = [], []
@@ -933,7 +936,8 @@ def large_openings(floor: Floor, settings: FramingSettings, lines: list[Member],
         if max(ox1 - ox0, oy1 - oy0) < settings.trimmer_from:
             continue
         core = hole.buffer(-tolerance)
-        if not core.is_empty and any(LineString(m.ends()).intersects(core) for m in lines):
+        if hole.area >= VOID_AREA or (not core.is_empty and any(
+                LineString(m.ends()).intersects(core) for m in lines)):
             voids.append(hole)
         else:
             inside.append(points)
@@ -989,6 +993,10 @@ def skeleton(floor: Floor, settings: FramingSettings):
     stub_notes += long_notes
     edges = edge_members(slab, lines, floor.supports, max_piece=2 * settings.edge_span)
     lines += edges
+    ties_ = void_ties(floor, lines, slab, voids, settings)
+    lines += ties_
+    if ties_:
+        notes.append(f"{len(ties_)} beams tie the voids to the frame around them")
     notes += stub_notes
     if edges:
         notes.append(f"{len(edges)} edge beams along the slab edge and the voids, "
@@ -996,9 +1004,11 @@ def skeleton(floor: Floor, settings: FramingSettings):
     problems: list[str] = []
     framed = size_members(lines, settings.girder_depths, settings.girder_widths, settings.fy,
                           problems)
-    holes = [Polygon(p) for p in floor.openings if len(p) >= 3]
-    panels = [b for b in bays(floor, framed, tolerance, slab=slab)
-              if not any(h.contains(b.polygon.representative_point()) for h in holes)]
+    from shapely.ops import unary_union
+
+    holes = unary_union([Polygon(p).buffer(0) for p in floor.openings if len(p) >= 3])
+    panels = [b for b in bays(floor, framed, tolerance, slab=slab)    # not a bay mostly opening
+              if holes.is_empty or holes.intersection(b.polygon).area < 0.5 * b.polygon.area]
     result = (framed, panels, notes, problems)
     _SKELETONS[key] = (floor, result)
     return result
@@ -1189,6 +1199,55 @@ def edge_members(slab, members: list[Member], supports: list[Support],
                 links[_key((point.x, point.y))] = Member(CANTILEVER, source.x, source.y,
                                                          point.x, point.y)
     return out + list(links.values())
+
+
+def void_ties(floor: Floor, members: list[Member], slab, voids: list, settings: FramingSettings,
+              tolerance: float = 50.0) -> list[Member]:
+    """Beams that tie each void to the frame around it, so the slab around the void is
+    not left as one ring-shaped bay: from each corner of the void (a turn of 20 degrees
+    or more), and about every EDGE_SUPPORT_SPACING along its edge, out along the axes of
+    the bay there to the first member met, at most ``long_cantilever`` long (the
+    shortest of the directions)."""
+    from shapely.geometry import LineString, Point
+    from shapely.ops import unary_union
+
+    out = []
+    if slab is None or not voids:
+        return out
+    around = bays(floor, members, max(settings.off_line, 50.0), slab=slab)
+    for hole in voids:
+        lines = unary_union([LineString(m.ends()) for m in members + out])
+        ring = hole.exterior
+        pts = list(ring.coords)[:-1]
+        marks = []
+        for k, p in enumerate(pts):
+            a, c = pts[k - 1], pts[(k + 1) % len(pts)]
+            turn = abs(line_angle(p[0] - a[0], p[1] - a[1]) - line_angle(c[0] - p[0], c[1] - p[1]))
+            if min(turn, 180 - turn) >= 20:
+                marks.append(p)
+        count = max(1, int(ring.length // EDGE_SUPPORT_SPACING))
+        marks += [ring.interpolate(ring.length * k / count).coords[0] for k in range(count)]
+        for x, y in marks:
+            here = Point(x, y)
+            bay = next((b for b in around if b.polygon.buffer(10 * tolerance).contains(here)), None)
+            axis = bay.angle if bay is not None else 0.0
+            best = None
+            for angle in (axis, axis + 90.0):
+                ux, uy = _unit(angle)
+                for sign in (1.0, -1.0):
+                    if hole.buffer(NEAR).contains(Point(x + sign * ux * 200, y + sign * uy * 200)):
+                        continue                  # into the void
+                    ray = LineString([(x + sign * ux * 2 * tolerance, y + sign * uy * 2 * tolerance),
+                                      (x + sign * ux * settings.long_cantilever,
+                                       y + sign * uy * settings.long_cantilever)])
+                    hits = _points_of(ray.intersection(lines))
+                    if hits:
+                        q = min(hits, key=lambda q: q.distance(here))
+                        if best is None or q.distance(here) < best[0]:
+                            best = (q.distance(here), q)
+            if best is not None and best[0] > SLAB_ONLY_OVERHANG:
+                out.append(Member(BEAM, x, y, best[1].x, best[1].y, note="ties a void"))
+    return out
 
 
 def frame_ties(floor: Floor, settings: FramingSettings, out: FloorFraming) -> FloorFraming:

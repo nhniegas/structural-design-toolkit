@@ -79,11 +79,15 @@ def _beam_deflection_table(top: pd.Series) -> ReportTable | None:
     stages_note = (f" Stages: {stages_text}; the long-term deflection before the partitions "
                    "is deducted (NSCP Table 424.2.2; ACI Table 24.2.2)." if stages_text not in ("", "None", "nan")
                    else " All the long-term deflection is counted after the partitions.")
+    section_text = str(top.get("Defl_section", "") or "")
+    section_note = (f"Section: {section_text} (the slab beside the beam as its flange, NSCP "
+                    "406.3.2.1; Mcr = fr Ig / yt, NSCP 424.2.3.5b). "
+                    if section_text not in ("", "None", "nan") else "")
     return ReportTable(
         "Deflection (NSCP 424.2; ACI 24.2)",
         ["Check", Tex(r"$\Delta$ (mm)"), "Limit (mm)", Tex(r"$\Delta$ / limit")],
         body, "lrrr",
-        "Effective moment of inertia Ie (mm4): left "
+        f"{section_note}Effective moment of inertia Ie (mm4): left "
         f"{number(top.get('Defl_Ie_left'), 0)}, midspan {number(top.get('Defl_Ie_mid'), 0)}, "
         f"right {number(top.get('Defl_Ie_right'), 0)}. Long-term factor "
         f"{number(top.get('Defl_lambda'), 3)}.{stages_note} Governing ratio "
