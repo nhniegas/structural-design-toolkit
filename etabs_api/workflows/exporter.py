@@ -2,8 +2,8 @@
 
 Every table is returned as a DataFrame and kept in ``exporter.tables`` under
 its name (``FACTORED LOADS``, ``SERVICE LOADS``, ``LIVE LOAD REDUCTION``,
-``FRAME DATA``, ``CONNECTIVITY``, ``LOCAL AXES``, ``POINTS``), which the
-design store saves for the beam and column steps.
+``FRAME DATA``, ``CONNECTIVITY``, ``LOCAL AXES``, ``POINTS``, ``SLAB FLANGES``),
+which the design store saves for the beam and column steps.
 """
 
 from __future__ import annotations
@@ -411,6 +411,54 @@ class ETABSDataExporter:
             supports = pd.DataFrame(columns=["UniqueName", "UX", "UY", "UZ", "RX", "RY", "RZ"])
         self._write_dataframe_to_excel(df=supports, sheet_name="SUPPORTS")
 
+    def display_slab_flanges(self, members: list | None = None) -> pd.DataFrame:
+        """The slab on each side of every beam and the clear distance to the next web
+        (``SLAB FLANGES``), for the deflection of T- and L-beams (``flanges``)."""
+        from design.concrete.beams.flanges import (
+            FLANGE_FIELDS, FLANGE_TABLE, FloorArea, flanges_to_rows, slab_flanges)
+
+        points = self.etabs.get_data("Point Object Connectivity")
+        xyz = {str(n): (float(x), float(y), float(z)) for n, x, y, z in
+               zip(points["UniqueName"], pd.to_numeric(points["X"]),
+                   pd.to_numeric(points["Y"]), pd.to_numeric(points["Z"]))}
+        beams = self.etabs.get_data("Beam Object Connectivity")
+        chosen = None if members is None else set(map(str, members))
+        lines = [(str(n), str(i), str(j)) for n, i, j in
+                 zip(beams["UniqueName"], beams["UniquePtI"], beams["UniquePtJ"])]
+        assigned = self.etabs.get_data("Frame Assignments - Section Properties")
+        rect = self.etabs.get_data("Frame Section Property Definitions - Concrete Rectangular")
+        width_of = dict(zip(rect["Name"].astype(str), pd.to_numeric(rect["t2"], errors="coerce")))
+        widths = {str(n): float(width_of.get(str(s), 0.0) or 0.0) for n, s in
+                  zip(assigned["UniqueName"], assigned["SectProp"])}
+        try:
+            slabs = self.etabs.get_data("Slab Property Definitions")
+            thickness = dict(zip(slabs["Name"].astype(str),
+                                 pd.to_numeric(slabs["Thickness"], errors="coerce")))
+        except (RuntimeError, KeyError):
+            thickness = {}
+        try:
+            areas = self.etabs.get_data("Area Assignments - Section Properties")
+        except RuntimeError:
+            areas = pd.DataFrame(columns=["UniqueName", "SectProp", "PropType"])
+        area_api = self.etabs.sap_model.AreaObj
+        floors = []
+        for name, prop, kind in zip(areas["UniqueName"].astype(str), areas["SectProp"].astype(str),
+                                    areas["PropType"].astype(str)):
+            corners = [xyz[str(p)] for p in area_api.GetPoints(name, 0, [])[1] if str(p) in xyz]
+            if len(corners) < 3 or max(c[2] for c in corners) - min(c[2] for c in corners) > 10:
+                continue   # a wall or a sloped area is not a floor
+            opening = kind.lower() == "opening"
+            floors.append(FloorArea([(c[0], c[1]) for c in corners],
+                                    sum(c[2] for c in corners) / len(corners),
+                                    0.0 if opening else float(thickness.get(prop, 0.0) or 0.0),
+                                    opening))
+        found = slab_flanges(xyz, lines, widths, floors)
+        if chosen is not None:
+            found = {name: flange for name, flange in found.items() if name in chosen}
+        table = pd.DataFrame(flanges_to_rows(found), columns=list(FLANGE_FIELDS))
+        self._write_dataframe_to_excel(df=table, sheet_name=FLANGE_TABLE)
+        return table
+
     def extract_all(self, load_combos: list, members: list | None,
                     options: ForceOptions | None) -> list[str]:
         """Every table of the beam and column design. Returns notes worth printing."""
@@ -423,4 +471,9 @@ class ETABSDataExporter:
         self.display_frame_data(members_selected=members)
         self.display_connectivity_data()
         self.display_orientation_data()
+        try:
+            self.display_slab_flanges(members)
+        except Exception as error:  # noqa: BLE001 - only the T- and L-beam option needs it
+            self.tables.pop("SLAB FLANGES", None)
+            notes.append(f"The slab beside the beams (T- and L-beams) was not read: {error}")
         return notes

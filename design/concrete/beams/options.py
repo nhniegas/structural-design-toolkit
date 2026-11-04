@@ -1,4 +1,5 @@
-"""The questions of the beam design: earth cover, deflection limit and when the partitions are built."""
+"""The questions of the beam design: earth cover, deflection limit, when the partitions are built
+and the section of the deflection check (rectangular, or T- and L-beams with the slab)."""
 
 import os
 from design.criteria.code_config import CODE
@@ -149,3 +150,37 @@ def ask_deflection_stages(title: str = "Beam Design - Deflection") -> Deflection
     stages = DeflectionStages(months, share)
     _save_deflection_settings({"stages": stages.to_saved()})
     return stages
+
+
+SECTION_RECTANGULAR = "Rectangular: the beam alone (the safe side)"
+SECTION_FLANGED = "T- and L-beams: the slab beside a beam is its flange (NSCP 406.3.2.1)"
+
+
+def ask_deflection_section(title: str = "Beam Design - Deflection") -> bool | None:
+    """Ask whether the deflection check takes the slab as a flange of the beams.
+
+    True for T- and L-beams, False for the beam alone, None when closed. The
+    answer is remembered for next time.
+    """
+    from utilities._gui_helpers import select_option
+
+    last = bool(_deflection_settings().get("flanges", False))
+    chosen = select_option(
+        title, "Section of the beams in the deflection check.\n\nA beam cast with the slab "
+        "bends with part of it. As T- and L-beams the slab beside a beam is its flange, of the "
+        "effective width of NSCP Table 406.3.2.1 (each side: the least of 8h, sw/2 and ln/8; "
+        "one side only: 6h, sw/2 and ln/12): Ig, the cracking moment and the cracked section "
+        "under a sagging moment use it. Under a hogging moment the cracked section is the "
+        "web. The strength design is not changed.",
+        [SECTION_RECTANGULAR, SECTION_FLANGED], default_index=1 if last else 0)
+    if chosen is None:
+        return None
+    flanged = chosen == SECTION_FLANGED
+    _save_deflection_settings({"flanges": flanged})
+    return flanged
+
+
+def describe_deflection_section(flanged: bool) -> str:
+    """The deflection section as the summaries show it."""
+    return ("T- and L-beams: the slab beside a beam is its flange (NSCP 406.3.2.1)" if flanged
+            else "rectangular: the beam alone")

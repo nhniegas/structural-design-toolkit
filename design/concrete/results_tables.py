@@ -155,7 +155,8 @@ def column_results_report(report_table: pd.DataFrame,
 
 
 DEFLECTION_EQUATIONS = [
-    "Iₑ = (Mcr/Mₐ)³ Ig + [1 − (Mcr/Mₐ)³] Icr ≤ Ig,  Mcr = fr Ig / (h/2),  fr = 0.62 √f′c   (NSCP 424.2.3.5; ACI 24.2.3.5)",
+    "Iₑ = (Mcr/Mₐ)³ Ig + [1 − (Mcr/Mₐ)³] Icr ≤ Ig,  Mcr = fr Ig / yt (h/2 for a rectangle),  fr = 0.62 √f′c   (NSCP 424.2.3.5; ACI 24.2.3.5)",
+    "T- and L-beams (when chosen): bf = bw + each overhang, the least of 8h, sw/2, ln/8 (one side only: 6h, sw/2, ln/12)   (NSCP Table 406.3.2.1)",
     "Δ = ∫∫ M / (Ec Iₑ) dx dx  along the span, zero at its supports;  Ec = 4700 √f′c",
     "λΔ = ξ / (1 + 50 ρ′),  ξ = 2.0 for 5 years or more   (NSCP 424.2.4.1; ACI 24.2.4.1)",
     "Live load:         Δ(D + L) − Δ(D) ≤ L/360          (roof: Δ(D + Lr) − Δ(D) ≤ L/180)",

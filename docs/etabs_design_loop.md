@@ -25,6 +25,7 @@ sdt design
 | Interior ties of the column schedule | Crossties or closed inner hoops, as in `sdt columns`; used for the `Column_Schedule.dxf` of the final design |
 | Deflection limit | L/480 (partitions likely to be damaged) or L/240 |
 | When the partitions are built | Not known, or the months and the dead load share before them, as in `sdt beams`. With them the long-term deflection before the partitions is deducted, so fewer beams are made deeper for deflection |
+| Section of the deflection check | Rectangular, or T- and L-beams with the slab beside a beam as its flange (NSCP 406.3.2.1), as in `sdt beams`. With T- and L-beams fewer beams are made deeper for deflection |
 | Target ratios | The code limits, the targets saved for this model, or your own for girders, beams and columns, check by check. The loop then sizes the members to them: a member above its target is made larger, and "make smaller" is measured against the target. See the [concrete guide](concrete_beam_column_design.md#target-ratios) |
 | Beam torsion | The analysis torsion, or at most φTcr (compatibility torsion), as in `sdt beams` |
 | Beam bar spacing | The code only (crack control, the default), or the office rule of 150 mm clear, as in `sdt beams` |

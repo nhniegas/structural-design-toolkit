@@ -26,6 +26,7 @@ sdt columns    # design the columns from the stored beam step, save the column o
 | Cover against earth | Whether the beams of any floor level need 75 mm cover (cast against or exposed to earth: footing tie beams, ground beams). If yes, pick the levels; the other beams keep the typed cover. Not asked when the typed cover is 75 mm or more. The levels are remembered and offered again |
 | Deflection limit | Partitions likely to be damaged (L/480) or not (L/240) |
 | When the partitions are built | Not known (all the long-term deflection is counted after them), or the months from when the beams first carry their dead load and the share of the dead load in place by then. See [Deflection stages](#deflection-stages) |
+| Section of the deflection check | Rectangular, the beam alone (the default, the safe side), or T- and L-beams, with the slab beside a beam as its flange (NSCP 406.3.2.1). Remembered. See [T- and L-beams](#t--and-l-beams) |
 | Target ratios | Use the code limits (every ratio 1.00), the targets saved for this model, or set them: one dialog for girders and one for beams, with a box for each check. See [Target ratios](#target-ratios) |
 | Beam torsion | Design for the analysis torsion, or take it as at most φTcr (compatibility torsion, NSCP 422.7.3.2; ACI 22.7.3.2). See [Beam torsion](#beam-torsion) |
 | Beam bar spacing | The code only (crack control, NSCP 424.3.2; ACI 24.3.2; the default), or the office rule (at most 150 mm clear between the bars of a face). See [Beam bar spacing](#beam-bar-spacing) |
@@ -33,7 +34,7 @@ sdt columns    # design the columns from the stored beam step, save the column o
 | Depth of a beam that carries others | Whether a girder or beam must be at least as deep as the beams that frame into it. See [Carrier depth](#carrier-depth) |
 | Output folder | For the results, the calculations and the schedules |
 
-**`sdt deflection`** checks only the deflections, apart from the strength design: it takes the bars of the last `sdt beams` of the model, reads the service moments again from ETABS (so a re-analysed model is checked with its current moments), asks the limit (L/480 or L/240) and the folder, and saves `<model> - Deflection.xlsx` with one row per beam: section, Ie, λΔ, the three deflections, their limits, the governing ratio and the check. It stops with a message when the model has no beam design yet (the cracked stiffness needs the bars).
+**`sdt deflection`** checks only the deflections, apart from the strength design: it takes the bars of the last `sdt beams` of the model, reads the service moments again from ETABS (so a re-analysed model is checked with its current moments), asks the limit (L/480 or L/240), when the partitions are built, the section (rectangular, or T- and L-beams; the slab beside each beam is read again from the model) and the folder, and saves `<model> - Deflection.xlsx` with one row per beam: section, Ie, λΔ, the three deflections, their limits, the governing ratio and the check. It stops with a message when the model has no beam design yet (the cracked stiffness needs the bars).
 
 **`sdt columns` asks:** column main bar, tie and cover; the bottom-story cover; the vertical bars carried down; with SMRF on, whether the capacity-design checks are run at the topmost level and at the foundation level (see [Levels where the capacity-design checks may be left out](#levels-where-the-capacity-design-checks-may-be-left-out)); how interior ties are drawn; the output folder.
 
@@ -68,7 +69,7 @@ Answers are remembered and offered again next time. Every named member (not a nu
   - `design.py`: the design of every beam from the tables (`design_beams`);
   - `sections.py`: flexure, shear, torsion and the SMRF checks of one beam;
   - `supports.py`: what holds a beam (support status, gravity beams, girders under 4d);
-  - `deflection.py`: deflection checks; `carriers.py`: the load path and the carrier depth rule;
+  - `deflection.py`: deflection checks; `flanges.py`: the slab beside a beam, for T- and L-beams; `carriers.py`: the load path and the carrier depth rule;
   - `results.py`: the results workbook; `schedule.py`: the schedule drawings; `calculations.py`: the calculation report;
   - `options.py`: the questions of the beam design.
 - `design/concrete/columns/`: the column design, one file for each job:
@@ -224,7 +225,7 @@ The beam design also checks deflection; `sdt beams` asks once whether the beams 
 
 For each beam, after its bars are chosen:
 
-1. In each zone (left end, midspan, right end): Ec = 4700 √f'c, Ig = b h³/12, fr = 0.62 √f'c, Mcr = fr Ig / (h/2), and Icr of the cracked transformed section with the zone's bars; the tension face follows the sign of the moment.
+1. In each zone (left end, midspan, right end): Ec = 4700 √f'c, Ig = b h³/12, fr = 0.62 √f'c, Mcr = fr Ig / (h/2), and Icr of the cracked transformed section with the zone's bars; the tension face follows the sign of the moment. With T- and L-beams chosen, a beam with a slab beside it takes the flanged section instead (see [T- and L-beams](#t--and-l-beams)).
 2. Ie (Eq. 24.2.3.5a) at Ma = the largest `DEF 101` moment of the zone. The same Ie is used for every load: cracked under the full service load, the beam stays cracked.
 3. The curvature M / (Ec Ie) is integrated twice along the span, with zero deflection at the supports.
 4. λΔ = 2.0 / (1 + 50 ρ'), with ρ' the compression steel at midspan (at the support of a cantilever).
@@ -243,6 +244,29 @@ For each beam, after its bars are chosen:
 | Total, immediate + long-term | Δ(DL + LL) + λΔ Δ(DL + 0.25 LL) |
 
 The total is the after-attachment deflection plus the immediate deflection of the sustained load, Δ(DL + 0.25 LL), which is there before the partitions are built. It is what camber, finishes and clearances have to allow for. The sustained live load of 25 % is a common practice value, not a code value.
+
+#### T- and L-beams
+
+A beam cast with the slab bends with part of it. By default the deflection takes the beam alone, a rectangle, which is the safe side. `sdt beams`, `sdt deflection` and `sdt design` ask the section; with **T- and L-beams** the slab beside a beam is its flange (NSCP 406.3.2.1; ACI 6.3.2.1). Only the deflection check changes: the strength design, the bars and the schedules do not.
+
+**The slab beside a beam** is read from the model at the extraction (`SLAB FLANGES` in the design data). For each side of a level beam, three points a quarter, half and three quarters along it, 100 mm beyond its face, are looked up: the side has a slab when two of them are on a floor area with a slab section and not in an opening. Its thickness h is that of the thinnest such slab. sw, the clear distance to the adjacent web, is measured square to the beam from its middle to the nearest other beam of the level within 30 degrees of it, less the two half widths. A side with no web within 50 m has no sw limit.
+
+**The effective flange width** bf = bw + the overhang on each side with a slab (NSCP Table 406.3.2.1), ln the span checked (its stations stop at the faces of the supports):
+
+| Slab | Overhang, each side with a slab |
+|---|---|
+| On both sides (T-beam) | The least of 8h, sw/2 and ln/8 |
+| On one side (L-beam) | The least of 6h, sw/2 and ln/12 |
+
+**The section properties.** The slab top is taken level with the beam top, as ETABS draws a beam at the floor level.
+
+| | Sagging moment (tension at the bottom) | Hogging moment (tension at the top) |
+|---|---|---|
+| Ig | Of the flanged gross section | Of the flanged gross section |
+| Mcr = fr Ig / yt (NSCP 424.2.3.5b) | yt from the centroid to the bottom face | yt from the centroid to the top face |
+| Icr | Flange in compression: the neutral axis in the flange, or in the web below it | The web alone with its bars; the flange is cracked and the slab bars are left out (the safe side) |
+
+λΔ keeps ρ' = As' / (bw d). The results have a column `Deflection section` (`T-beam: bf 1,800 mm, hf 150 mm`, `L-beam: ...`, `Rectangular` for a beam with no slab beside it), and the calculation report names the section. A beam that carries no slab, such as a tie beam or a beam beside an opening, stays rectangular.
 
 #### Deflection stages
 
