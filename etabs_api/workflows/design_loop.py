@@ -703,6 +703,9 @@ def column_actions(report: pd.DataFrame, sections: dict[str, Section], angles: d
     no size passes is often one that a larger section does not help, and the
     largest size would then be the worst answer.
     """
+    from design.concrete.columns.report import without_attrs
+
+    report = without_attrs(report)      # sliced per column: see without_attrs
     out: dict[str, tuple[Section, str]] = {}
     for name, rows in report.groupby(report["UniqueName"].astype(str)):
         section = sections.get(name)
@@ -1182,6 +1185,9 @@ def stop_unhelped_column_growth(actions: dict, sections: dict, report: pd.DataFr
     """
     if report is None or report.empty or "Shear_Utilization" not in report.columns:
         return []
+    from design.concrete.columns.report import without_attrs
+
+    report = without_attrs(report)      # sliced per column: see without_attrs
     names = report["UniqueName"].astype(str)
     now = pd.to_numeric(report["Shear_Utilization"], errors="coerce").groupby(names).max()
     groups = dict(tuple(report.groupby(names)))
@@ -1522,8 +1528,8 @@ def run_design_loop(bench: Workbench) -> dict:
         summary = f"beams failing {failing} of {beam_table['UniqueName'].nunique()}"
         bench.log(f"  beams failing: {failing} of {beam_table['UniqueName'].nunique()}")
         if column_report is not None:
-            failing = column_report.groupby("UniqueName")["Column_Design_Status"].apply(
-                lambda s: (s.astype(str) == "FAIL").any()).sum()
+            status = column_report["Column_Design_Status"].astype(str).eq("FAIL")
+            failing = int(status.groupby(column_report["UniqueName"]).any().sum())
             bench.log(f"  columns failing: {failing} of {column_report['UniqueName'].nunique()}")
             summary += f", columns failing {failing} of {column_report['UniqueName'].nunique()}"
         sizing = time.time() - start - sum(spent.values())

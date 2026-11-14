@@ -933,9 +933,25 @@ def column_report_display(report: pd.DataFrame) -> pd.DataFrame:
     return clean
 
 
+def without_attrs(frame: pd.DataFrame) -> pd.DataFrame:
+    """The table without its ``attrs``, for the writers that slice it many times.
+
+    The column report keeps the slenderness geometry, the clear heights and the
+    beam moment limits in ``attrs`` (about 100 kB on a large model) for the
+    sizing of the design loop. pandas deep-copies ``attrs`` into every slice and
+    every derived table, so a writer that takes a few rows per column copied
+    them thousands of times: on a 489-column model the calculation report spent
+    most of its 40 minutes in those copies. The writers need none of it.
+    """
+    out = frame.copy(deep=False)
+    out.attrs = {}
+    return out
+
+
 def write_column_results_xlsx(report: pd.DataFrame, groups: list[tuple[str, list[str]]],
                               path: str) -> str:
     """The column design report as a formatted Excel file (no Excel needed)."""
+    report = without_attrs(report)
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
     from openpyxl.utils import get_column_letter

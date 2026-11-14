@@ -369,6 +369,43 @@ def column_interaction_figure(rows: pd.DataFrame, path: str, dmain: float, dties
     return plot_surface(surface, points, path, title, hull, governing)
 
 
+FIGURES_IN_PROCESSES = 24   # columns from which the figures are drawn in several processes
+
+
+def _draw_batch(batch: list[tuple[str, pd.DataFrame, str]], folder: str,
+                options: dict) -> list[str]:
+    """What one process does: the figures of a part of the columns. Returns the
+    names whose figure was drawn."""
+    return [name for name, rows, relative in batch
+            if column_interaction_figure(rows, os.path.join(folder, relative), **options)]
+
+
+def draw_figures(tasks: list[tuple[str, pd.DataFrame, str]], folder: str, options: dict):
+    """Draw the figures of every column, in several processes on a large report
+    (each figure takes about a second: 9 minutes on 489 columns in one). Yields the
+    tasks whose figure was drawn, in their order."""
+    from design import parallel
+
+    workers = parallel.workers_for(len(tasks), FIGURES_IN_PROCESSES)
+    drawn: set[str] = set()
+    if workers > 1:
+        try:
+            futures = [parallel.pool(workers).submit(_draw_batch, part, folder, options)
+                       for part in parallel.chunks(tasks, workers)]
+            for future in futures:
+                drawn.update(future.result())
+        except Exception:  # noqa: BLE001 - a process that fails: draw the rest here
+            drawn = {name for name, rows, relative in tasks
+                     if os.path.isfile(os.path.join(folder, relative))}
+            missing = [task for task in tasks if task[0] not in drawn]
+            drawn.update(_draw_batch(missing, folder, options))
+    else:
+        drawn.update(_draw_batch(tasks, folder, options))
+    for task in tasks:
+        if task[0] in drawn:
+            yield task
+
+
 def planes_path(path: str) -> str:
     """The file of the XZ and YZ plane diagrams written beside the surface ``path``."""
     stem, extension = os.path.splitext(path)
@@ -393,19 +430,23 @@ def build_column_calc_report(report: pd.DataFrame, filepath: str, information: l
     """
     import shutil
 
+    from design.concrete.columns.report import without_attrs
+
+    report = without_attrs(report)      # sliced per column below: see without_attrs
     folder = os.path.dirname(os.path.abspath(filepath))
     figure_dir = "figures_tmp"
     figures: dict[str, tuple[str, str]] = {}
     if figure_options:
         os.makedirs(os.path.join(folder, figure_dir), exist_ok=True)
+        tasks = []
         for name, rows in report.groupby("UniqueName", sort=False):
             safe = re.sub(r"[^A-Za-z0-9_-]", "_", str(name))
-            relative = f"{figure_dir}/{safe}.jpg"
-            if column_interaction_figure(rows, os.path.join(folder, relative), **figure_options):
-                figures[name] = (relative, "Design interaction surface (phi Pn, phi Mnx, phi "
-                                 "Mny) of the final bar layout with every combination at both "
-                                 "ends; the hull vertices decide the check, the star governs."
-                                 + _bcc_caption(rows))
+            tasks.append((name, rows, f"{figure_dir}/{safe}.jpg"))
+        for name, rows, relative in draw_figures(tasks, folder, figure_options):
+            figures[name] = (relative, "Design interaction surface (phi Pn, phi Mnx, phi "
+                             "Mny) of the final bar layout with every combination at both "
+                             "ends; the hull vertices decide the check, the star governs."
+                             + _bcc_caption(rows))
     members = []
     for name, rows in report.groupby("UniqueName", sort=False):
         member = _column_calc_member(rows)
