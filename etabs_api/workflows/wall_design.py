@@ -108,6 +108,36 @@ WALL_FIELDS = {
 }
 
 
+def model_wall_concrete(model) -> float | None:
+    """f'c (MPa) of the walls' concrete in the model: the most common one of the
+    wall sections (ties go to the lower). None when it cannot be read."""
+    from collections import Counter
+
+    def table(key: str) -> list[dict]:
+        result = model.DatabaseTables.GetTableForDisplayArray(key, [], "All", 0, [], 0, [])
+        fields = [str(f) for f in as_list(result[2])]
+        values = as_list(result[4])
+        width = len(fields)
+        if not width:
+            return []
+        return [dict(zip(fields, values[i:i + width])) for i in range(0, len(values), width)]
+
+    try:
+        model.SetPresentUnits(9)        # N, mm: Fc in N/mm2 = MPa
+        strength = {str(r.get("Material")): float(r.get("Fc")) for r in
+                    table("Material Properties - Concrete Data") if r.get("Fc") not in (None, "")}
+        sections = table("Area Section Property Definitions - Wall")
+    except Exception:  # noqa: BLE001 - an older ETABS or a model without walls
+        return None
+    found = [round(strength[str(r.get("Material"))], 1) for r in sections
+             if str(r.get("Material")) in strength]
+    if not found:
+        return None
+    counts = Counter(found)
+    top = max(counts.values())
+    return min(fc for fc, n in counts.items() if n == top)
+
+
 def wall_names(walls) -> list[str]:
     return [f"W{w.number} ({w.shape}, {len(next(iter(w.legs.values())))} legs)" for w in walls]
 
@@ -132,10 +162,14 @@ def ask_wall_inputs(title: str, model, walls, extra: dict[str, tuple[str, str]] 
     if kinds is None:
         return None
     fields = {**WALL_FIELDS, **(extra or {})}
+    defaults = {label: default for label, (_, default) in fields.items()}
+    fc_model = model_wall_concrete(model)
+    if fc_model:                          # the model's wall concrete, not a fixed 28 MPa
+        defaults["f'c (MPa)"] = f"{fc_model:g}"
     typed = enter_values(title, "Materials and bars of the walls and coupling beams. Walls "
                          "whose degree of coupling is under the limit act as separate "
-                         "cantilevers.", list(fields),
-                         {label: default for label, (_, default) in fields.items()})
+                         "cantilevers. f'c is offered from the model's wall sections.",
+                         list(fields), defaults)
     if typed is None:
         return None
     try:

@@ -33,6 +33,21 @@ from design.concrete.columns.report import (
 )
 
 
+
+def _has_concrete_section(design_by_name, member) -> bool:
+    """Whether the frame has a concrete section in FRAME DATA (a width and depth, or
+    a diameter). Steel braces and null frames have none."""
+    if member not in design_by_name.index:
+        return False
+    row = design_by_name.loc[member]
+    if isinstance(row, pd.DataFrame):
+        row = row.iloc[0]
+    for key in ("Width", "Depth", "Diameter"):
+        value = pd.to_numeric(row.get(key), errors="coerce") if key in row else float("nan")
+        if pd.notna(value) and value > 0:
+            return True
+    return False
+
 def _evaluate_smrf_joints(
     column_results: pd.DataFrame,
     connectivity: pd.DataFrame,
@@ -120,6 +135,12 @@ def _evaluate_smrf_joints(
         kind = str(row["DesignType"]).strip().casefold()
         point_map = columns_at_point if kind == "column" else beams_at_point
         if kind not in {"column", "beam"}:
+            continue
+        # a "beam" with no concrete section (a steel brace ETABS classes as a beam
+        # because it is nearly flat, a null frame) is not part of the RC joint; a
+        # concrete beam without its design still blocks the check (it is reported)
+        if kind == "beam" and str(member) not in beam_result_groups \
+                and not _has_concrete_section(design_by_name, member):
             continue
         point_map.setdefault(point_i, []).append(member)
         point_map.setdefault(point_j, []).append(member)

@@ -998,6 +998,7 @@ def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict
     pushes = load_path_pushes(tables, gravity_combo) if load_path is None else load_path
     beam_props = prepare_beam_table(tables["FRAME DATA"], tables["CONNECTIVITY"], bars,
                                     earth_cover_stories, tables.get("POINTS"), pushes)
+    beam_props, too_shallow = split_too_shallow(beam_props)
     results = execute_beam_design(
         df_beam_props=beam_props,
         df_frame_forces=tables["FACTORED LOADS"],
@@ -1025,4 +1026,32 @@ def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict
 
         results = add_carrier_depth_check(results, tables["CONNECTIVITY"], tables.get("POINTS"),
                                           pushes)
-    return sort_beam_rows(results)
+    results = sort_beam_rows(results)
+    results.attrs[TOO_SHALLOW] = too_shallow
+    return results
+
+
+TOO_SHALLOW = "too_shallow"   # results.attrs key: the members left out, "name (b x h)"
+
+
+def split_too_shallow(beam_props: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+    """Leave out the members too shallow to hold a top and a bottom layer of bars.
+
+    A member of depth h at most 2 (cover + stirrup + main bar) has no effective
+    depth left for the two faces (a 400 x 100 "beam" is a slab strip or a
+    modelling stub): designing it stopped the whole run. Such members are left
+    out and listed, so the rest is designed.
+    """
+    if beam_props.empty:
+        return beam_props, []
+    depth = pd.to_numeric(beam_props.get("Depth", beam_props.get("Height")), errors="coerce")
+    need = 2 * (beam_props["cc"].astype(float) + beam_props["ds"].astype(float)
+                + beam_props["dm"].astype(float))
+    shallow = depth.isna() | (depth <= need)
+    out = []
+    for _, row in beam_props[shallow].iterrows():
+        h = pd.to_numeric(row.get("Depth", row.get("Height")), errors="coerce")
+        b = pd.to_numeric(row.get("Width"), errors="coerce")
+        size = f"{b:.0f} x {h:.0f}" if pd.notna(b) and pd.notna(h) else "no depth"
+        out.append(f"{row['UniqueName']} ({size})")
+    return beam_props[~shallow].reset_index(drop=True), out

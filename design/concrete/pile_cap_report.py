@@ -335,14 +335,9 @@ def export_pdf(cap, filepath_with_ext: str):
                 ("Prepared with", f"sdt pilecap {style.program_version()}".strip())])))
         doc.append(NoEscape(report_body(cap, os.path.relpath(
             figure, os.path.dirname(os.path.abspath(filepath))).replace("\\", "/"))))
-        from utilities.latex_help import compiler_args
+        from utilities.latex_help import generate_pdf
 
-        latex_args = compiler_args()
-        doc.generate_pdf(filepath, clean=False, clean_tex=False, compiler="pdflatex",
-                         compiler_args=latex_args)
-        doc.generate_pdf(filepath, clean_tex=True, compiler="pdflatex",
-                         compiler_args=latex_args)
-        return filepath + ".pdf"
+        return generate_pdf(doc, filepath)
     except Exception as error:  # noqa: BLE001 - the calculation stands without its PDF
         print(f"PDF Error: {error}")
         return None

@@ -38,8 +38,9 @@ The report is printed in the terminal and the model is saved. A separate window 
    - **AB** is the plan area of the lowest floor above the seismic base, overhangs in (m²).
    - **rmax** is the largest element-story shear ratio ri of the stories at or below two-thirds of the height (those that start below it, so a one-story building counts its story), under EQXPE (X) and EQYPE (Y):
      - for a moment frame, the shears along the direction of two adjacent columns joined by a beam, over the story shear, taking 70 % for a column with frame bays on both sides;
-     - for a wall (a labelled pier running in that direction), its shear times 3 / lw (lw in m), over the story shear.
-   - **The story shear** is the sum of the shears the story's columns and walls carry in that direction, or ETABS's story force when that is larger. Where walls carry the shear back (a podium or a backstay below grade), the story force ETABS gives is a small net value, and every column would look like the whole story.
+     - for a wall (a labelled pier running in that direction), its shear times 3 / lw (lw in m), over the story shear;
+     - for a braced frame (since v0.16.0), the horizontal force component of a single brace along the direction, over the story shear.
+   - **The story shear** is the sum of the shears the story's columns, walls and braces (their horizontal force) carry in that direction, or ETABS's story force when that is larger. Where walls carry the shear back (a podium or a backstay below grade), the story force ETABS gives is a small net value, and every column would look like the whole story.
    - **Limits:** ρ is between 1.0 and 1.5. For a dual system it need not exceed 80 % of the value. In Seismic Zone 2 it is 1.0. For special moment frames, a ρ over 1.25 is a warning to add bays; 1.25 is not used in its place.
    - **In the combinations:** ρx and ρy go into new directional combinations `EQ_RHO_01` to `08` and `RSA_RHO_01` to `08`, with ρx on the X cases and ρy on the Y cases. They take the place of `EQ_COMBO_nn` and `RSA_COMBO_nn` in every ULS and SLS seismic combination. The Em combinations (SSLC, Ω0 Eh) and the drift combinations keep ρ = 1.0. A model with no `EQ_COMBO_nn` combinations gets ρ in the report only. `sdt setup` writes the combinations back without ρ, so run `sdt analyze` again after it.
 6. Reports:

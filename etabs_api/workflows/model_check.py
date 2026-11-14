@@ -1003,7 +1003,47 @@ def check_combinations(d: ModelData) -> list[Finding]:
                        "Combinations refer to missing cases: " + ", ".join(missing[:10])
                        if missing else "Every combination refers to existing cases."))
     out += _check_vertical_effect(d, combos, uls)
+    out += _check_live_companion(d, combos, uls)
     return out
+
+
+def _check_live_companion(d: ModelData, combos: pd.DataFrame, uls: list[str]) -> list[Finding]:
+    """NSCP 203.3.1: f1 = 1.0 for floors in places of public assembly, live loads
+    above 4.8 kPa and garage live load; 0.5 for other live loads. A live pattern
+    the model loads above 4.8 kPa but the seismic strength combinations factor at
+    0.5 is flagged (assembly and garage use cannot be told from the model)."""
+    if "SF" not in combos or not uls:
+        return []
+    area = d.table("Area Load Assignments - Uniform")
+    if "LoadPattern" not in area or "Load" not in area:
+        return []
+    heavy_kpa = NSCP.live_load_reduction.heavy_kpa
+    live = {p for p, t in d.pattern_types.items() if t in (LIVE, REDUCIBLE)}
+    largest: dict[str, float] = {}
+    for p, value in zip(area["LoadPattern"].astype(str), area["Load"]):
+        if p in live:
+            largest[p] = max(largest.get(p, 0.0), abs(_num(value, 0.0)) * 1e3)
+    heavy = {p: kpa for p, kpa in largest.items() if kpa > heavy_kpa}
+    if not heavy:
+        return []
+    names = combos["Name"].replace({"": pd.NA}).ffill().astype(str)
+    quake = {p for p, t in d.pattern_types.items() if t == SEISMIC}
+    low: dict[str, list[str]] = {}
+    seismic_uls = {n for n, load in zip(names, combos["LoadName"].astype(str))
+                   if n in set(uls) and (load in quake or load.startswith(("EQ_COMBO", "RSA_COMBO")))}
+    for name, load, sf in zip(names, combos["LoadName"].astype(str), combos["SF"]):
+        if name in seismic_uls and load in heavy and abs(_num(sf, 0.0) - LOADS.live_companion) < 1e-6:
+            low.setdefault(load, []).append(name)
+    if not low:
+        return [Finding("Combinations", OK, "Live patterns above "
+                        f"{heavy_kpa:g} kPa have f1 = 1.0 in the seismic combinations: "
+                        + ", ".join(sorted(heavy)), "NSCP 203.3.1")]
+    return [Finding("Combinations", WARN, "Live patterns loaded above "
+                    f"{heavy_kpa:g} kPa with f1 = {LOADS.live_companion:g} in the seismic "
+                    "strength combinations (f1 = 1.0 required): "
+                    + ", ".join(f"{p} ({heavy[p]:.1f} kPa, {len(low[p])} combinations)"
+                                for p in sorted(low))
+                    + " - run sdt setup and give these patterns f1 = 1.0", "NSCP 203.3.1")]
 
 
 def _check_vertical_effect(d: ModelData, combos: pd.DataFrame, uls: list[str]) -> list[Finding]:

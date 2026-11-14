@@ -22,7 +22,8 @@ ETABS has no NSCP seismic code, so the model uses the UBC 97 auto-seismic patter
 
 - Figure 208-3 is the response spectrum.
 - Tables 208-4 to 208-8 hold Na, Nv, Ca and Cv. For Z 0.2 and 0.4 these are the same values as the UBC tables.
-- Table 208-11A gives R, Ω0 and the height limits for concrete systems.
+- Table 208-11A gives R, Ω0 and the height limits for concrete systems, Table 208-11B for steel systems (since v0.16.0).
+- f1 (NSCP 203.3.1): a live pattern loaded above 4.8 kPa that the seismic strength combinations factor at 0.5 is a warning, with the number of combinations (since v0.16.0).
 
 `sdt check` reads the UBC 97 inputs and holds them to the NSCP tables. It checks every pattern, including Ca, Cv, the period or coefficient typed in by hand. With results, it recomputes the NSCP base shear coefficient from the period and weight ETABS used, so an edited static pattern is checked too.
 

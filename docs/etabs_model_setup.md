@@ -51,10 +51,11 @@ Seven dialogs follow (eight with membrane slabs). Each box already holds the val
 | Materials | Concrete strengths (ksi); rebar grades (ksi) | `4, 5, 6` and `60` give C04, C05, C06 and G60 |
 | Frame Sections | Concrete and rebar of the sections; then for each kind of section a range as `min, max, step` in mm | Girders G: width `300, 600, 100`, depth `500, 1000, 100`. Leave a range blank to skip that kind |
 | Slab and Wall Sections | Slab thicknesses (mm); slab type (Membrane, Shell-Thin or Shell-Thick); concrete of the slabs (ksi); wall thicknesses (mm); concrete of the walls (ksi). When the type is Membrane, a second dialog asks whether to add a one-way counterpart of each slab | `100, 125, 150, 200`, `Membrane`, `4`, `150, 200, 250, 300`, `5`. Leave a list blank to skip it |
-| Seismic (UBC 97) | Zone factor Z, soil profile type, source type, distance (km), I, Ct, eccentricity ratio; then the seismic system, picked from the list of NSCP Table 208-11A | `0.4`, `SD`, `A`, `8`, `1`, `0.03`, `0.05`; C1, special reinforced concrete moment frames |
+| Seismic (UBC 97) | Zone factor Z, soil profile type, source type, distance (km), I, Ct, eccentricity ratio; then the seismic system, picked from the list of NSCP Table 208-11A (concrete) and, since v0.16.0, Table 208-11B (steel, keys starting with S) | `0.4`, `SD`, `A`, `8`, `1`, `0.03`, `0.05`; C1, special reinforced concrete moment frames; SB3, special concentrically braced frames (R 6.0, Ω0 2.2) |
 | Wind (ASCE 7-10) | Wind speed (as typed in ETABS, mph), exposure type, Kzt, gust factor, Kd | `150`, `B`, `1`, `0.85`, `0.85` |
 | Load Patterns | Extra super dead, live and reducible live patterns | `ELEVATOR DEAD, CONCRETE PAD` |
 | Mass Source | A choice: include 20 % of the reducible live load in the seismic mass, or not | |
+| Live load factor f1 (since v0.16.0) | One list per live pattern: f1 = 0.5 (other live loads) or f1 = 1.0 (places of public assembly, live loads above 4.8 kPa, garage live load; NSCP 203.3.1). On an open model each pattern shows its largest area load, and a pattern loaded above 4.8 kPa starts at 1.0; the choice made last time is offered next time | `LIVENRED (7.2 kPa max.)`: f1 = 1.0 |
 
 Notes on the section ranges:
 
@@ -151,7 +152,8 @@ Names are `<set> <number> <expression>`, for example `ULS 107 (1.2 + Ev) DL + f 
 | `ENVE_...` | Envelopes |
 
 - DL is every dead and super dead pattern, LL every live and reducible live pattern, Lr the roof live pattern.
-- f on live load is 0.5. The redundancy factor is 1.0.
+- f on live load (f1, NSCP 203.3.1) is set per live pattern: 1.0 for the patterns given f1 = 1.0 in the setup dialog, 0.5 for the others (before v0.16.0 every live pattern took 0.5). The names keep `f LL`. The redundancy factor is 1.0 (`sdt analyze` applies the computed one).
+- The combinations combine the load case of each pattern: when a pattern's linear static case has another name (pattern `LOUVERS PARIS`, case `LOUVERS`) that case is used, and the closing summary lists it (since v0.16.0; before, those combinations failed).
 - Each seismic combination exists for the static cases (`EQ1` to `EQ8`) and for the response spectrum cases (`RSA1` to `RSA8`), with the same number.
 - The vertical effect Ev = 0.5 Ca I D is in the dead load factor: `(1.2 + Ev)` where gravity adds to the earthquake and `(0.9 - Ev)` where it resists it. In the service combinations it is scaled with the earthquake (E / 1.4), for example `(1.0 + 0.714 Ev)` and `(0.6 - 0.714 Ev)`.
 - Wind is strength-level (ASCE 7-10): 1.0 W in the strength combinations and 0.6 W in the service ones.

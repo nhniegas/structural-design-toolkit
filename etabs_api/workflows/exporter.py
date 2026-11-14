@@ -46,6 +46,14 @@ class ETABSDataExporter:
             table = self.etabs.get_data(table_name)
             if isinstance(table, pd.DataFrame) and "UniqueName" in table.columns:
                 names += table["UniqueName"].astype(str).tolist()
+        # null frames (section "None": rigid links, dummy members) are not designed
+        try:
+            sections = self.etabs.get_data("Frame Assignments - Section Properties")
+            null = set(sections.loc[sections["SectProp"].astype(str).isin(("None", "NONE")),
+                                    "UniqueName"].astype(str))
+        except (RuntimeError, KeyError, AttributeError):
+            null = set()
+        names = [n for n in names if n not in null]
         if not names:
             raise ValueError("The ETABS model has no beams or columns.")
         from etabs_api.workflows.analysis_forces import designed_names
@@ -397,8 +405,15 @@ class ETABSDataExporter:
 
     def display_orientation_data(self) -> None:
         """Column local axes and joint coordinates (the SMRF joint checks need them)."""
-        self._write_dataframe_to_excel(
-            df=self.etabs.get_data("Frame Assignments - Local Axes"), sheet_name="LOCAL AXES")
+        # A model where no frame has a local-axis angle assigned has no such table:
+        # every frame then has the default angle 0, an empty table says so.
+        try:
+            axes = self.etabs.get_data("Frame Assignments - Local Axes")
+        except RuntimeError:
+            axes = None
+        if axes is None or "UniqueName" not in getattr(axes, "columns", ()):
+            axes = pd.DataFrame(columns=["UniqueName", "Angle"])
+        self._write_dataframe_to_excel(df=axes, sheet_name="LOCAL AXES")
         self._write_dataframe_to_excel(
             df=self.etabs.get_data("Point Object Connectivity"), sheet_name="POINTS")
         # The supports of the model: the column slenderness takes a footing as

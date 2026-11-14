@@ -38,7 +38,7 @@ if __package__ in (None, ""):
         0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from design.criteria.code_config import (
-    CODE, CONCRETE_SYSTEMS, DEFAULT_SYSTEM, NSCP, seismic_system, systems_with_r)
+    ALL_SYSTEMS, CODE, CONCRETE_SYSTEMS, DEFAULT_SYSTEM, NSCP, seismic_system, systems_with_r)
 from etabs_api.core.connection import save_model  # noqa: E402
 from etabs_api.core.helpers import as_list, return_code
 from etabs_api.workflows.load_combinations import DRIFT_SPECTRUM_CASES as lc_drift_cases
@@ -142,6 +142,9 @@ DEFAULT_SETTINGS = {
     "extra_reducible_live": [],
     "extra_roof_live": [],
     "left_out": [],           # the model's own patterns left out of the combinations and mass
+    # live patterns whose companion factor f1 is 1.0 (NSCP 203.3.1): places of public
+    # assembly, live loads above 4.8 kPa, garage live load; the others take 0.5
+    "full_live": [],
     # Seismic mass: every dead pattern at 1.0, plus these fractions of live load.
     "mass": {"include_reducible_live": False},
 }
@@ -427,8 +430,81 @@ def combinations(settings: dict) -> list[Combination]:
     return build_combinations(
         {name: kind for name, kind, _ in load_patterns(settings)},
         values["ca"], settings["seismic"]["importance"], RHO, system_omega0(settings),
-        LIVE_FACTOR,
+        LIVE_FACTOR, full_live=settings.get("full_live", []),
     )
+
+
+# f1 of a live pattern (NSCP 203.3.1), as the setup dialog offers it
+F1_OTHER = f"f1 = {LIVE_FACTOR:g} (other live loads)"
+F1_FULL = (f"f1 = {NSCP.load_factors.live_companion_heavy:g} (public assembly, above "
+           f"{NSCP.live_load_reduction.heavy_kpa:g} kPa, or garage)")
+
+
+def live_pattern_names(settings: dict) -> list[str]:
+    """The live and reducible live patterns the combinations will use."""
+    return [name for name, kind, _ in load_patterns(settings)
+            if kind in ("Live", "Reducible Live")]
+
+
+def largest_area_loads(model) -> dict[str, float]:
+    """The largest uniform area load of each pattern in the open model, in kPa
+    (the "Area Load Assignments - Uniform" table, read in N-mm). Empty when the
+    table cannot be read."""
+    out: dict[str, float] = {}
+    try:
+        model.SetPresentUnits(UNITS_N_MM)
+        result = model.DatabaseTables.GetTableForDisplayArray(
+            "Area Load Assignments - Uniform", [], "All", 0, [], 0, [])
+        fields = [str(name) for name in as_list(result[2])]
+        values = as_list(result[4])
+    except Exception:  # noqa: BLE001 - a model with no area loads, or an older ETABS
+        return out
+    if not fields or "LoadPattern" not in fields or "Load" not in fields:
+        return out
+    width, pattern, load = len(fields), fields.index("LoadPattern"), fields.index("Load")
+    for start in range(0, len(values), width):
+        try:
+            kpa = abs(float(values[start + load])) * 1e3       # N/mm2 -> kPa
+        except (TypeError, ValueError):
+            continue
+        name = str(values[start + pattern])
+        out[name] = max(out.get(name, 0.0), kpa)
+    return out
+
+
+def f1_defaults(settings: dict, loads: dict[str, float]) -> dict[str, str]:
+    """The f1 offered for each live pattern: the one chosen before, else 1.0 when
+    the model loads the pattern above 4.8 kPa (NSCP 203.3.1), else 0.5."""
+    heavy = NSCP.live_load_reduction.heavy_kpa
+    chosen = {str(n).upper() for n in settings.get("full_live", [])}
+    out = {}
+    for name in live_pattern_names(settings):
+        full = name.upper() in chosen or loads.get(name, 0.0) > heavy
+        out[name] = F1_FULL if full else F1_OTHER
+    return out
+
+
+def ask_live_factors(model, settings: dict, title: str) -> dict | None:
+    """Ask f1 of each live pattern (NSCP 203.3.1) and keep the 1.0 ones in
+    ``settings["full_live"]``. None when the dialog is closed."""
+    from utilities._gui_helpers import choose_for_each
+
+    names = live_pattern_names(settings)
+    if not names:
+        return settings
+    loads = largest_area_loads(model) if model is not None else {}
+    shown = [f"{name} ({loads[name]:.1f} kPa max.)" if name in loads else name for name in names]
+    defaults = f1_defaults(settings, loads)
+    chosen = choose_for_each(
+        title, "Companion live load factor f1 of each live pattern, in the seismic and wind "
+        "combinations (NSCP 203.3.1): 1.0 for floors in places of public assembly, live loads "
+        f"above {NSCP.live_load_reduction.heavy_kpa:g} kPa and garage live load; 0.5 for other "
+        "live loads. Patterns loaded above that in the model are offered 1.0.",
+        shown, [F1_OTHER, F1_FULL], {s: defaults[n] for s, n in zip(shown, names)})
+    if chosen is None:
+        return None
+    settings["full_live"] = [n for s, n in zip(shown, names) if chosen[s] == F1_FULL]
+    return settings
 
 
 def number_of_modes(story_count: int) -> int:
@@ -1061,9 +1137,42 @@ def define_spectrum_and_cases(model, settings: dict, log: SetupLog) -> None:
             log.done("response spectrum cases")
 
 
+def case_of_patterns(model) -> dict[str, str]:
+    """The linear static load case that applies each load pattern alone, at 1.0.
+
+    The combinations are built on pattern names, but ETABS combines load cases.
+    ETABS names the case of a pattern after it, unless the case was renamed or
+    made by hand (pattern "LOUVERS PARIS", case "LOUVERS"). A case named after
+    its pattern is preferred. Patterns no case applies alone are left out.
+    """
+    out: dict[str, str] = {}
+    try:
+        names = [str(n) for n in as_list(model.LoadCases.GetNameList(0, [])[1])]
+    except Exception:  # noqa: BLE001 - an older API: keep the pattern names
+        return out
+    for case in names:
+        try:
+            loads = model.LoadCases.StaticLinear.GetLoads(case)
+        except Exception:  # noqa: BLE001 - not a linear static case
+            continue
+        kinds, patterns, factors = (as_list(loads[i]) for i in (1, 2, 3))
+        if len(patterns) != 1 or str(kinds[0]) != "Load" or abs(float(factors[0]) - 1.0) > 1e-9:
+            continue
+        pattern = str(patterns[0])
+        if pattern not in out or case == pattern:
+            out[pattern] = case
+    return out
+
+
 def define_combinations(model, settings: dict, log: SetupLog, progress=None) -> None:
     api = model.RespCombo
     planned = combinations(settings)
+    cases = case_of_patterns(model)
+    renamed = sorted({f"{p} -> case {c}" for p, c in cases.items() if p != c and any(
+        p == name for combo in planned for name, _ in combo.cases)})
+    if renamed:
+        log.notes.append("Load patterns combined through their load case of another name: "
+                         + ", ".join(renamed))
     existing = {str(name) for name in as_list(api.GetNameList()[1])}
     # Overwrite: remove the old ones first, last created first, because a
     # combination that another one still uses cannot be deleted.
@@ -1082,6 +1191,7 @@ def define_combinations(model, settings: dict, log: SetupLog, progress=None) -> 
             continue
         ok = True
         for case, factor in combo.cases:  # 0 = load case, 1 = load combination
+            case = cases.get(case, case)          # the pattern's own load case
             ok = log.check(api.SetCaseList(combo.name, 0, case, factor),
                            f"{combo.name}: case {case}") and ok
         for other, factor in combo.combos:
@@ -1430,14 +1540,16 @@ def ask_settings(settings: dict) -> dict | None:
         s[key] = text.upper() if key in ("soil_type", "source_type") else float(text)
     seismic_values(settings)  # raises a clear error on an invalid zone, soil or source
     current = system_of(settings) or seismic_system(DEFAULT_SYSTEM)
-    labels = [system.label() for system in CONCRETE_SYSTEMS]
+    labels = [system.label() for system in ALL_SYSTEMS]
     chosen = select_option(
-        "Seismic (UBC 97)", "The earthquake-force-resisting system (NSCP Table 208-11A). R and "
-        "Omega0 follow from it, and sdt check compares the building height with its limit.",
+        "Seismic (UBC 97)", "The earthquake-force-resisting system (NSCP Table 208-11A for "
+        "concrete, 208-11B for steel: keys starting with S, such as SB3 special "
+        "concentrically braced frames). R and Omega0 follow from it, and sdt check compares "
+        "the building height with its limit.",
         labels, default_index=labels.index(current.label()))
     if chosen is None:
         return None
-    system = CONCRETE_SYSTEMS[labels.index(chosen)]
+    system = ALL_SYSTEMS[labels.index(chosen)]
     s["system"], s["r_factor"] = system.key, system.r
 
     # ---- wind ----
@@ -1568,6 +1680,9 @@ def run_model_setup() -> str | None:
         if mapped is None:
             return None
         settings, notes = mapped
+    settings = ask_live_factors(None if new_model else model, settings, title)
+    if settings is None:
+        return None
 
     with LoadingWindow("Defining the model parameters...") as window:
         if new_model:

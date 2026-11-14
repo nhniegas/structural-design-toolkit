@@ -118,6 +118,25 @@ class DesignStore:
         except (OSError, pickle.UnpicklingError, EOFError, AttributeError, ImportError):
             return None
 
+    def keep_columns_of(self, previous: "DesignStore | None") -> bool:
+        """Carry the column design of an earlier store of the same model over.
+
+        ``sdt beams`` writes a new store. Without this, a beam run on a model the
+        design loop (or ``sdt columns``) had designed dropped the column report,
+        and ``sdt columns`` / ``sdt schedules`` then found beams only. The column
+        results are kept only while the model file is the one they were read from
+        (not saved since); the inputs of the earlier run fill in what this run
+        does not set. True when column results were carried over.
+        """
+        if previous is None or previous.column_report is None or previous.is_stale():
+            return False
+        self.column_report = previous.column_report
+        self.column_groups = previous.column_groups
+        self.joint_results = previous.joint_results
+        for key, value in previous.inputs.items():
+            self.inputs.setdefault(key, value)
+        return True
+
     def is_stale(self) -> bool:
         """True when the model file was saved after the extraction."""
         try:
@@ -340,6 +359,9 @@ def run_beams() -> DesignStore | None:
     exempt_short_spans = ask_short_span_girders(title, last) if smrf else False
     if exempt_short_spans is None:
         return None
+    group = ask_design_group(connector.sap_model, title, last)
+    if group is None:
+        return None
     folder = select_output_directory("Folder for the beam results, calculations and schedules")
     if not folder:
         return None
@@ -348,11 +370,21 @@ def run_beams() -> DesignStore | None:
                "carrier_depth": carrier_depth,
                "compatibility_torsion": compatibility_torsion,
                "office_bar_spacing": office_bar_spacing,
-               "exempt_short_spans": exempt_short_spans})
+               "exempt_short_spans": exempt_short_spans, "design_group": group})
 
     stem = os.path.splitext(os.path.basename(model_path))[0]
+    members = None
+    if group:
+        from etabs_api.workflows.exporter import ETABSDataExporter
+
+        wanted = set(group_frames(connector.sap_model, group))
+        members = [m for m in ETABSDataExporter(connector).get_available_members() if m in wanted]
+        if not members:
+            show_warning(f"The group {group} has no beam or column to design.", title=title)
+            return None
     with dcr_targets.use(targets), LoadingWindow("Beam design") as window:
-        tables, notes = extract(connector, combos, options, progress=window.update,
+        tables, notes = extract(connector, combos, options, members=members,
+                                progress=window.update,
                                 deflection_roles=ready.deflection_roles)
         store = DesignStore(model_path, os.path.getmtime(model_path), tables, {
             "combos": combos, "seismic": seismic_key, "smrf": smrf, "gravity_combo": gravity,
@@ -365,6 +397,7 @@ def run_beams() -> DesignStore | None:
             "compatibility_torsion": compatibility_torsion,
             "office_bar_spacing": office_bar_spacing,
             "exempt_short_spans": exempt_short_spans,
+            "design_group": group,
             "sources": {"model": list(ready.sources.model),
                         "answered": list(ready.sources.answered),
                         "assumed": list(ready.sources.assumed)},
@@ -376,6 +409,7 @@ def run_beams() -> DesignStore | None:
                                exempt_short_spans=exempt_short_spans,
                                deflection_stages=stages, deflection_flanges=flanged)
         store.beam_results = results
+        kept_columns = store.keep_columns_of(DesignStore.load(model_path))
         store.save()
         window.update("Saving 1 of 3: the results workbook (.xlsx)")
         xlsx = write_beam_results_xlsx(results, output_path(folder, f"{stem} - Beam Design.xlsx"))
@@ -397,6 +431,7 @@ def run_beams() -> DesignStore | None:
     summary.add("Beam bar spacing", "office rule, 150 mm clear" if office_bar_spacing
                 else "crack control only (NSCP 424.3.2; ACI 24.3.2)")
     add_short_spans_to(summary, results, exempt_short_spans)
+    add_too_shallow_to(summary, results)
     summary.add("Deflection stages", stages.describe())
     summary.add("Deflection section", describe_deflection_section(flanged))
     ready.sources.add_to(summary)
@@ -406,6 +441,13 @@ def run_beams() -> DesignStore | None:
     summary.file("Schedules", ", ".join(os.path.basename(p) for p in dxf))
     summary.file("Calculations", pdf or missing_pdf_reason())
     summary.file("Design data", store.path)
+    if group:
+        summary.add("Members designed", f"group {group} ({len(members)} frames); columns "
+                    "next to them whose other beams are outside it are reported, not passed")
+    if kept_columns:
+        summary.note("The column design of the earlier run of this model was kept in the "
+                     "design data (the model was not saved since). Run sdt columns again "
+                     "if the beams changed.")
     summary.show(output_path(folder, f"{stem} - Beam Design summary.txt"), popup=True)
     return store
 
@@ -701,6 +743,54 @@ SHORT_SPAN_NOTE = ("Girders with a clear span under 4d were designed without the
                    "covered. Confirm how each is meant to resist the earthquake.")
 
 
+ALL_MEMBERS = "All beams and columns of the model"
+
+
+def model_groups(model) -> list[str]:
+    """The ETABS groups that hold frame objects (the group "All" left out)."""
+    from etabs_api.core.helpers import as_list
+
+    try:
+        names = [str(n) for n in as_list(model.GroupDef.GetNameList(0, [])[1])]
+    except Exception:  # noqa: BLE001
+        return []
+    return [n for n in names if n.upper() != "ALL" and group_frames(model, n)]
+
+
+def group_frames(model, group: str) -> list[str]:
+    """The frame objects of an ETABS group; empty when there is none."""
+    from etabs_api.core.helpers import as_list, return_code
+
+    try:
+        got = model.GroupDef.GetAssignments(group, 0, [], [])
+    except Exception:  # noqa: BLE001
+        return []
+    if return_code(got) != 0:
+        return []
+    return [str(n) for t, n in zip(as_list(got[1]), as_list(got[2])) if int(t) == 2]
+
+
+def ask_design_group(model, title: str, last: dict | None = None) -> str | None:
+    """Which members to design: the whole model or one ETABS group. Returns "" for
+    the whole model, the group name, or None when closed. Only offered when the
+    model has groups of frames."""
+    from utilities._gui_helpers import select_option
+
+    groups = model_groups(model)
+    if not groups:
+        return ""
+    choices = [ALL_MEMBERS] + groups
+    before = (last or {}).get("design_group") or ""
+    chosen = select_option(
+        title, "Members to design. Pick an ETABS group to design only its frames (for "
+        "example the new members of an addition); the forces still come from the whole "
+        "model. Columns designed later from these results take the same members.",
+        choices, default_index=choices.index(before) if before in choices else 0)
+    if chosen is None:
+        return None
+    return "" if chosen == ALL_MEMBERS else chosen
+
+
 def ask_short_span_girders(title: str, last: dict | None = None) -> bool | None:
     """Whether the girders with a clear span under 4d are designed without the
     SMRF rules. True to leave them out, False to keep them, None when closed."""
@@ -718,6 +808,18 @@ def ask_short_span_girders(title: str, last: dict | None = None) -> bool | None:
         [SHORT_SPAN_KEEP, SHORT_SPAN_EXEMPT],
         default_index=1 if (last or {}).get("exempt_short_spans") else 0)
     return None if chosen is None else chosen == SHORT_SPAN_EXEMPT
+
+
+def add_too_shallow_to(summary, results) -> None:
+    """List the members left out of the beam design for their small depth."""
+    from design.concrete.beams.design import TOO_SHALLOW
+
+    shallow = list(getattr(results, "attrs", {}).get(TOO_SHALLOW, []))
+    if shallow:
+        summary.note(f"{len(shallow)} members were not designed: too shallow for a top and a "
+                     "bottom layer of bars (depth at most 2 x (cover + stirrup + bar)). Check "
+                     "them in the model: " + ", ".join(shallow[:20])
+                     + (" ..." if len(shallow) > 20 else ""))
 
 
 def short_span_members(results) -> list[str]:

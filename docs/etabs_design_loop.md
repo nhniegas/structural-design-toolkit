@@ -16,6 +16,7 @@ sdt design
 | Question | Notes |
 |---|---|
 | What the model lacks | Only on a model not made with `sdt setup`: a dialog lists what was found and what is missing, then you pick the strength and deflection combinations and say what to do with untagged members. A second dialog lists the sections with other names, grouped as girders, beams, tie beams and columns. See [Working on a model the toolkit did not set up](existing_models.md) |
+| Members to design (since v0.16.0) | Asked only when the model has ETABS groups of frames: the whole model, or one group. Only the frames of the group are designed and resized; the analysis is of the whole model, so the forces include everything. Remembered |
 | Seismic combinations | Static (EQ), response spectrum (RSA) or both. Gravity and wind `ULS` combinations are always included. Not asked when you picked the combinations yourself |
 | Live load reduction, tributary area method, pattern live load | As in the extraction (see the [concrete guide](concrete_beam_column_design.md#step-1-etabs-extraction)) |
 | Design inputs | SMRF on or off, the gravity combination for the beam seismic shear, beam bars and cover, column bars and cover (as in `sdt beams` / `sdt columns`) |

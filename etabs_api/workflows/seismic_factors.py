@@ -19,7 +19,9 @@
   can carry it back, leaving a small net force). For moment frames ri is the
   largest shear of two adjacent columns of a frame bay over the story shear (70 % for a column with
   frame bays on both sides); for walls the wall shear times 3 / lw (m) over the
-  story shear; for dual systems rho need not exceed 80 % of the value. Between
+  story shear; for braced frames the largest horizontal force component of a single
+  brace over the story shear (the braces' horizontal forces also count in the story
+  shear); for dual systems rho need not exceed 80 % of the value. Between
   1.0 and 1.5, and at most 1.25 for special moment frames (more bays otherwise).
   1.0 in Seismic Zone 2 and for drift. Applied per direction: the strength and
   service seismic combinations use directional combinations ``EQ_RHO_nn`` with
@@ -463,6 +465,26 @@ def compute_rho(connector, setup: dict | None = None, progress=None) -> dict[str
             tops.setdefault(story, {})[top] = name
             top_xy.setdefault(story, {})[name] = points[top][:2]
             angle[name] = _num(model.FrameObj.GetLocalAxes(name)[0])
+        # braces: the plan direction of each (unit vector of its horizontal projection
+        # times the share of its length that is horizontal), for ri = its horizontal
+        # force over the story shear (NSCP 208.6.1)
+        brace_dir: dict[str, tuple[float, float]] = {}
+        brace_story: dict[str, str] = {}
+        try:
+            brace_rows = rows(model, "Brace Object Connectivity")
+        except Exception:  # noqa: BLE001 - a model without braces has no such table
+            brace_rows = []
+        for r in brace_rows:
+            a, b = str(r.get("UniquePtI")), str(r.get("UniquePtJ"))
+            if a not in points or b not in points:
+                continue
+            dx, dy, dz = (points[b][k] - points[a][k] for k in range(3))
+            length = math.sqrt(dx * dx + dy * dy + dz * dz)
+            if length <= 0:
+                continue
+            name = str(r["UniqueName"])
+            brace_dir[name] = (abs(dx) / length, abs(dy) / length)
+            brace_story[name] = str(r.get("Story"))
         beams: dict[str, list[tuple[str, str]]] = {}
         for r in rows(model, "Beam Object Connectivity"):
             story = str(r["Story"])
@@ -485,6 +507,19 @@ def compute_rho(connector, setup: dict | None = None, progress=None) -> dict[str
                 along = v2 * math.cos(a) - v3 * math.sin(a) if direction == "X" else \
                     v2 * math.sin(a) + v3 * math.cos(a)
                 column_shear[name] = max(column_shear.get(name, 0.0), abs(along))
+            brace_force: dict[str, float] = {}
+            if brace_dir:
+                try:
+                    brace_table = _table(connector, "Element Forces - Braces", [plus])
+                except Exception:  # noqa: BLE001
+                    brace_table = None
+                for _, r in (brace_table.iterrows() if brace_table is not None else ()):
+                    name = str(r.get("UniqueName"))
+                    if name not in brace_dir:
+                        continue
+                    share = brace_dir[name][0 if direction == "X" else 1]
+                    brace_force[name] = max(brace_force.get(name, 0.0),
+                                            abs(_num(r.get("P"))) * share)
             piers = _table(connector, "Pier Forces", [plus])
             props = _table(connector, "Pier Section Properties")
             length, runs_x = {}, {}
@@ -505,6 +540,8 @@ def compute_rho(connector, setup: dict | None = None, progress=None) -> dict[str
                 if str(r.get("Location")) == "Bottom" and runs_x.get(key, True) == (
                         direction == "X"):
                     carried[key[0]] = carried.get(key[0], 0.0) + abs(_num(r.get("V2")))
+            for name, value in brace_force.items():
+                carried[brace_story[name]] = carried.get(brace_story[name], 0.0) + value
             best = Rho(direction, area=area)
             for story in stories:
                 v = max(shear.get(story, 0.0), carried.get(story, 0.0))
@@ -512,6 +549,9 @@ def compute_rho(connector, setup: dict | None = None, progress=None) -> dict[str
                 ratio, where = story_ratio(column_shear, bays, v)
                 if ratio > best.r_max:
                     best.r_max, best.story, best.element = ratio, story, f"columns {where}"
+                for name, value in brace_force.items():   # braced frames (NSCP 208.6.1)
+                    if brace_story.get(name) == story and v > 0 and value / v > best.r_max:
+                        best.r_max, best.story, best.element = value / v, story, f"brace {name}"
                 for _, r in piers.iterrows():
                     if str(r.get("Story")) != story or str(r.get("Location")) != "Bottom":
                         continue

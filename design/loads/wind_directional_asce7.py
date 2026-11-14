@@ -1259,15 +1259,11 @@ class WindLoadCalculatorDirectionalASCE7:
         # --- Compile -----------------------------------------------------
         try:
             # twice: the header says "Page x of y", which LaTeX knows after one pass
-            from utilities.latex_help import compiler_args
+            from utilities.latex_help import generate_pdf
 
-            latex_args = compiler_args()
-            doc.generate_pdf(save_path, clean=False, clean_tex=False, compiler="pdflatex",
-                             compiler_args=latex_args)
-            doc.generate_pdf(save_path, clean_tex=True, compiler="pdflatex",
-                             compiler_args=latex_args)
-            print(f"PDF exported successfully: {save_path}.pdf")
-            return f"{save_path}.pdf"
+            written = generate_pdf(doc, save_path)
+            print(f"PDF exported successfully: {written}")
+            return written
         except subprocess.CalledProcessError as e:
             print(f"PDF EXPORT FAILED - LaTeX syntax error: {e}")
         except FileNotFoundError as e:

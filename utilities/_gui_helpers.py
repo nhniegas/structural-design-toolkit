@@ -782,11 +782,13 @@ def loading_window_command(message: str) -> list[str]:
 class LoadingWindow:
     """Displays a process-isolated loading window centered on screen during heavy ETABS tasks."""
 
+    PRINT_EVERY = 10.0   # seconds between progress lines printed with an answers file
+
     def __init__(self, message: str = "Processing, please wait..."):
         self.message = message
         self.proc: subprocess.Popen | None = None
         self._last_detail = ""
-        self._last_update = 0.0
+        self._last_update = -1e9
 
     def __enter__(self):
         self.start()
@@ -817,7 +819,17 @@ class LoadingWindow:
         """Show a progress line under the main message while the task runs.
 
         Calls that arrive faster than the window can show them are dropped.
+        With an answers file there is no window: a line is printed instead, at
+        most every ``PRINT_EVERY`` seconds, so a long run (``sdt columns`` on
+        hundreds of columns) shows it is moving and is not taken for stuck.
         """
+        if answers.replaying():
+            now = time.monotonic()
+            if now - self._last_update >= self.PRINT_EVERY and detail != self._last_detail:
+                self._last_detail, self._last_update = detail, now
+                print(f"[{time.strftime('%H:%M:%S')}] {self.message}: "
+                      + " | ".join(str(detail).splitlines()), flush=True)
+            return
         if not self.proc or self.proc.stdin is None or detail == self._last_detail:
             return
         now = time.monotonic()

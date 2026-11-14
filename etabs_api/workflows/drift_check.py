@@ -399,10 +399,20 @@ def _frames(connector) -> tuple[list[str], set[str], dict[str, str]]:
     beams = connector._read_database_table("Beam Object Connectivity")
     columns = connector._read_database_table("Column Object Connectivity")
     sections = connector._read_database_table("Frame Assignments - Section Properties")
-    names = [str(n) for n in beams.get("UniqueName", [])] + \
-        [str(n) for n in columns.get("UniqueName", [])]
-    return (names, {str(n) for n in columns.get("UniqueName", [])},
-            dict(zip(sections["UniqueName"].astype(str), sections["SectProp"].astype(str))))
+    section_of = dict(zip(sections["UniqueName"].astype(str), sections["SectProp"].astype(str)))
+
+    def real(name) -> bool:
+        """Not a null frame (section "None": rigid links, dummy members), which has
+        no section to read."""
+        return section_of.get(str(name), "") not in NULL_SECTIONS
+
+    names = [str(n) for n in beams.get("UniqueName", []) if real(n)] + \
+        [str(n) for n in columns.get("UniqueName", []) if real(n)]
+    return (names, {str(n) for n in columns.get("UniqueName", []) if real(n)},
+            {n: s for n, s in section_of.items() if s not in NULL_SECTIONS})
+
+
+NULL_SECTIONS = ("None", "NONE", "")   # ETABS names a frame with no section "None"
 
 
 def _spectrum_loads(model) -> dict[str, tuple]:

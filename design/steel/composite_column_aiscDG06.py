@@ -1068,14 +1068,9 @@ def export_pdf(col: RectangularFilledComposite, filepath_with_ext: str):
     # --- Compile PDF ---
     try:
         # twice: the header says "Page x of y", which LaTeX knows after one pass
-        from utilities.latex_help import compiler_args
+        from utilities.latex_help import generate_pdf
 
-        latex_args = compiler_args()
-        doc.generate_pdf(filepath, clean=False, clean_tex=False, compiler="pdflatex",
-                         compiler_args=latex_args)
-        doc.generate_pdf(filepath, clean_tex=True, compiler="pdflatex",
-                         compiler_args=latex_args)
-        return filepath + ".pdf"
+        return generate_pdf(doc, filepath)
     except Exception as e:
         print(f"PDF Error: {str(e)}")
         return None
