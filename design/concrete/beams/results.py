@@ -4,6 +4,7 @@ import re
 import pandas as pd
 from design.concrete.beams.deflection import DEFLECTION_COLUMNS
 from utilities._calc_report import is_blank, number
+from utilities.ordering import natural_key
 
 
 _BEAM_MARK_PATTERN = re.compile(r"^(.*?)(BX|BY|GX|GY)-(\d+)(.*)$", re.IGNORECASE)
@@ -12,43 +13,53 @@ _BEAM_MARK_PATTERN = re.compile(r"^(.*?)(BX|BY|GX|GY)-(\d+)(.*)$", re.IGNORECASE
 _BEAM_TYPE_PRIORITY = {"BX": 1, "BY": 2, "GX": 3, "GY": 4}
 
 
-def beam_sort_key(name: object, face: object = "") -> tuple:
-    """Order a beam mark by floor, type, numeric mark, suffix, and face."""
-    name_text = str(name).upper()
+def beam_sort_key(name: object, face: object = "", floor_rank: float | None = None) -> tuple:
+    """Order a beam mark by floor, type, number, suffix, and face.
+
+    Floors go from the bottom up: by ``floor_rank`` (the story elevation) when
+    it is known, else by the floor of the mark read by number (``2`` before
+    ``10``). Numbers are read as numbers (``BX-2`` before ``BX-10``), the
+    suffix letters by length first (``Z`` before ``AA``), and an untagged
+    ETABS name such as ``2`` comes before ``10``.
+    """
+    name_text = str(name).strip().upper()
     face_priority = 0 if "TOP" in str(face).upper() else 1
     match = _BEAM_MARK_PATTERN.match(name_text)
     if not match:
-        return name_text, 5, 0, "", face_priority
+        floor_key = (1 if floor_rank is None else 0, floor_rank or 0.0, ())
+        return floor_key, 5, (natural_key(name_text), natural_key(name_text)), face_priority
 
     floor, beam_type, number, suffix = match.groups()
+    floor_key = (1 if floor_rank is None else 0, floor_rank or 0.0,
+                 natural_key(floor) if floor_rank is None else ())
     return (
-        floor,
+        floor_key,
         _BEAM_TYPE_PRIORITY[beam_type.upper()],
-        int(number),
-        suffix,
+        (natural_key(f"{number}{suffix}"), natural_key(name_text)),
         face_priority,
     )
 
 
-def sort_beam_rows(df: pd.DataFrame) -> pd.DataFrame:
-    """Return rows sorted by beam mark and, when present, TOP before BOTTOM."""
+def sort_beam_rows(df: pd.DataFrame, story_elevations: dict[str, float] | None = None
+                   ) -> pd.DataFrame:
+    """Return rows sorted by beam mark and, when present, TOP before BOTTOM.
+
+    With ``story_elevations`` (story -> elevation) the floors go from the
+    bottom up by elevation; without, by the floor of each mark.
+    """
     if "UniqueName" not in df.columns:
         return df.reset_index(drop=True)
 
     result = df.copy()
-    if "Face" in result.columns:
-        result["_sort_key"] = [
-            beam_sort_key(name, face)
-            for name, face in zip(result["UniqueName"], result["Face"])
-        ]
+    faces = result["Face"] if "Face" in result.columns else [""] * len(result)
+    if story_elevations and "Story" in result.columns:
+        ranks = [story_elevations.get(str(story)) for story in result["Story"]]
     else:
-        result["_sort_key"] = result["UniqueName"].map(beam_sort_key)
-
-    return (
-        result.sort_values("_sort_key", kind="stable")
-        .drop(columns="_sort_key")
-        .reset_index(drop=True)
-    )
+        ranks = [None] * len(result)
+    keys = [beam_sort_key(name, face, rank)
+            for name, face, rank in zip(result["UniqueName"], faces, ranks)]
+    order = sorted(range(len(keys)), key=keys.__getitem__)   # sorted() is stable
+    return result.iloc[order].reset_index(drop=True)
 
 
 _BEAM_RESULT_LABELS = {

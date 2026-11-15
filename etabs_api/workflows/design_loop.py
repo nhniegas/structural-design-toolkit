@@ -53,6 +53,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from utilities.output_folders import SCHEDULES, beside, output_path, subfolder  # noqa: E402
+from utilities.ordering import natural_key  # noqa: E402
 from etabs_api.core.connection import save_model  # noqa: E402
 from etabs_api.workflows.sections import (  # noqa: E402
     Limits,
@@ -1317,8 +1318,8 @@ def stuck_by_kind(stuck: dict[str, str]) -> dict[str, list[str]]:
     """{what stops them: the members}, in the order of ``STUCK_KINDS``."""
     out: dict[str, list[str]] = {}
     for key, kind in STUCK_KINDS:
-        names = sorted(name for name, reason in stuck.items() if key in reason
-                       and not any(name in found for found in out.values()))
+        names = sorted((name for name, reason in stuck.items() if key in reason
+                        and not any(name in found for found in out.values())), key=natural_key)
         if names:
             out[kind] = names
     return out
@@ -1649,10 +1650,10 @@ def run_design_loop(bench: Workbench) -> dict:
                 continue
         break
     still_failing = sorted(set(beams.loc[beams["Design_Status"].astype(str) != "OK",
-                                         "UniqueName"].astype(str)))
+                                         "UniqueName"].astype(str)), key=natural_key)
     if report is not None:
         still_failing += sorted(set(report.loc[report["Column_Design_Status"].astype(str)
-                                               == "FAIL", "UniqueName"].astype(str)))
+                                               == "FAIL", "UniqueName"].astype(str)), key=natural_key)
     bench.log("")
     bench.log(f"Status: {status} after {iteration} iterations; "
               f"{len(all_changes)} section changes.")
@@ -2334,7 +2335,7 @@ def loop_summary(summary: dict, settings: LoopSettings, original: str, working: 
     for member, sizes in resized.items():
         by_size.setdefault(sizes, []).append(member)
     for (old, new), members in sorted(by_size.items()):
-        out.add(f"  {old} -> {new}", listed(sorted(members), 8))
+        out.add(f"  {old} -> {new}", listed(sorted(members, key=natural_key), 8))
     drift = summary.get("drift") or {}
     if drift:
         out.add("Drift of the final sizes",

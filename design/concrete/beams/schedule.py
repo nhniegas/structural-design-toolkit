@@ -14,6 +14,10 @@ def export_beam_dxf(results: pd.DataFrame, output_dir: str) -> list[str]:
     written = []
     if results.empty:
         return written
+    from design.concrete.beams.results import sort_beam_rows
+
+    # by type and number (BX-2 before BX-10), also for a design stored by an older version
+    results = sort_beam_rows(results)
     if "SupportStatus" in results.columns:
         gravity = results["SupportStatus"].map(is_gravity_beam)
     else:

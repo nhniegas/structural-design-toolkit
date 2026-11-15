@@ -39,6 +39,7 @@ if __package__ in (None, ""):
 from design.criteria import dcr_targets  # noqa: E402
 from utilities.latex_help import missing_pdf_reason  # noqa: E402
 from utilities.output_folders import SCHEDULES, output_path, subfolder  # noqa: E402
+from utilities.ordering import natural_key  # noqa: E402
 
 STORE_SUFFIX = " - design data.pkl"
 # Where the classes of a stored design were before the design folders (v0.3.8 and earlier).
@@ -829,7 +830,7 @@ def short_span_members(results) -> list[str]:
     if results is None or getattr(results, "empty", True) or "Seismic_Rules" not in results:
         return []
     rows = results[results["Seismic_Rules"].astype(str).str.startswith(SMRF_SHORT_SPAN)]
-    return sorted(set(rows["UniqueName"].astype(str)))
+    return sorted(set(rows["UniqueName"].astype(str)), key=natural_key)
 
 
 def add_short_spans_to(summary, results, exempt_short_spans: bool) -> None:
@@ -1254,7 +1255,7 @@ def column_summary(report: pd.DataFrame, command: str, model_path: str | None = 
     summary = RunSummary(command, model_path)
     names = report["UniqueName"].astype(str)
     failing = report.loc[report["Column_Design_Status"].astype(str) == "FAIL"]
-    failed_names = sorted(set(failing["UniqueName"].astype(str)))
+    failed_names = sorted(set(failing["UniqueName"].astype(str)), key=natural_key)
     summary.add("Columns designed", names.nunique())
     summary.add("Combinations", report["Combo"].astype(str).nunique())
     summary.add("Passing", names.nunique() - len(failed_names))
@@ -1282,7 +1283,7 @@ def column_summary(report: pd.DataFrame, command: str, model_path: str | None = 
         if len(hit):
             seen.setdefault(label, set()).update(hit)
     for label, members in seen.items():
-        summary.fail(f"{label}: {listed(sorted(members))}")
+        summary.fail(f"{label}: {listed(sorted(members, key=natural_key))}")
     other = [name for name in failed_names if not any(name in m for m in seen.values())]
     if other:
         summary.fail(f"Other (see the Design Status Reason column): {listed(other)}")

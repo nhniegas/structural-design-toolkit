@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 from design.concrete.columns.slenderness import SLENDERNESS_REPORT_FIELDS
 from utilities._calc_report import is_blank, number
+from utilities.ordering import natural_key, natural_rank
 
 
 BCC_EXEMPT_TEXT = ("N/A - NSCP 418.7.3.1; ACI 18.7.3.1: the column stops at this joint and "
@@ -299,7 +300,7 @@ def _build_consolidated_column_report(
     report_rows: list[dict] = []
     for column in column_results.to_dict("records"):
         member = str(column["UniqueName"])
-        combos = sorted(combos_of.get(member, ()))
+        combos = sorted(combos_of.get(member, ()), key=natural_key)
         if not combos:
             combos = [""]
         for combo in combos:
@@ -536,14 +537,18 @@ def _build_consolidated_column_report(
         report_rows,
         columns=[column for _, column_names in groups for column in column_names],
     )
-    report["_story_sort"] = report["Story"].astype(str)
+    # marks by number (C2 before C10, C before PC), then from the top floor down
+    sort_columns = {"_label_sort": "Column_Label", "_story_sort": "Story",
+                    "_member_sort": "UniqueName", "_combo_sort": "Combo"}
+    for rank_column, source in sort_columns.items():
+        report[rank_column] = natural_rank(report[source])
     report = (
         report.sort_values(
-            ["Column_Label", "Level_Elevation_m", "_story_sort", "UniqueName", "Combo"],
+            ["_label_sort", "Level_Elevation_m", "_story_sort", "_member_sort", "_combo_sort"],
             ascending=[True, False, True, True, True],
             kind="stable",
         )
-        .drop(columns="_story_sort")
+        .drop(columns=list(sort_columns))
         .reset_index(drop=True)
     )
     return _expand_column_report_hierarchy(report)
@@ -728,9 +733,10 @@ def _expand_column_report_hierarchy(
     long_report["_elevation"] = np.repeat(elevations.fillna(-math.inf).to_numpy(float), 2)
     long_report = (
         long_report.assign(
-            _label_sort=long_report["Column_Label"].astype(str),
-            _story_sort=long_report["Story"].astype(str),
-            _member_sort=long_report["UniqueName"].astype(str),
+            _label_sort=natural_rank(long_report["Column_Label"]),
+            _story_sort=natural_rank(long_report["Story"]),
+            _member_sort=natural_rank(long_report["UniqueName"]),
+            _combo_sort=natural_rank(long_report["Combo"]),
         )
         .sort_values(
             [
@@ -739,12 +745,13 @@ def _expand_column_report_hierarchy(
                 "_story_sort",
                 "_member_sort",
                 "_end_order",
-                "Combo",
+                "_combo_sort",
             ],
             ascending=[True, False, True, True, True, True],
             kind="stable",
         )
-        .drop(columns=["_end_order", "_elevation", "_label_sort", "_story_sort", "_member_sort"])
+        .drop(columns=["_end_order", "_elevation", "_label_sort", "_story_sort", "_member_sort",
+                       "_combo_sort"])
         .reset_index(drop=True)
     )
     return long_report, report_groups
