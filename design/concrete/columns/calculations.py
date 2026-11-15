@@ -432,7 +432,13 @@ def build_column_calc_report(report: pd.DataFrame, filepath: str, information: l
 
     from design.concrete.columns.report import without_attrs
 
+    from utilities.ordering import column_member_order
+
     report = without_attrs(report)      # sliced per column below: see without_attrs
+    # the columns by mark (C2 before C10), as in the results and the schedule, also
+    # for a design stored by an older version
+    order = {name: index for index, name in enumerate(column_member_order(report))}
+    report = report.iloc[report["UniqueName"].astype(str).map(order).argsort(kind="stable")]
     folder = os.path.dirname(os.path.abspath(filepath))
     figure_dir = "figures_tmp"
     figures: dict[str, tuple[str, str]] = {}

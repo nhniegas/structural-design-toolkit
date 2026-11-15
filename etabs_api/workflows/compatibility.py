@@ -44,6 +44,7 @@ if __package__ in (None, ""):
 
 from design.criteria.code_config import CODE, NSCP  # noqa: E402
 from etabs_api.core.helpers import as_list, return_code  # noqa: E402
+from utilities.ordering import natural_key  # noqa: E402
 
 GROUP = "GRAVITY ONLY"
 MIN_DRIFT_RATIO = 0.0025           # NSCP 208.7.2.3: at least 0.0025 times the story height
@@ -639,7 +640,7 @@ def run_compatibility_cli():
     failing = [c.name for c in checks if not c.passed]
     if failing:
         summary.fail("Detailing not met: " + ", ".join(failing[:30]))
-    missing = sorted(set(members) - {c.name for c in checks})
+    missing = sorted(set(members) - {c.name for c in checks}, key=natural_key)
     if missing:
         summary.note("Not in the stored design, so not checked: " + ", ".join(missing[:30]))
     summary.file("Workbook", workbook)

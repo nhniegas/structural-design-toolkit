@@ -1614,6 +1614,18 @@ def test_schedule_floor_level_is_the_range_the_column_spans(tmp_path):
     assert {"FDN TO GF", "GF TO 2F", "2F TO PD1"} <= texts
 
 
+def test_schedule_marks_are_read_by_number_with_planted_columns_last(tmp_path):
+    """C2 before C10, and the planted PC marks after every C mark (v0.16.1)."""
+    marks = ["C10", "PC1", "C2", "C1A", "C1", "C11"]
+    report = pd.DataFrame([_report_row(f"2-{mark}", "2F") for mark in marks])
+    target = tmp_path / "schedule.dxf"
+    col_schedule.generate_dxf_column_schedule(report, str(target), 25.0, 40.0, True)
+    texts = list(ezdxf.readfile(target).modelspace().query("TEXT"))
+    header = [t for t in texts if t.dxf.text in marks]
+    header.sort(key=lambda t: t.get_placement()[1][0])
+    assert [t.dxf.text for t in header] == ["C1", "C1A", "C2", "C10", "C11", "PC1"]
+
+
 def test_circular_smrf_spiral_detailing_passes():
     """A spiral supports every bar: its 'N/A for continuous spiral' bar-support result
     must not fail the detailing (it made every circular SMRF column fail)."""

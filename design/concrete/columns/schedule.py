@@ -7,6 +7,7 @@ import pandas as pd
 import ezdxf
 from dataclasses import dataclass
 from design.criteria.code_config import CODE
+from utilities.ordering import natural_key
 from shapely.geometry import LineString
 from shapely.ops import unary_union
 from design.concrete.columns.section import (
@@ -972,7 +973,8 @@ def generate_dxf_column_schedule(
     # Arrange the schedule by story so the level properties are written once
     # and shared by every column mark on that level.
     story_values = sorted(story_names, key=story_rank.get, reverse=True)
-    labels = list(dict.fromkeys(report["_DXF Mark"].astype(str)))
+    # marks by number, left to right: C1, C1A, C2 ... C10, then the planted PC marks
+    labels = sorted(dict.fromkeys(report["_DXF Mark"].astype(str)), key=natural_key)
     story_content_height = drawing_height + len(field_names) * data_height
     story_x_positions = [0.0]
     for width in left_widths:

@@ -1026,7 +1026,10 @@ def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict
 
         results = add_carrier_depth_check(results, tables["CONNECTIVITY"], tables.get("POINTS"),
                                           pushes)
-    results = sort_beam_rows(results)
+    from utilities.ordering import story_elevations
+
+    # floors from the bottom up by elevation, then type and number (BX-2 before BX-10)
+    results = sort_beam_rows(results, story_elevations(tables.get("POINTS")))
     results.attrs[TOO_SHALLOW] = too_shallow
     return results
 

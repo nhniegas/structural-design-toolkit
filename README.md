@@ -77,6 +77,7 @@ Supporting code:
 - `utilities/latex_help.py`: compiles every PDF report (pdflatex in the report's folder) and says what to do when LaTeX is missing.
 - `build_exe.ps1`: builds the packaged program `sdt.exe`.
 - `utilities/_xlsx_values.py`: rounded numbers and stated blanks of the result workbooks.
+- `utilities/ordering.py`: the order of the members in the results, schedules and reports (marks by number: C2 before C10).
 - `main.qmd`: Quarto template for written reports.
 - `main.py`: terminal entry point of every command (`sdt --help` lists them).
 
