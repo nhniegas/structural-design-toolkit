@@ -36,9 +36,11 @@ def enable(on: bool = True) -> None:
         shutdown()
 
 
-def workers_for(members: int) -> int:
-    """How many processes to design ``members`` members with (1 = this process only)."""
-    if not _enabled or members < MIN_MEMBERS:
+def workers_for(members: int, minimum: int | None = None) -> int:
+    """How many processes to design ``members`` members with (1 = this process only).
+    ``minimum`` is the fewest members worth the processes (fewer for heavier work,
+    such as the report figures, which take about a second each)."""
+    if not _enabled or members < (MIN_MEMBERS if minimum is None else minimum):
         return 1
     asked = os.environ.get("SDT_WORKERS", "").strip()
     if asked:

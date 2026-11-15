@@ -106,3 +106,66 @@ def missing_pdf_reason() -> str:
     return ("not written: LaTeX stopped with an error. The results and schedules were "
             "written. Run sdt doctor: it lists the LaTeX packages the reports use and "
             "installs those that are missing. Then run the command again.")
+
+
+def tex_path(path: str) -> str:
+    """``path`` in a form pdflatex can read.
+
+    TeX reads ``~`` as a special character, so a Windows short (8.3) name such
+    as ``C:/Users/NHELHA~1/...`` stops the compiler ("file error in nonstop
+    mode") and no PDF is written. The short name is turned back into the long
+    one; a path without ``~`` is returned as it is.
+    """
+    path = os.path.abspath(path)
+    if "~" not in path or os.name != "nt":
+        return path
+    folder, name = os.path.split(path)
+    try:
+        import ctypes
+
+        buffer = ctypes.create_unicode_buffer(32768)
+        if ctypes.windll.kernel32.GetLongPathNameW(folder, buffer, len(buffer)):
+            return os.path.join(buffer.value, name)
+    except (OSError, AttributeError, ValueError):
+        pass
+    return path
+
+
+def generate_pdf(doc, filepath: str, passes: int = 2, keep_tex: bool = False,
+                 keep_log: bool = False, extra_args: list[str] | None = None) -> str:
+    """Compile a PyLaTeX document to ``<filepath>.pdf`` and return that path.
+
+    Every report of the toolkit is compiled here. pdflatex runs in the folder of
+    the report with the bare file name, so no part of the path is read by TeX
+    (a ``~`` or another special character in a folder name cannot stop it), and
+    short 8.3 names are made long first (``tex_path``). When the file name
+    itself has a ``~`` the report is compiled under a plain name and renamed.
+    ``passes`` is 2 for the reports whose header says "Page x of y". Raises what
+    the compiler raises (``FileNotFoundError`` when there is no pdflatex,
+    ``subprocess.CalledProcessError`` on a LaTeX error, after printing its log).
+    """
+    filepath = tex_path(filepath)
+    folder, name = os.path.split(filepath)
+    work = name if "~" not in name else "sdt_report"
+    doc.generate_tex(os.path.join(folder, work))
+    command = ["pdflatex", *compiler_args(), *(extra_args or []),
+               "--interaction=nonstopmode", work + ".tex"]
+    for _ in range(max(1, passes)):
+        try:
+            subprocess.check_output(command, stderr=subprocess.STDOUT, cwd=folder)
+        except subprocess.CalledProcessError as error:
+            print(error.output.decode(errors="replace"))
+            raise
+    leftovers = (".aux", ".out", ".fls", ".fdb_latexmk") + (() if keep_log else (".log",)) \
+        + (() if keep_tex else (".tex",))
+    for ext in leftovers:
+        try:
+            os.remove(os.path.join(folder, work + ext))
+        except OSError:
+            pass
+    if work != name:
+        for ext in (".pdf",) + ((".log",) if keep_log else ()) + ((".tex",) if keep_tex else ()):
+            source = os.path.join(folder, work + ext)
+            if os.path.exists(source):
+                os.replace(source, os.path.join(folder, name + ext))
+    return filepath + ".pdf"

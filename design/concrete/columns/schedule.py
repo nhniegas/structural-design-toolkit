@@ -1217,7 +1217,9 @@ def export_column_cad_drawings(
     if inner_tie_style not in INNER_TIE_STYLES:
         raise ValueError(f"inner_tie_style must be one of {INNER_TIE_STYLES}.")
 
-    report = column_report_display(report)
+    from design.concrete.columns.report import without_attrs
+
+    report = column_report_display(without_attrs(report))
     if not report.empty:
         report = report.drop_duplicates(subset=["Unique Name"], keep="first")
     if report.empty:

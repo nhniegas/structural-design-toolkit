@@ -56,6 +56,10 @@ WIND_SIGNS = (("+", 1.0), ("-", -1.0))
 DRIFT_SPECTRUM_CASES = ("RSAXD", "RSAYD")
 
 
+class _Companion:
+    """Marks the live load of a combination as the companion load f1 L."""
+
+
 @dataclass
 class Combination:
     """One load combination: its cases and combinations with their factors."""
@@ -80,6 +84,7 @@ def build_combinations(
     rho: float = _FACTORS.rho,
     omega0: float = _FACTORS.omega0,
     live_factor: float = _FACTORS.live_companion,
+    full_live: tuple[str, ...] | list[str] | set[str] = (),
 ) -> list[Combination]:
     """All combinations, in the order they must be created.
 
@@ -87,6 +92,11 @@ def build_combinations(
     patterns form DL, live and reducible live form LL, roof live forms Lr, and
     the wind patterns are ``WX`` and ``WY``. ``live_factor`` is f on LL. The
     factors are those of ``NSCP.load_factors`` (design/criteria/code_config.py).
+
+    ``full_live`` names the live patterns whose companion factor f1 is 1.0:
+    floors in places of public assembly, live loads above 4.8 kPa and garage
+    live load (NSCP 203.3.1); every other live pattern takes ``live_factor``
+    (0.5). The combination names keep "f LL": f is per pattern.
     """
     k = _FACTORS
     dead = [name for name, kind in patterns.items() if kind in DEAD_TYPES]
@@ -95,9 +105,16 @@ def build_combinations(
     ev = k.vertical_effect * ca * importance
     out: list[Combination] = []
 
-    def gravity(dl: float, ll: float = 0.0, lr: float = 0.0) -> list[tuple[str, float]]:
+    full = {str(name).upper() for name in full_live}
+
+    def gravity(dl: float, ll: float | _Companion = 0.0, lr: float = 0.0
+                ) -> list[tuple[str, float]]:
         items = [(name, dl) for name in dead]
-        items += [(name, ll) for name in live if ll]
+        if isinstance(ll, _Companion):            # f1 LL: 1.0 or live_factor, per pattern
+            items += [(name, _FACTORS.live_companion_heavy if name.upper() in full
+                       else live_factor) for name in live]
+        else:
+            items += [(name, ll) for name in live if ll]
         items += [(name, lr) for name in roof if lr]
         return items
 
@@ -127,7 +144,7 @@ def build_combinations(
                 )
                 group(f"{key}_{label}", name)
 
-    f = live_factor
+    f = _Companion()        # the companion live load: f1 of each pattern
     w = (("WX", "WX"), ("WY", "WY"))
     d, d_min, s = k.dead, k.dead_minimum, k.service
     # ---- strength (NSCP 203.3.1) ----
@@ -196,7 +213,7 @@ def build_combinations(
     for case, signs in [(c, (1.0, -1.0)) for c in drift_static] + \
             [(c, (1.0,)) for c in DRIFT_SPECTRUM_CASES]:
         for number, dl, ll, text in ((100, d + ev, f, f"({_g(d)} + Ev) DL + f LL"),
-                                     (102, d_min - ev, 0.0, f"({_g(d_min)} - Ev) DL")):
+                                     (102, d_min - ev, 0.0, f"({_g(d_min)} - Ev) DL")):  # f: per pattern
             for offset, sign in enumerate(signs):
                 operator = "+" if sign > 0 else "-"
                 group("DRIFT", add(f"{DRIFT_SET} {number + offset} {text} {operator} "

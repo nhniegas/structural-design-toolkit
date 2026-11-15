@@ -15,7 +15,7 @@ Walls are numbered in plan order, as the columns are (top to bottom, then left t
 | Question | |
 |---|---|
 | Special or ordinary, wall by wall | Special: 418.10, for walls of the seismic-force-resisting system in zone 4. Ordinary: Section 411 |
-| f'c, fy, the vertical and horizontal bar, cover, and the module the boundary element length is rounded up to | 28 MPa, 414 MPa, 16 mm, 12 mm, 40 mm, 50 mm |
+| f'c, fy, the vertical and horizontal bar, cover, and the module the boundary element length is rounded up to | f'c of the model's wall sections (the most common one; since v0.16.0, 28 MPa when it cannot be read), 414 MPa, 16 mm, 12 mm, 40 mm, 50 mm |
 | Which method decides special boundary elements when both apply | The displacement method (418.10.6.2) or the stress method (418.10.6.3); both results are given either way |
 | Strength combinations | The `ULS` combinations, or those you pick when the model has none |
 

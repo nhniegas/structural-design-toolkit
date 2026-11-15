@@ -123,6 +123,7 @@ class LoopSettings:
     wall_strength: list = field(default_factory=list)
     wall_max_thickness: float = 400.0
     drift_options: object = None    # drift_check.DriftOptions of the run
+    design_group: str = ""          # an ETABS group: only its frames are designed and resized
 
 
 @dataclass
@@ -702,6 +703,9 @@ def column_actions(report: pd.DataFrame, sections: dict[str, Section], angles: d
     no size passes is often one that a larger section does not help, and the
     largest size would then be the worst answer.
     """
+    from design.concrete.columns.report import without_attrs
+
+    report = without_attrs(report)      # sliced per column: see without_attrs
     out: dict[str, tuple[Section, str]] = {}
     for name, rows in report.groupby(report["UniqueName"].astype(str)):
         section = sections.get(name)
@@ -810,7 +814,15 @@ class Workbench:
         columns = self._table("Column Object Connectivity")["UniqueName"].astype(str)
         from etabs_api.workflows.analysis_forces import designed_names
 
-        return designed_names(self.connector, beams), designed_names(self.connector, columns)
+        beams, columns = designed_names(self.connector, beams), designed_names(self.connector,
+                                                                                columns)
+        if self.settings.design_group:      # only the frames of the group are designed
+            from design.concrete.workflow import group_frames
+
+            wanted = set(group_frames(self.model, self.settings.design_group))
+            beams = [b for b in beams if b in wanted]
+            columns = [c for c in columns if c in wanted]
+        return beams, columns
 
     def sections(self) -> dict[str, Section]:
         """The section of every member; read from ETABS where the name does not say it."""
@@ -1173,6 +1185,9 @@ def stop_unhelped_column_growth(actions: dict, sections: dict, report: pd.DataFr
     """
     if report is None or report.empty or "Shear_Utilization" not in report.columns:
         return []
+    from design.concrete.columns.report import without_attrs
+
+    report = without_attrs(report)      # sliced per column: see without_attrs
     names = report["UniqueName"].astype(str)
     now = pd.to_numeric(report["Shear_Utilization"], errors="coerce").groupby(names).max()
     groups = dict(tuple(report.groupby(names)))
@@ -1513,8 +1528,8 @@ def run_design_loop(bench: Workbench) -> dict:
         summary = f"beams failing {failing} of {beam_table['UniqueName'].nunique()}"
         bench.log(f"  beams failing: {failing} of {beam_table['UniqueName'].nunique()}")
         if column_report is not None:
-            failing = column_report.groupby("UniqueName")["Column_Design_Status"].apply(
-                lambda s: (s.astype(str) == "FAIL").any()).sum()
+            status = column_report["Column_Design_Status"].astype(str).eq("FAIL")
+            failing = int(status.groupby(column_report["UniqueName"]).any().sum())
             bench.log(f"  columns failing: {failing} of {column_report['UniqueName'].nunique()}")
             summary += f", columns failing {failing} of {column_report['UniqueName'].nunique()}"
         sizing = time.time() - start - sum(spent.values())
@@ -1975,6 +1990,12 @@ def run_design_cli() -> dict | None:
         return None
     combos, sources = ready.combos, ready.sources
     seismic = ready.seismic_key or "picked"
+    # members to design: the whole model or one group (the forces come from the whole model)
+    from design.concrete.workflow import ask_design_group
+
+    design_group = ask_design_group(model, title, last)
+    if design_group is None:
+        return None
     # sections the loop will resize, whatever the model calls them
     found = read_model_sections(connector)
     if not confirm_sections(found, title):
@@ -2091,7 +2112,13 @@ def run_design_cli() -> dict | None:
         return None
     _remember({"smrf": smrf, "gravity_combo": gravity, **beam_bars, **column_bars,
                "beam_earth_cover_stories": earth_stories, "check_top_level": levels[0],
-               "check_foundation_level": levels[1]})
+               "check_foundation_level": levels[1],
+               # the beam answers, as `sdt beams` remembers them: a later `sdt beams`
+               # on the designed model then offers the same choices
+               "carrier_depth": carrier_depth,
+               "compatibility_torsion": compatibility_torsion,
+               "office_bar_spacing": office_bar_spacing,
+               "exempt_short_spans": exempt_short_spans})
 
     # loop limits
     last = _saved("design_loop")
@@ -2184,8 +2211,10 @@ def run_design_cli() -> dict | None:
         wall_values=(walls or {}).get("values", {}),
         wall_strength=(walls or {}).get("strength", []),
         wall_max_thickness=(walls or {}).get("values", {}).get("largest", 400.0),
+        design_group=design_group,
     )
-    _remember({"resize_for_drift": resize_for_drift, "section_scale": section_scale})
+    _remember({"resize_for_drift": resize_for_drift, "section_scale": section_scale,
+               "design_group": design_group})
 
     # the working copy: the original model is not changed
     stem = os.path.splitext(original)[0]
@@ -2346,11 +2375,15 @@ def loop_summary(summary: dict, settings: LoopSettings, original: str, working: 
 
         out.add("Beam torsion", "at most phi Tcr (compatibility torsion, NSCP 422.7.3.2; ACI 22.7.3.2)")
         out.note(TORSION_NOTE)
+    if settings.design_group:
+        out.add("Members designed", f"group {settings.design_group} only (the forces come from "
+                "the whole model)")
     out.add("Beam bar spacing", "office rule, 150 mm clear" if settings.office_bar_spacing
             else "crack control only (NSCP 424.3.2; ACI 24.3.2)")
-    from design.concrete.workflow import add_short_spans_to
+    from design.concrete.workflow import add_short_spans_to, add_too_shallow_to
 
     add_short_spans_to(out, beams, settings.exempt_short_spans)
+    add_too_shallow_to(out, beams)
     if settings.deflection_stages is not None:
         out.add("Deflection stages", settings.deflection_stages.describe())
     from design.concrete.beams.options import describe_deflection_section

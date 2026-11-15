@@ -246,6 +246,9 @@ def column_specs(report, main: float) -> dict[str, dict]:
     the closest spacing of its two ends, and the most legs of the two."""
     import pandas as pd
 
+    from design.concrete.columns.report import without_attrs
+
+    report = without_attrs(report)      # sliced per column: see without_attrs
     out = {}
     for name, rows in report.groupby(report["UniqueName"].astype(str)):
         first = rows.iloc[0]

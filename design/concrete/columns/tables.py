@@ -157,7 +157,10 @@ def _extract_frame_angles(frame_table: pd.DataFrame) -> dict[str, float]:
 
     Returns:
         A map from normalized frame unique names to their ETABS beta angles.
+        Empty when the table is empty (no frame has an angle assigned: all are 0).
     """
+    if frame_table is None or frame_table.empty:
+        return {}
     name_column = _find_column(
         frame_table, ("UniqueName", "Frame", "Name", "Label"), "frame name"
     )

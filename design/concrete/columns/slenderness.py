@@ -378,9 +378,17 @@ class FrameModel:
 
     def __init__(self, columns: dict[str, FrameColumn], beams: dict[str, FrameBeam],
                  code: AciCode = CODE,
-                 supports: dict[str, tuple[bool, bool, bool]] | None = None):
+                 supports: dict[str, tuple[bool, bool, bool]] | None = None,
+                 links: dict[str, tuple[str, str, tuple[float, float]]] | None = None):
         self.columns, self.beams, self.code = columns, beams, code
         self.supports = supports
+        # horizontal members with no concrete section (rigid links to walls, null or
+        # steel members): joint -> their plan directions. They support a column
+        # laterally (they end lu) but give no rotational restraint (psi).
+        self.links_at: dict[str, list[tuple[float, float]]] = {}
+        for joint_i, joint_j, direction in (links or {}).values():
+            for joint in (joint_i, joint_j):
+                self.links_at.setdefault(joint, []).append(direction)
         self.columns_at: dict[str, list[str]] = {}
         self.beams_at: dict[str, list[str]] = {}
         self.column_above: dict[str, str] = {}
@@ -476,7 +484,13 @@ class FrameModel:
                 and not self.beams_at.get(joint))
 
     def braced(self, joint: str, direction: tuple[float, float]) -> bool:
-        return self.is_footing(joint) or self.beam_stiffness(joint, direction) > 0.0
+        """Whether the joint supports the column laterally in ``direction``: a
+        footing, a beam along it, or a link along it (a rigid link to a wall)."""
+        if self.is_footing(joint) or self.beam_stiffness(joint, direction) > 0.0:
+            return True
+        limit = self.code.column_slenderness.brace_alignment
+        return any((d[0] * direction[0] + d[1] * direction[1]) ** 2 >= limit
+                   for d in self.links_at.get(joint, []))
 
     def base(self, joint: str, direction: tuple[float, float]) -> tuple[float, str]:
         """psi of a footing for bending in the vertical plane along ``direction``,

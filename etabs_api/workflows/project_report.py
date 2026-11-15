@@ -901,14 +901,9 @@ def build_report(data: ReportData, filepath: str) -> str | None:
     try:
         os.chdir(os.path.dirname(os.path.abspath(filepath)))
         # twice: "Page x of y" and the long tables settle on the second pass
-        from utilities.latex_help import compiler_args
+        from utilities.latex_help import generate_pdf
 
-        latex_args = compiler_args()
-        doc.generate_pdf(filepath, clean=False, clean_tex=False, compiler="pdflatex",
-                         compiler_args=latex_args)
-        doc.generate_pdf(filepath, clean_tex=True, compiler="pdflatex",
-                         compiler_args=latex_args)
-        return filepath + ".pdf"
+        return generate_pdf(doc, filepath)
     except Exception as error:  # noqa: BLE001 - LaTeX missing or a compile error
         print(f"PDF Error: {error}")
         return None

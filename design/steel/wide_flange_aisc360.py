@@ -2294,20 +2294,14 @@ class WideFlangeReport:
         """Writes <filename>.pdf (and .tex if keep_tex).  Returns the PDF path."""
         base = os.path.splitext(filename)[0]
         content = self.builder.build(demands or Demands(), title, date)
-        from utilities.latex_help import compiler_args
+        from utilities.latex_help import generate_pdf, tex_path
 
-        latex_args = compiler_args()
+        base = tex_path(base)
         pages = None
         for pt, gap in self.FIT_STEPS:
             doc = LatexRenderer(pt, gap, file_name=os.path.basename(base) + ".pdf").document(
                 content)
-            doc.generate_pdf(
-                base,
-                clean=False,
-                clean_tex=False,
-                compiler="pdflatex",
-                compiler_args=["-interaction=nonstopmode", *latex_args],
-            )
+            generate_pdf(doc, base, passes=1, keep_tex=True, keep_log=True)
             pages = self._pages(base + ".log")
             if pages == 1:
                 break

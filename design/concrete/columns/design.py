@@ -1377,11 +1377,9 @@ def _slenderness_frame_model(frame_data: pd.DataFrame, connection_by_name: pd.Da
             return 0.0
         return value if math.isfinite(value) else 0.0
 
+    links: dict[str, tuple[str, str, tuple[float, float]]] = {}
     for member, connection in connection_by_name.iterrows():
         member = str(member)
-        if member not in data.index:
-            continue
-        row = data.loc[member]
         point_i = _normalize_object_name(connection["UniquePtI"])
         point_j = _normalize_object_name(connection["UniquePtJ"])
         if point_i not in point_coordinates or point_j not in point_coordinates:
@@ -1391,6 +1389,17 @@ def _slenderness_frame_model(frame_data: pd.DataFrame, connection_by_name: pd.Da
         if length <= 0:
             continue
         kind = str(connection["DesignType"]).strip().casefold()
+        horizontal = abs(float(end[2] - start[2])) <= 0.1 * length
+        if member not in data.index or (kind == "beam" and number(
+                data.loc[member].get("Depth") if member in data.index else 0) <= 0):
+            # a horizontal member with no concrete section (a rigid link to a wall, a
+            # null or steel member) gives lateral support for lu, not rotational
+            # restraint for psi (NSCP 406.2.5: lu is between members that give
+            # lateral support)
+            if kind == "beam" and horizontal:
+                links[member] = (point_i, point_j, plan_direction(end - start))
+            continue
+        row = data.loc[member]
         fc = number(row.get("f'c"))
         if kind == "column":
             if start[2] > end[2]:
@@ -1409,7 +1418,7 @@ def _slenderness_frame_model(frame_data: pd.DataFrame, connection_by_name: pd.Da
         elif kind == "beam":
             beams[member] = FrameBeam(member, point_i, point_j, length, number(row.get("Width")),
                                       number(row.get("Depth")), fc, plan_direction(end - start))
-    return FrameModel(columns, beams, supports=supports) if columns else None
+    return FrameModel(columns, beams, supports=supports, links=links) if columns else None
 
 
 def _slenderness_geometry(member: str, frame_model: FrameModel | None, forces: pd.DataFrame,
