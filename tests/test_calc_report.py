@@ -105,14 +105,15 @@ def test_the_preamble_has_the_header_the_footer_and_a_fallback_for_each_package(
                           "11 October 2026")
     for expected in ("Beam Design", "ACI 318M-14", "Model: t34", "11 October 2026",
                      "sdt beams", "t34.pdf", "Check the results independently",
-                     r"\definecolor{sdtamber}{HTML}{FFAA2C}", r"Page \sdtpages"):
+                     r"\definecolor{sdtaccent}{HTML}{1F4E9A}", r"Page \sdtpages"):
         assert expected in text
     # a missing package gives a plainer report, never a failed one
     for package in ("tgheros", "sansmath", "colortbl", "fancyhdr"):
         assert rf"\IfFileExists{{{package}.sty}}" in text
     # "Page x of y" is written with no package: lastpage is not asked for
     assert "lastpage.sty" not in text and r"\newlabel{sdtlastpage}" in text
-    assert style.INK == "1C1E24" and style.AMBER == "FFAA2C"       # those of the icon
+    assert style.INK == "1A1A1A" and style.ACCENT == "1F4E9A"      # the blue of ETABS
+    assert r"\colorbox{sdtaccent}{\textcolor{white}" in text        # the SDT mark
 
 
 def test_the_title_block_sets_its_pairs_two_to_a_line():
@@ -139,3 +140,20 @@ def test_a_figure_is_set_beside_a_narrow_table_and_the_table_keeps_its_size():
     # the two columns wrap their own text: no box around the sentence, no fixed "ll"
     assert "p{0.54" + chr(92) + "linewidth}" in text and chr(92) + "parbox" not in text
     assert chr(92) + "sdtpass{PASS}" in text and "Interaction surface" in text
+
+
+def test_every_summary_table_fits_the_text_width():
+    """The summary tables are fixed p{} columns: with their gaps they must fit 174 mm
+    (v0.18.1: the beam table was 175 mm and ran past the right margin)."""
+    import re
+    from pathlib import Path
+
+    from utilities._calc_report import TEXT_WIDTH_MM, table_width_mm
+
+    root = Path(__file__).resolve().parents[1]
+    for path in ("design/concrete/beams/calculations.py", "design/concrete/columns/calculations.py",
+                 "design/concrete/wall_report.py"):
+        source = (root / path).read_text(encoding="utf-8")
+        specs = re.findall(r'"((?:p\{[0-9.]+(?:cm|mm)\})+)"', source)
+        summary = max(specs, key=lambda spec: spec.count("p{"))   # the widest is the summary
+        assert table_width_mm(summary) <= TEXT_WIDTH_MM, (path, summary, table_width_mm(summary))

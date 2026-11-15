@@ -1,9 +1,10 @@
 """The look of the PDF calculation reports, shared by every command that writes one.
 
 A report has, on every page, a header with the program's mark, the title, the
-design code, what it was made from and the page number over an amber rule, and
-a footer with the version and the file. Its text and equations are in one sans
-typeface, in the graphite of the program; section titles sit on a grey band,
+design code, what it was made from and the page number over a blue rule, and
+a footer with the version and the file. The look is that of ETABS and of the
+program's windows (since v0.18.1): text and equations in one sans typeface in
+near-black, the blue of ETABS for the mark and the rules; section titles sit on a grey band,
 tables have a grey head and light rules, and a result is a ratio with a PASS or
 FAIL tag.
 
@@ -18,8 +19,8 @@ from __future__ import annotations
 import os
 from datetime import datetime
 
-# The graphite and amber of the icon (tools/make_icon.py), and the greys of a page.
-INK, AMBER = "1C1E24", "FFAA2C"
+# The blue of ETABS, as the windows and the icon (tools/make_icon.py), and the greys of a page.
+INK, ACCENT = "1A1A1A", "1F4E9A"
 SOFT, LINE, BAND = "6B7280", "D5D8DE", "F3F4F6"
 PASS_TEXT, PASS_FILL = "1E7A34", "E4F4E7"
 FAIL_TEXT, FAIL_FILL = "B3261E", "FBE6E4"
@@ -71,7 +72,7 @@ def preamble(title: str, code: str = "", source: str = "", command: str = "",
 \IfFileExists{colortbl.sty}{\usepackage{colortbl}}{%
   \providecommand{\rowcolor}[1]{}\providecommand{\columncolor}[1]{}%
   \providecommand{\arrayrulecolor}[1]{}}
-\definecolor{sdtink}{HTML}{""" + INK + r"""}\definecolor{sdtamber}{HTML}{""" + AMBER + r"""}
+\definecolor{sdtink}{HTML}{""" + INK + r"""}\definecolor{sdtaccent}{HTML}{""" + ACCENT + r"""}
 \definecolor{sdtsoft}{HTML}{""" + SOFT + r"""}\definecolor{sdtline}{HTML}{""" + LINE + r"""}
 \definecolor{sdtband}{HTML}{""" + BAND + r"""}
 \definecolor{sdtokfg}{HTML}{""" + PASS_TEXT + r"""}\definecolor{sdtokbg}{HTML}{""" + PASS_FILL + r"""}
@@ -82,16 +83,16 @@ def preamble(title: str, code: str = "", source: str = "", command: str = "",
 \renewcommand{\arraystretch}{1.2}
 \setlength{\arrayrulewidth}{0.4pt}
 \arrayrulecolor{sdtline}
-\newcommand{\sdtmark}{\colorbox{sdtink}{\textcolor{sdtamber}{\bfseries\small\,SDT\,}}}
+\newcommand{\sdtmark}{\colorbox{sdtaccent}{\textcolor{white}{\bfseries\small\,SDT\,}}}
 \newcommand{\sdtpass}[1]{\colorbox{sdtokbg}{\textcolor{sdtokfg}{\bfseries\scriptsize\strut\ #1\ }}}
 \newcommand{\sdtfail}[1]{\colorbox{sdtnobg}{\textcolor{sdtnofg}{\bfseries\scriptsize\strut\ #1\ }}}
 \newcommand{\sdtwarn}[1]{\colorbox{sdtwarnbg}{\textcolor{sdtwarnfg}{\bfseries\scriptsize\strut\ #1\ }}}
 \newcommand{\sdtsoft}[1]{\textcolor{sdtsoft}{#1}}
 \newcommand{\sdtover}[1]{\textcolor{sdtnofg}{\bfseries #1}}
-% a section title on a grey band with an amber mark, as wide as the line it is on
+% a section title on a grey band with a blue mark, as wide as the line it is on
 \newcommand{\sdtband}[1]{\par\vspace{3mm}%
   {\setlength{\fboxsep}{2mm}\noindent\colorbox{sdtband}{\parbox{\dimexpr\linewidth-4mm}{%
-  \textcolor{sdtamber}{\rule[-0.6mm]{1.1mm}{3.6mm}}\hspace{2mm}\bfseries #1}}}\par\nopagebreak\vspace{2mm}}
+  \textcolor{sdtaccent}{\rule[-0.6mm]{1.1mm}{3.6mm}}\hspace{2mm}\bfseries #1}}}\par\nopagebreak\vspace{2mm}}
 \newcommand{\sdtsub}[1]{\par\vspace{2.5mm}{\bfseries\small #1}\par\nopagebreak\vspace{0.8mm}%
   {\color{sdtline}\hrule height 0.4pt}\nopagebreak\vspace{1.6mm}}
 \makeatletter
@@ -121,7 +122,7 @@ def preamble(title: str, code: str = "", source: str = "", command: str = "",
   \fancyhead[C]{\parbox{\textwidth}{%
     \sdtmark\ \ {\bfseries """ + escape(title) + r"""}\hfill{\small Page \sdtpages}\\[0.6mm]
     {\footnotesize\sdtsoft{""" + escape(code) + r"""}}\hfill{\footnotesize\sdtsoft{""" + right_head + r"""}}\\[0.8mm]
-    {\color{sdtamber}\rule{\textwidth}{1.1pt}}}}%
+    {\color{sdtaccent}\rule{\textwidth}{1.1pt}}}}%
   \fancyfoot[C]{\parbox{\textwidth}{{\color{sdtline}\rule{\textwidth}{0.4pt}}\\[0.6mm]
     {\scriptsize\sdtsoft{""" + left_foot + r"""}}\hfill
     {\scriptsize\sdtsoft{A calculation aid. Check the results independently before use.}}}}%

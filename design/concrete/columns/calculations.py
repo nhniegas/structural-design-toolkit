@@ -472,7 +472,7 @@ def build_column_calc_report(report: pd.DataFrame, filepath: str, information: l
              "Status"],
             members,
             filepath,
-            "p{1.4cm}p{2.9cm}p{1.3cm}p{2.3cm}p{1.1cm}p{1.9cm}p{1.9cm}p{2.6cm}",
+            "p{1.4cm}p{2.6cm}p{1.2cm}p{2.1cm}p{1.1cm}p{1.8cm}p{1.8cm}p{2.4cm}",
             command="sdt columns",
             member_pages=True,
         )

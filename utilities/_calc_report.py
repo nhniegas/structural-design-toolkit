@@ -9,6 +9,7 @@ written out: the tables carry the intermediate and final values only. The look
 
 import math
 import os
+import re
 import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -222,6 +223,20 @@ def _basis_latex(information: list) -> str:
         lines.append(f"{a} & {b} & {c} & {d}" + r" \\")
     lines.append(r"\end{tabular}}\par")
     return "\n".join(lines)
+
+
+TEXT_WIDTH_MM = 174.0      # A4 less the 18 mm margins of report_style.MARGINS
+TABLE_GAP_PT = 5.0         # \tabcolsep of the summary table
+
+
+def table_width_mm(spec: str, gap_pt: float = TABLE_GAP_PT) -> float:
+    """The width a table of fixed ``p{..}`` columns takes, gaps between columns included
+    (none at the outer edges: the table is set with @{} there)."""
+    widths = []
+    for value, unit in re.findall(r"p\{([0-9.]+)(mm|cm)\}", spec):
+        widths.append(float(value) * (10.0 if unit == "cm" else 1.0))
+    gaps = max(len(widths) - 1, 0) * 2 * gap_pt * 25.4 / 72.27
+    return sum(widths) + gaps
 
 
 def build_calc_report(

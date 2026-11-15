@@ -773,7 +773,6 @@ def run_loading_window(message: str) -> None:
     ``LoadingWindow``) and shows the lines it reads from its standard input."""
     import queue
     import threading
-    from tkinter import ttk
 
     root = _window("Working")
     root.protocol("WM_DELETE_WINDOW", lambda: None)
@@ -782,10 +781,18 @@ def run_loading_window(message: str) -> None:
     width = _px(root, 440)
     wrap = width - _px(root, 48)
     body = tk.Frame(root, bg=BG)
-    body.pack(fill=tk.BOTH, expand=True, padx=_px(root, 24), pady=_px(root, 20))
-    progress = ttk.Progressbar(body, mode="indeterminate", style="SDT.Horizontal.TProgressbar")
-    progress.pack(fill=tk.X)
-    progress.start(12)
+    body.pack(fill=tk.BOTH, expand=True, padx=_px(root, 24), pady=_px(root, 16))
+    # a city built along the loading line by a crane that runs back and forth
+    from utilities.loading_city import CityAnimation
+
+    scene_width, scene_height = width - _px(root, 48), _px(root, 92)
+    scene = tk.Canvas(body, width=scene_width, height=scene_height, bg=BG,
+                      highlightthickness=0, bd=0)
+    scene.pack(fill=tk.X)
+    city = CityAnimation(scene, scene_width, scene_height,
+                         {"accent": ACCENT, "select": SELECT, "line": LINE, "muted": MUTED},
+                         scale=_px(root, 100) / 100.0)
+    city.start()
 
     # Progress lines sent by LoadingWindow.update() arrive on stdin, one per line.
     detail = tk.Label(body, text="Please wait.", bg=BG, fg=MUTED, font=(BODY_FONT, 10),

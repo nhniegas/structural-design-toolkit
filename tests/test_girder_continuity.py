@@ -188,3 +188,42 @@ def test_through_ends_reads_both_ends():
 @pytest.mark.parametrize("value", [None, float("nan"), ""])
 def test_through_ends_of_a_blank(value):
     assert through_ends(value) == []
+
+
+# --------------------------------------------------------------------------
+# the matched bars are checked again (v0.18.1): steel ratio, probable-moment shear
+# --------------------------------------------------------------------------
+def test_matched_bars_are_checked_again_for_the_steel_ratio_and_the_shear():
+    """A girder given the support bars of a heavy next span: the 2.5 % limit (NSCP
+    418.6.3.1) and the probable-moment shear Ve are those of the matched bars."""
+    plain = beam_design.execute_beam_design(_props(), _forces(), True, "GRAV")
+    engine = BeamFlexureDesign(400.0, 600.0, dmain=25.0, dstirrup=10.0, cc=40.0)
+    full = [engine.max_bar_per_layer] * 3            # three full layers: far above 2.5 %
+    heavy = beam_design.execute_beam_design(
+        _props(), _forces(), True, "GRAV", layer_floors={"B1": {("left", "top"): full}})
+    before = plain[plain["Face"] == "TOP"].iloc[0]
+    after = heavy[heavy["Face"] == "TOP"].iloc[0]
+    assert before["SMRF_Rho_Check"] == "PASS"
+    assert after["SMRF_Rho_Check"] == "FAIL"
+    assert "2.5%" in after["Design_Status"] or "LAYERS" in after["Design_Status"]
+    assert after["Ve_left_kN"] > before["Ve_left_kN"]   # the larger bars raise Mpr and Ve
+
+
+def test_the_design_loop_designs_with_the_matching_at_every_iteration(monkeypatch):
+    """sdt design calls the beam design with the option at each iteration, so a girder
+    that fails with its matched bars is resized like any other."""
+    import types
+
+    import etabs_api.workflows.design_loop as loop
+
+    seen = []
+    monkeypatch.setattr(beam_design, "design_beams",
+                        lambda *args, **kwargs: seen.append(kwargs.get("girder_continuity")))
+    bench = types.SimpleNamespace(
+        tables={}, show=lambda *a: None, load_path=lambda: None,
+        settings=loop.LoopSettings(combos=[], force_options=None, gravity_combo="GRAV",
+                                   smrf=True, beam_bars={}, column_bars={},
+                                   girder_continuity=True))
+    loop.Workbench.design_beams(bench)
+    loop.Workbench.design_beams(bench)               # a second iteration
+    assert seen == [True, True]
