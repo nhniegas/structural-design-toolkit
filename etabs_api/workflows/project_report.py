@@ -229,7 +229,7 @@ def listed_combinations(combos: dict[str, dict]) -> dict[str, list[str]]:
 # =============================================================================
 # PICTURES
 # =============================================================================
-INK, AMBER_DARK = "#1C1E24", "#B36B00"
+INK, AMBER_DARK = "#1A1A1A", "#1F4E9A"   # the column marks in the blue of ETABS
 
 
 def draw_plan(floor, path: str) -> str:

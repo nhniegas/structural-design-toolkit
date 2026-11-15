@@ -10,7 +10,7 @@ Code: `utilities/report_style.py` (the look), `utilities/_calc_report.py` (the b
 
 | Part | What it shows |
 |---|---|
-| Header | The `SDT` mark and the title of the report; under it the design code. At the right, "Page x of y", then the model or the section the report is of, and the date. A thin amber rule closes it |
+| Header | The `SDT` mark and the title of the report; under it the design code. At the right, "Page x of y", then the model or the section the report is of, and the date. A thin blue rule closes it |
 | Footer | The program version, the command that wrote the report and the file name; and the note that the report is a calculation aid |
 
 **On the first page**
@@ -23,10 +23,10 @@ Code: `utilities/report_style.py` (the look), `utilities/_calc_report.py` (the b
 
 **In the body**
 
-- A section title sits on a grey band with an amber mark at its left. In the beam and column reports each member has its own band.
+- A section title sits on a grey band with a blue mark at its left. In the beam and column reports each member has its own band.
 - A table has its title in bold above it, a grey head and a light rule under each row. Notes are in grey under it.
 - A result is a tag: `PASS` or `OK` in green, `FAIL` in red. A ratio is its number; the tag beside it says whether it passes.
-- The text and the equations are in one sans typeface, in the graphite of the program.
+- The text and the equations are in one sans typeface, in near-black; the `SDT` mark is white on the blue of ETABS, as the program's icon (since v0.18.1).
 
 **Beam and column reports** hold the intermediate and final values of each member in tables, with no equation written out for each member; on a model of a hundred members that would be a report of several hundred pages. The column report keeps the interaction surface of each column, with every combination plotted against it, and its P-M diagrams in the XZ and YZ planes after the tables. Each column starts on a new page and takes two: its forces and checks on the first, and on the second its transverse reinforcement with the interaction surface at its right, then its design status. Set under the tables, the surface was pushed to the next page and left a half empty one. On a large model the figures are drawn in several processes (from 24 columns, as many as the machine allows up to 8); the BOTTOM building's 489 columns, 1,270 pages, take about 2.5 minutes (since v0.16.0; about 25 before).
 
@@ -50,7 +50,7 @@ The reports are compiled with `pdflatex`. Beyond the packages of the earlier for
 
 - `report_style.new_document(title, code, source, command, file_name)` gives a PyLaTeX document with the header, the footer and the commands of the format. A new report built on it has the look of the others.
 - `report_style.title_block`, `tag` and `ratio` give the pieces. `\section` is redefined to the grey band, and the three rules of `booktabs` to the grey head and the light lines, so a report written with PyLaTeX's `Section` and `Tabular` needs no change.
-- The colours are constants at the top of `report_style.py`, graphite and amber (the windows and the icon have the light look and the blue of ETABS since v0.18.0).
+- The colours are constants at the top of `report_style.py` (`INK`, `ACCENT`, ...): the blue of ETABS, as the windows and the icon. The summary table of each report is set in fixed columns that must fit the 174 mm between the margins; `tests/test_calc_report.py` checks it.
 
 ## Not in this format yet
 

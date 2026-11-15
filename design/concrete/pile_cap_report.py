@@ -106,7 +106,7 @@ def draw_plan(cap, path: str) -> str:
             ax.plot(rx, ry, color="#6B7280", lw=0.6, ls=":")
     col = g["column"]
     cx, cy = col.exterior.xy
-    ax.fill(cx, cy, facecolor="#FFAA2C", edgecolor="#1C1E24", lw=1.0, alpha=0.9)
+    ax.fill(cx, cy, facecolor="#1F4E9A", edgecolor="#1C1E24", lw=1.0, alpha=0.9)
     region = g.get("column_perimeter")
     if region is not None and not region.is_empty and region.geom_type == "Polygon":
         rx, ry = region.exterior.xy

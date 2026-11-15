@@ -65,6 +65,7 @@ Supporting code:
 - `utilities/design_cli.py`: the dialog workflow of the standalone checks (input dialogs, then printout, PDF or both); `utilities/design_window.py`: the window of the composite, steel and pile cap checks (inputs, live drawing, results).
 - `utilities/_gui_helpers.py`: file pickers, list pickers, choice and text-entry dialogs, and the loading window.
 - `utilities/form_window.py`: the one window of a command: every question as a section, the answers that depend on others asked again, Run.
+- `utilities/loading_city.py`: the animation of the progress window, a city built by a crane along the loading line.
 - `utilities/_calc_report.py`: layout of the beam and column PDF calculation reports.
 - `utilities/terminal.py`: tables, colour and equations in the terminal; `design/concrete/results_tables.py`: the beam and column tables.
 - `utilities/run_summary.py`: the summary every command shows in a window when it finishes (the terminal keeps the detailed results).

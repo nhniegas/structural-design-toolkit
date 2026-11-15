@@ -14,6 +14,7 @@ When a command starts, one window opens with all its questions, one under the ot
 - **Values it does not accept** are said in red under the questions (for example "The zone factor and Ct must be numbers."). The bottom line says the command cannot go on; change the value and it goes on.
 - **Run.** When every question is answered, the bottom line says "Check the inputs above, then Run" and the **Run** button turns blue. The model is not changed, and no result is written, before Run (the answers to remember for next time and the setup inputs of the model may be saved).
 - **Cancel** (or closing the window) stops the command; nothing has been changed.
+- **The page stays where you are.** Changing an answer keeps the page where it was, also while a question further down still waits; the form scrolls to a waiting question only the first time it shows it (since v0.18.1). The mouse wheel moves the page a few lines a notch.
 
 After Run the window closes and the command works, with its progress window. A question that can only be asked once the work has started, from what it found, is asked in a window of its own, as before. For example:
 
@@ -47,7 +48,7 @@ $env:SDT_DIALOGS = "1"; sdt beams
 | Window | What it does | Keys |
 |---|---|---|
 | A choice, values, two lists | The dialogs of one question, with `SDT_DIALOGS=1` or for a question asked after Run | Enter confirms; Escape cancels |
-| Progress | The task in the title band, a moving bar, and the step being done under it. It cannot be closed while the command works | |
+| Progress | The task in the title band; a city built along the loading line, where a tower crane runs back and forth and the buildings it passes go up floor by floor: frames, braced frames, setback towers, houses, warehouses, domes, and landmarks such as the Burj Khalifa, Taipei 101 with its damper ball and the Eiffel Tower (since v0.18.1); and the step being done under it. It cannot be closed while the command works | |
 | Summary | The closing summary of a command in a fixed-width font: what needs attention in red, "Nothing needs attention" in green, notes in grey. The text can be selected | **Copy** puts the whole summary on the clipboard; Enter or Escape closes |
 | Warning | A message with a blue sign | Enter or Escape closes |
 

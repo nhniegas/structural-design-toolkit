@@ -336,6 +336,9 @@ class TkForm:
         self._waiting: int | None = None
         self._state = "asking"
         self._closed = False
+        self._view = None          # where the page was when an answer was changed
+        self._wheel = 0            # mouse wheel turns not scrolled yet
+        self._wheel_job = None
 
     # ---- building ----
     def _open(self) -> None:
@@ -365,7 +368,10 @@ class TkForm:
         window = canvas.create_window((0, 0), window=page, anchor="nw")
         page.bind("<Configure>", lambda _e: canvas.configure(scrollregion=canvas.bbox("all")))
         canvas.bind("<Configure>", lambda e: canvas.itemconfigure(window, width=e.width))
-        root.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(int(-e.delta / 120), "units"))
+        # the wheel moves the page in steps of a few lines; the turns that come in while
+        # the page is redrawn are added up and scrolled at once, so it does not lag behind
+        canvas.configure(yscrollincrement=gui._px(root, 20))
+        root.bind_all("<MouseWheel>", self._on_wheel)
         self.canvas, self.page = canvas, page
         self.list_frame = tk.Frame(page, bg=gui.BG)
         self.list_frame.pack(fill=tk.X, padx=gui._px(root, 20), pady=(gui._px(root, 8), 0))
@@ -396,6 +402,21 @@ class TkForm:
         gui._dress(root)
         root.lift()
         root.focus_force()
+
+    def _on_wheel(self, event) -> None:
+        self._wheel += event.delta
+        if self._wheel_job is None:
+            self._wheel_job = self.root.after(15, self._scroll_wheel)
+
+    def _scroll_wheel(self) -> None:
+        self._wheel_job = None
+        steps = -round(self._wheel / 40)        # one notch of 120: three steps of 20 px
+        self._wheel = 0
+        if steps:
+            try:
+                self.canvas.yview_scroll(steps, "units")
+            except Exception:  # noqa: BLE001 - the window is going away
+                pass
 
     def _set_run(self, on: bool) -> None:
         from utilities import _gui_helpers as gui
@@ -511,7 +532,12 @@ class TkForm:
         if index is not None and index < len(self.sections):
             section = self.sections[index]
             self._say(f"Waiting for: {section.question.question}", gui.ACCENT)
-            self.root.after(50, lambda: self._scroll_to(section))
+            if self._view is None:     # shown when first waited for, not after each change
+                self.root.after(50, lambda: self._scroll_to(section))
+        if self._view is not None:     # after a change: the page stays where it was
+            view, self._view = self._view, None
+            self.root.update_idletasks()
+            self.canvas.yview_moveto(view)
         self._event = None
         while self._event is None and not self._closed:
             try:
@@ -522,6 +548,7 @@ class TkForm:
             return ("cancel",)
         event, self._event = self._event, None
         if event[0] == "answer":
+            self._view = self.canvas.yview()[0]
             self._say("Asking again with the new answer...")
             self.root.update_idletasks()
         return event
