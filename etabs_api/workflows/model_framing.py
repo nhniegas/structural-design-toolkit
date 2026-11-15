@@ -566,6 +566,9 @@ def run_model() -> str | None:
     inputs = gcm.ask_grid_inputs(title, floor_layers=True)
     if inputs is None:
         return None
+    from utilities.form_window import ready_to_run
+
+    ready_to_run()   # the questions end here: the form waits for Run
     applied = gcm.apply_grid_inputs(title, inputs)
     if applied is None:
         return None

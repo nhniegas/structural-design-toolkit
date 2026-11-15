@@ -870,6 +870,9 @@ def run_drift_check() -> DriftReport | None:
         "is left as it was for the strength design. Continue?", ["Continue", "Cancel"])
     if go != "Continue":
         return None
+    from utilities.form_window import ready_to_run
+
+    ready_to_run()   # the questions end here: the form waits for Run
     try:
         with LoadingWindow("Story drift") as window:
             report = run_drift(connector, options.reference, options.wind_denominator, levels,

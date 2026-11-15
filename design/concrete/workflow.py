@@ -377,6 +377,9 @@ def run_beams() -> DesignStore | None:
                "exempt_short_spans": exempt_short_spans,
                "girder_continuity": girder_continuity, "design_group": group})
 
+    from utilities.form_window import ready_to_run
+
+    ready_to_run()   # the questions end here: the form waits for Run
     stem = os.path.splitext(os.path.basename(model_path))[0]
     members = None
     if group:
@@ -1052,6 +1055,9 @@ def run_schedules() -> list[str] | None:
     folder = select_output_directory("Folder for the schedules")
     if not folder:
         return None
+    from utilities.form_window import ready_to_run
+
+    ready_to_run()   # the questions end here: the form waits for Run
     written = write_schedules(store, folder, beams, columns, tie_style, section_scale)
     summary = RunSummary("sdt schedules", store.model_path)
     summary.add("Design data", os.path.basename(path))
@@ -1109,6 +1115,9 @@ def run_deflection() -> pd.DataFrame | None:
     folder = select_output_directory("Folder for the deflection results")
     if not folder:
         return None
+    from utilities.form_window import ready_to_run
+
+    ready_to_run()   # the questions end here: the form waits for Run
     targets = dcr_targets.Targets.from_saved(store.inputs.get("dcr_targets"))
     with dcr_targets.use(targets), LoadingWindow("Deflection check") as window:
         window.update("Reading the service moments of the deflection combinations from ETABS")
@@ -1234,6 +1243,9 @@ def run_columns() -> DesignStore | None:
     _remember({**bars, "check_top_level": levels[0], "check_foundation_level": levels[1],
                "section_scale": section_scale})
 
+    from utilities.form_window import ready_to_run
+
+    ready_to_run()   # the questions end here: the form waits for Run
     with dcr_targets.use(targets), LoadingWindow("Column design") as window:
         report, groups, joints = design_columns(
             store.tables, store.beam_results, smrf, bars["dmain"], bars["dties"], bars["cover"],

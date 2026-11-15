@@ -535,6 +535,9 @@ def run_compatibility_cli():
     types = pattern_types(connector)
     dead = [n for n, k in types.items() if k in DEAD_TYPES]
     live = [n for n, k in types.items() if k in LIVE_TYPES]
+    from utilities.form_window import ready_to_run
+
+    ready_to_run()   # the questions end here: the form waits for Run
     with LoadingWindow(title) as window:
         window.update("Analysis and the forces of the drift and gravity load cases")
         ensure_analysis(connector, list(cases) + dead + live)

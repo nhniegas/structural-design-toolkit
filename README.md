@@ -1,6 +1,6 @@
 # Structural Design Toolkit
 
-Structural design calculations and ETABS automation, run from the terminal with input dialogs. No spreadsheet is needed: results are saved as Excel files, calculation reports as PDF and reinforcement schedules as DXF.
+Structural design calculations and ETABS automation, run from the terminal, each command with its inputs in one window. No spreadsheet is needed: results are saved as Excel files, calculation reports as PDF and reinforcement schedules as DXF.
 
 ## What is in it
 
@@ -64,6 +64,7 @@ Supporting code:
 - `etabs_api/workflows/model_setup.py`, `ubc97.py`, `load_combinations.py`: definition of materials, sections, loads and NSCP 2015 combinations in an ETABS model.
 - `utilities/design_cli.py`: the dialog workflow of the standalone checks (input dialogs, then printout, PDF or both); `utilities/design_window.py`: the window of the composite, steel and pile cap checks (inputs, live drawing, results).
 - `utilities/_gui_helpers.py`: file pickers, list pickers, choice and text-entry dialogs, and the loading window.
+- `utilities/form_window.py`: the one window of a command: every question as a section, the answers that depend on others asked again, Run.
 - `utilities/_calc_report.py`: layout of the beam and column PDF calculation reports.
 - `utilities/terminal.py`: tables, colour and equations in the terminal; `design/concrete/results_tables.py`: the beam and column tables.
 - `utilities/run_summary.py`: the summary every command shows in a window when it finishes (the terminal keeps the detailed results).
@@ -194,7 +195,7 @@ sdt beams --record beams.json    # any command: save what you answer in its dial
 sdt beams --answers beams.json   # any command: run it with no dialog, from that file
 ```
 
-Each command asks for its inputs in dialogs. The standalone checks `composite`, `steel` and `pilecap` open one window instead: the inputs, a drawing that follows them as you type, and the results, with buttons to run again, print in the terminal or save the PDF report. `wind` asks whether to print the results in the terminal, export a PDF calculation report, or both. The terminal shows the detailed results of a command as tables, with the equations of the checks and each status in colour (see [Results in the terminal](docs/terminal_output.md)). When it finishes, a separate window shows its summary: what was run, the counts, what needs attention and the files written.
+Each command asks for its inputs in one window: every question one under the other, already answered with what was last chosen or the program's default, the questions that depend on an answer following it as it changes, and **Run** at the bottom (see [The dialogs](docs/dialogs.md)). The windows and the program's icon have the light look and the blue of ETABS. The standalone checks `composite`, `steel` and `pilecap` open one window instead: the inputs, a drawing that follows them as you type, and the results, with buttons to run again, print in the terminal or save the PDF report. `wind` asks whether to print the results in the terminal, export a PDF calculation report, or both. The terminal shows the detailed results of a command as tables, with the equations of the checks and each status in colour (see [Results in the terminal](docs/terminal_output.md)). When it finishes, a separate window shows its summary: what was run, the counts, what needs attention and the files written.
 
 The commands also run on a model that was not made with `sdt setup`: one with its own combination names, section names and untagged members. A command reads what the model holds and asks for what is missing (which combinations to design for, the deflection and drift combinations, what to do with untagged members), saves the answers beside the model, and says in its summary what was read, answered or assumed. See [Working on a model the toolkit did not set up](docs/existing_models.md).
 

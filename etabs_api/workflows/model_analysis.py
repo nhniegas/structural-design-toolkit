@@ -807,7 +807,7 @@ def run_model_analysis() -> AnalysisReport | None:
         path, counter = f"{stem} - ANALYSIS{extension}", 2
         while os.path.exists(path):
             path, counter = f"{stem} - ANALYSIS ({counter}){extension}", counter + 1
-        save_model(model, path)
+        # saved after Run (below): the questions may be asked again before it
 
     from etabs_api.workflows import model_inputs as mi
 
@@ -872,6 +872,11 @@ def run_model_analysis() -> AnalysisReport | None:
         else:
             reason = ("Spectrum at 100 % of the static base shear: the types sdt irregularity "
                       "cannot check were not confirmed absent.")
+    from utilities.form_window import ready_to_run
+
+    ready_to_run()   # the questions end here: the form waits for Run
+    if path != original:
+        save_model(model, path)           # the copy that is scaled
     try:
         with LoadingWindow("Analysis") as window:
             report = analyze_model(connector, zone, ct, progress=window.update, target=target,

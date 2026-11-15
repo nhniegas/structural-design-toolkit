@@ -153,6 +153,10 @@ def run_design(module, title: str, name: str, report_name: str):
         summary.show(popup=True, echo=False)
         return result
     show, export = OUTPUT_OPTIONS[choice]
+    path = select_save_file(default_name=report_name) if export else None
+    from utilities.form_window import ready_to_run
+
+    ready_to_run()   # the questions end here: the form waits for Run
     if show:
         from utilities import terminal
 
@@ -163,7 +167,6 @@ def run_design(module, title: str, name: str, report_name: str):
             terminal.write(module.summary_text(result))
     summary.add("Results", "printed in the terminal" if show else "not printed (PDF only)")
     if export:
-        path = select_save_file(default_name=report_name)
         if path:
             if not path.lower().endswith(".pdf"):
                 path += ".pdf"

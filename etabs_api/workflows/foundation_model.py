@@ -1275,6 +1275,9 @@ def run_foundation() -> Outcome | None:
         if live is None:
             return None
         options = Options(SPECTRUM_CHOICES[spectrum], *LIVE_CHOICES[live])
+    from utilities.form_window import ready_to_run
+
+    ready_to_run()   # the questions end here: the form waits for Run
     try:
         with LoadingWindow("Foundation model") as window:
             if action == CREATE:

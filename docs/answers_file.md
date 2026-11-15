@@ -4,6 +4,9 @@ Every command asks its inputs in dialogs. With an answers file the dialogs are n
 
 Use it to run a command again with the same inputs, to run it on several models, or to leave a long run to itself.
 
+
+**With the command window (since v0.18.0).** Without `--answers`, a command asks in one window (see [The dialogs](dialogs.md)). With `--record`, that window opens as usual and the answers it ran with are saved when you press Run, in the order the command asked them, so the file replays the run as before.
+
 ## How to use it
 
 ```powershell

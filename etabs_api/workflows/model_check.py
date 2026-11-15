@@ -1534,6 +1534,9 @@ def run_model_check() -> list[Finding] | None:
     except ValueError:
         show_warning("The wind drift limit must be a positive number.", title="Model Check")
         return None
+    from utilities.form_window import ready_to_run
+
+    ready_to_run()   # the questions end here: the form waits for Run
     with LoadingWindow("Checking the model") as window:
         window.update("Reading the model (nothing is changed)")
         data = read_model_data(connector, progress=window.update)
