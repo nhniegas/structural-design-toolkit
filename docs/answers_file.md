@@ -17,7 +17,7 @@ With `--answers`:
 
 - each dialog is printed with the answer it got, so the run says what it was given;
 - warnings and the closing summary are printed in the terminal, not shown in a window;
-- no progress window opens;
+- no progress window opens; instead, a long step prints a progress line every 10 seconds, `[HH:MM:SS] message: detail` (since v0.16.0), so a run of `sdt columns` on hundreds of columns is not silent for minutes;
 - answers of the file that no dialog used are listed at the end.
 
 ## The file
