@@ -81,6 +81,33 @@ class BeamFlexureDesign:
         n_min_150 = self.get_min_bars_for_150mm_spacing()
         self.n_top = n_min_150
         self.n_bot = n_min_150
+        # The fewest bars of each layer, from the outer layer in: set when a girder's
+        # support bars are matched to the next span so they run through the column.
+        # Empty: the layers are filled one after the other, as before.
+        self.floor_top: list[int] = []
+        self.floor_bot: list[int] = []
+
+    def set_layer_floor(self, top: list[int] | None = None, bot: list[int] | None = None) -> None:
+        """The fewest bars of each layer of the top and bottom faces (outer layer first).
+
+        Each count is capped at the bars a layer of this width holds. The face
+        gets at least the sum; bars beyond it fill the outer layers first.
+        """
+        def capped(floor):
+            return [min(int(n), self.max_bar_per_layer) for n in (floor or [])]
+
+        self.floor_top = capped(top)
+        self.floor_bot = capped(bot)
+        self.n_top = max(self.n_top, sum(self.floor_top))
+        self.n_bot = max(self.n_bot, sum(self.floor_bot))
+
+    def top_layers(self) -> list:
+        """The bars of each top layer, outer layer first."""
+        return self.calculate_layer_distribution(self.n_top, self.floor_top)
+
+    def bot_layers(self) -> list:
+        """The bars of each bottom layer, outer layer first."""
+        return self.calculate_layer_distribution(self.n_bot, self.floor_bot)
 
     def calculate_max_bars_per_layer(self) -> int:
         """Return the number of longitudinal bars that fit in one layer under minimum-clear-spacing rules."""
@@ -121,10 +148,23 @@ class BeamFlexureDesign:
         min_spaces = math.ceil(clear_center_width / max_center_spacing)
         return max(detailing.min_bars_per_face, min_spaces + 1)
 
-    def calculate_layer_distribution(self, n_bars: int) -> list:
-        """Distribute a total bar count into consecutive layers within the section fit limit."""
-        layers = []
-        remaining = n_bars
+    def calculate_layer_distribution(self, n_bars: int, floor: list | None = None) -> list:
+        """Distribute a total bar count into consecutive layers within the section fit limit.
+
+        ``floor`` gives the fewest bars of each layer (outer layer first); the
+        other bars fill the layers in order, outer layer first. Without it the
+        layers are filled one after the other.
+        """
+        layers = [int(n) for n in (floor or [])]
+        remaining = n_bars - sum(layers)
+        for index, count in enumerate(layers):
+            if remaining <= 0:
+                break
+            add = min(remaining, self.max_bar_per_layer - count)
+            layers[index] += add
+            remaining -= add
+        while layers and layers[-1] == 0:
+            layers.pop()
         while remaining > 0:
             count = min(remaining, self.max_bar_per_layer)
             layers.append(count)
@@ -136,7 +176,7 @@ class BeamFlexureDesign:
         vert_clear_spacing = max(self.code.beam_detailing.layer_clear_spacing, self.dmain)
         center_spacing = self.dmain + vert_clear_spacing
 
-        top_layers = self.calculate_layer_distribution(self.n_top)
+        top_layers = self.top_layers()
         # Distance from the top concrete face to the center of the first top layer.
         top_d1 = self.cc + self.dstirrup + (self.dmain / 2.0)
         # Weight each layer's coordinate by bar count to locate the top-steel centroid.
@@ -145,7 +185,7 @@ class BeamFlexureDesign:
         )
         d_top_centroid = top_moments / self.n_top if self.n_top > 0 else top_d1
 
-        bot_layers = self.calculate_layer_distribution(self.n_bot)
+        bot_layers = self.bot_layers()
         bot_d1_from_bottom = self.cc + self.dstirrup + (self.dmain / 2.0)
         # Use coordinates measured from the top so the bottom-steel centroid is comparable.
         bot_moments_from_top = sum(
@@ -173,10 +213,8 @@ class BeamFlexureDesign:
         # diameter is added to the cover given to the stirrup.
         s_max_crack = self.code.crack_control_spacing(self.fy, self.cc + self.dstirrup)
 
-        n_layer_1 = min(
-            self.n_top if is_negative_moment else self.n_bot,
-            self.max_bar_per_layer,
-        )
+        layers = self.top_layers() if is_negative_moment else self.bot_layers()
+        n_layer_1 = layers[0] if layers else 0
 
         if n_layer_1 > 1:
             clear_center_width = self.width - 2 * (
@@ -337,8 +375,8 @@ class BeamFlexureDesign:
     def design_beam(self, Al_top_req: float = 0.0, Al_bot_req: float = 0.0) -> dict:
         """Increase top and bottom reinforcement until strength, minimum-steel, spacing, and detailing checks pass or capacity is exhausted."""
         n_min_150 = self.get_min_bars_for_150mm_spacing()
-        self.n_top = max(self.n_top, n_min_150)
-        self.n_bot = max(self.n_bot, n_min_150)
+        self.n_top = max(self.n_top, n_min_150, sum(self.floor_top))
+        self.n_bot = max(self.n_bot, n_min_150, sum(self.floor_bot))
 
         # This solver limits detailing to three bar layers before reporting congestion.
         max_layers = self.code.beam_detailing.max_layers
@@ -346,8 +384,8 @@ class BeamFlexureDesign:
         self.rebar_congestion_exceeded = False
 
         while True:
-            top_layers = self.calculate_layer_distribution(self.n_top)
-            bot_layers = self.calculate_layer_distribution(self.n_bot)
+            top_layers = self.top_layers()
+            bot_layers = self.bot_layers()
 
             # --- STRICT MINIMUM OF 2 BARS PER LAYER (ADD ONLY) ---
             # If the calculation results in exactly 1 bar in the last layer (e.g., [6, 1]),
@@ -434,11 +472,11 @@ class BeamFlexureDesign:
     def clean_single_bars(self):
         """Post-process check to ensure no manual overrides result in exactly 1 bar in the last layer."""
         if self.max_bar_per_layer >= 2:
-            top_layers = self.calculate_layer_distribution(self.n_top)
+            top_layers = self.top_layers()
             if top_layers and top_layers[-1] == 1:
                 self.n_top += 1
 
-            bot_layers = self.calculate_layer_distribution(self.n_bot)
+            bot_layers = self.bot_layers()
             if bot_layers and bot_layers[-1] == 1:
                 self.n_bot += 1
 
@@ -1000,10 +1038,18 @@ def check_stirrup_leg_anchorage(
     dstirrup: float,
     width: float,
     cc: float,
+    top_layer_1: int | None = None,
+    bot_layer_1: int | None = None,
 ) -> dict:
-    """Add longitudinal bars when needed to anchor the required number of stirrup legs."""
-    top_layer_1 = min(n_top, max_bar_per_layer)
-    bot_layer_1 = min(n_bot, max_bar_per_layer)
+    """Add longitudinal bars when needed to anchor the required number of stirrup legs.
+
+    ``top_layer_1`` and ``bot_layer_1`` are the bars of the outer layers when
+    they are not simply the first ``max_bar_per_layer`` bars (a layer floor).
+    """
+    if top_layer_1 is None:
+        top_layer_1 = min(n_top, max_bar_per_layer)
+    if bot_layer_1 is None:
+        bot_layer_1 = min(n_bot, max_bar_per_layer)
 
     if n_legs > max_bar_per_layer:
         raise ValueError(
@@ -1031,11 +1077,14 @@ def check_stirrup_leg_anchorage(
 
 
 def check_alternating_tie_legs(
-    n_top: int, n_bot: int, current_n_legs: int, max_bar_per_layer: int
+    n_top: int, n_bot: int, current_n_legs: int, max_bar_per_layer: int,
+    top_layer_1: int | None = None, bot_layer_1: int | None = None,
 ) -> int:
     """Return the stirrup-leg count needed to laterally support alternating longitudinal bars."""
-    top_layer_1 = min(n_top, max_bar_per_layer)
-    bot_layer_1 = min(n_bot, max_bar_per_layer)
+    if top_layer_1 is None:
+        top_layer_1 = min(n_top, max_bar_per_layer)
+    if bot_layer_1 is None:
+        bot_layer_1 = min(n_bot, max_bar_per_layer)
 
     req_top = (top_layer_1 // 2) + 1
     req_bot = (bot_layer_1 // 2) + 1
@@ -1082,8 +1131,7 @@ def get_location_effective_depth(
 
 def get_layer_columns(engine, is_top: bool) -> tuple:
     """Returns (L1, L2, L3) physical elevation counts (Topmost to Bottommost)."""
-    n_bars = engine.n_top if is_top else engine.n_bot
-    layers = engine.calculate_layer_distribution(n_bars)
+    layers = engine.top_layers() if is_top else engine.bot_layers()
 
     if is_top:
         l1 = layers[0] if len(layers) > 0 else 0

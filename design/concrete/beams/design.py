@@ -82,6 +82,7 @@ def execute_beam_design(
     progress=None,
     compatibility_torsion: bool = False,
     exempt_short_spans: bool = False,
+    layer_floors: dict | None = None,
 ) -> pd.DataFrame:
     """The beam design, shared between several processes on a large model.
 
@@ -97,7 +98,7 @@ def execute_beam_design(
     options = dict(enable_seismic_design=enable_seismic_design,
                    gravity_combo_name=gravity_combo_name, Pu_axial_load=Pu_axial_load,
                    code=code, compatibility_torsion=compatibility_torsion,
-                   exempt_short_spans=exempt_short_spans)
+                   exempt_short_spans=exempt_short_spans, layer_floors=layer_floors)
     names = df_beam_props["UniqueName"] if "UniqueName" in df_beam_props.columns else []
     workers = parallel.workers_for(len(names))
     if workers > 1 and all(isinstance(name, str) for name in names):
@@ -137,8 +138,14 @@ def _execute_beam_design(
     progress=None,
     compatibility_torsion: bool = False,
     exempt_short_spans: bool = False,
+    layer_floors: dict | None = None,
 ) -> pd.DataFrame:
     """Executes the full beam design pipeline and returns the results DataFrame.
+
+    ``layer_floors`` (beam name -> {(end, face): [bars of each layer]}, end
+    ``left`` or ``right``, face ``top`` or ``bot``) gives the fewest bars of
+    each layer at a support: a girder's support bars matched to those of the
+    next span so they run through the column (``continuity.match_girder_bars``).
 
     ``exempt_short_spans`` leaves the girders with a clear span under 4d out
     of the SMRF rules (``seismic_rules_of``); the results then say for every
@@ -371,6 +378,11 @@ def _execute_beam_design(
                 / flexure_target
             flex_eng_right.Mu_pos = face_max["BOTTOM"]["Mu_right"] \
                 / flexure_target
+            # support bars matched to the next span (bars through the column)
+            floors = (layer_floors or {}).get(unique_name, {})
+            for end, engine in (("left", flex_eng_left), ("right", flex_eng_right)):
+                if (end, "top") in floors or (end, "bot") in floors:
+                    engine.set_layer_floor(floors.get((end, "top")), floors.get((end, "bot")))
 
             max_Tu_left, max_Tu_mid, max_Tu_right = (
                 all_max["Tu_left"],
@@ -676,7 +688,9 @@ def _execute_beam_design(
             # --- STEP 3C: Post-Checks ---
             for eng in flex_engines.values():
                 alt_legs = check_alternating_tie_legs(
-                    eng.n_top, eng.n_bot, governing_beam_legs, eng.max_bar_per_layer
+                    eng.n_top, eng.n_bot, governing_beam_legs, eng.max_bar_per_layer,
+                    eng.top_layers()[0] if eng.n_top else 0,
+                    eng.bot_layers()[0] if eng.n_bot else 0,
                 )
                 governing_beam_legs = max(governing_beam_legs, alt_legs)
 
@@ -692,6 +706,8 @@ def _execute_beam_design(
                         d_s,
                         b_width,
                         c_cover,
+                        eng.top_layers()[0] if eng.n_top else 0,
+                        eng.bot_layers()[0] if eng.n_bot else 0,
                     )
                 except ValueError:
                     # The width cannot hold a bar for every stirrup leg: this beam
@@ -971,7 +987,8 @@ def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict
                  exempt_short_spans: bool = False,
                  deflection_stages: DeflectionStages | None = None,
                  load_path: dict | None = None,
-                 deflection_flanges: bool = False) -> pd.DataFrame:
+                 deflection_flanges: bool = False,
+                 girder_continuity: bool = False) -> pd.DataFrame:
     """Design every beam from the extracted tables; deflection when service loads exist.
 
     ``tables`` holds FACTORED LOADS, FRAME DATA, CONNECTIVITY and (optional)
@@ -988,7 +1005,9 @@ def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict
     given, and the design loop gives the reading of its first analysis so
     that it does not change as the sizes do. ``deflection_flanges`` checks the
     deflection of a beam with a slab beside it as a T- or L-beam, from the SLAB
-    FLANGES table (NSCP 406.3.2.1). The target ratios are those that
+    FLANGES table (NSCP 406.3.2.1). ``girder_continuity`` matches the support
+    bars of girders that meet in line at a column, layer by layer, so they run
+    through it, and designs those girders again (``continuity``). The target ratios are those that
     are active (``dcr_targets.use``). Returns the results, two rows (TOP,
     BOTTOM) per beam.
     """
@@ -999,17 +1018,24 @@ def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict
     beam_props = prepare_beam_table(tables["FRAME DATA"], tables["CONNECTIVITY"], bars,
                                     earth_cover_stories, tables.get("POINTS"), pushes)
     beam_props, too_shallow = split_too_shallow(beam_props)
-    results = execute_beam_design(
-        df_beam_props=beam_props,
-        df_frame_forces=tables["FACTORED LOADS"],
+    design_options = dict(
         enable_seismic_design=smrf,
         gravity_combo_name=gravity_combo,
-        progress=progress,
         compatibility_torsion=compatibility_torsion,
         exempt_short_spans=exempt_short_spans,
         code=CODE if office_bar_spacing else override(
             CODE, beam_detailing__limit_clear_spacing=False),
     )
+    results = execute_beam_design(
+        df_beam_props=beam_props,
+        df_frame_forces=tables["FACTORED LOADS"],
+        progress=progress,
+        **design_options,
+    )
+    continuity_note = None
+    if girder_continuity and not results.empty:
+        results, continuity_note = _match_girders_through_columns(
+            results, beam_props, tables, design_options, progress)
     service = tables.get("SERVICE LOADS")
     if service is not None and len(service) and not results.empty:
         flanges = None
@@ -1031,10 +1057,59 @@ def design_beams(tables: dict, smrf: bool, gravity_combo: str | None, bars: dict
     # floors from the bottom up by elevation, then type and number (BX-2 before BX-10)
     results = sort_beam_rows(results, story_elevations(tables.get("POINTS")))
     results.attrs[TOO_SHALLOW] = too_shallow
+    if continuity_note:
+        results.attrs[CONTINUITY_NOTE] = continuity_note
     return results
 
 
 TOO_SHALLOW = "too_shallow"   # results.attrs key: the members left out, "name (b x h)"
+CONTINUITY_NOTE = "girder_continuity"   # results.attrs key: what the matching did
+CONTINUITY_COLUMN = "Bars_Through_Columns"
+
+
+def _match_girders_through_columns(results: pd.DataFrame, beam_props: pd.DataFrame,
+                                   tables: dict, design_options: dict, progress=None
+                                   ) -> tuple[pd.DataFrame, str]:
+    """Girder support bars matched to the next span, layer by layer, and the
+    girders designed again with them (``continuity``). Returns the results with
+    the column ``Bars_Through_Columns`` and a line for the summary."""
+    from design.concrete.beams import continuity
+
+    pairs = continuity.girder_pairs(results, tables.get("CONNECTIVITY"), tables.get("POINTS"),
+                                    tables.get("FRAME DATA"))
+    if not pairs:
+        results = results.copy()
+        results[CONTINUITY_COLUMN] = "-"
+        return results, "no girders meet in line at a column (or no joint coordinates)"
+    forces = tables["FACTORED LOADS"]
+    floors: dict = {}
+    rounds = 0
+    converged = False
+    for rounds in range(1, continuity.MAX_ROUNDS + 1):
+        new = continuity.match_girder_bars(results, pairs, floors)
+        if new == floors:
+            converged = True
+            break
+        floors = new
+        names = set(floors)
+        if progress is not None:
+            progress(f"Girder bars through the columns\nround {rounds}: "
+                     f"{len(names)} girders designed again")
+        again = execute_beam_design(
+            df_beam_props=beam_props[beam_props["UniqueName"].astype(str).isin(names)],
+            df_frame_forces=forces[forces["UniqueName"].astype(str).isin(names)],
+            layer_floors=floors, **design_options)
+        kept = results[~results["UniqueName"].astype(str).isin(names)]
+        results = pd.concat([kept, again], ignore_index=True)
+    results = results.copy()
+    results[CONTINUITY_COLUMN] = continuity.describe_continuity(results, pairs)
+    girders = len({name for pair in pairs for name in (pair.first, pair.second)})
+    note = (f"{len(pairs)} column joints, {girders} girders: support bars matched layer by "
+            "layer with the next span (in line within 1:6)")
+    if not converged:
+        note += (f"; the counts still changed after {rounds} rounds, check the column "
+                 f"{CONTINUITY_COLUMN}")
+    return results, note
 
 
 def split_too_shallow(beam_props: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:

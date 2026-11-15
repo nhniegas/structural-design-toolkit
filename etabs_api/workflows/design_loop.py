@@ -115,6 +115,7 @@ class LoopSettings:
     compatibility_torsion: bool = False  # beam torsion at most phi Tcr (ACI 22.7.3.2)
     office_bar_spacing: bool = False  # beam bars at most 150 mm clear (False: crack control)
     exempt_short_spans: bool = False  # girders under 4d clear span without the SMRF rules
+    girder_continuity: bool = False  # girder support bars matched to the next span in line
     deflection_stages: object = None  # deflection.DeflectionStages: when partitions are built
     deflection_flanges: bool = False  # deflection of T- and L-beams with the slab (406.3.2.1)
     resize_for_drift: bool = False  # grow columns and girders until every story passes drift
@@ -1022,7 +1023,8 @@ class Workbench:
                             exempt_short_spans=self.settings.exempt_short_spans,
                             deflection_stages=self.settings.deflection_stages,
                             load_path=self.load_path(),
-                            deflection_flanges=self.settings.deflection_flanges)
+                            deflection_flanges=self.settings.deflection_flanges,
+                            girder_continuity=self.settings.girder_continuity)
 
     def design_columns(self, beams: pd.DataFrame) -> pd.DataFrame:
         from design.concrete.columns.design import design_columns
@@ -2079,10 +2081,13 @@ def run_design_cli() -> dict | None:
     office_bar_spacing = ask_bar_spacing(title, last)
     if office_bar_spacing is None:
         return None
-    from design.concrete.workflow import ask_short_span_girders
+    from design.concrete.workflow import ask_girder_continuity, ask_short_span_girders
 
     exempt_short_spans = ask_short_span_girders(title, last) if smrf else False
     if exempt_short_spans is None:
+        return None
+    girder_continuity = ask_girder_continuity(title, last)
+    if girder_continuity is None:
         return None
     from etabs_api.workflows.drift_check import ask_drift_options, has_standard_combinations
 
@@ -2119,7 +2124,8 @@ def run_design_cli() -> dict | None:
                "carrier_depth": carrier_depth,
                "compatibility_torsion": compatibility_torsion,
                "office_bar_spacing": office_bar_spacing,
-               "exempt_short_spans": exempt_short_spans})
+               "exempt_short_spans": exempt_short_spans,
+               "girder_continuity": girder_continuity})
 
     # loop limits
     last = _saved("design_loop")
@@ -2205,7 +2211,7 @@ def run_design_cli() -> dict | None:
         targets=targets, carrier_depth=carrier_depth,
         compatibility_torsion=compatibility_torsion,
         office_bar_spacing=office_bar_spacing,
-        exempt_short_spans=exempt_short_spans,
+        exempt_short_spans=exempt_short_spans, girder_continuity=girder_continuity,
         deflection_stages=deflection_stages, deflection_flanges=deflection_flanges,
         resize_for_drift=resize_for_drift, drift_options=drift_options,
         design_walls=bool(walls), wall_kinds=(walls or {}).get("kinds", {}),
@@ -2248,6 +2254,9 @@ def run_design_cli() -> dict | None:
         if exempt_short_spans:
             bench.log("Girders with a clear span under 4d are designed without the SMRF rules "
                       "(NSCP 418.6.2.1(a); ACI 18.6.2.1(a)).")
+        if girder_continuity:
+            bench.log("Girder support bars are matched layer by layer with the next span in "
+                      "line (within 1:6), so they run through the columns.")
         bench.log("Deflection stages: " + deflection_stages.describe() + ".")
         bench.log("Deflection section: " + describe_deflection_section(deflection_flanges) + ".")
         bench.log("Beam lines: " + line_sharing_text(settings) + ".")
@@ -2381,9 +2390,11 @@ def loop_summary(summary: dict, settings: LoopSettings, original: str, working: 
                 "the whole model)")
     out.add("Beam bar spacing", "office rule, 150 mm clear" if settings.office_bar_spacing
             else "crack control only (NSCP 424.3.2; ACI 24.3.2)")
-    from design.concrete.workflow import add_short_spans_to, add_too_shallow_to
+    from design.concrete.workflow import (add_continuity_to, add_short_spans_to,
+                                          add_too_shallow_to)
 
     add_short_spans_to(out, beams, settings.exempt_short_spans)
+    add_continuity_to(out, beams, settings.girder_continuity)
     add_too_shallow_to(out, beams)
     if settings.deflection_stages is not None:
         out.add("Deflection stages", settings.deflection_stages.describe())
@@ -2429,6 +2440,7 @@ def save_final_design(bench: Workbench, summary: dict, working: str, folder: str
     store = DesignStore(working, os.path.getmtime(working), bench.tables, {
         "combos": settings.combos, "smrf": settings.smrf, "gravity_combo": settings.gravity_combo,
         "exempt_short_spans": settings.exempt_short_spans,
+        "girder_continuity": settings.girder_continuity,
         "beam_bars": settings.beam_bars, "column_bars": settings.column_bars,
         "long_limit": settings.long_limit,
         "deflection_stages": (settings.deflection_stages.to_saved()
