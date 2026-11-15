@@ -52,6 +52,7 @@ def generate_dxf_beam_schedule(
         doc.styles.new("SIMPLEX", dxfattribs={"font": "simplex.shx"})
 
     msp = doc.modelspace()
+    any_through = False   # a girder whose support bars run through a column (the note)
 
     # 2. Define Table Geometry (Column Widths & Row Heights in mm based on markup)
     col_widths = [
@@ -271,6 +272,10 @@ def generate_dxf_beam_schedule(
             legs = int(top_row.get("Stirrup_Legs", 2))
             type_num = max(1, legs - 1)
             remarks_str = f"TYPE - {type_num}"
+            through = through_ends(top_row.get("Bars_Through_Columns"))
+            if through:
+                remarks_str += "\nTHRU " + ",".join(through)
+                any_through = True
             add_cell_text(remarks_str, col_x[12], y_beam_start, col_widths[12], beam_h)
 
             dm = int(top_row.get("dm", top_row.get("d_main", 25)))
@@ -333,4 +338,27 @@ def generate_dxf_beam_schedule(
 
             y_curr = y_beam_end
 
+    if any_through:
+        note = msp.add_text(
+            "THRU L / R: THE SUPPORT BARS AT THE LEFT / RIGHT END RUN THROUGH THE COLUMN, "
+            "LAYER BY LAYER, INTO THE NEXT GIRDER. BARS IN EXCESS OF THE NEXT GIRDER'S "
+            "COUNT ANCHOR IN THE COLUMN.",
+            dxfattribs={"style": "SIMPLEX", "height": 2.0, "width": 0.75, "color": 7})
+        note.set_placement((col_x[0], y_curr - 5.0),
+                           align=ezdxf.enums.TextEntityAlignment.LEFT)
     doc.saveas(output_filepath)
+
+
+def through_ends(note: object) -> list[str]:
+    """The ends (``L``, ``R``) whose support bars run through the column, from the
+    ``Bars_Through_Columns`` text of the results."""
+    text = str(note or "")
+    ends = []
+    for part in text.split(" | "):
+        if " through" not in part:
+            continue
+        if part.startswith("left"):
+            ends.append("L")
+        elif part.startswith("right"):
+            ends.append("R")
+    return ends

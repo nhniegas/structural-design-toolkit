@@ -32,6 +32,7 @@ sdt columns    # design the columns from the stored beam step, save the column o
 | Beam bar spacing | The code only (crack control, NSCP 424.3.2; ACI 24.3.2; the default), or the office rule (at most 150 mm clear between the bars of a face). See [Beam bar spacing](#beam-bar-spacing) |
 | Girders under 4d | Only with SMRF: apply the SMRF rules to girders with a clear span under 4d, as to every girder, or design them without. See [Girders with a clear span under 4d](#girders-with-a-clear-span-under-4d) |
 | Depth of a beam that carries others | Whether a girder or beam must be at least as deep as the beams that frame into it. See [Carrier depth](#carrier-depth) |
+| Girder bars through the columns (since v0.17.0) | No (the default: each girder keeps its own support bars, which anchor in the column), or yes: the support bars of two girders in line at a column are matched layer by layer so they run through it. Remembered. See [Girder bars through the columns](#girder-bars-through-the-columns) |
 | Members to design (since v0.16.0) | Asked only when the model has ETABS groups of frames: the whole model, or one group (for example the new members of an addition). The forces still come from the whole model. `sdt columns` designs the columns of the same run, and a column whose other beams are outside the group is reported (`BLOCKED`), not passed. Remembered |
 | Output folder | For the results, the calculations and the schedules |
 
@@ -74,7 +75,7 @@ Answers are remembered and offered again next time. Every named member (not a nu
   - `design.py`: the design of every beam from the tables (`design_beams`);
   - `sections.py`: flexure, shear, torsion and the SMRF checks of one beam;
   - `supports.py`: what holds a beam (support status, gravity beams, girders under 4d);
-  - `deflection.py`: deflection checks; `flanges.py`: the slab beside a beam, for T- and L-beams; `carriers.py`: the load path and the carrier depth rule;
+  - `deflection.py`: deflection checks; `flanges.py`: the slab beside a beam, for T- and L-beams; `carriers.py`: the load path and the carrier depth rule; `continuity.py`: girder bars through the columns (pairs in line, layer-by-layer matching);
   - `results.py`: the results workbook; `schedule.py`: the schedule drawings; `calculations.py`: the calculation report;
   - `options.py`: the questions of the beam design.
 - `design/concrete/columns/`: the column design, one file for each job:
@@ -372,6 +373,20 @@ What to know before choosing the second:
 - **Cantilevers and gravity beams are not affected.** A cantilever keeps its treatment; a gravity beam never had the SMRF rules.
 
 The effective depth is taken to the centre of one layer of bars: d = h - cover - stirrup - half a bar. When the option is on, the results have a "Seismic rules" column that says for every beam whether the SMRF rules were applied and why not, the summary lists the girders left out, and their calculation sheets say so.
+
+### Girder bars through the columns
+
+Since v0.17.0, `sdt beams` and `sdt design` can match the support bars of girders that meet in line at a column, so the bars run through the column into the next span instead of anchoring in it. The option is off by default.
+
+- **Girders only.** Members on columns (including cantilevers on a column). Gravity beams keep their own bars.
+- **In line.** The two girders meet at the column with their axes within 1 in 6 of a straight line, in plan. At a column with more girders, each is paired with the one most in line with it; a girder end has at most one partner.
+- **Layer by layer.** Each layer of the top and of the bottom face takes the larger count of the two spans, so every bar has its partner in the same place: girder A with 4 + 2 top bars and girder B with 5 + 0 both get 5 + 2.
+- **Narrower girder.** A layer holds what fits in the width of its girder. The narrower girder takes the most bars that fit; the extra bars of the wider girder anchor in the column, as before.
+- **Bottom bars at a depth step.** With the tops flush, the bottom bars of girders of different depth are at different heights. They are matched only when the step bends at 1 in 6 or flatter over the smaller side of the column (a 600 mm column takes a step of up to 100 mm). Otherwise the bottom bars anchor as before and only the top bars are matched.
+- **Designed again.** The matched girders are designed again with these bars as the least they may have: more bars raise the probable moments, the capacity shear Ve of the girder and the joint shear and capacity shear of the columns, and the SMRF strength ratios (NSCP 418.6.3.2; ACI 18.6.3.2) may add bottom bars. The pairs are matched again until no count changes (at most 10 rounds; the summary says if they still changed).
+- **Effective depth from the real layers.** A matched end can have its bars in two layers where the girder alone would have one (4 + 2 instead of 6 + 0); its capacity is computed with the bars where they are.
+
+The results have a column "Support bars through the columns" that says for each girder end what runs through and what anchors, for example `right (to 2GX-2): top 5+2 through; bottom 3 through` or `top 4 through, 2 anchored`. The calculation report repeats it. In the girder schedule the Remarks cell reads `THRU L`, `THRU R` or `THRU L,R` for the ends whose bars run through, with a note under the table. The 1 in 6 is the office tolerance for "in line"; the anchorage of the bars that do not run through is not designed by the toolkit.
 
 ### Carrier depth
 
