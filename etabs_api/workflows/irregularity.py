@@ -968,6 +968,9 @@ def run_irregularity() -> IrregularityReport | None:
         if choice is None:
             return None
         first_order = choice == EXACT
+    from utilities.form_window import ready_to_run
+
+    ready_to_run()   # the questions end here: the form waits for Run
     with LoadingWindow("Irregularity check") as window:
         report = read_irregularity(connector, path, first_order, window.update, design_is_old)
     if terminal.drawn():

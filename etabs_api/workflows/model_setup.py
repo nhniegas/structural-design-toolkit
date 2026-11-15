@@ -1684,6 +1684,9 @@ def run_model_setup() -> str | None:
     if settings is None:
         return None
 
+    from utilities.form_window import ready_to_run
+
+    ready_to_run()   # the questions end here: the form waits for Run
     with LoadingWindow("Defining the model parameters...") as window:
         if new_model:
             # Only now, after every dialog was confirmed, so a cancelled run

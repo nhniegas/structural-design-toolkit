@@ -543,6 +543,9 @@ def auto_tag_frames(prefixes: dict[str, str] | None = None,
     clashes = set(conflicting_tags(tags, all_names))
     tags = {old: new for old, new in tags.items() if new not in clashes}
 
+    from utilities.form_window import ready_to_run
+
+    ready_to_run()   # the questions end here: the form waits for Run
     new_path = model_path if in_place else tagged_model_path(model_path)
     with LoadingWindow("Tagging beams and columns...") as window:
         if return_code(save_model(model, new_path)) != 0:

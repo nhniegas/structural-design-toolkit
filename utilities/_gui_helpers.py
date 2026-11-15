@@ -2,9 +2,11 @@
 The windows of the toolkit: the dialogs that ask, the progress window, the
 closing summary and the warnings.
 
-They share one look, that of the program's icon: a graphite window, light
-text, and amber for the mark, the choice made and the button that confirms.
-File and folder pickers are those of Windows.
+They share one look, that of ETABS: white windows with light grey bands and
+borders, black Segoe UI text, and the blue of ETABS for the mark, the choice
+made and the button that confirms. File and folder pickers are those of Windows.
+When a command runs with the window open (``form_window``), the dialogs that
+ask become sections of that one window instead of windows of their own.
 """
 
 import ctypes
@@ -30,21 +32,24 @@ except Exception:
 # =============================================================================
 # THEME
 # =============================================================================
-# The graphite and amber of the icon (tools/make_icon.py), and the greys between.
-BG = "#1C1E24"            # the window
-PANEL = "#23262E"         # the header band and the footer
-FIELD = "#2C3039"         # text boxes, lists, the row of the choice made
-LINE = "#3B404B"          # borders
-TEXT = "#E9EAEE"
-MUTED = "#A3A8B3"         # explanations, labels of little weight
-AMBER = "#FFAA2C"
-AMBER_LIGHT = "#FFC062"   # the confirm button under the pointer
-ON_AMBER = "#1C1E24"      # text on amber
-AMBER_DIM = "#7A5A22"     # selected text in a box: the text stays light, with or without focus
-RED = "#FF7366"
-GREEN = "#78D27C"
+# The light look of ETABS (Ultimate 22): white, light grey bands, thin grey
+# borders, black text, a light blue for what is selected and blue for the accent.
+BG = "#FFFFFF"            # the window
+PANEL = "#F0F0F0"         # the header band, the footer and section bands
+FIELD = "#FFFFFF"         # text boxes and lists
+LINE = "#ABADB3"          # borders
+TEXT = "#000000"
+MUTED = "#5F6368"         # explanations, labels of little weight
+ACCENT = "#1F4E9A"        # the mark, the choice made, the button that confirms
+ACCENT_LIGHT = "#3C7FB1"  # the confirm button under the pointer, the focused border
+ON_ACCENT = "#FFFFFF"     # text on the accent
+SELECT = "#CCE4F7"        # the row of the choice made, selected text (ETABS' selected tab)
+BUTTON = "#E1E1E1"        # the other buttons, as those of Windows
+BUTTON_OVER = "#E5F1FB"   # a button under the pointer
+RED = "#C42B1C"
+GREEN = "#107C10"
 
-HEADING_FONT = "Bahnschrift"      # the font of the icon's letters; Windows has it
+HEADING_FONT = "Segoe UI"         # ETABS writes its titles in Segoe UI
 BODY_FONT = "Segoe UI"
 MONO_FONT = "Consolas"
 MARK = "SDT"
@@ -66,7 +71,7 @@ def _px(widget, points: float) -> int:
 
 
 def _dress(root) -> None:
-    """Give a window the icon, the graphite background and a dark title bar."""
+    """Give a window the icon, the white background and a light title bar."""
     root.configure(bg=BG)
     try:
         root.iconbitmap(icon_path())
@@ -75,7 +80,7 @@ def _dress(root) -> None:
     try:
         root.update_idletasks()
         handle = ctypes.windll.user32.GetParent(root.winfo_id())
-        value = ctypes.c_int(1)
+        value = ctypes.c_int(0)             # light, as ETABS
         for attribute in (20, 19):          # DWMWA_USE_IMMERSIVE_DARK_MODE, and before 20H1
             if ctypes.windll.dwmapi.DwmSetWindowAttribute(
                     handle, attribute, ctypes.byref(value), ctypes.sizeof(value)) == 0:
@@ -130,25 +135,25 @@ def _close(root) -> None:
 
 
 def _header(root, title: str) -> tk.Frame:
-    """The band at the top of a window: the mark in amber, then what is asked."""
+    """The band at the top of a window: the mark in blue, then what is asked."""
     band = tk.Frame(root, bg=PANEL)
     band.pack(side=tk.TOP, fill=tk.X)
     inner = tk.Frame(band, bg=PANEL)
     inner.pack(fill=tk.X, padx=_px(root, 20), pady=_px(root, 12))
-    tk.Label(inner, text=MARK, bg=PANEL, fg=AMBER, font=(HEADING_FONT, 13, "bold")).pack(
+    tk.Label(inner, text=MARK, bg=PANEL, fg=ACCENT, font=(HEADING_FONT, 13, "bold")).pack(
         side=tk.LEFT)
     tk.Label(inner, text=title, bg=PANEL, fg=TEXT, font=(HEADING_FONT, 12)).pack(
         side=tk.LEFT, padx=(_px(root, 12), 0))
-    tk.Frame(root, bg=AMBER, height=_px(root, 2)).pack(side=tk.TOP, fill=tk.X)
+    tk.Frame(root, bg=ACCENT, height=_px(root, 2)).pack(side=tk.TOP, fill=tk.X)
     return band
 
 
 def _button(parent, text: str, command, primary: bool = False, width: int = 0) -> tk.Button:
-    """A flat button: amber for the one that confirms, grey for the others."""
-    normal, over = (AMBER, AMBER_LIGHT) if primary else (FIELD, LINE)
+    """A flat button: blue for the one that confirms, grey for the others."""
+    normal, over = (ACCENT, ACCENT_LIGHT) if primary else (BUTTON, BUTTON_OVER)
     button = tk.Button(
-        parent, text=text, command=command, bg=normal, fg=ON_AMBER if primary else TEXT,
-        activebackground=over, activeforeground=ON_AMBER if primary else TEXT,
+        parent, text=text, command=command, bg=normal, fg=ON_ACCENT if primary else TEXT,
+        activebackground=over, activeforeground=ON_ACCENT if primary else TEXT,
         font=(BODY_FONT, 10, "bold" if primary else "normal"), relief=tk.FLAT, bd=0,
         padx=_px(parent, 18), pady=_px(parent, 6), cursor="hand2", highlightthickness=0)
     if width:
@@ -201,8 +206,8 @@ def _scrollbar_style(root) -> str:
         style.configure(name, troughcolor=FIELD, background=LINE, bordercolor=FIELD,
                         lightcolor=LINE, darkcolor=LINE, relief=tk.FLAT, gripcount=0)
         style.map(name, background=[("active", MUTED)])
-    style.configure("SDT.Horizontal.TProgressbar", troughcolor=FIELD, background=AMBER,
-                    bordercolor=FIELD, lightcolor=AMBER, darkcolor=AMBER)
+    style.configure("SDT.Horizontal.TProgressbar", troughcolor=FIELD, background=ACCENT,
+                    bordercolor=FIELD, lightcolor=ACCENT, darkcolor=ACCENT)
     return "SDT.Vertical.TScrollbar"
 
 
@@ -217,9 +222,30 @@ def _scroll_when_needed(bar, show, hide):
     return update
 
 
+def _form():
+    """The form session asking now (``form_window``), or None."""
+    from utilities import form_window
+
+    return form_window.active()
+
+
+def _ask_in_form(kind: str, title: str, prompt: str = "", **fields):
+    """Ask in the form session; ``answers.ASK`` when there is none."""
+    session = _form()
+    if session is None:
+        return answers.ASK
+    from utilities.form_window import Question
+
+    return session.ask(Question(kind, title, prompt, **fields))
+
+
 def select_output_directory(title: str = "Select the output folder") -> str:
     """Opens a native Windows directory dialog to select an output folder."""
     folder_path = answers.folder(title)   # from the answers file, when there is one
+    if folder_path is answers.ASK and _form() is not None:
+        from utilities.form_window import load_folders
+
+        folder_path = _ask_in_form("folder", title, default=load_folders().get(title))
     if folder_path is answers.ASK:
         root = _hidden_root()
         folder_path = filedialog.askdirectory(title=title)
@@ -242,6 +268,10 @@ def select_save_file(default_name="Composite_Column_Report") -> str:
     """Opens a native Windows Save As dialog to name the PDF."""
     title = "Save PDF Report As"
     scripted = answers.save_path(title, default_name, ".pdf")
+    if scripted is answers.ASK:
+        scripted = _ask_in_form("save", title, extra={"extension": ".pdf",
+                                                      "description": "PDF files",
+                                                      "name": default_name})
     if scripted is not answers.ASK:
         return scripted
     root = _hidden_root()
@@ -263,6 +293,10 @@ def select_save_path(
 ) -> str:
     """Opens a native Windows Save As dialog for a file of the given extension."""
     scripted = answers.save_path(title, default_name, extension)
+    if scripted is answers.ASK:
+        scripted = _ask_in_form("save", title, extra={"extension": extension,
+                                                      "description": description,
+                                                      "name": default_name})
     if scripted is not answers.ASK:
         return scripted
     root = _hidden_root()
@@ -280,6 +314,9 @@ def select_save_path(
 def select_open_path(title: str, extension: str, description: str) -> str:
     """Opens a native Windows file dialog for one file of the given extension."""
     scripted = answers.open_path(title)
+    if scripted is answers.ASK:
+        scripted = _ask_in_form("open", title, extra={"extension": extension,
+                                                      "description": description})
     if scripted is not answers.ASK:
         return scripted
     root = _hidden_root()
@@ -295,6 +332,9 @@ def select_etabs_file() -> str:
     """Opens a native Windows file dialog to select an ETABS .edb file."""
     title = "Select ETABS Model File"
     scripted = answers.open_path(title)
+    if scripted is answers.ASK:
+        scripted = _ask_in_form("open", title, extra={"extension": ".edb",
+                                                      "description": "ETABS Database Files"})
     if scripted is not answers.ASK:
         return scripted
     root = _hidden_root()
@@ -319,6 +359,9 @@ def select_option(
     if not options:
         raise ValueError("select_option needs at least one option.")
     scripted = answers.option(title, prompt, options, default_index)
+    if scripted is answers.ASK:       # a section of the form, when one is open
+        scripted = _ask_in_form("option", title, prompt, options=list(options),
+                                default=default_index)
     if scripted is not answers.ASK:   # answered from the answers file
         return scripted
     result: dict[str, str | None] = {"value": None}
@@ -348,17 +391,17 @@ def select_option(
     def paint():
         for index, (row, edge, mark, label) in enumerate(rows):
             on = index == chosen["index"]
-            colour = FIELD if on else BG
+            colour = SELECT if on else BG
             for widget in (row, mark, label):
                 widget.configure(bg=colour)
-            edge.configure(bg=AMBER if on else BG)
+            edge.configure(bg=ACCENT if on else BG)
             label.configure(fg=TEXT if on else MUTED,
                             font=(BODY_FONT, 10, "bold" if on else "normal"))
             mark.delete("all")
-            mark.create_oval(2, 2, dot - 2, dot - 2, outline=AMBER if on else LINE, width=2)
+            mark.create_oval(2, 2, dot - 2, dot - 2, outline=ACCENT if on else LINE, width=2)
             if on:
-                mark.create_oval(dot * 0.32, dot * 0.32, dot * 0.68, dot * 0.68, fill=AMBER,
-                                 outline=AMBER)
+                mark.create_oval(dot * 0.32, dot * 0.32, dot * 0.68, dot * 0.68, fill=ACCENT,
+                                 outline=ACCENT)
 
     def choose(index: int):
         chosen["index"] = index % len(options)
@@ -400,16 +443,16 @@ def select_option(
 
 
 def _entry(parent, width: int) -> tuple[tk.Frame, tk.Entry]:
-    """A text box of the theme, in its frame: the border turns amber while it is
+    """A text box of the theme, in its frame: the border turns blue while it is
     typed in. The frame is what is placed in the window."""
     border = tk.Frame(parent, bg=LINE)
     inside = tk.Frame(border, bg=FIELD)
     inside.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
     entry = tk.Entry(inside, width=width, font=(BODY_FONT, 10), bg=FIELD, fg=TEXT,
-                     insertbackground=AMBER, selectbackground=AMBER_DIM, selectforeground=TEXT,
+                     insertbackground=ACCENT, selectbackground=SELECT, selectforeground=TEXT,
                      relief=tk.FLAT, bd=0, highlightthickness=0)
     entry.pack(fill=tk.X, padx=_px(parent, 8), pady=_px(parent, 5))
-    entry.bind("<FocusIn>", lambda _e: border.configure(bg=AMBER))
+    entry.bind("<FocusIn>", lambda _e: border.configure(bg=ACCENT))
     entry.bind("<FocusOut>", lambda _e: border.configure(bg=LINE))
     inside.bind("<Button-1>", lambda _e: entry.focus_set())
     return border, entry
@@ -426,6 +469,9 @@ def enter_values(
     if not labels:
         raise ValueError("enter_values needs at least one label.")
     scripted = answers.values(title, prompt, labels, defaults)
+    if scripted is answers.ASK:       # a section of the form, when one is open
+        scripted = _ask_in_form("values", title, prompt, labels=list(labels),
+                                default=dict(defaults or {}))
     if scripted is not answers.ASK:   # answered from the answers file
         return scripted
     result: dict[str, dict[str, str] | None] = {"value": None}
@@ -494,6 +540,11 @@ def choose_for_each(
         raise ValueError("choose_for_each needs at least one label.")
     offered = {label: (defaults or {}).get(label, choices[0]) for label in labels}
     scripted = answers.values(title, prompt, labels, offered)
+    if scripted is answers.ASK:       # a section of the form, when one is open
+        in_form = _ask_in_form("choices", title, prompt, labels=list(labels),
+                               options=list(choices), default=offered)
+        if in_form is not answers.ASK:
+            return in_form
     if scripted is not answers.ASK:   # answered from the answers file
         if scripted is None:
             return None
@@ -532,10 +583,10 @@ def choose_for_each(
             row=row, column=0, sticky="w", pady=_px(root, 4), padx=(0, _px(root, 16)))
         var = tk.StringVar(root, value=offered[label])
         menu = tk.OptionMenu(rows, var, *choices)
-        menu.configure(bg=FIELD, fg=TEXT, activebackground=AMBER_DIM, activeforeground=TEXT,
+        menu.configure(bg=FIELD, fg=TEXT, activebackground=SELECT, activeforeground=TEXT,
                        highlightthickness=1, highlightbackground=LINE, relief=tk.FLAT,
                        font=(BODY_FONT, 10), anchor="w", width=width, bd=0)
-        menu["menu"].configure(bg=FIELD, fg=TEXT, activebackground=AMBER,
+        menu["menu"].configure(bg=FIELD, fg=TEXT, activebackground=ACCENT,
                                activeforeground=BG, font=(BODY_FONT, 10), bd=0)
         menu.grid(row=row, column=1, sticky="ew", pady=_px(root, 4))
         chosen[label] = var
@@ -568,6 +619,9 @@ class DualListboxSelector:
         self.scripted = answers.items(title, list(available_items))
         if self.scripted is not answers.ASK:
             return
+        if _form() is not None:      # a section of the form: asked by show()
+            self.scripted = None
+            return
 
         self.root = _window(title)
         # Handle early window close ('X' button) safely
@@ -589,8 +643,8 @@ class DualListboxSelector:
         # tk.EXTENDED enables Shift+Click range select and Ctrl+Click toggle select
         box = tk.Listbox(
             inside, selectmode=tk.EXTENDED, exportselection=False, width=34, height=14,
-            bg=FIELD, fg=TEXT, font=(BODY_FONT, 10), selectbackground=AMBER,
-            selectforeground=ON_AMBER, relief=tk.FLAT, bd=0, highlightthickness=0,
+            bg=FIELD, fg=TEXT, font=(BODY_FONT, 10), selectbackground=ACCENT,
+            selectforeground=ON_ACCENT, relief=tk.FLAT, bd=0, highlightthickness=0,
             activestyle="none")
         box.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(_px(root, 8), 0),
                  pady=_px(root, 6))
@@ -695,6 +749,10 @@ class DualListboxSelector:
 
     def show(self) -> list[str]:
         """Displays dialog safely and blocks until user confirms or closes."""
+        if self.scripted is None:    # a section of the form
+            self.selected_items = list(_ask_in_form("items", self.title,
+                                                    options=list(self.available_items)))
+            return self.selected_items
         if self.scripted is not answers.ASK:
             self.selected_items = list(self.scripted)
             return self.selected_items
@@ -884,7 +942,7 @@ def show_summary(text: str, title: str = "Summary") -> None:
     rows = min(len(lines) + 1, 36)
     box = tk.Text(frame, width=columns, height=rows, wrap=tk.NONE, font=(MONO_FONT, 10),
                   relief=tk.FLAT, bd=0, bg=BG, fg=TEXT, insertbackground=BG,
-                  selectbackground=AMBER, selectforeground=ON_AMBER, highlightthickness=0,
+                  selectbackground=ACCENT, selectforeground=ON_ACCENT, highlightthickness=0,
                   padx=_px(root, 4), pady=_px(root, 4))
     vertical = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=box.yview, style=bar)
     horizontal = ttk.Scrollbar(frame, orient=tk.HORIZONTAL, command=box.xview,
@@ -896,7 +954,7 @@ def show_summary(text: str, title: str = "Summary") -> None:
             horizontal, lambda: horizontal.grid(row=1, column=0, sticky="ew"),
             horizontal.grid_remove))
     box.tag_configure("rule", foreground=LINE)
-    box.tag_configure("heading", foreground=AMBER, font=(MONO_FONT, 10, "bold"))
+    box.tag_configure("heading", foreground=ACCENT, font=(MONO_FONT, 10, "bold"))
     box.tag_configure("attention", foreground=RED, font=(MONO_FONT, 10, "bold"))
     box.tag_configure("good", foreground=GREEN)
     box.tag_configure("note", foreground=MUTED)
@@ -941,6 +999,10 @@ def show_warning(message: str, title: str = "Warning", topmost: bool = True) -> 
     """
     if answers.warning(message, title):
         return
+    session = _form()
+    if session is not None:          # shown in the form, under its questions
+        session.warn(message)
+        return
     root = _window(title, topmost)   # topmost: over Excel and ETABS
 
     def close(_event=None):
@@ -954,8 +1016,8 @@ def show_warning(message: str, title: str = "Warning", topmost: bool = True) -> 
     body.pack(fill=tk.BOTH, expand=True, padx=_px(root, 24), pady=_px(root, 20))
     size = _px(root, 30)
     sign = tk.Canvas(body, width=size, height=size, bg=BG, highlightthickness=0)
-    sign.create_polygon(size / 2, 2, size - 1, size - 3, 1, size - 3, fill=AMBER, outline=AMBER)
-    sign.create_text(size / 2, size * 0.60, text="!", fill=ON_AMBER,
+    sign.create_polygon(size / 2, 2, size - 1, size - 3, 1, size - 3, fill=ACCENT, outline=ACCENT)
+    sign.create_text(size / 2, size * 0.60, text="!", fill=ON_ACCENT,
                      font=(BODY_FONT, 12, "bold"))
     sign.pack(side=tk.LEFT, anchor="n", padx=(0, _px(root, 16)))
     tk.Label(body, text=str(message), bg=BG, fg=TEXT, font=(BODY_FONT, 10), justify="left",

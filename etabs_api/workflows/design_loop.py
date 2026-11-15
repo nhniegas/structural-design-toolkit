@@ -2223,6 +2223,9 @@ def run_design_cli() -> dict | None:
     _remember({"resize_for_drift": resize_for_drift, "section_scale": section_scale,
                "design_group": design_group})
 
+    from utilities.form_window import ready_to_run
+
+    ready_to_run()   # the questions end here: the form waits for Run
     # the working copy: the original model is not changed
     stem = os.path.splitext(original)[0]
     working = f"{stem} - DESIGN.EDB"

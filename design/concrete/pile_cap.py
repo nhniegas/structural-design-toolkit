@@ -1720,7 +1720,8 @@ def preview(figure, values: dict, cap: "PileCap | None") -> str:
         sx, sy = pile_shape(values, px, py).exterior.xy
         colour = PLOT["dark"]
         if ratio is not None:
-            colour = "#2E5E36" if ratio[i] <= 0.9 else "#6B5418" if ratio[i] <= 1.0 else "#7A2620"
+            # light fills on the white drawing, so the pile number stays readable
+            colour = "#C8E6C9" if ratio[i] <= 0.9 else "#FFE0A3" if ratio[i] <= 1.0 else "#F8C4BF"
         ax.fill(sx, sy, facecolor=colour, edgecolor=PLOT["text"], lw=1.0, zorder=5)
         ax.annotate(str(i + 1), (px, py), ha="center", va="center", fontsize=9,
                     color=PLOT["text"], fontweight="bold", zorder=6)

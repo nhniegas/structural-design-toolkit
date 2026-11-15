@@ -409,6 +409,9 @@ def run_quantities() -> Quantities | None:
             return None
         if include == "No":
             plan = None
+    from utilities.form_window import ready_to_run
+
+    ready_to_run()   # the questions end here: the form waits for Run
     with LoadingWindow("Concrete quantities") as window:
         quantities = read_quantities(connector, path, thickness, plan, window.update)
     report = quantities_report(quantities)

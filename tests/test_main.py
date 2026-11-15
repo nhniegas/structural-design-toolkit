@@ -275,8 +275,8 @@ def test_the_dialogs_have_the_colours_of_the_icon_and_find_its_file():
         "make_icon", Path(__file__).resolve().parents[1] / "tools" / "make_icon.py")
     make_icon = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(make_icon)
-    assert _gui_helpers.BG == "#%02X%02X%02X" % make_icon.DARK
-    assert _gui_helpers.AMBER == "#%02X%02X%02X" % make_icon.AMBER
+    # the windows have the light look of ETABS (v0.18.0), the icon keeps its colours
+    assert _gui_helpers.BG == "#FFFFFF" and _gui_helpers.ACCENT == "#1F4E9A"
     assert os.path.isfile(_gui_helpers.icon_path())
 
 
