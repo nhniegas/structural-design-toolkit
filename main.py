@@ -95,7 +95,7 @@ import argparse
 import sys
 from pathlib import Path
 
-VERSION = "0.16.1"  # the same as in pyproject.toml (tests/test_main.py checks it)
+VERSION = "0.18.0"  # the same as in pyproject.toml (tests/test_main.py checks it)
 # Hidden first argument: this process is the progress window of another one
 # (utilities/_gui_helpers.LoadingWindow). It is how the packaged program,
 # which has no separate Python to start, opens that window.
@@ -323,15 +323,19 @@ def run_and_restore(name: str, answers_file: str | None = None,
     (the commands work in N-mm, whatever units the model is in).
 
     ``answers_file`` answers its dialogs from a file; ``record_file`` shows
-    them and saves what is answered (utilities/answers.py).
+    them and saves what is answered (utilities/answers.py). Without an answers
+    file the questions are asked in one window (utilities/form_window.py), or
+    one dialog after the other with ``SDT_DIALOGS=1``.
     """
-    from utilities import answers
+    from utilities import answers, form_window
 
     if answers_file:
         answers.load(answers_file)
     elif record_file:
         answers.record(record_file)
     try:
+        if not answers_file and form_window.wanted():
+            return form_window.run(name, COMMANDS[name][0], description=COMMANDS[name][1])
         return COMMANDS[name][0]()
     finally:
         if answers_file or record_file:

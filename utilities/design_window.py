@@ -40,7 +40,8 @@ LABEL_WIDTH = 300           # px at 96 dpi: labels wrap to this
 
 # colours of the drawings, those of the window
 PLOT = dict(bg=gui.PANEL, field=gui.FIELD, line=gui.LINE, text=gui.TEXT, muted=gui.MUTED,
-            amber=gui.AMBER, red=gui.RED, green=gui.GREEN, dark=gui.BG, on_amber=gui.ON_AMBER)
+            amber=gui.ACCENT, red=gui.RED, green=gui.GREEN, dark=gui.BG, on_amber=gui.ON_ACCENT,
+            warn="#E07B00")   # a ratio from 0.9 to 1.0: amber, also on the light look
 
 
 def style_axes(ax, ticks: bool = True) -> None:
@@ -60,7 +61,7 @@ def style_axes(ax, ticks: bool = True) -> None:
 def ratio_colour(ratio: float | None) -> str:
     if ratio is None:
         return PLOT["muted"]
-    return PLOT["green"] if ratio <= 0.9 else PLOT["amber"] if ratio <= 1.0 else PLOT["red"]
+    return PLOT["green"] if ratio <= 0.9 else PLOT["warn"] if ratio <= 1.0 else PLOT["red"]
 
 
 class DesignWindow:
@@ -128,14 +129,14 @@ class DesignWindow:
 
         results = tk.Frame(body, bg=gui.PANEL)
         results.grid(row=0, column=2, sticky="nsew")
-        tk.Label(results, text="RESULTS", bg=gui.PANEL, fg=gui.AMBER,
+        tk.Label(results, text="RESULTS", bg=gui.PANEL, fg=gui.ACCENT,
                  font=(gui.HEADING_FONT, 11, "bold"), anchor="w").pack(
             fill=tk.X, padx=gui._px(root, 12), pady=(gui._px(root, 10), gui._px(root, 4)))
         self.text = tk.Text(results, bg=gui.PANEL, fg=gui.TEXT, font=(gui.MONO_FONT, 9),
                             relief=tk.FLAT, bd=0, wrap="word", highlightthickness=0,
                             width=46, padx=gui._px(root, 12), pady=gui._px(root, 4))
         self.text.pack(fill=tk.BOTH, expand=True)
-        for tag, colour in (("pass", gui.GREEN), ("fail", gui.RED), ("head", gui.AMBER),
+        for tag, colour in (("pass", gui.GREEN), ("fail", gui.RED), ("head", gui.ACCENT),
                             ("muted", gui.MUTED)):
             self.text.tag_configure(tag, foreground=colour)
         self.text.tag_configure("head", font=(gui.HEADING_FONT, 10, "bold"))
@@ -172,15 +173,15 @@ class DesignWindow:
     def _combo_style(self, root) -> None:
         style = ttk.Style(root)
         style.configure("SDT.TCombobox", fieldbackground=gui.FIELD, background=gui.LINE,
-                        foreground=gui.TEXT, arrowcolor=gui.AMBER, bordercolor=gui.LINE,
+                        foreground=gui.TEXT, arrowcolor=gui.ACCENT, bordercolor=gui.LINE,
                         lightcolor=gui.FIELD, darkcolor=gui.FIELD, selectbackground=gui.FIELD,
                         selectforeground=gui.TEXT, padding=gui._px(root, 4))
         style.map("SDT.TCombobox", fieldbackground=[("readonly", gui.FIELD)],
-                  foreground=[("readonly", gui.TEXT)], bordercolor=[("focus", gui.AMBER)])
+                  foreground=[("readonly", gui.TEXT)], bordercolor=[("focus", gui.ACCENT)])
         root.option_add("*TCombobox*Listbox.background", gui.FIELD)
         root.option_add("*TCombobox*Listbox.foreground", gui.TEXT)
-        root.option_add("*TCombobox*Listbox.selectBackground", gui.AMBER)
-        root.option_add("*TCombobox*Listbox.selectForeground", gui.ON_AMBER)
+        root.option_add("*TCombobox*Listbox.selectBackground", gui.ACCENT)
+        root.option_add("*TCombobox*Listbox.selectForeground", gui.ON_ACCENT)
 
     def _wheel(self, canvas, event) -> None:
         widget = event.widget
@@ -196,7 +197,7 @@ class DesignWindow:
         row = 0
         for title, group in self.groups:
             heading = title.split(":", 1)[-1].strip().upper()
-            tk.Label(form, text=heading, bg=gui.BG, fg=gui.AMBER,
+            tk.Label(form, text=heading, bg=gui.BG, fg=gui.ACCENT,
                      font=(gui.HEADING_FONT, 10, "bold"), anchor="w").grid(
                 row=row, column=0, columnspan=2, sticky="w",
                 pady=(gui._px(root, 14 if row else 2), gui._px(root, 4)))
@@ -244,7 +245,7 @@ class DesignWindow:
         if field.key in self.multiline:
             frame = tk.Frame(form, bg=gui.LINE)
             text = tk.Text(frame, height=5, width=30, bg=gui.FIELD, fg=gui.TEXT,
-                           insertbackground=gui.AMBER, font=(gui.MONO_FONT, 9), relief=tk.FLAT,
+                           insertbackground=gui.ACCENT, font=(gui.MONO_FONT, 9), relief=tk.FLAT,
                            bd=0, wrap="word", padx=gui._px(root, 6), pady=gui._px(root, 4))
             text.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
             text.insert("1.0", value.replace("; ", ";\n"))
@@ -297,7 +298,7 @@ class DesignWindow:
 
         root = self.root
         tk.Label(frame, text=getattr(self.module, "PREVIEW_TITLE", "DRAWING"), bg=gui.PANEL,
-                 fg=gui.AMBER, font=(gui.HEADING_FONT, 11, "bold"), anchor="w").pack(
+                 fg=gui.ACCENT, font=(gui.HEADING_FONT, 11, "bold"), anchor="w").pack(
             fill=tk.X, padx=gui._px(root, 12), pady=(gui._px(root, 10), gui._px(root, 4)))
         self.figure = Figure(figsize=(6, 6), dpi=100, facecolor=gui.PANEL)
         self.plot = FigureCanvasTkAgg(self.figure, master=frame)

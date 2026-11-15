@@ -360,6 +360,9 @@ def run_beams() -> DesignStore | None:
     exempt_short_spans = ask_short_span_girders(title, last) if smrf else False
     if exempt_short_spans is None:
         return None
+    girder_continuity = ask_girder_continuity(title, last)
+    if girder_continuity is None:
+        return None
     group = ask_design_group(connector.sap_model, title, last)
     if group is None:
         return None
@@ -371,8 +374,12 @@ def run_beams() -> DesignStore | None:
                "carrier_depth": carrier_depth,
                "compatibility_torsion": compatibility_torsion,
                "office_bar_spacing": office_bar_spacing,
-               "exempt_short_spans": exempt_short_spans, "design_group": group})
+               "exempt_short_spans": exempt_short_spans,
+               "girder_continuity": girder_continuity, "design_group": group})
 
+    from utilities.form_window import ready_to_run
+
+    ready_to_run()   # the questions end here: the form waits for Run
     stem = os.path.splitext(os.path.basename(model_path))[0]
     members = None
     if group:
@@ -398,6 +405,7 @@ def run_beams() -> DesignStore | None:
             "compatibility_torsion": compatibility_torsion,
             "office_bar_spacing": office_bar_spacing,
             "exempt_short_spans": exempt_short_spans,
+            "girder_continuity": girder_continuity,
             "design_group": group,
             "sources": {"model": list(ready.sources.model),
                         "answered": list(ready.sources.answered),
@@ -408,7 +416,8 @@ def run_beams() -> DesignStore | None:
                                compatibility_torsion=compatibility_torsion,
                                office_bar_spacing=office_bar_spacing,
                                exempt_short_spans=exempt_short_spans,
-                               deflection_stages=stages, deflection_flanges=flanged)
+                               deflection_stages=stages, deflection_flanges=flanged,
+                               girder_continuity=girder_continuity)
         store.beam_results = results
         kept_columns = store.keep_columns_of(DesignStore.load(model_path))
         store.save()
@@ -432,6 +441,7 @@ def run_beams() -> DesignStore | None:
     summary.add("Beam bar spacing", "office rule, 150 mm clear" if office_bar_spacing
                 else "crack control only (NSCP 424.3.2; ACI 24.3.2)")
     add_short_spans_to(summary, results, exempt_short_spans)
+    add_continuity_to(summary, results, girder_continuity)
     add_too_shallow_to(summary, results)
     summary.add("Deflection stages", stages.describe())
     summary.add("Deflection section", describe_deflection_section(flanged))
@@ -811,6 +821,40 @@ def ask_short_span_girders(title: str, last: dict | None = None) -> bool | None:
     return None if chosen is None else chosen == SHORT_SPAN_EXEMPT
 
 
+CONTINUITY_ANCHOR = "No - each girder keeps its own support bars (they anchor in the column)"
+CONTINUITY_THROUGH = ("Yes - match the support bars of girders in line, so they run "
+                      "through the column")
+
+
+def ask_girder_continuity(title: str, last: dict | None = None) -> bool | None:
+    """Whether the support bars of girders that meet in line at a column are
+    matched so they run through it. None when the dialog is closed."""
+    from utilities._gui_helpers import select_option
+
+    chosen = select_option(
+        title, "Girder bars through the columns.\n\nAt an interior column, the top and "
+        "bottom bars at the supports of two girders in line (axes within 1 in 6, in plan) "
+        "can be made the same, layer by layer, so they run through the column instead of "
+        "anchoring in it. Each layer takes the larger count of the two spans; a narrower "
+        "girder takes the most bars that fit and the extra bars of the wider one anchor. "
+        "Bottom bars are matched only when the depth step bends at 1 in 6 or flatter "
+        "within the column. The girders are designed again with these bars (the probable-"
+        "moment shear rises with them). Gravity beams keep their own bars.",
+        [CONTINUITY_ANCHOR, CONTINUITY_THROUGH],
+        default_index=1 if (last or {}).get("girder_continuity") else 0)
+    return None if chosen is None else chosen == CONTINUITY_THROUGH
+
+
+def add_continuity_to(summary, results, girder_continuity: bool) -> None:
+    """Say in the summary what the girder bar matching did."""
+    from design.concrete.beams.design import CONTINUITY_NOTE
+
+    if not girder_continuity:
+        return
+    note = getattr(results, "attrs", {}).get(CONTINUITY_NOTE)
+    summary.add("Girder bars through columns", note or "on")
+
+
 def add_too_shallow_to(summary, results) -> None:
     """List the members left out of the beam design for their small depth."""
     from design.concrete.beams.design import TOO_SHALLOW
@@ -1011,6 +1055,9 @@ def run_schedules() -> list[str] | None:
     folder = select_output_directory("Folder for the schedules")
     if not folder:
         return None
+    from utilities.form_window import ready_to_run
+
+    ready_to_run()   # the questions end here: the form waits for Run
     written = write_schedules(store, folder, beams, columns, tie_style, section_scale)
     summary = RunSummary("sdt schedules", store.model_path)
     summary.add("Design data", os.path.basename(path))
@@ -1068,6 +1115,9 @@ def run_deflection() -> pd.DataFrame | None:
     folder = select_output_directory("Folder for the deflection results")
     if not folder:
         return None
+    from utilities.form_window import ready_to_run
+
+    ready_to_run()   # the questions end here: the form waits for Run
     targets = dcr_targets.Targets.from_saved(store.inputs.get("dcr_targets"))
     with dcr_targets.use(targets), LoadingWindow("Deflection check") as window:
         window.update("Reading the service moments of the deflection combinations from ETABS")
@@ -1193,6 +1243,9 @@ def run_columns() -> DesignStore | None:
     _remember({**bars, "check_top_level": levels[0], "check_foundation_level": levels[1],
                "section_scale": section_scale})
 
+    from utilities.form_window import ready_to_run
+
+    ready_to_run()   # the questions end here: the form waits for Run
     with dcr_targets.use(targets), LoadingWindow("Column design") as window:
         report, groups, joints = design_columns(
             store.tables, store.beam_results, smrf, bars["dmain"], bars["dties"], bars["cover"],

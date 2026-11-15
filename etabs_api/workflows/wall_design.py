@@ -279,21 +279,26 @@ def run_walls_cli():
     have = {p.name: str(model.AreaObj.GetPier(p.name, "")[0]) for p in panels}
     planned = {p.name: leg.label for w in walls for legs in w.legs.values() for leg in legs
                for p in leg.panels}
-    if any(have.get(n) != planned[n] for n in planned):
+    relabel = any(have.get(n) != planned[n] for n in planned)
+    if relabel:
         answer = select_option(title, "The walls are not labelled as the design reads them: one "
                                "pier label per straight leg (W1A, W1B, ...), the legs that meet "
                                "making one wall. Label them now (the model is changed)?",
                                ["Label the piers now", "Stop"])
         if answer != "Label the piers now":
             return None
-        if model.GetModelIsLocked():
-            model.SetModelIsLocked(False)
-        wp.apply_pier_labels(model, walls)
-        save_model(model)
     # ---- inputs ----
     asked = ask_wall_inputs(title, model, walls)
     if asked is None:
         return None
+    from utilities.form_window import ready_to_run
+
+    ready_to_run()   # the questions end here: the form waits for Run
+    if relabel:      # only now: the questions may be asked again before Run
+        if model.GetModelIsLocked():
+            model.SetModelIsLocked(False)
+        wp.apply_pier_labels(model, walls)
+        save_model(model)
     kinds, values, strength = asked
     names = list(kinds)
     fc, fy, bar_v, bar_h, cover = (values[k] for k in ("fc", "fy", "bar_v", "bar_h", "cover"))

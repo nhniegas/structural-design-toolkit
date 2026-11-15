@@ -851,6 +851,9 @@ def run_framing_plans() -> str | None:
         return None
     path = output_path(folder, f"{stem} - Framing Plans.dxf", DRAWINGS)
 
+    from utilities.form_window import ready_to_run
+
+    ready_to_run()   # the questions end here: the form waits for Run
     try:
         with LoadingWindow("Framing plans") as window:
             window.update("Reading the frames, sections, walls and grids")

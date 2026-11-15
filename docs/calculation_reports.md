@@ -50,7 +50,7 @@ The reports are compiled with `pdflatex`. Beyond the packages of the earlier for
 
 - `report_style.new_document(title, code, source, command, file_name)` gives a PyLaTeX document with the header, the footer and the commands of the format. A new report built on it has the look of the others.
 - `report_style.title_block`, `tag` and `ratio` give the pieces. `\section` is redefined to the grey band, and the three rules of `booktabs` to the grey head and the light lines, so a report written with PyLaTeX's `Section` and `Tabular` needs no change.
-- The colours are constants at the top of `report_style.py`, the same graphite and amber as the icon and the dialogs.
+- The colours are constants at the top of `report_style.py`, graphite and amber (the windows and the icon have the light look and the blue of ETABS since v0.18.0).
 
 ## Not in this format yet
 

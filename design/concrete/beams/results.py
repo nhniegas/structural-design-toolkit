@@ -93,6 +93,7 @@ _BEAM_RESULT_LABELS = {
     "Alternating_Tie_Check": "Alternating tie check",
     "Torsion_Basis": "Torsion designed for",
     "Seismic_Rules": "Seismic rules",
+    "Bars_Through_Columns": "Support bars through the columns",
     "Target_DCR_Flexure": "Target ratio, flexure",
     "Target_DCR_Shear": "Target ratio, shear and torsion",
     **DEFLECTION_COLUMNS,

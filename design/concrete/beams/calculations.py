@@ -246,6 +246,9 @@ def _beam_calc_member(
         + (" Torsion: " + str(top.get("Torsion_Basis")) + "."
            if str(top.get("Torsion_Basis", "")).startswith(COMPATIBILITY_TORSION[:13]) else "")
         + (" Seismic (SMRF) rules: " + str(top.get("Seismic_Rules")) + "." if short_span else "")
+        + (" Support bars through the columns: "
+           + str(top.get("Bars_Through_Columns")).replace(" | ", "; ") + "."
+           if str(top.get("Bars_Through_Columns", "-")) not in ("-", "", "nan", "None") else "")
         + (" " + target_note if target_note else ""),
     )
 

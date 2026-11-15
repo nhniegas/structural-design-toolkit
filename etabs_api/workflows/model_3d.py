@@ -555,6 +555,9 @@ def run_model_3d() -> str | None:
         return None
     path = output_path(folder, f"{stem} - 3D Model.step")
 
+    from utilities.form_window import ready_to_run
+
+    ready_to_run()   # the questions end here: the form waits for Run
     try:
         with LoadingWindow("3D model") as window:
             window.update("Reading the frames, sections, walls and slabs")
