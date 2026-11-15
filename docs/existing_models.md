@@ -68,8 +68,16 @@ Every summary ends with where the inputs came from:
 - **Answered by you:** for example the combinations you picked, the size ranges.
 - **Assumed:** for example deflection combinations added by the toolkit.
 
+## Members the design leaves out or reads differently
+
+- **Frames with the section `None`** (rigid links, for example from a column to a wall) are skipped by `sdt beams`, `sdt columns` and `sdt drift`. A horizontal link at a column joint still braces the column: it ends the unbraced length there (NSCP 406.2.5) and adds nothing to ψ (since v0.16.0).
+- **Members too shallow for two layers of bars** (depth up to 2 (cover + stirrup + bar), such as a 400 × 100 member modelled as a beam) are left out and listed in the summary.
+- **Steel braces** that ETABS classes as beams no longer stop the joint check of `sdt columns`: a member with no concrete section is left out of the joint. Their forces count in the story shear and ri of the redundancy factor ρ (`sdt analyze`).
+- **No local-axis table**: when no frame has a local-axis angle assigned, every angle is read as 0.
+- **ETABS groups**: when the model has groups of frames, `sdt beams` and `sdt design` ask whether to design the whole model or one group (for example the new members of an addition). The forces still come from the whole model.
+
 ## Not covered
 
-- **Shear walls** are not designed. The readiness dialog and the summaries say how many wall panels the model has.
+- **Shear walls** are designed by `sdt walls` ([Wall design](etabs_wall_design.md)), not by `sdt beams`, `sdt columns` or `sdt design`. The readiness dialog and the summaries of those commands say how many wall panels the model has.
 - **Envelope combinations** cannot be designed for.
 - **Steel and composite frames** in the ETABS model are not designed by `sdt beams` / `sdt columns` (see the [steel and composite modules](steel_design_documentation.md) for the standalone checks).

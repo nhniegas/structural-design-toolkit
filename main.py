@@ -36,6 +36,13 @@ the same commands.
                     slenderness; save the results, calculations and schedule
     sdt design      analysis and beam/column design loop that resizes the
                     members until they pass (etabs_api/workflows/design_loop.py)
+    sdt schedules   the beam and column schedules (DXF) again from a stored
+                    design, without designing (no ETABS)
+    sdt walls       structural walls, planar, L, U and cores, NSCP 418.10 and
+                    411 (etabs_api/workflows/wall_design.py)
+    sdt compatibility  members not in the lateral system (group GRAVITY ONLY):
+                    forces at the design displacement, NSCP 418.14
+                    (etabs_api/workflows/compatibility.py)
     sdt foundation  a second model for the foundation: only the support joints,
                     loaded with the reactions of this model; or update its forces.
                     On the foundation model: save its footings and tie beams
@@ -43,11 +50,11 @@ the same commands.
     sdt plans       framing plans of every floor as one DXF: beams at their
                     width, columns at their size, marks and grids; and the
                     foundation plan when it was saved
+                    (etabs_api/workflows/framing_plans.py)
     sdt 3d          the concrete of the model as 3D solids in one STEP file
                     (columns, beams, walls, slabs, the saved foundation, and
                     the bars of the saved designs)
                     (etabs_api/workflows/model_3d.py)
-                    (etabs_api/workflows/framing_plans.py)
     sdt quantities  the concrete volume of each story and of the building, the
                     floor area, and the concrete ratio in m3/m2
                     (etabs_api/workflows/concrete_quantities.py)
@@ -74,9 +81,10 @@ the same commands.
 a menu of the commands: type a number or a name, and the menu comes back when
 the command ends.
 
-Each command asks for its inputs in dialogs. The standalone checks
-(composite, steel, wind, pilecap) then ask whether to print the results in the
-terminal, export a PDF report, or both. The terminal shows the detailed
+Each command asks for its inputs in dialogs. The standalone checks composite,
+steel and pilecap open one window with the inputs, a drawing and the results;
+wind asks whether to print the results in the terminal, export a PDF report,
+or both. The terminal shows the detailed
 results; when a command finishes, a separate window shows its summary: what
 was run, the counts, what needs attention and the files.
 """
