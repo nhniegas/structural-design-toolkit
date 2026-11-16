@@ -14,6 +14,9 @@ one row, each with its title:
   every floor or only where the column starts.
 * **Grids**, optional, with their bubbles and, optionally, the dimensions
   between them.
+* **Slab marks**, optional, when ``sdt slabs`` has saved its design beside the
+  model: the mark of every panel at its centre, with an arrow along the main
+  bars (one-way slabs and cantilevers) or two crossed arrows (two-way slabs).
 
 Nothing in the model is changed. The functions that draw need no ETABS.
 """
@@ -24,6 +27,7 @@ import math
 import os
 import re
 import sys
+import time
 from dataclasses import dataclass, field
 
 if __package__ in (None, ""):
@@ -34,12 +38,14 @@ from utilities.output_folders import DRAWINGS, output_path  # noqa: E402
 LAYER_GIRDER, LAYER_BEAM, LAYER_COLUMN = "S-GIRDER", "S-BEAM", "S-COLUMN"
 LAYER_WALL, LAYER_GRID, LAYER_TEXT, LAYER_DIM = "S-WALL", "S-GRID", "S-TEXT", "S-DIM"
 LAYER_FOOTING, LAYER_TIE_BEAM = "S-FOOTING", "S-TIEBEAM"
+LAYER_SLAB = "S-SLAB"
 # name, AutoCAD colour index, linetype
 LAYERS = (
     (LAYER_GIRDER, 3, "Continuous"), (LAYER_BEAM, 4, "Continuous"),
     (LAYER_COLUMN, 7, "Continuous"), (LAYER_WALL, 8, "Continuous"),
     (LAYER_GRID, 8, "CENTER"), (LAYER_TEXT, 2, "Continuous"), (LAYER_DIM, 1, "Continuous"),
     (LAYER_FOOTING, 6, "Continuous"), (LAYER_TIE_BEAM, 5, "Continuous"),
+    (LAYER_SLAB, 6, "Continuous"),
 )
 BEAM_STYLE = "SDT_BEAM"       # the multiline style: two dashed lines, one unit apart
 DIM_STYLE = "SDT_PLAN"
@@ -118,6 +124,9 @@ class FloorPlan:
     # the foundation plan only: its footings (foundation_plan.Footing), the title of
     # the plan and the lines written under it (the footing sizes)
     footings: list = field(default_factory=list)
+    # the slab panels of sdt slabs: dicts with centre, span (x, y in the panel's axes),
+    # angle (radians), mark, kind, short
+    slabs: list = field(default_factory=list)
     title: str = ""
     notes: list[str] = field(default_factory=list)
 
@@ -451,6 +460,9 @@ def draw_floor(msp, floor: FloorPlan, offset: tuple[float, float], options: Plan
         low_y = min(y for _, y in outline)
         _text(msp, footing.mark, (low_x + 0.5 * height, low_y + 0.5 * height), height,
               align="BOTTOM_LEFT", layer=LAYER_FOOTING)
+    for panel in floor.slabs:
+        draw_slab_mark(msp, panel, offset, height)
+        counts["slabs"] = counts.get("slabs", 0) + 1
     cuts = beam_end_cuts(floor)
     for beam in floor.beams:
         at_i, at_j = cuts[beam.name]
@@ -502,6 +514,95 @@ def draw_floor(msp, floor: FloorPlan, offset: tuple[float, float], options: Plan
                   (column.x + reach + 0.4 * height + ox, column.y + rise + 0.4 * height + oy),
                   height, align="BOTTOM_LEFT")
     return counts
+
+
+CHAR_WIDTH = 0.9      # the width of a simplex character, by the text height
+
+
+def draw_slab_mark(msp, panel: dict, offset: tuple[float, float], height: float) -> None:
+    """The mark of a slab panel (``S-1``; its kind is in the slab schedule) at its
+    centre, with the office span symbol along its main bars: a line with a half arrowhead at each end, the
+    two on opposite sides; both ways for a two-way slab; for a cantilever, the half
+    arrowhead at its free end only."""
+    ox, oy = offset
+    if "centre" in panel:
+        cx, cy = panel["centre"][0] + ox, panel["centre"][1] + oy
+        spans = panel["span"]
+    else:
+        x0, y0, x1, y1 = panel["box"]
+        cx, cy = (x0 + x1) / 2.0 + ox, (y0 + y1) / 2.0 + oy
+        spans = (x1 - x0, y1 - y0)
+    angle = float(panel.get("angle", 0.0))
+    if not panel.get("mark"):
+        return
+    # The mark sits beside the symbol, above and to the right of where its lines cross,
+    # along the panel's x axis, so it never runs over a line at any grid angle. The
+    # symbol and the mark are centred together in the panel, and the text is made
+    # smaller (to 60 percent at least) on a bay too narrow for it.
+    c, s = math.cos(angle), math.sin(angle)
+    label = str(panel["mark"])
+    directions = ["X", "Y"] if panel.get("kind") == "TWO WAY" else [panel.get("short", "X")]
+    halves = {d: max(min(0.3 * (spans[0] if d == "X" else spans[1]), 6.0 * height), 1.5 * height)
+              for d in directions}
+    margin = 0.08 * spans[0]
+    # the crossing may move left as far as the x line still fits in the panel; the text
+    # gets the room from there to the right side of the panel
+    most = max(0.0, 0.5 * spans[0] - halves.get("X", 0.0) - margin)
+    room = 0.5 * spans[0] - margin + most - 0.5 * height
+    size = max(min(height, room / (CHAR_WIDTH * len(label))), 0.6 * height)
+    gap = 0.5 * size
+    width = CHAR_WIDTH * size * len(label)
+    shift = min((width + gap) / 2.0, most)
+    cx, cy = cx - shift * c, cy - shift * s
+    _text(msp, label, (cx + gap * (c - s), cy + gap * (s + c)), size,
+          angle=math.degrees(angle), align="BOTTOM_LEFT", layer=LAYER_SLAB)
+    for direction in directions:
+        half = halves[direction]
+        turn = angle if direction == "X" else angle + math.pi / 2.0
+        ux, uy = math.cos(turn), math.sin(turn)
+        a = (cx - ux * half, cy - uy * half)
+        b = (cx + ux * half, cy + uy * half)
+        msp.add_line(a, b, dxfattribs={"layer": LAYER_SLAB})
+        head = min(1.6 * height, 0.6 * half)          # long, narrow half arrowheads
+        px, py = -uy, ux
+        free = int(panel.get("free", 0)) if panel.get("kind") == "CANTILEVER" else 0
+        # (tip, back along the line, to one side): b gets its barb on one side, a on the other
+        ends = [(b, -1.0, 1.0), (a, 1.0, -1.0)]
+        if free:
+            ends = [ends[0] if free > 0 else ends[1]]
+        for tip, back, side in ends:
+            barb = (tip[0] + back * ux * head + side * px * 0.25 * head,
+                    tip[1] + back * uy * head + side * py * 0.25 * head)
+            msp.add_line(tip, barb, dxfattribs={"layer": LAYER_SLAB})
+
+
+def saved_slab_design(model_path: str) -> dict | None:
+    """The slab panels and marks saved by sdt slabs for ``model_path``, or None."""
+    import json
+
+    path = os.path.splitext(os.path.abspath(model_path))[0] + " - slab design.json"
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    data["saved"] = time.strftime("%Y-%m-%d %H:%M", time.localtime(os.path.getmtime(path)))
+    return data
+
+
+def add_slab_marks(floors: list[FloorPlan], data: dict) -> int:
+    """Put the saved slab panels on the floors of their story; returns how many."""
+    by_story: dict[str, list] = {}
+    for panel in data.get("panels", []):
+        by_story.setdefault(str(panel.get("story")), []).append(panel)
+    count = 0
+    for floor in floors:
+        if not floor.title and floor.story in by_story:
+            floor.slabs = by_story[floor.story]
+            count += len(floor.slabs)
+    return count
 
 
 def draw_grids(msp, grids: list[PlanGrid], box: tuple[float, float, float, float],
@@ -584,7 +685,7 @@ def write_framing_plans(floors: list[FloorPlan], grids: list[PlanGrid], path: st
             draw_grids(msp, grids, box, offset, options)
         counts = draw_floor(msp, floor, offset, options, marked)
         for key, value in counts.items():
-            totals[key] += value
+            totals[key] = totals.get(key, 0) + value
         totals["floors"] += 1
         middle = (box[0] + box[2]) / 2.0 + offset[0]
         base = box[1] - room - 4.0 * height
@@ -782,6 +883,8 @@ def plans_summary(totals: dict[str, int], options: PlanOptions, model_path: str 
     summary.add("Beams and girders", totals["beams"])
     summary.add("Columns", totals["columns"])
     summary.add("Walls", totals["walls"])
+    if totals.get("slabs"):
+        summary.add("Slab marks", f"{totals['slabs']} panels (from sdt slabs)")
     if "footings" in totals:
         summary.add("Foundation plan", f"included: {totals['footings']} footings (the first "
                                        "plan; its tie beams and columns are in the counts)")
@@ -846,6 +949,16 @@ def run_framing_plans() -> str | None:
             return None
         if include == "No":
             foundation = None
+    slabs = saved_slab_design(model_path)
+    if slabs is not None:
+        include = select_option(
+            title, "Draw the slab marks?\n\nThe slab design of sdt slabs was saved on "
+            f"{slabs['saved']}: {len(slabs.get('panels', []))} panels. Each mark is drawn at the "
+            "centre of its panel with an arrow along its main bars.", ["Yes", "No"])
+        if include is None:
+            return None
+        if include == "No":
+            slabs = None
     folder = select_output_directory("Folder for the framing plans (.dxf)")
     if not folder:
         return None
@@ -861,6 +974,8 @@ def run_framing_plans() -> str | None:
             if not floors:
                 show_warning("The model has no beams, columns or walls to draw.", title=title)
                 return None
+            if slabs is not None:
+                add_slab_marks(floors, slabs)
             if foundation is not None:
                 floors = [foundation_floor(foundation)] + floors
             window.update(f"Drawing {len(floors)} floors")

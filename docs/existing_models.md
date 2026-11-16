@@ -79,5 +79,6 @@ Every summary ends with where the inputs came from:
 ## Not covered
 
 - **Shear walls** are designed by `sdt walls` ([Wall design](etabs_wall_design.md)), not by `sdt beams`, `sdt columns` or `sdt design`. The readiness dialog and the summaries of those commands say how many wall panels the model has.
+- **Slabs** are designed by `sdt slabs` ([Slab design](slab_design.md)). It reads models not made by `sdt setup`: any load pattern names (by their type: dead, superimposed dead, live, reducible live, roof live), any slab and beam section names, one slab object over many bays (cut at the beams), and grids at any angle.
 - **Envelope combinations** cannot be designed for.
 - **Steel and composite frames** in the ETABS model are not designed by `sdt beams` / `sdt columns` (see the [steel and composite modules](steel_design_documentation.md) for the standalone checks).

@@ -40,6 +40,10 @@ the same commands.
                     design, without designing (no ETABS)
     sdt walls       structural walls, planar, L, U and cores, NSCP 418.10 and
                     411 (etabs_api/workflows/wall_design.py)
+    sdt slabs       the solid slabs panel by panel: one-way by NSCP Table 406.5.2
+                    (or a strip analysis), two-way by ACI Method 3 or the Direct
+                    Design Method; marks, schedule and flags
+                    (etabs_api/workflows/slab_design.py, design/concrete/slabs/)
     sdt compatibility  members not in the lateral system (group GRAVITY ONLY):
                     forces at the design displacement, NSCP 418.14
                     (etabs_api/workflows/compatibility.py)
@@ -95,7 +99,7 @@ import argparse
 import sys
 from pathlib import Path
 
-VERSION = "0.18.2"  # the same as in pyproject.toml (tests/test_main.py checks it)
+VERSION = "0.19.0"  # the same as in pyproject.toml (tests/test_main.py checks it)
 # Hidden first argument: this process is the progress window of another one
 # (utilities/_gui_helpers.LoadingWindow). It is how the packaged program,
 # which has no separate Python to start, opens that window.
@@ -171,6 +175,12 @@ def _walls():
     from etabs_api.workflows.wall_design import run_walls_cli
 
     return run_walls_cli()
+
+
+def _slabs():
+    from etabs_api.workflows.slab_design import run_slabs_cli
+
+    return run_slabs_cli()
 
 
 def _compatibility():
@@ -280,6 +290,7 @@ COMMANDS = {
     "columns": (_columns, "design the columns (with slenderness) from the stored beam step"),
     "design": (_design, "analysis and design loop that resizes beams and columns"),
     "walls": (_walls, "design the structural walls (planar, L, U, cores): NSCP 418.10 and 411"),
+    "slabs": (_slabs, "design the solid slabs, one-way and two-way, panel by panel (NSCP 2015)"),
     "compatibility": (_compatibility, "members not in the lateral system (group GRAVITY ONLY): "
                                       "forces at the design displacement, NSCP 418.14"),
     "foundation": (_foundation, "foundation model from the support reactions, or update its forces"),
