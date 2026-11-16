@@ -209,6 +209,37 @@ def test_matched_bars_are_checked_again_for_the_steel_ratio_and_the_shear():
     assert after["Ve_left_kN"] > before["Ve_left_kN"]   # the larger bars raise Mpr and Ve
 
 
+def test_a_girder_over_two_and_a_half_percent_with_the_matched_bars_is_made_deeper():
+    """v0.18.2: the 2.5 % failure that the matched bars cause sends the girder to the
+    next depth in sdt design, and the loop says why."""
+    from etabs_api.workflows import design_loop as loop
+    from etabs_api.workflows.sections import Limits, Section
+
+    engine = BeamFlexureDesign(400.0, 600.0, dmain=25.0, dstirrup=10.0, cc=40.0)
+    full = [engine.max_bar_per_layer] * 3
+    heavy = beam_design.execute_beam_design(
+        _props(), _forces(), True, "GRAV", layer_floors={"B1": {("left", "top"): full}})
+    assert "2.5%" in " ".join(heavy["Design_Status"].astype(str)) \
+        or "LAYERS" in " ".join(heavy["Design_Status"].astype(str))
+    heavy[beam_design.CONTINUITY_COLUMN] = "left (to B0): top 12 through"
+    current = Section("G", 400, 600, "C28", "G60")
+    settings = loop.LoopSettings(combos=[], limits=Limits(),
+                                 ranges={"G": {"width": [300, 600, 50], "depth": [500, 1000, 50]}})
+    actions = loop.beam_actions(heavy, {"B1": current}, {"B1": 6000.0}, set(), settings)
+    new, reason = actions["B1"]
+    assert new.depth > current.depth
+    assert reason.startswith("grow (") and reason.endswith(loop.MATCHED_NOTE + ")")
+    # without the matched bars the reason is the plain one
+    plain = heavy.drop(columns=[beam_design.CONTINUITY_COLUMN])
+    assert loop.MATCHED_NOTE not in loop.beam_actions(
+        plain, {"B1": current}, {"B1": 6000.0}, set(), settings)["B1"][1]
+    # more bars do not cause a deflection failure: no note there (BOTTOM, v0.18.2)
+    sagging = heavy.copy()
+    sagging["Design_Status"] = "FAILED: DEFLECTION (NSCP 424.2.2)"
+    assert loop.beam_actions(sagging, {"B1": current}, {"B1": 6000.0}, set(),
+                             settings)["B1"][1] == "grow (deflection)"
+
+
 def test_the_design_loop_designs_with_the_matching_at_every_iteration(monkeypatch):
     """sdt design calls the beam design with the option at each iteration, so a girder
     that fails with its matched bars is resized like any other."""

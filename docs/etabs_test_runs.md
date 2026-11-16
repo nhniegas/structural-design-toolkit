@@ -94,6 +94,8 @@ The first runs showed three things:
 
 For v0.7.0 a second scenario, `t34 own patterns.json`, runs `setup`, `check`, `analyze` and `drift` with every dialog at its default on a copy of the test model that was given load patterns of its own (`Dead` with a self weight of 1.0, `Live`, `EQX`), as a model from another office has. It checks that setup puts `Dead` and `Live` in the combinations and the mass, sets the second self weight to 0, and does not list the patterns ETABS makes by itself (`WX(1/12)`, `~LLRF`). The copy is made by a short script beside the scenario, since ETABS must add the patterns.
 
+The girder bars through the columns (v0.17.0) have three scenarios: `t34 continuity.json` and `bottom continuity.json` run `sdt beams` and `sdt columns` with the option on, and `t34 design continuity.json` (since v0.18.2) runs `sdt design` with it, so the girders that fail with their matched bars are resized by the loop.
+
 ## Limits
 
 - The models are not part of the repository, so the scenarios and references stay with the models on your machine.
