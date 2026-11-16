@@ -447,6 +447,20 @@ def member_demands(results: pd.DataFrame) -> dict[str, tuple[float, float]]:
                                                              grouped["V"]) if m == m and v == v}
 
 
+MATCHED_NOTE = ", with the bars matched through the columns"
+# the failures the matched bars can cause (reasons as beam_actions writes them)
+MATCHED_REASONS = ("max bars", "smrf steel ratio", "smrf moment", "shear spacing", "failed")
+
+
+def matched_bars(rows: pd.DataFrame) -> bool:
+    """Whether a beam took support bars from the next span (``Bars_Through_Columns``,
+    girder bars through the columns): its steel ratio, layers and probable-moment
+    shear were checked with those bars (v0.18.1)."""
+    if "Bars_Through_Columns" not in rows:
+        return False
+    return rows["Bars_Through_Columns"].astype(str).str.contains("through").any()
+
+
 def beam_actions(results: pd.DataFrame, sections: dict[str, Section], lengths: dict[str, float],
                  grown: set[str], settings: LoopSettings, seismic: bool = True,
                  allow_shrink: bool = True, lines: dict[str, str] | None = None,
@@ -496,6 +510,12 @@ def beam_actions(results: pd.DataFrame, sections: dict[str, Section], lengths: d
                 if smaller is not None:
                     shrinkable[name] = smaller
             continue
+        if reason in MATCHED_REASONS and matched_bars(rows):
+            # the support bars came from the next span (girder bars through the columns)
+            # and were checked again with this section: more bars raise the steel ratio,
+            # the layers, the probable moments and so the capacity shear Ve (not the
+            # deflection, which they reduce)
+            reason += MATCHED_NOTE
         if new is None:
             wanted[name] = (section, f"{reason}: no larger size within the limits")
         else:
@@ -1140,7 +1160,7 @@ def stop_runaway_growth(actions: dict, sections: dict, shear_growths: dict[str, 
     """
     stopped = []
     for name, (new, reason) in list(actions.items()):
-        if reason not in SHEAR_REASONS or new == sections.get(name):
+        if reason.replace(MATCHED_NOTE, "") not in SHEAR_REASONS or new == sections.get(name):
             continue
         shear_growths[name] = shear_growths.get(name, 0) + 1
         if shear_growths[name] > MAX_SHEAR_GROWTHS:
@@ -1269,7 +1289,7 @@ def stop_unhelped_deflection_growth(actions: dict, sections: dict, results: pd.D
         if "SupportStatus" in results.columns else pd.Series(dtype=str)
     stopped = []
     for name, (new, reason) in list(actions.items()):
-        if reason != DEFLECTION_REASON or new == sections.get(name):
+        if reason.replace(MATCHED_NOTE, "") != DEFLECTION_REASON or new == sections.get(name):
             continue
         ratio = float(now.get(name, float("nan")))
         before = ratios.get(name)

@@ -134,7 +134,7 @@ How the seismic patterns hold these inputs depends on the model:
 - **After `sdt grids`:** "User Defined" again. ETABS puts the source distance of a "Per Code" pattern back to 15 km whenever the seismic table is written, and `sdt grids` writes it to set the bottom and top story. So it writes the Ca and Cv of the pattern's own inputs instead of leaving "Per Code" with the wrong distance.
 - **Model that was already open:** "User Defined", with the Ca and Cv worked out here. The values are the same; the model is not reloaded from text.
 
-The response spectrum scale factor is g I / R. Scaling to the static base shear is not done yet.
+The response spectrum scale factor set here is g I / R. `sdt analyze` then scales each spectrum case to the static base shear (90 % or 100 %, NSCP 208.5.3.5.4); see [Analysis](etabs_analysis.md).
 
 ## Load combinations (NSCP 2015)
 

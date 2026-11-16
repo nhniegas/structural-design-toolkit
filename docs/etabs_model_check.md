@@ -69,9 +69,12 @@ Every story is included, those below the ground level too. A model set up before
 | | Column side at least 300 mm; side ratio at least 0.4 | 418.7.2.1 |
 | | Concrete at least 21 MPa; rebar at most 420 MPa | 418.2.5.1, 418.2.6.1, 420.2.2.5 |
 
-## Not checked yet
+## Checked by other commands
 
-- Irregularities are not part of this command: `sdt irregularity` checks them, with the torsion amplifier Ax and the P-delta stability coefficient (see [Irregularity check](etabs_irregularity.md)).
-- The redundancy factor ρ (208.6.1).
+- Irregularities: `sdt irregularity` checks them, with the torsion amplifier Ax and the P-delta stability coefficient (see [Irregularity check](etabs_irregularity.md)).
+- The redundancy factor ρ (208.6.1): `sdt analyze` works it out per direction and puts it into the seismic combinations (see [Analysis](etabs_analysis.md)).
+
+## Not checked
+
 - Minimum live loads against Table 205-1, and partition loads (204.3).
-- Wind speed against the site map (Figure 207A.5).
+- Wind speed against the site map (Figure 207A.5): the speed of each wind pattern is listed, to be confirmed against the site.
