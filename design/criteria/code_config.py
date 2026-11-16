@@ -347,6 +347,81 @@ class DetailingDrawingConfig:
 
 
 # =============================================================================
+# SLABS: ONE-WAY (ACI ch. 7) AND TWO-WAY (ACI ch. 8)
+# =============================================================================
+@dataclass(frozen=True)
+class SlabConfig:
+    """Thickness, steel and spacing limits of solid non-prestressed slabs."""
+
+    # minimum h of one-way slabs, l / divisor                       ACI Table 7.3.1.1
+    one_way_h_simple: float = 20.0
+    one_way_h_one_end: float = 24.0
+    one_way_h_both_ends: float = 28.0
+    one_way_h_cantilever: float = 10.0
+    h_fy_base: float = 0.4  # multiplier 0.4 + fy/700 for fy other than 420      ACI 7.3.1.1.1
+    h_fy_divisor: float = 700.0  #                                               ACI 7.3.1.1.1
+    # minimum h of two-way slabs with beams on all sides             ACI Table 8.3.1.2
+    alpha_fm_low: float = 0.2  # at or under it, Table 8.3.1.1 applies           ACI Table 8.3.1.2(a)
+    alpha_fm_high: float = 2.0  #                                                 ACI Table 8.3.1.2(d)
+    two_way_h_fy_base: float = 0.8  # ln (0.8 + fy/1400)                          ACI Table 8.3.1.2(b),(d)
+    two_way_h_fy_divisor: float = 1400.0
+    two_way_h_mid_constant: float = 36.0  # 36 + 5 beta (alpha_fm - 0.2)         ACI Table 8.3.1.2(b)
+    two_way_h_mid_beta: float = 5.0
+    two_way_h_mid_floor: float = 125.0  # mm                                      ACI Table 8.3.1.2(c)
+    two_way_h_stiff_constant: float = 36.0  # 36 + 9 beta                         ACI Table 8.3.1.2(d)
+    two_way_h_stiff_beta: float = 9.0
+    two_way_h_stiff_floor: float = 90.0  # mm                                     ACI Table 8.3.1.2(e)
+    discontinuous_edge_increase: float = 1.10  # without an edge beam alpha_f >= 0.8  ACI 8.3.1.2.1
+    edge_beam_alpha: float = 0.8  #                                                ACI 8.3.1.2.1
+    # two-way slabs without interior beams, fy 420, no drop panels   ACI Table 8.3.1.1
+    flat_h_exterior_no_edge_beam: float = 30.0
+    flat_h_exterior_edge_beam: float = 33.0
+    flat_h_interior: float = 33.0
+    flat_h_floor: float = 125.0  # mm, without drop panels                        ACI 8.3.1.1(a)
+    # minimum flexural steel, As,min / Ag                         ACI Tables 7.6.1.1, 8.6.1.1
+    as_min_low_fy: float = 0.0020  # fy < 420
+    as_min_ratio_420: float = 0.0018  # x 420 / fy, fy >= 420
+    as_min_floor: float = 0.0014
+    as_min_fy_limit: float = 420.0
+    two_way_min_strain: float = 0.004  # net tensile strain                       ACI 8.3.3.1
+    # spacing                                                      ACI 7.7.2.3, 7.7.2.4, 8.7.2.2
+    one_way_max_spacing_h: float = 3.0  # lesser of 3h and 450
+    temperature_max_spacing_h: float = 5.0  # lesser of 5h and 450
+    two_way_critical_spacing_h: float = 2.0  # lesser of 2h and 450 at critical sections
+    two_way_other_spacing_h: float = 3.0  # lesser of 3h and 450 elsewhere
+    max_spacing_cap: float = 450.0  # mm
+    cover: float = 20.0  # mm, slabs not exposed, bars 36 mm and smaller        ACI Table 20.6.1.3.1
+    shear_vc_coeff: float = 0.17  # Vc = 0.17 lambda sqrt(fc') b d             ACI 22.5.5.1
+    # one-way approximate moments, wu ln^2 / divisor                 ACI Table 6.5.2
+    coeff_end_integral: float = 14.0  # positive, end span, discontinuous end integral
+    coeff_end_unrestrained: float = 11.0  # positive, end span, discontinuous end unrestrained
+    coeff_interior_positive: float = 16.0
+    coeff_ext_support_spandrel: float = 24.0  # negative, interior face of exterior support, spandrel
+    coeff_ext_support_column: float = 16.0  # the same, built with a column
+    coeff_first_interior_two_spans: float = 9.0
+    coeff_first_interior_more_spans: float = 10.0
+    coeff_other_supports: float = 11.0
+    coeff_short_spans: float = 12.0  # every support of slabs with spans <= 3 m   ACI Table 6.5.2
+    short_span_limit: float = 3000.0  # mm
+    shear_first_interior: float = 1.15  # 1.15 wu ln / 2                           ACI Table 6.5.4
+    # conditions for the approximate moments                          ACI 6.5.1
+    live_to_dead_max: float = 3.0  # L <= 3D                                       ACI 6.5.1(c)
+    adjacent_span_ratio_max: float = 1.2  # longer within 20 % of the shorter      ACI 6.5.1(e)
+    # Direct Design Method limits                                     ACI 8.10.2
+    ddm_min_spans: int = 3  #                                                       ACI 8.10.2.1
+    ddm_span_difference: float = 1.0 / 3.0  #                                       ACI 8.10.2.2
+    ddm_max_aspect: float = 2.0  #                                                  ACI 8.10.2.3
+    ddm_live_to_dead_max: float = 2.0  #                                            ACI 8.10.2.6
+    ddm_alpha_ratio_min: float = 0.2  #                                             ACI 8.10.2.7
+    ddm_alpha_ratio_max: float = 5.0
+    ddm_min_clear_span_ratio: float = 0.65  # ln >= 0.65 l1                         ACI 8.10.3.2.1
+    ddm_interior_negative: float = 0.65  #                                          ACI 8.10.4.1
+    ddm_interior_positive: float = 0.35
+    beam_flange_slab_multiple: float = 4.0  # slab each side <= 4 h                ACI 8.4.1.8
+    one_way_aspect: float = 2.0  # long / short over 2: one-way (the Method 3 tables stop at m = 0.5)
+
+
+# =============================================================================
 # INPUT CONVENTIONS
 # =============================================================================
 @dataclass(frozen=True)
@@ -384,6 +459,7 @@ class AciCode:
     column_slenderness: ColumnSlendernessConfig = field(
         default_factory=ColumnSlendernessConfig)
     drawing: DetailingDrawingConfig = field(default_factory=DetailingDrawingConfig)
+    slab: SlabConfig = field(default_factory=SlabConfig)
     conventions: InputConventionConfig = field(default_factory=InputConventionConfig)
 
     # ---- helpers shared by beam and column scripts -------------------------

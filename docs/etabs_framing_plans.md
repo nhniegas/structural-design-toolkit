@@ -19,6 +19,7 @@ sdt plans
 | Column marks | On every floor, or only where each column starts (the bottom-most level) |
 | Plot scale | 1 : 100, 1 : 50 or 1 : 200. It sets the text height (2.5 mm on paper, so 250 mm at 1 : 100) and the length of the dashes. The plan itself is always drawn at 1 : 1 in mm |
 | Foundation plan | Yes or no. Asked only when a plan of the foundation model of this model was saved (see [The foundation plan](#the-foundation-plan)) |
+| Slab marks (since v0.19.0) | Yes or no. Asked only when `sdt slabs` saved its design beside the model (`<model> - slab design.json`); it says when. See [Slab marks](#slab-marks) |
 | Folder | The output folder: `<model> - Framing Plans.dxf` is saved in its `Drawings` subfolder |
 
 A window then shows the summary: the floors, the counts of what was drawn and the file.
@@ -36,6 +37,7 @@ The floors are drawn side by side in one row, from the lowest, each with its tit
 | Beam names and column marks, titles | Text | `S-TEXT` |
 | Grid lines and bubbles | Centre lines | `S-GRID` |
 | Grid dimensions | Between the grids, and overall | `S-DIM` |
+| Slab marks and span symbols (since v0.19.0) | Text and lines | `S-SLAB` |
 
 **Beams are multilines** (the AutoCAD `MLINE` object, style `SDT_BEAM`). A multiline is one object with two parallel lines: when you drag an end point, both lines follow and the width is kept. The width is the scale of each multiline, so it can be changed in its properties. `EXPLODE` turns a multiline into two plain lines.
 
@@ -80,9 +82,21 @@ The foundation plan is drawn first, to the left of the floors, with the title `F
 
 The saved plan is what the foundation model held when it was saved. After the foundation changes, save the plan again. When `sdt foundation` saves a plan, it reports the columns that have no footing under them.
 
+## Slab marks
+
+After `sdt slabs`, its panels and marks are saved beside the model. `sdt plans` then offers to draw them. Each panel gets:
+
+- **Its mark**: `S-1`, numbered on each floor. The kind (ONE WAY, TWO WAY, CANTILEVER) is in the remarks of the slab schedule.
+- **The office span symbol**: a line along the span with a half arrowhead at each end, the two on opposite sides.
+  - One-way slab: one symbol, along the main bars (the short span).
+  - Two-way slab: two, crossed.
+  - Cantilever: one, with its half arrowhead at the free end only.
+
+The symbol and the mark are centred together in the panel, the mark beside the symbol so it never runs over a line. On a bay too narrow for the mark, the text is made smaller, to 60 percent of the plan's text height at least. Both follow the axes of the panel, so they lie along the bays of a skewed grid. When the slabs or their loads change, run `sdt slabs` again before the plans. See [Slab design](slab_design.md).
+
 ## What it does not do
 
-- Slabs: no slab outline, mark or span arrow.
+- Slabs: no slab outline or hatch; the marks need `sdt slabs` first.
 - The foundation plan shows the footings as modelled: no bars, no dimensions to the grids, no footing schedule table. A wall footing is drawn by its outline, with no wall on it.
 - A beam whose section is not a concrete rectangle (a steel shape, a tee, a section designer section) is drawn as one dashed line; the summary lists those sections. A column that is not a rectangle or a circle is not drawn.
 - The insertion point (cardinal point) and joint offsets of a member are ignored: every member is drawn on its joint-to-joint line.

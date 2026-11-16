@@ -96,6 +96,8 @@ For v0.7.0 a second scenario, `t34 own patterns.json`, runs `setup`, `check`, `a
 
 The girder bars through the columns (v0.17.0) have three scenarios: `t34 continuity.json` and `bottom continuity.json` run `sdt beams` and `sdt columns` with the option on, and `t34 design continuity.json` (since v0.18.2) runs `sdt design` with it, so the girders that fail with their matched bars are resized by the loop.
 
+The slab design (v0.19.0) has two: `t34 slabs.json` runs `sdt slabs` and then `sdt plans` with the slab marks, and `bottom slabs.json` runs `sdt slabs` on the BOTTOM model, whose framing is skewed (1,233 panels from 259 floor objects).
+
 ## Limits
 
 - The models are not part of the repository, so the scenarios and references stay with the models on your machine.

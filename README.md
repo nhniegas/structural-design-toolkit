@@ -8,6 +8,7 @@ Structural design calculations and ETABS automation, run from the terminal, each
 |---|---|---|
 | `sdt beams` | `concrete/beams/` | NSCP 2015 (ACI 318M-14) beam flexure, shear, torsion, deflection and SMRF checks from ETABS forces; girder and beam schedule DXF; PDF calculation report |
 | `sdt columns` | `concrete/columns/` | NSCP 2015 (ACI 318M-14) column P-M with slenderness, shear, confinement, strong-column and joint-shear checks; column schedule DXF; PDF calculation report |
+| `sdt slabs` | `concrete/slabs/` | NSCP 2015 solid slabs panel by panel: one-way by Table 406.5.2 or a strip analysis, two-way by ACI Method 3 or the Direct Design Method (408.10); thickness, bars, shear; marks, slab schedule DXF, slab marks on `sdt plans`; PDF calculation report |
 | `sdt composite` | `steel/composite_column_aiscDG06.py` | AISC Design Guide 6 rectangular filled composite column; one window with the section drawn and its interaction diagram; printout and/or PDF report |
 | `sdt steel` | `steel/wide_flange_aisc360.py` | AISC 360-22 wide-flange capacity checks; one window with the section drawn and the ratio of every check; printout and/or PDF report |
 | `sdt wind` | `loads/wind_directional_asce7.py` | ASCE 7 directional procedure (MWFRS) wind pressures; printout and/or PDF report |
@@ -23,6 +24,8 @@ design/
     beams/      design, sections, supports, deflection, carriers, results, schedule, calculations, options
     columns/    design, sizing, section, layouts, flexure, interaction, slenderness, transverse,
                 shear, joints, tables, report, schedule, calculations, options
+    slabs/      panels (cut at the beams and walls), method3, one_way, ddm, strip, design,
+                schedule (marks and tables), schedule_dxf, report
   steel/        wide-flange members (AISC 360-22) and filled composite columns (AISC DG6)
   loads/        the wind calculator (ASCE 7)
   parallel.py   the processes that share the beam design of a large model and the report figures
@@ -76,6 +79,7 @@ Supporting code:
 - `design/parallel.py`: the processes that share the beam design of a large model, and the figures of the column report, between the cores (`SDT_WORKERS=1` keeps one).
 - `etabs_api/workflows/seismic_factors.py`: Ax applied as amplified accidental torsion patterns, and the redundancy factor ρ of each direction (columns, walls and braces), for `sdt analyze`.
 - `etabs_api/workflows/wall_design.py`, `wall_piers.py`: `sdt walls`; `etabs_api/workflows/compatibility.py`: `sdt compatibility`.
+- `etabs_api/workflows/slab_design.py`: `sdt slabs`, which reads the slabs, beams, walls and floor loads and runs the design of `design/concrete/slabs/`.
 - `utilities/latex_help.py`: compiles every PDF report (pdflatex in the report's folder) and says what to do when LaTeX is missing.
 - `build_exe.ps1`: builds the packaged program `sdt.exe`.
 - `utilities/_xlsx_values.py`: rounded numbers and stated blanks of the result workbooks.
@@ -149,6 +153,7 @@ Each guide in `docs/` covers one tool: how to run it, its inputs, what it writes
 - [Wind load calculator](docs/wind_calculator_asce7_documentation.md)
 - [Pile cap design](docs/pile_cap_design.md)
 - [Wall design](docs/etabs_wall_design.md)
+- [Slab design](docs/slab_design.md)
 - [Deformation compatibility](docs/etabs_compatibility.md)
 - [Output folders: where each file is written](docs/output_folders.md)
 - [Results in the terminal](docs/terminal_output.md)
@@ -178,9 +183,10 @@ sdt columns     # design the columns from the stored beam step
 sdt design      # analysis and beam/column design loop that resizes members until they pass
 sdt schedules   # the beam and column schedules (DXF) again from a stored design, no ETABS
 sdt walls       # structural walls: planar, L, U and cores, NSCP 418.10 and 411
+sdt slabs       # solid slabs panel by panel: one-way and two-way, marks, schedule, calcs
 sdt compatibility  # members not in the lateral system (group GRAVITY ONLY): forces at the design displacement, NSCP 418.14
 sdt foundation  # a second model for the foundation, from the support reactions; or update its forces
-sdt plans       # framing plans of every floor as one DXF: beams, columns, marks, grids; the foundation plan too
+sdt plans       # framing plans of every floor as one DXF: beams, columns, marks, grids; slab marks and the foundation plan too
 sdt 3d          # the model as 3D solids in a STEP file, for AutoCAD; the foundation and the bars too
 sdt quantities  # concrete volume by story, floor area and the concrete ratio in m3/m2 (read only)
 sdt composite   # rectangular filled composite column, AISC DG6 (no ETABS)
@@ -243,7 +249,7 @@ This defines the materials, frame sections, load patterns, UBC 97 response spect
 
 ## Framing plans
 
-`sdt plans` writes the framing plans of the open model as one DXF, the floors side by side at 1:1 in mm. Beams and girders are dashed multilines at their true width, which keep their width when an end is dragged in AutoCAD, and stop at the column faces. Columns are solid at their true size and rotation, walls at their thickness. Every beam has its name; the column marks are on every floor or only where each column starts; the grids, with or without dimensions, are optional. When the plan of the foundation model was saved with `sdt foundation`, the foundation plan can be included: footings with their marks (`F1` for isolated footings of one size, `CF1` for a combined footing), tie beams and columns. See [Framing plans](docs/etabs_framing_plans.md).
+`sdt plans` writes the framing plans of the open model as one DXF, the floors side by side at 1:1 in mm. Beams and girders are dashed multilines at their true width, which keep their width when an end is dragged in AutoCAD, and stop at the column faces. Columns are solid at their true size and rotation, walls at their thickness. Every beam has its name; the column marks are on every floor or only where each column starts; the grids, with or without dimensions, are optional. After `sdt slabs`, the slab marks can be drawn too, each with the office span symbol along its main bars. When the plan of the foundation model was saved with `sdt foundation`, the foundation plan can be included: footings with their marks (`F1` for isolated footings of one size, `CF1` for a combined footing), tie beams and columns. See [Framing plans](docs/etabs_framing_plans.md).
 
 ## 3D model
 
@@ -256,6 +262,10 @@ This defines the materials, frame sections, load patterns, UBC 97 response spect
 ## Wall design
 
 `sdt walls` designs the structural walls, planar, L, U and cores, to NSCP 2015 418.10 (special) or 411 (ordinary), wall by wall. Each straight leg has its own pier label (`sdt tag` gives them), and the legs that meet are designed together as one section: axial load and bending by strain compatibility about each principal axis, shear leg by leg, minimum steel and curtains, and special boundary elements by the displacement and the stress methods. See [Wall design](docs/etabs_wall_design.md).
+
+## Slab design
+
+`sdt slabs` designs the solid slabs of the open model panel by panel, to NSCP 2015. The floor objects are cut along the beam and wall lines into panels, in each panel's own axes so the bays of a skewed grid are rectangles too, with the thickness and concrete of their slab property and the dead and live loads assigned to them. One-way panels (supported on two opposite sides, or longer than twice their width) take the moments of NSCP Table 406.5.2 when the strip meets 406.5.1, else of a strip analysis with the live load of 406.4.2. Two-way panels take ACI Method 3 (cases 1 to 9, as the office slab sheets; NSCP 408.2.1), or the Direct Design Method of 408.10 when their beams are flexible (a mean alpha_f under the limit you set) and its limits hold. Each panel is checked for thickness, bars (12 mm, at most 300 mm by default), net tensile strain and shear, and flagged when it fails, not resized. Panels of the same design share a mark, at most 15 per floor. It writes the results workbook, the slab schedule (DXF), the calculation report (PDF), and the marks that `sdt plans` draws. See [Slab design](docs/slab_design.md).
 
 ## Deformation compatibility
 
@@ -305,7 +315,7 @@ Not in this version, and planned for later ones:
 - **Steel and composite members from the ETABS model.** `sdt steel` and `sdt composite` are standalone checks with typed inputs.
 - **Flanged beams.** The design loop resizes rectangular beams and rectangular or circular columns only.
 - **The irregularities left to judgement**: in-plane discontinuity, out-of-plane offsets, non-parallel systems, and the change of diaphragm stiffness from story to story.
-- **Slabs on the framing plans.** `sdt plans` draws beams, columns, walls and grids; slab marks and span arrows are not drawn yet.
+- **Slabs beyond solid slabs on beams.** `sdt slabs` designs solid slabs on beams and walls. Flat plates and flat slabs (punching shear), post-tensioned, ribbed and waffle slabs, and tank slabs are not designed, and deflection is not calculated (the thickness is checked against the NSCP minimum).
 - **Equations in the batch reports.** The beam and column reports, and Part C of the full project report, hold tables of values for each member. Writing out the equations of every member with their numbers is planned as a choice.
 - **The full project report for a model designed earlier.** Today it is written at the end of `sdt design` only.
 - **Bar details in the 3D model.** `sdt 3d` draws the designed bars straight. Laps, hooks, bends, anchorage and cut-off points are not designed yet, and slabs, walls and footings have no bars.
