@@ -83,6 +83,7 @@ Supporting code:
 - `utilities/latex_help.py`: compiles every PDF report (pdflatex in the report's folder) and says what to do when LaTeX is missing.
 - `build_exe.ps1`: builds the packaged program `sdt.exe`.
 - `utilities/_xlsx_values.py`: rounded numbers and stated blanks of the result workbooks.
+- `utilities/ecc_drafting.py`: the ECC drafting standard of every DXF sdt writes (colour = pen, S- layers, SIMPLEX 0.85).
 - `utilities/ordering.py`: the order of the members in the results, schedules and reports (marks by number: C2 before C10).
 - `main.qmd`: Quarto template for written reports.
 - `main.py`: terminal entry point of every command (`sdt --help` lists them).
@@ -249,7 +250,7 @@ This defines the materials, frame sections, load patterns, UBC 97 response spect
 
 ## Framing plans
 
-`sdt plans` writes the framing plans of the open model as one DXF, the floors side by side at 1:1 in mm. Beams and girders are dashed multilines at their true width, which keep their width when an end is dragged in AutoCAD, and stop at the column faces. Columns are solid at their true size and rotation, walls at their thickness. Every beam has its name; the column marks are on every floor or only where each column starts; the grids, with or without dimensions, are optional. After `sdt slabs`, the slab marks can be drawn too, each with the office span symbol along its main bars. When the plan of the foundation model was saved with `sdt foundation`, the foundation plan can be included: footings with their marks (`F1` for isolated footings of one size, `CF1` for a combined footing), tie beams and columns. See [Framing plans](docs/etabs_framing_plans.md).
+`sdt plans` writes the framing plans of the open model as one DXF, the floors side by side at 1:1 in mm. Beams and girders are dashed multilines at their true width, which keep their width when an end is dragged in AutoCAD, and stop at the column faces. Columns are solid at their true size and rotation, walls at their thickness. Every beam has its name; the column marks are on every floor or only where each column starts; the grids, with or without dimensions, are optional. After `sdt slabs`, the slab marks can be drawn too, each with the office span symbol along its main bars. When the plan of the foundation model was saved with `sdt foundation`, the foundation plan can be included: footings with their marks (`F1` for isolated footings of one size, `CF1` for a combined footing), tie beams and columns. Since v0.20.0 the plans and the schedules follow the office drafting standard (ECC): every object on an S- layer whose colour is its pen in `ECC_FULL for Paper.ctb` (columns 0.53, girders 0.40, beams 0.15, text 0.13, grids grey), no lineweights of their own, text SIMPLEX at width 0.85; `sdt model` reads columns on `S-COLS` too. See [Framing plans](docs/etabs_framing_plans.md).
 
 ## 3D model
 

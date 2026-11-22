@@ -386,3 +386,18 @@ def test_renamed_stories_carry_the_columns_and_walls():
     gcm.rename_stories(building, [("2F", "L2")])
     assert building.stories == [("L2", 4500.0)] and building.columns[0].story == "L2"
     assert building.story_pairs == [("2F", "L2")]
+
+
+def test_columns_on_the_ecc_layer_are_read_too(tmp_path):
+    # S-COLS is the column layer of the ECC drafting standard (utilities/ecc_drafting.py)
+    path = str(write_plans(tmp_path / "ecc.dxf", [("2F", 3000, on_grids())]))
+    doc = ezdxf.readfile(path)
+    for entity in doc.modelspace().query("LWPOLYLINE"):
+        if entity.dxf.layer == "S-COLUMN":
+            entity.dxf.layer = "S-COLS"
+    doc.saveas(path)
+    building = gc.read_framing_plans(path)
+    assert len(building.columns) == 6
+    # a layer named by the user replaces the default and its ECC name
+    building = gc.read_framing_plans(path, {"column": "MY-COLS"})
+    assert not building.columns

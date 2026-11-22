@@ -100,5 +100,10 @@ def write_slab_schedule(path: str, marks: list[Mark]) -> str:
             y = c
         rect(xs[0], top, xs[-1], y, "OUTLINE")
         x0 += total + GAP
+    # the ECC drafting standard: layers by colour, no explicit lineweights (utilities/ecc_drafting.py)
+    from utilities import ecc_drafting
+
+    ecc_drafting.to_standard(doc, {"TABLE": "symbols", "OUTLINE": "schedule", "TEXT": "text",
+                                   "TITLE": "titles"})
     doc.saveas(path)
     return path

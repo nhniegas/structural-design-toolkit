@@ -33,6 +33,11 @@ from design.concrete.columns.report import (
 DEFAULT_SECTION_SCALE = 20.0   # the column sections are drawn at 1 : 20 unless chosen
 
 
+
+# schedule layers -> roles of the ECC drafting standard (utilities/ecc_drafting.py)
+COLUMN_SCHEDULE_ROLES = {"TABLE": ("symbols", "text"), "CONCRETE": "concrete", "TIES": "ties",
+                         "CROSSTIES": "ties", "HOOKS": "ties", "LONGITUDINAL": "bars"}
+
 def _bundle_histogram(summary: str) -> dict[int, int]:
     """Parse the report bundle summary into bundle-size to package-count pairs."""
     result: dict[int, int] = {}
@@ -1161,6 +1166,10 @@ def generate_dxf_column_schedule(
                 add_text(value, x_left, row_top - data_height / 2.0, text_height, detail_width)
         y_top = block_bottom
 
+    # the ECC drafting standard: layers by colour, no explicit lineweights (utilities/ecc_drafting.py)
+    from utilities import ecc_drafting
+
+    ecc_drafting.to_standard(doc, COLUMN_SCHEDULE_ROLES)
     doc.saveas(output_filepath)
     return
 

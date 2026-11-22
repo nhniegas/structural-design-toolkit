@@ -33,20 +33,18 @@ from dataclasses import dataclass, field
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from utilities import ecc_drafting as ecc  # noqa: E402
 from utilities.output_folders import DRAWINGS, output_path  # noqa: E402
 
-LAYER_GIRDER, LAYER_BEAM, LAYER_COLUMN = "S-GIRDER", "S-BEAM", "S-COLUMN"
-LAYER_WALL, LAYER_GRID, LAYER_TEXT, LAYER_DIM = "S-WALL", "S-GRID", "S-TEXT", "S-DIM"
-LAYER_FOOTING, LAYER_TIE_BEAM = "S-FOOTING", "S-TIEBEAM"
-LAYER_SLAB = "S-SLAB"
-# name, AutoCAD colour index, linetype
-LAYERS = (
-    (LAYER_GIRDER, 3, "Continuous"), (LAYER_BEAM, 4, "Continuous"),
-    (LAYER_COLUMN, 7, "Continuous"), (LAYER_WALL, 8, "Continuous"),
-    (LAYER_GRID, 8, "CENTER"), (LAYER_TEXT, 2, "Continuous"), (LAYER_DIM, 1, "Continuous"),
-    (LAYER_FOOTING, 6, "Continuous"), (LAYER_TIE_BEAM, 5, "Continuous"),
-    (LAYER_SLAB, 6, "Continuous"),
-)
+# The ECC drafting standard (utilities/ecc_drafting.py): colour = pen through
+# ECC_FULL for Paper.ctb, objects ByLayer, SIMPLEX 0.85 text.
+LAYER_GIRDER, LAYER_BEAM, LAYER_COLUMN = ecc.layer("girders"), ecc.layer("beams"), ecc.layer("columns")
+LAYER_WALL, LAYER_GRID, LAYER_TEXT, LAYER_DIM = (ecc.layer("walls"), ecc.layer("grid"),
+                                                ecc.layer("text"), ecc.layer("dims"))
+LAYER_FOOTING, LAYER_TIE_BEAM = ecc.layer("footings"), ecc.layer("tie_beams")
+LAYER_SLAB = ecc.layer("slab_marks")
+PLAN_ROLES = ("girders", "beams", "columns", "walls", "grid", "text", "dims", "footings",
+              "tie_beams", "slab_marks", "symbols")
 BEAM_STYLE = "SDT_BEAM"       # the multiline style: two dashed lines, one unit apart
 DIM_STYLE = "SDT_PLAN"
 PAPER_TEXT = 2.5              # mm on paper; the text height is this times the plot scale
@@ -397,8 +395,9 @@ def _new_document(options: PlanOptions):
     if "HIDDEN" not in doc.linetypes:   # the dashes of a member seen from above
         doc.linetypes.add("HIDDEN", pattern=[0.375, 0.25, -0.125],
                           description="Hidden __ __ __ __ __ __ __ __")
-    for name, color, linetype in LAYERS:
-        doc.layers.add(name, color=color, linetype=linetype)
+    ecc.setup(doc, PLAN_ROLES)
+    doc.header["$LTSCALE"] = 10.0 * options.scale  # standalone DXF; a template sheet uses its own
+    doc.header["$PSLTSCALE"] = 0
     style = doc.mline_styles.new(BEAM_STYLE)
     style.elements.append(0.5, 256, "HIDDEN")
     style.elements.append(-0.5, 256, "HIDDEN")
@@ -407,6 +406,7 @@ def _new_document(options: PlanOptions):
         "dimtxt": height, "dimasz": 0.6 * height, "dimtsz": 0.5 * height,
         "dimexe": 0.5 * height, "dimexo": 0.5 * height, "dimgap": 0.3 * height,
         "dimtad": 1, "dimdec": 0, "dimlfac": 1.0, "dimscale": 1.0, "dimtih": 0, "dimtoh": 0,
+        "dimclrd": 256, "dimclre": 256, "dimclrt": 52, "dimtxsty": ecc.TEXT_STYLE,
     })
     return doc
 
@@ -416,7 +416,7 @@ def _text(msp, text: str, point, height: float, angle: float = 0.0, align: str =
     from ezdxf.enums import TextEntityAlignment
 
     entity = msp.add_text(str(text), height=height,
-                          dxfattribs={"layer": layer, "rotation": angle})
+                          dxfattribs={"layer": layer, "rotation": angle, "style": ecc.TEXT_STYLE})
     entity.set_placement(point, align=getattr(TextEntityAlignment, align))
 
 
@@ -553,9 +553,29 @@ def draw_slab_mark(msp, panel: dict, offset: tuple[float, float], height: float)
     gap = 0.5 * size
     width = CHAR_WIDTH * size * len(label)
     shift = min((width + gap) / 2.0, most)
+    if directions == ["X"]:
+        # centred above the x line: no shift, and the whole bay width is the room for the text
+        shift = 0.0
+        size = max(min(height, (spans[0] - 2.0 * margin) / (CHAR_WIDTH * len(label))),
+                   0.6 * height)
+        gap = 0.5 * size
     cx, cy = cx - shift * c, cy - shift * s
-    _text(msp, label, (cx + gap * (c - s), cy + gap * (s + c)), size,
-          angle=math.degrees(angle), align="BOTTOM_LEFT", layer=LAYER_SLAB)
+    if len(directions) == 1:
+        # the beam names sit at the middle of their beams: a one-way mark and symbol move a
+        # quarter of the bay's length off the middle, along the bay, clear of them
+        along = 0.25 * (spans[1] if directions == ["X"] else spans[0])
+        if directions == ["X"]:
+            cx, cy = cx + along * s, cy - along * c
+        else:
+            cx, cy = cx - along * c, cy - along * s
+    if directions == ["X"]:
+        # one-way along the panel's x: the mark centred above the span line, clear of the
+        # beam names on the beam lines at the ends of a narrow bay
+        _text(msp, label, (cx - gap * s, cy + gap * c), size, angle=math.degrees(angle),
+              align="BOTTOM_CENTER", layer=LAYER_SLAB)
+    else:
+        _text(msp, label, (cx + gap * (c - s), cy + gap * (s + c)), size,
+              angle=math.degrees(angle), align="BOTTOM_LEFT", layer=LAYER_SLAB)
     for direction in directions:
         half = halves[direction]
         turn = angle if direction == "X" else angle + math.pi / 2.0
@@ -629,8 +649,10 @@ def draw_grids(msp, grids: list[PlanGrid], box: tuple[float, float, float, float
         msp.add_line((line.x1 + ox, line.y1 + oy), (line.x2 + ox, line.y2 + oy),
                      dxfattribs={"layer": LAYER_GRID})
         centre = (line.x1 - ux * radius + ox, line.y1 - uy * radius + oy)
-        msp.add_circle(centre, radius, dxfattribs={"layer": LAYER_GRID, "linetype": "Continuous"})
-        _text(msp, line.label, centre, height, layer=LAYER_GRID)
+        # the grid line plots light grey; its bubble and label plot black so they read
+        msp.add_circle(centre, radius, dxfattribs={"layer": ecc.layer("symbols"),
+                                                   "linetype": "Continuous"})
+        _text(msp, line.label, centre, height, layer=LAYER_TEXT)
         if abs(ux) < 1e-6:
             vertical.append(line.x1)
         elif abs(uy) < 1e-6:
