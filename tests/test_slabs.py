@@ -352,11 +352,11 @@ def test_slab_marks_on_the_framing_plans(tmp_path):
     totals = write_framing_plans(floors, [], path)
     assert totals["slabs"] == 3
     msp = ezdxf.readfile(path).modelspace()
-    texts = {e.dxf.text for e in msp.query("TEXT[layer=='S-SLAB']")}
+    texts = {e.dxf.text for e in msp.query("TEXT[layer=='S-ANNO-SLAB']")}
     assert texts == {"S-1", "S-2", "S-3"}
     # span lines with a half arrowhead at each end: 2 x 3 for the two-way, 3 for the
     # one-way; the cantilever's at its free end only (2)
-    lines = msp.query("LINE[layer=='S-SLAB']")
+    lines = msp.query("LINE[layer=='S-ANNO-SLAB']")
     assert len(lines) == 6 + 3 + 2
     # the cantilever's half arrowhead is at its free (south) end, y = -600 - half
     cantilever = [e for e in lines if max(e.dxf.start.y, e.dxf.end.y) < 0]

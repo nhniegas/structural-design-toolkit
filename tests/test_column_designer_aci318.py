@@ -914,7 +914,8 @@ def test_column_schedule_dxf_is_written_and_readable(tmp_path):
 
     document = ezdxf.readfile(target)
     layers = {entity.dxf.layer for entity in document.modelspace()}
-    assert {"TABLE", "CONCRETE", "TIES", "CROSSTIES", "LONGITUDINAL"} <= layers
+    # the ECC drafting standard: table, concrete, ties and bars on their ECC layers
+    assert {"S-ANNO-TEXT", "S-ANNO-SYMB", "S-DETAIL", "S-DETL-RBAR", "S-REBAR"} <= layers
 
 
 def test_dxf_draws_one_circle_per_longitudinal_bar(tmp_path):
@@ -922,7 +923,7 @@ def test_dxf_draws_one_circle_per_longitudinal_bar(tmp_path):
     target = tmp_path / "one.dxf"
     col_schedule.generate_dxf_column_schedule(report, str(target), 25.0, 40.0, True)
     circles = [e for e in ezdxf.readfile(target).modelspace()
-               if e.dxftype() == "CIRCLE" and e.dxf.layer == "LONGITUDINAL"]
+               if e.dxftype() == "CIRCLE" and e.dxf.layer == "S-REBAR"]
     assert len(circles) == 16  # corners are no longer drawn twice
 
 
@@ -1025,7 +1026,7 @@ def test_circular_column_is_drawn_with_a_circular_concrete_outline(tmp_path):
     target = tmp_path / "circular.dxf"
     col_schedule.generate_dxf_column_schedule(pd.DataFrame([row]), str(target), 25.0, 40.0, True)
 
-    concrete = [e for e in ezdxf.readfile(target).modelspace() if e.dxf.layer == "CONCRETE"]
+    concrete = [e for e in ezdxf.readfile(target).modelspace() if e.dxf.layer == "S-DETAIL"]
     assert [entity.dxftype() for entity in concrete] == ["CIRCLE"]
 
 
@@ -1267,7 +1268,7 @@ def test_schedule_draws_every_bar_of_a_bundled_layout(tmp_path, style):
     col_schedule.generate_dxf_column_schedule(pd.DataFrame([row]), str(target), 25.0, 40.0, True, style)
     document = ezdxf.readfile(target)
     circles = [e for e in document.modelspace()
-               if e.dxftype() == "CIRCLE" and e.dxf.layer == "LONGITUDINAL"]
+               if e.dxftype() == "CIRCLE" and e.dxf.layer == "S-REBAR"]
     assert len(circles) == sum(c for *_, c in layout)
     assert len(document.audit().errors) == 0
 
@@ -1810,7 +1811,7 @@ def test_every_section_of_the_schedule_is_drawn_at_one_scale(tmp_path):
     doc = ezdxf.readfile(target)
     widths = []
     for entity in doc.modelspace():
-        if entity.dxf.layer == "CONCRETE" and entity.dxftype() == "LWPOLYLINE":
+        if entity.dxf.layer == "S-DETAIL" and entity.dxftype() == "LWPOLYLINE":
             xs = [p[0] for p in entity.get_points()]
             widths.append(round(max(xs) - min(xs), 6))
     assert sorted(widths) == [20.0, 40.0]

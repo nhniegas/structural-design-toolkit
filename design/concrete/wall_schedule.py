@@ -124,6 +124,11 @@ def write_wall_schedule(path: str, walls: list[dict], scale: float = 50.0) -> st
                 text(value, (x1 + x2) / 2, top - ROW / 2,
                      min(TEXT, (x2 - x1) / (0.75 * max(len(str(value)), 1))))
         y -= block
+    # the ECC drafting standard: layers by colour, no explicit lineweights (utilities/ecc_drafting.py)
+    from utilities import ecc_drafting
+
+    ecc_drafting.to_standard(doc, {"TABLE": ("symbols", "text"), "CONCRETE": "concrete",
+                                   "BARS": "bars", "BOUNDARY": "symbol_lines"})
     doc.saveas(path)
     return path
 

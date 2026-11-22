@@ -28,16 +28,23 @@ A window then shows the summary: the floors, the counts of what was drawn and th
 
 The floors are drawn side by side in one row, from the lowest, each with its title (`2F FRAMING PLAN`) and elevation. A story with no beam, column or wall is left out.
 
-| Item | How | Layer |
+Since v0.20.0 the plans follow the **ECC drafting standard** (`utilities/ecc_drafting.py`; the standard itself, with its template and plot styles, is in `Desktop\ECC DRAFTING STANDARDS`): colour = pen through `ECC_FULL for Paper.ctb`, every object ByLayer with no lineweight of its own, text in SIMPLEX at width 0.85.
+
+| Item | How | Layer (colour, plotted pen) |
 |---|---|---|
-| Girders (beams that frame into a column) | Dashed multiline at the true width of the section | `S-GIRDER` |
-| Beams (carried by other beams) | Dashed multiline at the true width | `S-BEAM` |
-| Columns | Solid, at the true size and rotation; circular columns as circles | `S-COLUMN` |
-| Walls | Solid, at the true thickness | `S-WALL` |
-| Beam names and column marks, titles | Text | `S-TEXT` |
-| Grid lines and bubbles | Centre lines | `S-GRID` |
-| Grid dimensions | Between the grids, and overall | `S-DIM` |
-| Slab marks and span symbols (since v0.19.0) | Text and lines | `S-SLAB` |
+| Girders (beams that frame into a column) | Dashed multiline at the true width of the section | `S-GIRDER` (4, 0.40) |
+| Beams (carried by other beams) | Dashed multiline at the true width | `S-BEAM` (3, 0.15) |
+| Columns | Solid, at the true size and rotation; circular columns as circles | `S-COLS` (5, 0.53) |
+| Walls | Solid, at the true thickness | `S-WALL` (4, 0.40) |
+| Beam names, column marks, grid labels, titles | Text | `S-ANNO-TEXT` (52, 0.13) |
+| Grid lines | Centre lines | `S-GRID` (251, 0.09 grey) |
+| Grid bubbles | Circles | `S-ANNO-SYMB` (52, 0.13) |
+| Grid dimensions | Between the grids, and overall | `S-ANNO-DIMS` (1, 0.18) |
+| Slab marks and span symbols (since v0.19.0) | Text and lines | `S-ANNO-SLAB` (52, 0.13) |
+
+Before v0.20.0 the layers were `S-COLUMN`, `S-TEXT`, `S-DIM` and `S-SLAB`, girders and beams were colours 3 and 4, and the grid bubbles were on `S-GRID`.
+
+**Slab marks in narrow bays (since v0.20.0).** A one-way slab's mark is centred above its span symbol, and the two sit a quarter of the bay's length off its middle, clear of the beam names written at the middle of the beams.
 
 **Beams are multilines** (the AutoCAD `MLINE` object, style `SDT_BEAM`). A multiline is one object with two parallel lines: when you drag an end point, both lines follow and the width is kept. The width is the scale of each multiline, so it can be changed in its properties. `EXPLODE` turns a multiline into two plain lines.
 
@@ -63,10 +70,10 @@ The foundation plan is drawn first, to the left of the floors, with the title `F
 
 | Item | How | Layer |
 |---|---|---|
-| Footings | The outline of each footing, with its mark at the lower left corner | `S-FOOTING` |
-| Tie beams | Dashed multiline at the true width, stopped at the column faces, with its name | `S-TIEBEAM` |
-| Columns | Solid, at the size and rotation of the column on each support, each with its mark | `S-COLUMN` |
-| Footing sizes | One line for each mark under the title: `F1: 2,000 x 2,000 x 500 thk (9 footings)` | `S-TEXT` |
+| Footings | The outline of each footing, dashed, with its mark at the lower left corner | `S-FOOTING` (6, 0.45) |
+| Tie beams | Dashed multiline at the true width, stopped at the column faces, with its name | `S-TIEBEAM` (4, 0.40) |
+| Columns | Solid, at the size and rotation of the column on each support, each with its mark | `S-COLS` (5, 0.53) |
+| Footing sizes | One line for each mark under the title: `F1: 2,000 x 2,000 x 500 thk (9 footings)` | `S-ANNO-TEXT` |
 
 **What is one footing.** Each horizontal shell of the foundation model is a footing. Shells that touch are one footing, so a mat or a footing meshed into several shells has one outline and one mark.
 

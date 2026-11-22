@@ -11,7 +11,8 @@ The drawing rules (see ``edb/plan dxf`` for samples), all in millimetres:
                 right, lowest level first
 * ``S-ORIGIN``  one point per plan at the same building point
 * ``S-GRID``    one line per grid, with its label as a text at one end
-* ``S-COLUMN``  each column as its outline: a closed rectangle or a circle
+* ``S-COLUMN``  each column as its outline: a closed rectangle or a circle (``S-COLS``,
+                the ECC drafting standard's name, is read too)
 * ``S-WALL``    walls and core walls, drawn either way:
                 a polyline along the wall centre lines with its width set to the
                 wall thickness (one polyline can trace a whole core), or
@@ -56,6 +57,8 @@ from etabs_api.core.helpers import as_list, return_code
 DEFAULT_LAYERS = {"story": "S-STORY", "origin": "S-ORIGIN", "grid": "S-GRID",
                   "column": "S-COLUMN", "wall": "S-WALL"}
 FLOOR_LAYERS = {"slab": "S-SLAB", "opening": "S-OPENING", "load": "S-LOAD"}
+# the ECC drafting standard's names (utilities/ecc_drafting.py), also read while the default is kept
+ECC_ALIASES = {"column": ("S-COLS",)}
 MIN_WALL_LENGTH = 100.0  # mm; shorter pieces of a wall polyline are ignored
 LABEL_REACH = 2500.0  # mm from a grid line end to its label
 SAME_PLACE = 5.0  # mm; a column this close to its old place has not moved
@@ -184,11 +187,14 @@ def read_framing_plans(path: str, layers: dict | None = None) -> Building:
     import ezdxf
 
     layers = {**DEFAULT_LAYERS, **FLOOR_LAYERS, **(layers or {})}
-    names = {key: value.strip().upper() for key, value in layers.items()}
+    names = {key: {value.strip().upper()} for key, value in layers.items()}
+    for key, aliases in ECC_ALIASES.items():
+        if layers[key].strip().upper() == DEFAULT_LAYERS[key]:
+            names[key].update(aliases)
     modelspace = ezdxf.readfile(path).modelspace()
 
     def on(entity, key: str) -> bool:
-        return entity.dxf.layer.upper() == names[key]
+        return entity.dxf.layer.upper() in names[key]
 
     def text_of(entity) -> tuple[str, float, float]:
         if entity.dxftype() == "MTEXT":

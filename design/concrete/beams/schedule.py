@@ -346,6 +346,10 @@ def generate_dxf_beam_schedule(
             dxfattribs={"style": "SIMPLEX", "height": 2.0, "width": 0.75, "color": 7})
         note.set_placement((col_x[0], y_curr - 5.0),
                            align=ezdxf.enums.TextEntityAlignment.LEFT)
+    # the ECC drafting standard: layers by colour, no explicit lineweights (utilities/ecc_drafting.py)
+    from utilities import ecc_drafting
+
+    ecc_drafting.to_standard(doc)
     doc.saveas(output_filepath)
 
 

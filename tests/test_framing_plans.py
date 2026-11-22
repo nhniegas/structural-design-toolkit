@@ -175,7 +175,8 @@ def test_grids_with_bubbles_and_dimensions_when_asked(tmp_path):
     _, _, plain = written(tmp_path, fp.PlanOptions(grids=True, dimensions=False),
                           floors=[bay()])
     assert sum(1 for e in plain if e.dxf.layer == fp.LAYER_GRID and e.dxftype() == "LINE") == 4
-    assert sum(1 for e in plain if e.dxf.layer == fp.LAYER_GRID and e.dxftype() == "CIRCLE") == 4
+    # the bubbles and labels plot black (ECC standard): bubbles on S-ANNO-SYMB, labels on text
+    assert sum(1 for e in plain if e.dxf.layer == "S-ANNO-SYMB" and e.dxftype() == "CIRCLE") == 4
     assert not [e for e in plain if e.dxftype() == "DIMENSION"]
     _, _, dimensioned = written(tmp_path, fp.PlanOptions(grids=True, dimensions=True),
                                 floors=[bay()])
